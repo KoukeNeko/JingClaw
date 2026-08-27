@@ -76,6 +76,34 @@ func originToProto(o domain.RunOrigin) *controlv1.RunOrigin {
 	return out
 }
 
+func stopReasonToProto(reason domain.StopReason) controlv1.StopReason {
+	switch reason {
+	case domain.StopEndTurn:
+		return controlv1.StopReason_STOP_REASON_END_TURN
+	case domain.StopMaxTokens:
+		return controlv1.StopReason_STOP_REASON_MAX_TOKENS
+	case domain.StopContentFilter:
+		return controlv1.StopReason_STOP_REASON_CONTENT_FILTER
+	case domain.StopCancelled:
+		return controlv1.StopReason_STOP_REASON_CANCELLED
+	case domain.StopError:
+		return controlv1.StopReason_STOP_REASON_ERROR
+	case domain.StopToolUse:
+		return controlv1.StopReason_STOP_REASON_TOOL_USE
+	default:
+		return controlv1.StopReason_STOP_REASON_UNSPECIFIED
+	}
+}
+
+func usageToProto(usage domain.Usage) *controlv1.Usage {
+	return &controlv1.Usage{
+		InputTokens:       usage.InputTokens,
+		CachedInputTokens: usage.CachedInputTokens,
+		OutputTokens:      usage.OutputTokens,
+		ReasoningTokens:   usage.ReasoningTokens,
+	}
+}
+
 func sessionToProto(s domain.Session) *controlv1.Session {
 	return &controlv1.Session{
 		Id:        string(s.ID),
@@ -124,8 +152,14 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 	case domain.AssistantMessageCompleted:
 		out.Payload = &controlv1.Event_AssistantMessageCompleted{
 			AssistantMessageCompleted: &controlv1.AssistantMessageCompleted{
-				MessageId: string(p.MessageID),
+				MessageId:  string(p.MessageID),
+				StopReason: stopReasonToProto(p.StopReason),
 			},
+		}
+
+	case domain.UsageChanged:
+		out.Payload = &controlv1.Event_UsageChanged{
+			UsageChanged: &controlv1.UsageChanged{Usage: usageToProto(p.Usage)},
 		}
 
 	default:

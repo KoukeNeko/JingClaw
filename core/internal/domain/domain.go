@@ -120,6 +120,7 @@ const (
 	EventRunStateChanged           EventKind = "run.state_changed"
 	EventAssistantTextDelta        EventKind = "assistant.delta"
 	EventAssistantMessageCompleted EventKind = "assistant.completed"
+	EventUsageChanged              EventKind = "usage.changed"
 )
 
 type Event struct {
@@ -157,10 +158,70 @@ type AssistantTextDelta struct {
 }
 
 type AssistantMessageCompleted struct {
-	MessageID MessageID
+	MessageID  MessageID
+	StopReason StopReason
+}
+
+// UsageChanged reports cumulative usage for the run so far, so cost is visible
+// while a run is in flight rather than only once it ends.
+type UsageChanged struct {
+	Usage Usage
 }
 
 func (UserMessageAdded) isEventPayload()          {}
 func (RunStateChanged) isEventPayload()           {}
 func (AssistantTextDelta) isEventPayload()        {}
 func (AssistantMessageCompleted) isEventPayload() {}
+func (UsageChanged) isEventPayload()              {}
+
+// StopReason says why a generation ended. Providers spell this differently;
+// the runtime needs one vocabulary to decide whether a turn is genuinely
+// finished or was cut short.
+type StopReason string
+
+const (
+	StopEndTurn StopReason = "end_turn"
+
+	// StopMaxTokens means the answer was truncated, not completed. Treating it
+	// as a normal finish is how agents end up silently losing half a reply.
+	StopMaxTokens StopReason = "max_tokens"
+
+	StopContentFilter StopReason = "content_filter"
+	StopCancelled     StopReason = "cancelled"
+	StopError         StopReason = "error"
+
+	// Reserved for M1, when a turn can end because the model asked for a tool.
+	StopToolUse StopReason = "tool_use"
+)
+
+// Usage is token accounting for one model call. Providers report it at
+// different moments and with different granularity, so every field is
+// optional and zero means "not reported" rather than "zero tokens".
+type Usage struct {
+	InputTokens int64
+
+	// CachedInputTokens is the subset of InputTokens served from a prompt
+	// cache. Tracked separately because it is priced differently.
+	CachedInputTokens int64
+
+	OutputTokens int64
+
+	// ReasoningTokens covers output the model produced while thinking, which
+	// is billed but never shown.
+	ReasoningTokens int64
+}
+
+// Add merges another usage record into this one.
+func (u Usage) Add(other Usage) Usage {
+	return Usage{
+		InputTokens:       u.InputTokens + other.InputTokens,
+		CachedInputTokens: u.CachedInputTokens + other.CachedInputTokens,
+		OutputTokens:      u.OutputTokens + other.OutputTokens,
+		ReasoningTokens:   u.ReasoningTokens + other.ReasoningTokens,
+	}
+}
+
+// TotalTokens is what a budget check compares against.
+func (u Usage) TotalTokens() int64 {
+	return u.InputTokens + u.OutputTokens + u.ReasoningTokens
+}

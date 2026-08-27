@@ -32,7 +32,15 @@ type assistantTextDeltaJSON struct {
 }
 
 type assistantMessageCompletedJSON struct {
-	MessageID string `json:"message_id"`
+	MessageID  string `json:"message_id"`
+	StopReason string `json:"stop_reason,omitempty"`
+}
+
+type usageChangedJSON struct {
+	InputTokens       int64 `json:"input_tokens,omitempty"`
+	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"`
+	OutputTokens      int64 `json:"output_tokens,omitempty"`
+	ReasoningTokens   int64 `json:"reasoning_tokens,omitempty"`
 }
 
 type runOriginJSON struct {
@@ -74,7 +82,16 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 
 	case domain.AssistantMessageCompleted:
 		return json.Marshal(assistantMessageCompletedJSON{
-			MessageID: string(p.MessageID),
+			MessageID:  string(p.MessageID),
+			StopReason: string(p.StopReason),
+		})
+
+	case domain.UsageChanged:
+		return json.Marshal(usageChangedJSON{
+			InputTokens:       p.Usage.InputTokens,
+			CachedInputTokens: p.Usage.CachedInputTokens,
+			OutputTokens:      p.Usage.OutputTokens,
+			ReasoningTokens:   p.Usage.ReasoningTokens,
 		})
 
 	default:
@@ -125,8 +142,21 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
 		}
 		return domain.AssistantMessageCompleted{
-			MessageID: domain.MessageID(p.MessageID),
+			MessageID:  domain.MessageID(p.MessageID),
+			StopReason: domain.StopReason(p.StopReason),
 		}, nil
+
+	case domain.EventUsageChanged:
+		var p usageChangedJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		return domain.UsageChanged{Usage: domain.Usage{
+			InputTokens:       p.InputTokens,
+			CachedInputTokens: p.CachedInputTokens,
+			OutputTokens:      p.OutputTokens,
+			ReasoningTokens:   p.ReasoningTokens,
+		}}, nil
 
 	default:
 		return nil, fmt.Errorf("storage: unknown event kind %q", kind)

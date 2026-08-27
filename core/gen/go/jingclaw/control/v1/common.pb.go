@@ -201,6 +201,70 @@ func (RunOriginKind) EnumDescriptor() ([]byte, []int) {
 	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{2}
 }
 
+type StopReason int32
+
+const (
+	StopReason_STOP_REASON_UNSPECIFIED StopReason = 0
+	StopReason_STOP_REASON_END_TURN    StopReason = 1
+	// The answer was truncated, not completed. Rendering this as a normal finish
+	// is how a client silently loses half a reply.
+	StopReason_STOP_REASON_MAX_TOKENS     StopReason = 2
+	StopReason_STOP_REASON_CONTENT_FILTER StopReason = 3
+	StopReason_STOP_REASON_CANCELLED      StopReason = 4
+	StopReason_STOP_REASON_ERROR          StopReason = 5
+	// Reserved for M1, when a turn can end because the model asked for a tool.
+	StopReason_STOP_REASON_TOOL_USE StopReason = 6
+)
+
+// Enum value maps for StopReason.
+var (
+	StopReason_name = map[int32]string{
+		0: "STOP_REASON_UNSPECIFIED",
+		1: "STOP_REASON_END_TURN",
+		2: "STOP_REASON_MAX_TOKENS",
+		3: "STOP_REASON_CONTENT_FILTER",
+		4: "STOP_REASON_CANCELLED",
+		5: "STOP_REASON_ERROR",
+		6: "STOP_REASON_TOOL_USE",
+	}
+	StopReason_value = map[string]int32{
+		"STOP_REASON_UNSPECIFIED":    0,
+		"STOP_REASON_END_TURN":       1,
+		"STOP_REASON_MAX_TOKENS":     2,
+		"STOP_REASON_CONTENT_FILTER": 3,
+		"STOP_REASON_CANCELLED":      4,
+		"STOP_REASON_ERROR":          5,
+		"STOP_REASON_TOOL_USE":       6,
+	}
+)
+
+func (x StopReason) Enum() *StopReason {
+	p := new(StopReason)
+	*p = x
+	return p
+}
+
+func (x StopReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StopReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_jingclaw_control_v1_common_proto_enumTypes[3].Descriptor()
+}
+
+func (StopReason) Type() protoreflect.EnumType {
+	return &file_jingclaw_control_v1_common_proto_enumTypes[3]
+}
+
+func (x StopReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StopReason.Descriptor instead.
+func (StopReason) EnumDescriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{3}
+}
+
 // Metadata attached to every mutating request.
 type RequestMeta struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -398,6 +462,80 @@ func (x *RunOrigin) GetPrincipal() *ExternalPrincipal {
 	return nil
 }
 
+// Token accounting for a run. Providers report these at different moments and
+// with different granularity, so a zero means "not reported" rather than
+// "zero tokens".
+type Usage struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	InputTokens int64                  `protobuf:"varint,1,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	// The subset of input_tokens served from a prompt cache, tracked separately
+	// because it is priced differently.
+	CachedInputTokens int64 `protobuf:"varint,2,opt,name=cached_input_tokens,json=cachedInputTokens,proto3" json:"cached_input_tokens,omitempty"`
+	OutputTokens      int64 `protobuf:"varint,3,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	// Output the model produced while thinking: billed, never shown.
+	ReasoningTokens int64 `protobuf:"varint,4,opt,name=reasoning_tokens,json=reasoningTokens,proto3" json:"reasoning_tokens,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *Usage) Reset() {
+	*x = Usage{}
+	mi := &file_jingclaw_control_v1_common_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Usage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Usage) ProtoMessage() {}
+
+func (x *Usage) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_common_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Usage.ProtoReflect.Descriptor instead.
+func (*Usage) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Usage) GetInputTokens() int64 {
+	if x != nil {
+		return x.InputTokens
+	}
+	return 0
+}
+
+func (x *Usage) GetCachedInputTokens() int64 {
+	if x != nil {
+		return x.CachedInputTokens
+	}
+	return 0
+}
+
+func (x *Usage) GetOutputTokens() int64 {
+	if x != nil {
+		return x.OutputTokens
+	}
+	return 0
+}
+
+func (x *Usage) GetReasoningTokens() int64 {
+	if x != nil {
+		return x.ReasoningTokens
+	}
+	return 0
+}
+
 // Where a run's output should be delivered. Owned by the Run rather than the
 // Session, so taking a gateway-started session over from a GUI does not echo
 // the operator's notes back to the originating channel.
@@ -413,7 +551,7 @@ type DeliveryTarget struct {
 
 func (x *DeliveryTarget) Reset() {
 	*x = DeliveryTarget{}
-	mi := &file_jingclaw_control_v1_common_proto_msgTypes[3]
+	mi := &file_jingclaw_control_v1_common_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -425,7 +563,7 @@ func (x *DeliveryTarget) String() string {
 func (*DeliveryTarget) ProtoMessage() {}
 
 func (x *DeliveryTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_common_proto_msgTypes[3]
+	mi := &file_jingclaw_control_v1_common_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -438,7 +576,7 @@ func (x *DeliveryTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliveryTarget.ProtoReflect.Descriptor instead.
 func (*DeliveryTarget) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{3}
+	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DeliveryTarget) GetKind() string {
@@ -474,7 +612,12 @@ const file_jingclaw_control_v1_common_proto_rawDesc = "" +
 	"\tRunOrigin\x126\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\".jingclaw.control.v1.RunOriginKindR\x04kind\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12D\n" +
-	"\tprincipal\x18\x03 \x01(\v2&.jingclaw.control.v1.ExternalPrincipalR\tprincipal\"6\n" +
+	"\tprincipal\x18\x03 \x01(\v2&.jingclaw.control.v1.ExternalPrincipalR\tprincipal\"\xaa\x01\n" +
+	"\x05Usage\x12!\n" +
+	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12.\n" +
+	"\x13cached_input_tokens\x18\x02 \x01(\x03R\x11cachedInputTokens\x12#\n" +
+	"\routput_tokens\x18\x03 \x01(\x03R\foutputTokens\x12)\n" +
+	"\x10reasoning_tokens\x18\x04 \x01(\x03R\x0freasoningTokens\"6\n" +
 	"\x0eDeliveryTarget\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref*\x8d\x01\n" +
@@ -498,7 +641,16 @@ const file_jingclaw_control_v1_common_proto_rawDesc = "" +
 	"\rRunOriginKind\x12\x1f\n" +
 	"\x1bRUN_ORIGIN_KIND_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cRUN_ORIGIN_KIND_LOCAL_CLIENT\x10\x01\x12\x1b\n" +
-	"\x17RUN_ORIGIN_KIND_GATEWAY\x10\x02B\xdd\x01\n" +
+	"\x17RUN_ORIGIN_KIND_GATEWAY\x10\x02*\xcb\x01\n" +
+	"\n" +
+	"StopReason\x12\x1b\n" +
+	"\x17STOP_REASON_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14STOP_REASON_END_TURN\x10\x01\x12\x1a\n" +
+	"\x16STOP_REASON_MAX_TOKENS\x10\x02\x12\x1e\n" +
+	"\x1aSTOP_REASON_CONTENT_FILTER\x10\x03\x12\x19\n" +
+	"\x15STOP_REASON_CANCELLED\x10\x04\x12\x15\n" +
+	"\x11STOP_REASON_ERROR\x10\x05\x12\x18\n" +
+	"\x14STOP_REASON_TOOL_USE\x10\x06B\xdd\x01\n" +
 	"\x17com.jingclaw.control.v1B\vCommonProtoP\x01ZGgithub.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1;controlv1\xa2\x02\x03JCX\xaa\x02\x13Jingclaw.Control.V1\xca\x02\x13Jingclaw\\Control\\V1\xe2\x02\x1fJingclaw\\Control\\V1\\GPBMetadata\xea\x02\x15Jingclaw::Control::V1b\x06proto3"
 
 var (
@@ -513,20 +665,22 @@ func file_jingclaw_control_v1_common_proto_rawDescGZIP() []byte {
 	return file_jingclaw_control_v1_common_proto_rawDescData
 }
 
-var file_jingclaw_control_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_jingclaw_control_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_jingclaw_control_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_jingclaw_control_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_jingclaw_control_v1_common_proto_goTypes = []any{
 	(TrustLevel)(0),           // 0: jingclaw.control.v1.TrustLevel
 	(RunStatus)(0),            // 1: jingclaw.control.v1.RunStatus
 	(RunOriginKind)(0),        // 2: jingclaw.control.v1.RunOriginKind
-	(*RequestMeta)(nil),       // 3: jingclaw.control.v1.RequestMeta
-	(*ExternalPrincipal)(nil), // 4: jingclaw.control.v1.ExternalPrincipal
-	(*RunOrigin)(nil),         // 5: jingclaw.control.v1.RunOrigin
-	(*DeliveryTarget)(nil),    // 6: jingclaw.control.v1.DeliveryTarget
+	(StopReason)(0),           // 3: jingclaw.control.v1.StopReason
+	(*RequestMeta)(nil),       // 4: jingclaw.control.v1.RequestMeta
+	(*ExternalPrincipal)(nil), // 5: jingclaw.control.v1.ExternalPrincipal
+	(*RunOrigin)(nil),         // 6: jingclaw.control.v1.RunOrigin
+	(*Usage)(nil),             // 7: jingclaw.control.v1.Usage
+	(*DeliveryTarget)(nil),    // 8: jingclaw.control.v1.DeliveryTarget
 }
 var file_jingclaw_control_v1_common_proto_depIdxs = []int32{
 	2, // 0: jingclaw.control.v1.RunOrigin.kind:type_name -> jingclaw.control.v1.RunOriginKind
-	4, // 1: jingclaw.control.v1.RunOrigin.principal:type_name -> jingclaw.control.v1.ExternalPrincipal
+	5, // 1: jingclaw.control.v1.RunOrigin.principal:type_name -> jingclaw.control.v1.ExternalPrincipal
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -544,8 +698,8 @@ func file_jingclaw_control_v1_common_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jingclaw_control_v1_common_proto_rawDesc), len(file_jingclaw_control_v1_common_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   4,
+			NumEnums:      4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -27,8 +27,11 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider/gemini"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
+	"github.com/KoukeNeko/JingClaw/core/internal/secret"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/sqlite"
 )
 
@@ -43,19 +46,23 @@ func main() {
 
 func run() error {
 	var (
-		devFake    = flag.Bool("dev-fake", false, "use the deterministic fake provider (the only option in M0)")
-		addr       = flag.String("addr", "127.0.0.1:0", "loopback address to listen on; port 0 picks a free one")
-		chunkDelay = flag.Duration("fake-delay", 150*time.Millisecond, "delay between fake provider chunks")
-		dataDir    = flag.String("data-dir", "", "directory for the database; defaults to the user config directory")
+		providerName = flag.String("provider", "fake", "model provider: fake or gemini")
+		model        = flag.String("model", "", "model to use; required for real providers")
+		addr         = flag.String("addr", "127.0.0.1:0", "loopback address to listen on; port 0 picks a free one")
+		chunkDelay   = flag.Duration("fake-delay", 150*time.Millisecond, "delay between fake provider chunks")
+		dataDir      = flag.String("data-dir", "", "directory for the database; defaults to the user config directory")
+		listModels   = flag.Bool("list-models", false, "print the provider's available models and exit")
 	)
+	// Retained so existing invocations keep working.
+	devFake := flag.Bool("dev-fake", false, "alias for --provider=fake")
 	flag.Parse()
+
+	if *devFake {
+		*providerName = "fake"
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
-
-	if !*devFake {
-		return errors.New("M0 has no real provider yet; start with --dev-fake")
-	}
 
 	// Signal-aware root context. Everything the daemon owns descends from it,
 	// so one Ctrl+C unwinds the whole tree.
@@ -73,12 +80,27 @@ func run() error {
 	}
 	defer func() { _ = store.Close() }()
 
+	modelProvider, err := buildProvider(rootCtx, *providerName, *chunkDelay)
+	if err != nil {
+		return err
+	}
+
+	if *listModels {
+		return printModels(rootCtx, modelProvider)
+	}
+
+	selectedModel, err := resolveModel(rootCtx, modelProvider, *model)
+	if err != nil {
+		return err
+	}
+
 	hub := event.NewHub()
 
 	rt := runtime.New(rootCtx, runtime.Options{
 		Store:        store,
 		Hub:          hub,
-		Provider:     fake.New(*chunkDelay),
+		Provider:     modelProvider,
+		Model:        selectedModel,
 		NewSessionID: func() string { return id.WithPrefix("ses") },
 		NewRunID:     func() string { return id.WithPrefix("run") },
 		NewMessageID: func() string { return id.WithPrefix("msg") },
@@ -145,13 +167,14 @@ func run() error {
 
 	logger.Info("jingclaw daemon listening",
 		"base_url", baseURL,
-		"provider", "fake",
+		"provider", modelProvider.Name(),
+		"model", selectedModel,
 		"database", dbPath,
 		"discovery", discoveryPath,
 	)
 	// Human-facing line on stdout; the structured log goes to stderr.
-	fmt.Printf("JingClaw daemon\nListening: %s\nProvider:  fake\nDatabase:  %s\nDiscovery: %s\n",
-		baseURL, dbPath, discoveryPath)
+	fmt.Printf("JingClaw daemon\nListening: %s\nProvider:  %s\nModel:     %s\nDatabase:  %s\nDiscovery: %s\n",
+		baseURL, modelProvider.Name(), selectedModel, dbPath, discoveryPath)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
@@ -195,4 +218,85 @@ func databasePath(dataDir string) (string, error) {
 		return "", fmt.Errorf("create data dir: %w", err)
 	}
 	return filepath.Join(dataDir, "jingclaw.db"), nil
+}
+
+// buildProvider constructs the configured provider. Real providers are wrapped
+// in retry here rather than inside each adapter, so backoff policy is one
+// decision instead of one per vendor.
+func buildProvider(ctx context.Context, name string, chunkDelay time.Duration) (provider.Provider, error) {
+	switch name {
+	case "fake":
+		return fake.New(chunkDelay), nil
+
+	case "gemini":
+		keyFile, err := secret.DefaultFile("gemini.key")
+		if err != nil {
+			return nil, err
+		}
+
+		apiKey, err := secret.Load(secret.LoadOptions{
+			EnvVars: []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+			File:    keyFile,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !apiKey.IsSet() {
+			return nil, fmt.Errorf(
+				"no Gemini API key: set GEMINI_API_KEY or write it to %s with mode 600", keyFile)
+		}
+
+		p, err := gemini.New(ctx, gemini.Config{APIKey: apiKey.Reveal()})
+		if err != nil {
+			return nil, err
+		}
+		return provider.WithRetry(p, provider.DefaultRetryPolicy()), nil
+
+	default:
+		return nil, fmt.Errorf("unknown provider %q; use fake or gemini", name)
+	}
+}
+
+// resolveModel picks the model to run with. An explicit choice is verified
+// against what the provider actually serves, because a typo should fail at
+// startup rather than on the user's first message.
+func resolveModel(ctx context.Context, p provider.Provider, requested string) (string, error) {
+	models, err := p.Models(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list models: %w", err)
+	}
+
+	if requested != "" {
+		for _, m := range models {
+			if m.ID == requested {
+				return requested, nil
+			}
+		}
+		if len(models) == 0 {
+			// The provider could not enumerate; trust the operator rather
+			// than refuse to start.
+			return requested, nil
+		}
+		return "", fmt.Errorf("provider %s does not serve model %q; run --list-models to see the options",
+			p.Name(), requested)
+	}
+
+	if len(models) == 1 {
+		return models[0].ID, nil
+	}
+	return "", fmt.Errorf("provider %s serves %d models; pick one with --model (see --list-models)",
+		p.Name(), len(models))
+}
+
+func printModels(ctx context.Context, p provider.Provider) error {
+	models, err := p.Models(ctx)
+	if err != nil {
+		return fmt.Errorf("list models: %w", err)
+	}
+
+	for _, m := range models {
+		fmt.Printf("%-40s  ctx=%-9d out=%-7d  %s\n",
+			m.ID, m.ContextWindow, m.MaxOutputTokens, m.DisplayName)
+	}
+	return nil
 }

@@ -24,6 +24,7 @@ message Event {
     RunStateChanged run_state_changed = 11;
     AssistantTextDelta assistant_text_delta = 12;
     AssistantMessageCompleted assistant_message_completed = 13;
+    UsageChanged usage_changed = 14;
   }
 }
 
@@ -51,6 +52,13 @@ message AssistantTextDelta {
 
 message AssistantMessageCompleted {
   string message_id = 1;
+  StopReason stop_reason = 2;
+}
+
+// Cumulative usage for the run so far. Sent as its own event so cost is
+// visible while a run is in flight, not only once it ends.
+message UsageChanged {
+  Usage usage = 1;
 }
 
 // Sent once when a subscription opens, so a client knows where the log

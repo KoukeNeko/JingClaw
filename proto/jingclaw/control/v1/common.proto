@@ -73,6 +73,38 @@ message RunOrigin {
   ExternalPrincipal principal = 3;
 }
 
+// Token accounting for a run. Providers report these at different moments and
+// with different granularity, so a zero means "not reported" rather than
+// "zero tokens".
+message Usage {
+  int64 input_tokens = 1;
+
+  // The subset of input_tokens served from a prompt cache, tracked separately
+  // because it is priced differently.
+  int64 cached_input_tokens = 2;
+
+  int64 output_tokens = 3;
+
+  // Output the model produced while thinking: billed, never shown.
+  int64 reasoning_tokens = 4;
+}
+
+enum StopReason {
+  STOP_REASON_UNSPECIFIED = 0;
+  STOP_REASON_END_TURN = 1;
+
+  // The answer was truncated, not completed. Rendering this as a normal finish
+  // is how a client silently loses half a reply.
+  STOP_REASON_MAX_TOKENS = 2;
+
+  STOP_REASON_CONTENT_FILTER = 3;
+  STOP_REASON_CANCELLED = 4;
+  STOP_REASON_ERROR = 5;
+
+  // Reserved for M1, when a turn can end because the model asked for a tool.
+  STOP_REASON_TOOL_USE = 6;
+}
+
 // Where a run's output should be delivered. Owned by the Run rather than the
 // Session, so taking a gateway-started session over from a GUI does not echo
 // the operator's notes back to the originating channel.

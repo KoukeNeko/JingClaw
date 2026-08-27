@@ -217,7 +217,19 @@ func describe(ev *controlv1.Event) (label, detail string) {
 		return "assistant.delta", payload.AssistantTextDelta.GetText()
 
 	case *controlv1.Event_AssistantMessageCompleted:
-		return "assistant.completed", ""
+		reason := payload.AssistantMessageCompleted.GetStopReason()
+		if reason == controlv1.StopReason_STOP_REASON_END_TURN ||
+			reason == controlv1.StopReason_STOP_REASON_UNSPECIFIED {
+			return "assistant.completed", ""
+		}
+		// A truncated or filtered answer must not look like a normal finish.
+		return "assistant.completed", strings.ToLower(strings.TrimPrefix(reason.String(), "STOP_REASON_"))
+
+	case *controlv1.Event_UsageChanged:
+		usage := payload.UsageChanged.GetUsage()
+		return "usage", fmt.Sprintf("in=%d out=%d cached=%d reasoning=%d",
+			usage.GetInputTokens(), usage.GetOutputTokens(),
+			usage.GetCachedInputTokens(), usage.GetReasoningTokens())
 
 	default:
 		return "unknown", ""

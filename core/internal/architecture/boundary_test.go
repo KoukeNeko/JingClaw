@@ -57,6 +57,50 @@ func TestDomainHasNoInternalDependencies(t *testing.T) {
 	}
 }
 
+// Provider adapters must depend on the contract, never on the runtime.
+// Reversing that would let adding a vendor reach into run lifecycle, storage
+// or permissions.
+func TestProviderAdaptersDoNotDependOnRuntime(t *testing.T) {
+	adapters := []string{
+		"github.com/KoukeNeko/JingClaw/core/internal/provider",
+		"github.com/KoukeNeko/JingClaw/core/internal/provider/fake",
+		"github.com/KoukeNeko/JingClaw/core/internal/provider/gemini",
+	}
+
+	forbidden := []string{
+		"github.com/KoukeNeko/JingClaw/core/internal/runtime",
+		"github.com/KoukeNeko/JingClaw/core/internal/storage",
+		"github.com/KoukeNeko/JingClaw/core/internal/control",
+	}
+
+	for _, adapter := range adapters {
+		deps := packageDeps(t, adapter)
+		for _, pkg := range forbidden {
+			if deps[pkg] {
+				t.Errorf("%s must not depend on %s", adapter, pkg)
+			}
+		}
+	}
+}
+
+// Vendor SDK types must not escape their adapter. If they do, swapping a
+// provider stops being a local change.
+func TestVendorSDKStaysInsideItsAdapter(t *testing.T) {
+	const vendorSDK = "google.golang.org/genai"
+
+	for _, pkg := range []string{
+		"github.com/KoukeNeko/JingClaw/core/internal/runtime",
+		"github.com/KoukeNeko/JingClaw/core/internal/control",
+		"github.com/KoukeNeko/JingClaw/core/internal/storage",
+		"github.com/KoukeNeko/JingClaw/core/internal/provider",
+		"github.com/KoukeNeko/JingClaw/core/cmd/agent",
+	} {
+		if packageDeps(t, pkg)[vendorSDK] {
+			t.Errorf("%s depends on %s; the SDK belongs to internal/provider/gemini alone", pkg, vendorSDK)
+		}
+	}
+}
+
 func packageDeps(t *testing.T, pkg string) map[string]bool {
 	t.Helper()
 

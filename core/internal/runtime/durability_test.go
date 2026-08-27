@@ -45,6 +45,7 @@ func newRestartableRuntime(t *testing.T, dbPath string, chunkDelay time.Duration
 		Store:        store,
 		Hub:          event.NewHub(),
 		Provider:     fake.New(chunkDelay),
+		Model:        fake.ModelID,
 		NewSessionID: next("ses"),
 		NewRunID:     next("run"),
 		NewMessageID: next("msg"),

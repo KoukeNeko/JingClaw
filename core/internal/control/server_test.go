@@ -47,6 +47,7 @@ func newServer(t *testing.T, chunkDelay time.Duration) controlv1connect.SessionS
 		Store:        store,
 		Hub:          hub,
 		Provider:     fake.New(chunkDelay),
+		Model:        fake.ModelID,
 		NewSessionID: next("ses"),
 		NewRunID:     next("run"),
 		NewMessageID: next("msg"),

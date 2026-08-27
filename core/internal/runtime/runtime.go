@@ -15,6 +15,7 @@ import (
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
 
@@ -38,7 +39,11 @@ type Options struct {
 	Store storage.Store
 	Hub   *event.Hub
 
-	Provider Provider
+	Provider provider.Provider
+
+	// Model names the model each run uses. The daemon owns this; clients ask
+	// rather than deciding for themselves.
+	Model string
 
 	NewSessionID IDGenerator
 	NewRunID     IDGenerator
@@ -235,14 +240,23 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run, userText string) 
 
 	messageID := domain.MessageID(r.opts.NewMessageID())
 
-	// M0 runs a single model turn. The step sequence is what matters: tools
-	// slot in between the stream and the terminal state without reshaping this.
-	stream, err := r.opts.Provider.Generate(ctx, ModelRequest{LastUserText: userText})
+	// One model turn. The step sequence is what matters: tools slot in between
+	// the stream and the terminal state without reshaping this.
+	stream, err := r.opts.Provider.Generate(ctx, provider.Request{
+		Model: r.opts.Model,
+		Messages: []provider.Message{{
+			Role:    provider.RoleUser,
+			Content: provider.Text(userText),
+		}},
+	})
 	if err != nil {
 		r.finishFromError(ctx, run, err)
 		return
 	}
 	defer func() { _ = stream.Close() }()
+
+	stopReason := domain.StopEndTurn
+	var usage domain.Usage
 
 	for {
 		ev, err := stream.Recv(ctx)
@@ -254,22 +268,35 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run, userText string) 
 			return
 		}
 
-		delta, ok := ev.(TextDelta)
-		if !ok {
-			continue
-		}
+		switch e := ev.(type) {
+		case provider.TextDelta:
+			if err := r.append(ctx, run.SessionID, run.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{
+				MessageID: messageID,
+				Text:      e.Text,
+			}); err != nil {
+				r.finishFromError(ctx, run, err)
+				return
+			}
 
-		if err := r.append(ctx, run.SessionID, run.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{
-			MessageID: messageID,
-			Text:      delta.Text,
-		}); err != nil {
-			r.finishFromError(ctx, run, err)
-			return
+		case provider.UsageDelta:
+			// Providers report cumulative totals, so the latest wins rather
+			// than being summed.
+			usage = e.Usage
+			if err := r.append(ctx, run.SessionID, run.ID, domain.EventUsageChanged, domain.UsageChanged{
+				Usage: usage,
+			}); err != nil {
+				r.finishFromError(ctx, run, err)
+				return
+			}
+
+		case provider.Completed:
+			stopReason = e.StopReason
 		}
 	}
 
 	if err := r.append(ctx, run.SessionID, run.ID, domain.EventAssistantMessageCompleted, domain.AssistantMessageCompleted{
-		MessageID: messageID,
+		MessageID:  messageID,
+		StopReason: stopReason,
 	}); err != nil {
 		r.finishFromError(ctx, run, err)
 		return

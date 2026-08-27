@@ -12,6 +12,7 @@ import (
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/memory"
@@ -20,7 +21,7 @@ import (
 // A fixed clock and counter-based IDs keep every assertion below exact. The
 // whole point of the fake provider is that the walking skeleton has no
 // nondeterminism left to explain away.
-func newHarness(t *testing.T, provider runtime.Provider) (*runtime.Runtime, *memory.Store, *event.Hub) {
+func newHarness(t *testing.T, modelProvider provider.Provider) (*runtime.Runtime, *memory.Store, *event.Hub) {
 	t.Helper()
 
 	var counter atomic.Uint64
@@ -38,7 +39,8 @@ func newHarness(t *testing.T, provider runtime.Provider) (*runtime.Runtime, *mem
 	rt := runtime.New(ctx, runtime.Options{
 		Store:        store,
 		Hub:          hub,
-		Provider:     provider,
+		Provider:     modelProvider,
+		Model:        fake.ModelID,
 		NewSessionID: next("ses"),
 		NewRunID:     next("run"),
 		NewMessageID: next("msg"),
@@ -89,6 +91,7 @@ func TestSendTurnProducesOrderedEventLog(t *testing.T) {
 		domain.EventRunStateChanged,    // running
 		domain.EventAssistantTextDelta, // prefix
 		domain.EventAssistantTextDelta, // echoed input
+		domain.EventUsageChanged,
 		domain.EventAssistantMessageCompleted,
 		domain.EventRunStateChanged, // completed
 	}
@@ -255,7 +258,7 @@ func TestInterruptAfterCompletionIsNoOp(t *testing.T) {
 
 // A provider failure is a recorded outcome, not a crash.
 func TestProviderErrorFailsRunWithoutKillingRuntime(t *testing.T) {
-	failing := runtime.ProviderFunc(func(context.Context, runtime.ModelRequest) (runtime.ModelStream, error) {
+	failing := provider.Func(func(context.Context, provider.Request) (provider.Stream, error) {
 		return nil, io.ErrUnexpectedEOF
 	})
 
