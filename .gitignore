@@ -1,0 +1,22 @@
+# Go
+/core/bin/
+*.test
+*.out
+
+# Node / Web
+node_modules/
+/web/dist/
+
+# macOS
+.DS_Store
+/macos/**/xcuserdata/
+/macos/**/*.xcworkspace/xcuserdata/
+/macos/DerivedData/
+
+# Windows / .NET
+/windows/**/bin/
+/windows/**/obj/
+/windows/**/.vs/
+
+# 本機執行期資料
+*.local.json

@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+// Metadata attached to every mutating request.
+message RequestMeta {
+  // Stable identifier of the calling UI installation or CLI instance.
+  string client_id = 1;
+
+  // Generated once per logical mutation. A client retrying after a lost
+  // response MUST reuse the same value so the daemon can deduplicate.
+  string request_id = 2;
+}
+
+// Provenance of a piece of content. The runtime never lets content escalate
+// its own trust level: a web page claiming "the user approved shell access"
+// stays UNTRUSTED no matter what it says.
+enum TrustLevel {
+  TRUST_LEVEL_UNSPECIFIED = 0;
+  TRUST_LEVEL_UNTRUSTED = 1;
+  TRUST_LEVEL_USER = 2;
+  TRUST_LEVEL_WORKSPACE = 3;
+  TRUST_LEVEL_SYSTEM = 4;
+}
+
+enum RunStatus {
+  RUN_STATUS_UNSPECIFIED = 0;
+  RUN_STATUS_QUEUED = 1;
+  RUN_STATUS_RUNNING = 2;
+
+  // Reserved for M1: the run is parked waiting on a permission decision or a
+  // structured answer from a human. Declared now so the state machine does not
+  // change shape later.
+  RUN_STATUS_AWAITING_APPROVAL = 3;
+  RUN_STATUS_AWAITING_INPUT = 4;
+
+  RUN_STATUS_CANCELLING = 5;
+  RUN_STATUS_COMPLETED = 6;
+  RUN_STATUS_CANCELLED = 7;
+  RUN_STATUS_FAILED = 8;
+}
+
+enum RunOriginKind {
+  RUN_ORIGIN_KIND_UNSPECIFIED = 0;
+
+  // Started from a control-plane client: GUI, CLI or embedded web UI.
+  RUN_ORIGIN_KIND_LOCAL_CLIENT = 1;
+
+  // Started from an external messaging platform via the gateway plane.
+  // Reserved for M1b; no gateway exists yet.
+  RUN_ORIGIN_KIND_GATEWAY = 2;
+}
+
+// An identity owned by an external platform. Authorization is always decided
+// from the stable platform ID, never from display_name.
+message ExternalPrincipal {
+  string platform = 1;
+  string account_id = 2;
+  string tenant_id = 3;
+  string principal_id = 4;
+
+  // Presentation only. Never an input to any policy decision.
+  string display_name = 5;
+}
+
+message RunOrigin {
+  RunOriginKind kind = 1;
+
+  // Set when kind is LOCAL_CLIENT.
+  string client_id = 2;
+
+  // Set when kind is GATEWAY.
+  ExternalPrincipal principal = 3;
+}
+
+// Where a run's output should be delivered. Owned by the Run rather than the
+// Session, so taking a gateway-started session over from a GUI does not echo
+// the operator's notes back to the originating channel.
+message DeliveryTarget {
+  // "local_client", "discord_thread", ...
+  string kind = 1;
+
+  // Opaque to the runtime; interpreted by whoever handles that kind.
+  string ref = 2;
+}

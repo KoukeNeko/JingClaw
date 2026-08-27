@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+import "google/protobuf/timestamp.proto";
+import "jingclaw/control/v1/common.proto";
+import "jingclaw/control/v1/event.proto";
+
+// A long-lived conversation and workspace. Outlives any single execution.
+message Session {
+  string id = 1;
+  string title = 2;
+
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+// One "please do something" execution inside a Session.
+message Run {
+  string id = 1;
+  string session_id = 2;
+
+  RunStatus status = 3;
+
+  RunOrigin origin = 4;
+  repeated DeliveryTarget delivery_targets = 5;
+
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp finished_at = 7;
+}
+
+message CreateSessionRequest {
+  RequestMeta meta = 1;
+  string title = 2;
+}
+
+message CreateSessionResponse {
+  Session session = 1;
+}
+
+message SendTurnRequest {
+  RequestMeta meta = 1;
+
+  string session_id = 2;
+  string text = 3;
+}
+
+// Deliberately does not carry the answer. The caller subscribes to the event
+// stream for that, so closing a client never kills an in-flight model request.
+message SendTurnResponse {
+  string run_id = 1;
+  string message_id = 2;
+}
+
+message SubscribeEventsRequest {
+  string session_id = 1;
+
+  // Resume point. The server replays everything with seq > after_seq, then
+  // stays open for live events. Zero means "from the beginning".
+  uint64 after_seq = 2;
+
+  string client_id = 3;
+}
+
+message InterruptRunRequest {
+  RequestMeta meta = 1;
+
+  string run_id = 2;
+  string reason = 3;
+}
+
+message InterruptRunResponse {
+  RunStatus status = 1;
+}
+
+// Frames carried by SubscribeEvents. Named for its RPC per buf's standard
+// lint rules; "hello" arrives first, then events, with heartbeats when idle.
+message SubscribeEventsResponse {
+  oneof value {
+    StreamHello hello = 1;
+    Event event = 2;
+    StreamHeartbeat heartbeat = 3;
+  }
+}
+
+service SessionService {
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc SendTurn(SendTurnRequest) returns (SendTurnResponse);
+  rpc SubscribeEvents(SubscribeEventsRequest) returns (stream SubscribeEventsResponse);
+  rpc InterruptRun(InterruptRunRequest) returns (InterruptRunResponse);
+}

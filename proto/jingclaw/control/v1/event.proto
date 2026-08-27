@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+import "google/protobuf/timestamp.proto";
+import "jingclaw/control/v1/common.proto";
+
+// The append-only event log is the source of truth for session history.
+// Message history shown in a UI is a projection of these, never the reverse.
+message Event {
+  string id = 1;
+
+  string session_id = 2;
+  string run_id = 3;
+
+  // Strictly increasing within a session. Clients use it to resume after a
+  // disconnect and to detect gaps.
+  uint64 seq = 4;
+
+  google.protobuf.Timestamp occurred_at = 5;
+
+  oneof payload {
+    UserMessageAdded user_message_added = 10;
+    RunStateChanged run_state_changed = 11;
+    AssistantTextDelta assistant_text_delta = 12;
+    AssistantMessageCompleted assistant_message_completed = 13;
+  }
+}
+
+message UserMessageAdded {
+  string message_id = 1;
+  string text = 2;
+
+  TrustLevel trust = 3;
+  RunOrigin origin = 4;
+}
+
+message RunStateChanged {
+  RunStatus status = 1;
+
+  // Populated on CANCELLED and FAILED.
+  string reason = 2;
+}
+
+// Provider deltas are coalesced before becoming events: one row per token
+// would make the log unusable and, once persisted, would hammer the database.
+message AssistantTextDelta {
+  string message_id = 1;
+  string text = 2;
+}
+
+message AssistantMessageCompleted {
+  string message_id = 1;
+}
+
+// Sent once when a subscription opens, so a client knows where the log
+// currently ends before live events start arriving.
+message StreamHello {
+  uint64 head_seq = 1;
+}
+
+// Keeps idle connections alive and lets a client notice a stalled stream.
+message StreamHeartbeat {
+  uint64 head_seq = 1;
+}
