@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
+	"github.com/KoukeNeko/JingClaw/core/internal/permission"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
@@ -54,6 +56,12 @@ const (
 	usageFlushInterval = 2 * time.Second
 )
 
+// isDurablyPaused reports whether a run is waiting on a human rather than
+// abandoned by a crash.
+func isDurablyPaused(status domain.RunStatus) bool {
+	return status == domain.RunAwaitingApproval || status == domain.RunAwaitingInput
+}
+
 // IDGenerator produces identifiers. Injected so tests can be deterministic.
 type IDGenerator func() string
 
@@ -67,6 +75,10 @@ type Options struct {
 	// rather than deciding for themselves.
 	Model string
 
+	// Permissions gates every tool call. Nil means every call runs, which is
+	// only appropriate when the tools are read-only.
+	Permissions *permission.Engine
+
 	// Tools available to a run. Nil means the model answers from context
 	// alone, which is exactly what the walking skeleton did.
 	Tools *tool.Registry
@@ -79,10 +91,11 @@ type Options struct {
 	// reason beats burning quota until a human notices.
 	MaxIterations int
 
-	NewSessionID IDGenerator
-	NewRunID     IDGenerator
-	NewMessageID IDGenerator
-	NewEventID   IDGenerator
+	NewSessionID  IDGenerator
+	NewRunID      IDGenerator
+	NewMessageID  IDGenerator
+	NewEventID    IDGenerator
+	NewApprovalID IDGenerator
 
 	Now    func() time.Time
 	Logger *slog.Logger
@@ -108,9 +121,34 @@ type activeRun struct {
 	done   chan struct{}
 }
 
+// New builds a runtime.
+//
+// Missing collaborators are fatal here rather than at first use. A nil ID
+// generator discovered halfway through a run crashes the daemon in the middle
+// of someone's work, and the stack trace points at the symptom rather than at
+// the wiring that caused it.
 func New(ctx context.Context, opts Options) *Runtime {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+
+	required := map[string]any{
+		"Store":         opts.Store,
+		"Hub":           opts.Hub,
+		"Provider":      opts.Provider,
+		"NewSessionID":  opts.NewSessionID,
+		"NewRunID":      opts.NewRunID,
+		"NewMessageID":  opts.NewMessageID,
+		"NewEventID":    opts.NewEventID,
+		"NewApprovalID": opts.NewApprovalID,
+	}
+	for name, value := range required {
+		if isNilOption(value) {
+			panic("runtime: Options." + name + " is required")
+		}
 	}
 
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -130,10 +168,24 @@ func New(ctx context.Context, opts Options) *Runtime {
 // watches a spinner that will never resolve. They are marked failed rather
 // than cancelled because nobody chose to stop them, and the distinction is
 // what someone reading the log later needs.
+//
+// A run parked on a human is not an orphan. Waiting for an answer is its
+// correct state, and the answer may arrive hours later, from a different
+// client, after this daemon has restarted twice.
 func (r *Runtime) RecoverOrphanedRuns(ctx context.Context) (int, error) {
-	orphans, err := r.opts.Store.UnfinishedRuns(ctx)
+	unfinished, err := r.opts.Store.UnfinishedRuns(ctx)
 	if err != nil {
 		return 0, err
+	}
+
+	orphans := make([]domain.Run, 0, len(unfinished))
+	for _, run := range unfinished {
+		if isDurablyPaused(run.Status) {
+			r.opts.Logger.Info("leaving a paused run alone",
+				"run_id", string(run.ID), "status", string(run.Status))
+			continue
+		}
+		orphans = append(orphans, run)
 	}
 
 	for _, run := range orphans {
@@ -254,7 +306,7 @@ func (r *Runtime) SendTurn(ctx context.Context, sessionID domain.SessionID, text
 	r.mu.Unlock()
 
 	r.group.Go(func() error {
-		defer close(tracked.done)
+		defer r.releaseRun(runID, tracked)
 		defer cancel(nil)
 
 		// A failing run is a normal outcome recorded in the log, not a reason
@@ -279,10 +331,49 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 
 	declarations := r.toolDeclarations()
 
-	// The loop is the agent: generate, act on what the model asked for,
-	// generate again with what was observed. It ends when the model stops
-	// asking for tools, or when the budget runs out.
-	for iteration := 1; ; iteration++ {
+	// The loop is the agent: settle whatever is outstanding, generate, act on
+	// what the model asked for, generate again with what was observed.
+	//
+	// Settling comes first so that resuming after an approval is the same code
+	// path as running normally. A resumed run simply starts with calls already
+	// requested and now answered.
+	for {
+		outstanding, err := r.outstandingCalls(ctx, run)
+		if err != nil {
+			r.finishFromError(ctx, run, err)
+			return
+		}
+
+		if len(outstanding) > 0 {
+			suspended, err := r.runTools(ctx, run, outstanding)
+			if err != nil {
+				r.finishFromError(ctx, run, err)
+				return
+			}
+			if suspended {
+				// Parked on a human. The run continues when the answer
+				// arrives, from whichever process is alive then.
+				return
+			}
+			continue
+		}
+
+		// The budget counts model turns already in the log rather than
+		// iterations of this loop, so a run resumed in a new process cannot
+		// quietly start its allowance over.
+		turns, err := r.modelTurns(ctx, run)
+		if err != nil {
+			r.finishFromError(ctx, run, err)
+			return
+		}
+		if turns >= maxIterations {
+			// Say why it stopped. A run that simply ends after N silent
+			// iterations is indistinguishable from one that finished.
+			r.finish(ctx, run, domain.RunFailed,
+				fmt.Sprintf("runtime: stopped after %d model turns without a final answer", maxIterations))
+			return
+		}
+
 		messages, err := r.buildConversation(ctx, run.SessionID)
 		if err != nil {
 			r.finishFromError(ctx, run, err)
@@ -302,19 +393,6 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 
 		if len(calls) == 0 {
 			r.finish(ctx, run, domain.RunCompleted, "")
-			return
-		}
-
-		if iteration >= maxIterations {
-			// Say why it stopped. A run that simply ends after N silent
-			// iterations is indistinguishable from one that finished.
-			r.finish(ctx, run, domain.RunFailed,
-				fmt.Sprintf("runtime: stopped after %d tool iterations without a final answer", maxIterations))
-			return
-		}
-
-		if err := r.runTools(ctx, run, calls); err != nil {
-			r.finishFromError(ctx, run, err)
 			return
 		}
 	}
@@ -418,13 +496,37 @@ func (r *Runtime) InterruptRun(ctx context.Context, id domain.RunID, reason stri
 	return domain.RunCancelling, nil
 }
 
-// Wait blocks until a run this process is driving reaches a terminal state.
+// releaseRun unregisters a run whose goroutine is finishing.
+//
+// This has to happen whether the run ended or merely parked on an approval.
+// Leaving the entry behind would make a later resume believe the run was
+// already moving, and a run waiting on a human would never continue.
+func (r *Runtime) releaseRun(id domain.RunID, tracked *activeRun) {
+	r.mu.Lock()
+	if current, ok := r.active[id]; ok && current == tracked {
+		delete(r.active, id)
+	}
+	r.mu.Unlock()
+
+	close(tracked.done)
+}
+
+// Wait blocks until a run stops moving: finished, failed, or parked on a
+// human. It is not an error to wait for a run this process is no longer
+// driving, because parking is a normal outcome.
 func (r *Runtime) Wait(ctx context.Context, id domain.RunID) error {
 	r.mu.RLock()
 	tracked, ok := r.active[id]
 	r.mu.RUnlock()
 
 	if !ok {
+		run, err := r.opts.Store.Run(ctx, id)
+		if err != nil {
+			return err
+		}
+		if run.Status.IsTerminal() || isDurablyPaused(run.Status) {
+			return nil
+		}
 		return ErrRunNotFound
 	}
 
@@ -658,46 +760,108 @@ func (r *Runtime) generateTurn(
 	return calls, nil
 }
 
-// runTools executes the calls the model asked for, in order.
+// runTools executes calls that are outstanding for this run.
 //
-// Sequential execution is the conservative default: the registry knows which
-// tools are parallel-safe, but two calls can still contend for the same file,
-// and getting that wrong is far more expensive than the latency saved.
-func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []provider.ToolCallRequested) error {
-	for _, call := range calls {
+// It returns true when the run must park: at least one call needs a human, and
+// nothing further can happen until someone answers.
+//
+// Execution is sequential. The registry knows which tools are parallel-safe,
+// but two calls can still contend for the same file, and getting that wrong
+// costs far more than the latency saved.
+func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingCall) (bool, error) {
+	var suspended bool
+
+	for _, pending := range calls {
 		if err := ctx.Err(); err != nil {
-			return err
+			return false, err
 		}
 
-		started := r.opts.Now()
+		call := tool.Call{ID: string(pending.CallID), Name: pending.Name, Arguments: pending.Arguments}
 
-		var result tool.Result
-		if r.opts.Tools == nil {
-			result = tool.Errorf(tool.CodeNotFound, "",
-				"no tools are available in this session").Result()
-		} else {
-			result = r.opts.Tools.Execute(ctx, tool.Call{
-				ID:        call.ID,
-				Name:      call.Name,
-				Arguments: call.Args,
-			})
+		result, park, err := r.settleCall(ctx, run, call)
+		if err != nil {
+			return false, err
+		}
+		if park {
+			suspended = true
+			// Later calls in the same turn stay outstanding on purpose: they
+			// may well depend on the one being reviewed, and running them
+			// first would act on an assumption the human has not confirmed.
+			break
 		}
 
-		if err := r.append(ctx, run.SessionID, run.ID, domain.EventToolCallCompleted,
-			domain.ToolCallCompleted{
-				CallID:     domain.ToolCallID(call.ID),
-				Name:       call.Name,
-				Summary:    result.Summary,
-				Content:    result.Content,
-				IsError:    result.IsError,
-				Truncated:  result.Truncated,
-				DurationMS: r.opts.Now().Sub(started).Milliseconds(),
-			}); err != nil {
-			return err
+		if err := r.recordToolResult(ctx, run, call, result, r.opts.Now()); err != nil {
+			return false, err
 		}
 	}
 
-	return nil
+	if suspended {
+		r.suspend(ctx, run)
+	}
+	return suspended, nil
+}
+
+// settleCall resolves one call to either a result or a request for approval.
+func (r *Runtime) settleCall(ctx context.Context, run domain.Run, call tool.Call) (tool.Result, bool, error) {
+	if r.opts.Tools == nil {
+		return tool.Errorf(tool.CodeNotFound, "",
+			"no tools are available in this session").Result(), false, nil
+	}
+
+	registered, known := r.opts.Tools.Lookup(call.Name)
+	if !known {
+		// An unknown tool never reaches the policy engine; there is nothing to
+		// evaluate, and the model needs to be told it asked for something that
+		// does not exist.
+		return r.opts.Tools.Execute(ctx, call), false, nil
+	}
+
+	// A decision already made for this call wins: this is a resumed run.
+	decided, err := r.opts.Store.ApprovalForCall(ctx, run.ID, domain.ToolCallID(call.ID))
+	switch {
+	case err == nil && decided.Status == domain.ApprovalAllowed:
+		return r.opts.Tools.Execute(ctx, call), false, nil
+	case err == nil && decided.Status == domain.ApprovalDenied:
+		return deniedResult(call, "a human declined this action"), false, nil
+	case err == nil && decided.IsPending():
+		// Already waiting; do not raise a second prompt for it.
+		return tool.Result{}, true, nil
+	case err != nil && !errors.Is(err, storage.ErrApprovalNotFound):
+		return tool.Result{}, false, err
+	}
+
+	switch outcome := r.evaluate(ctx, run, registered.Spec(), call); outcome.decision {
+	case permission.Allow:
+		return r.opts.Tools.Execute(ctx, call), false, nil
+
+	case permission.Deny:
+		return deniedResult(call, outcome.outcome.Reason), false, nil
+
+	default:
+		if err := r.requestApproval(ctx, run, call, outcome.outcome); err != nil {
+			return tool.Result{}, false, err
+		}
+		return tool.Result{}, true, nil
+	}
+}
+
+func (r *Runtime) recordToolResult(
+	ctx context.Context,
+	run domain.Run,
+	call tool.Call,
+	result tool.Result,
+	started time.Time,
+) error {
+	return r.append(ctx, run.SessionID, run.ID, domain.EventToolCallCompleted,
+		domain.ToolCallCompleted{
+			CallID:     domain.ToolCallID(call.ID),
+			Name:       call.Name,
+			Summary:    result.Summary,
+			Content:    result.Content,
+			IsError:    result.IsError,
+			Truncated:  result.Truncated,
+			DurationMS: r.opts.Now().Sub(started).Milliseconds(),
+		})
 }
 
 func (r *Runtime) toolDeclarations() []provider.ToolDeclaration {
@@ -722,4 +886,19 @@ func (r *Runtime) systemPrompt() []provider.ContentBlock {
 		return nil
 	}
 	return provider.Text(r.opts.SystemPrompt)
+}
+
+// isNilOption reports whether an option was left unset, covering both a nil
+// interface and a typed nil function.
+func isNilOption(value any) bool {
+	if value == nil {
+		return true
+	}
+
+	switch v := reflect.ValueOf(value); v.Kind() {
+	case reflect.Func, reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }

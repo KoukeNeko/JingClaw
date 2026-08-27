@@ -44,7 +44,8 @@ func newRootCommand() *cobra.Command {
 		SilenceErrors: true,
 	}
 
-	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand())
+	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand(),
+		newApprovalsCommand(), newApproveCommand(), newDenyCommand())
 	return root
 }
 
@@ -186,6 +187,95 @@ func newInterruptCommand() *cobra.Command {
 	return cmd
 }
 
+func newApprovalsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "approvals <session-id>",
+		Short: "List tool calls waiting for a decision",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := dial()
+			if err != nil {
+				return err
+			}
+
+			resp, err := client.ListApprovals(cmd.Context(), connect.NewRequest(&controlv1.ListApprovalsRequest{
+				SessionId: args[0],
+			}))
+			if err != nil {
+				return err
+			}
+
+			approvals := resp.Msg.GetApprovals()
+			if len(approvals) == 0 {
+				fmt.Fprintln(os.Stderr, "nothing waiting")
+				return nil
+			}
+
+			for _, approval := range approvals {
+				fmt.Printf("%s  %s\n", approval.GetId(), approval.GetSummary())
+				for _, effect := range approval.GetEffects() {
+					fmt.Printf("    - %s\n", effect)
+				}
+			}
+			return nil
+		},
+	}
+}
+
+func newApproveCommand() *cobra.Command {
+	var session bool
+
+	cmd := &cobra.Command{
+		Use:   "approve <approval-id>",
+		Short: "Allow a waiting tool call",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return decide(cmd, args[0], true, session)
+		},
+	}
+	cmd.Flags().BoolVar(&session, "session", false,
+		"allow this tool for the rest of the session, not just this call")
+
+	return cmd
+}
+
+func newDenyCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "deny <approval-id>",
+		Short: "Refuse a waiting tool call",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return decide(cmd, args[0], false, false)
+		},
+	}
+}
+
+func decide(cmd *cobra.Command, approvalID string, allow, forSession bool) error {
+	client, err := dial()
+	if err != nil {
+		return err
+	}
+
+	remember := controlv1.RememberScope_REMEMBER_SCOPE_ONCE
+	if forSession {
+		remember = controlv1.RememberScope_REMEMBER_SCOPE_SESSION
+	}
+
+	resp, err := client.DecideApproval(cmd.Context(), connect.NewRequest(&controlv1.DecideApprovalRequest{
+		Meta:       newMeta(),
+		ApprovalId: approvalID,
+		Allow:      allow,
+		Remember:   remember,
+	}))
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(strings.ToLower(strings.TrimPrefix(
+		resp.Msg.GetApproval().GetStatus().String(), "APPROVAL_STATUS_")))
+	return nil
+}
+
 func printFrame(frame *controlv1.SubscribeEventsResponse) {
 	switch value := frame.GetValue().(type) {
 	case *controlv1.SubscribeEventsResponse_Hello:
@@ -236,6 +326,20 @@ func describe(ev *controlv1.Event) (label, detail string) {
 			status = "error: " + compact(done.GetContent(), 160)
 		}
 		return "tool.completed", fmt.Sprintf("%s (%dms) %s", done.GetName(), done.GetDurationMs(), status)
+
+	case *controlv1.Event_ApprovalRequested:
+		request := payload.ApprovalRequested
+		detail := fmt.Sprintf("%s — %s", request.GetApprovalId(), request.GetSummary())
+		if effects := request.GetEffects(); len(effects) > 0 {
+			detail += " [" + strings.Join(effects, "; ") + "]"
+		}
+		return "approval.requested", detail
+
+	case *controlv1.Event_ApprovalResolved:
+		resolved := payload.ApprovalResolved
+		return "approval." + strings.ToLower(strings.TrimPrefix(
+				resolved.GetStatus().String(), "APPROVAL_STATUS_")),
+			fmt.Sprintf("%s by %s", resolved.GetToolName(), resolved.GetDecidedBy())
 
 	case *controlv1.Event_UsageChanged:
 		usage := payload.UsageChanged.GetUsage()

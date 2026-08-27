@@ -29,6 +29,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
+	"github.com/KoukeNeko/JingClaw/core/internal/permission"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/gemini"
@@ -106,12 +107,19 @@ func run() error {
 		return err
 	}
 
+	// One observer shared by the tools, so a write can tell whether the file
+	// it is about to replace is one the agent actually read.
+	observed := builtin.NewObserver()
+
 	tools := tool.NewRegistry()
 	tools.MustRegister(
-		&builtin.ReadFile{Workspace: ws},
+		&builtin.ReadFile{Workspace: ws, Observer: observed},
 		&builtin.GlobFiles{Workspace: ws},
 		&builtin.Grep{Workspace: ws},
+		&builtin.WriteFile{Workspace: ws, Observer: observed},
 	)
+
+	permissions := permission.New(permission.LocalProfile())
 
 	hub := event.NewHub()
 
@@ -121,12 +129,14 @@ func run() error {
 		Provider:      modelProvider,
 		Model:         selectedModel,
 		Tools:         tools,
+		Permissions:   permissions,
 		SystemPrompt:  systemPrompt(ws),
 		MaxIterations: *maxIters,
 		NewSessionID:  func() string { return id.WithPrefix("ses") },
 		NewRunID:      func() string { return id.WithPrefix("run") },
 		NewMessageID:  func() string { return id.WithPrefix("msg") },
 		NewEventID:    func() string { return id.WithPrefix("evt") },
+		NewApprovalID: func() string { return id.WithPrefix("apr") },
 		Now:           time.Now,
 		Logger:        logger,
 	})
@@ -192,6 +202,7 @@ func run() error {
 		"provider", modelProvider.Name(),
 		"model", selectedModel,
 		"workspace", ws.Root(),
+		"permission_profile", permissions.Profile(),
 		"database", dbPath,
 		"discovery", discoveryPath,
 	)

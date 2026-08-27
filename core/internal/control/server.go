@@ -96,6 +96,48 @@ func (s *Server) InterruptRun(
 	}), nil
 }
 
+func (s *Server) ListApprovals(
+	ctx context.Context,
+	req *connect.Request[controlv1.ListApprovalsRequest],
+) (*connect.Response[controlv1.ListApprovalsResponse], error) {
+	approvals, err := s.rt.PendingApprovals(ctx, domain.SessionID(req.Msg.GetSessionId()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	out := make([]*controlv1.Approval, 0, len(approvals))
+	for _, approval := range approvals {
+		out = append(out, approvalToProto(approval))
+	}
+
+	return connect.NewResponse(&controlv1.ListApprovalsResponse{Approvals: out}), nil
+}
+
+func (s *Server) DecideApproval(
+	ctx context.Context,
+	req *connect.Request[controlv1.DecideApprovalRequest],
+) (*connect.Response[controlv1.DecideApprovalResponse], error) {
+	if req.Msg.GetApprovalId() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("approval_id is required"))
+	}
+
+	// The client says allow or deny; the daemon owns what that unlocks. A
+	// client cannot widen its own permissions by asking nicely.
+	approval, err := s.rt.DecideApproval(ctx,
+		domain.ApprovalID(req.Msg.GetApprovalId()),
+		req.Msg.GetAllow(),
+		rememberScopeFromProto(req.Msg.GetRemember()),
+		req.Msg.GetMeta().GetClientId(),
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	return connect.NewResponse(&controlv1.DecideApprovalResponse{
+		Approval: approvalToProto(approval),
+	}), nil
+}
+
 // SubscribeEvents replays everything after the client's cursor, then follows
 // the log live.
 //
@@ -187,8 +229,12 @@ func toConnectError(err error) error {
 		return nil
 	case errors.Is(err, storage.ErrSessionNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
-	case errors.Is(err, runtime.ErrRunNotFound):
+	case errors.Is(err, runtime.ErrRunNotFound), errors.Is(err, storage.ErrApprovalNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
+	case errors.Is(err, runtime.ErrApprovalNotPending), errors.Is(err, storage.ErrApprovalDecided):
+		// Someone already answered. FailedPrecondition rather than an error
+		// state: the prompt is settled, the client is simply late.
+		return connect.NewError(connect.CodeFailedPrecondition, err)
 	case errors.Is(err, runtime.ErrShuttingDown):
 		return connect.NewError(connect.CodeUnavailable, err)
 	case errors.Is(err, context.Canceled):

@@ -3,10 +3,12 @@ package builtin
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -29,6 +31,10 @@ const (
 // ReadFile reads a range of lines from a workspace file.
 type ReadFile struct {
 	Workspace *workspace.Workspace
+
+	// Observer records what was seen, which is what later lets a write refuse
+	// to clobber a file the agent never looked at.
+	Observer *Observer
 }
 
 func (t *ReadFile) Spec() tool.Spec {
@@ -103,11 +109,10 @@ func (t *ReadFile) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 			"%s is %d bytes, over the %d byte read limit", args.Path, info.Size(), maxReadableFile)
 	}
 
-	file, err := os.Open(absolute)
+	raw, err := os.ReadFile(absolute)
 	if err != nil {
 		return tool.Result{}, tool.Errorf(tool.CodeInternal, "", "%v", err)
 	}
-	defer func() { _ = file.Close() }()
 
 	if args.EndLine > 0 && args.StartLine > args.EndLine {
 		return tool.Result{}, tool.Errorf(tool.CodeInvalidArguments,
@@ -115,11 +120,23 @@ func (t *ReadFile) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 			"start_line %d is after end_line %d", args.StartLine, args.EndLine)
 	}
 
-	return readLines(ctx, file, args, info.Size())
+	result, err := readLines(ctx, bytes.NewReader(raw), args, info.Size())
+	if err != nil {
+		return result, err
+	}
+
+	// Record the whole file's hash even when only a range was returned: the
+	// question a later write asks is whether the file changed, not whether the
+	// part that was read did.
+	if t.Observer != nil {
+		t.Observer.Observe(absolute, hashBytes(raw))
+	}
+
+	return result, nil
 }
 
-func readLines(ctx context.Context, file *os.File, args readFileArgs, size int64) (tool.Result, error) {
-	scanner := bufio.NewScanner(file)
+func readLines(ctx context.Context, source io.Reader, args readFileArgs, size int64) (tool.Result, error) {
+	scanner := bufio.NewScanner(source)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	start := args.StartLine

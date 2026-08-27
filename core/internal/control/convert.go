@@ -95,6 +95,54 @@ func stopReasonToProto(reason domain.StopReason) controlv1.StopReason {
 	}
 }
 
+func approvalStatusToProto(status domain.ApprovalStatus) controlv1.ApprovalStatus {
+	switch status {
+	case domain.ApprovalPending:
+		return controlv1.ApprovalStatus_APPROVAL_STATUS_PENDING
+	case domain.ApprovalAllowed:
+		return controlv1.ApprovalStatus_APPROVAL_STATUS_ALLOWED
+	case domain.ApprovalDenied:
+		return controlv1.ApprovalStatus_APPROVAL_STATUS_DENIED
+	default:
+		return controlv1.ApprovalStatus_APPROVAL_STATUS_UNSPECIFIED
+	}
+}
+
+func rememberScopeToProto(scope domain.RememberScope) controlv1.RememberScope {
+	switch scope {
+	case domain.RememberOnce:
+		return controlv1.RememberScope_REMEMBER_SCOPE_ONCE
+	case domain.RememberSession:
+		return controlv1.RememberScope_REMEMBER_SCOPE_SESSION
+	default:
+		return controlv1.RememberScope_REMEMBER_SCOPE_UNSPECIFIED
+	}
+}
+
+func rememberScopeFromProto(scope controlv1.RememberScope) domain.RememberScope {
+	if scope == controlv1.RememberScope_REMEMBER_SCOPE_SESSION {
+		return domain.RememberSession
+	}
+	// Anything unrecognised narrows to a single use. A scope the daemon does
+	// not understand must never be treated as broader than it is.
+	return domain.RememberOnce
+}
+
+func approvalToProto(a domain.Approval) *controlv1.Approval {
+	return &controlv1.Approval{
+		Id:         string(a.ID),
+		SessionId:  string(a.SessionID),
+		RunId:      string(a.RunID),
+		ToolCallId: string(a.ToolCallID),
+		ToolName:   a.ToolName,
+		Arguments:  a.Arguments,
+		Summary:    a.Summary,
+		Effects:    a.Effects,
+		Status:     approvalStatusToProto(a.Status),
+		CreatedAt:  timestamppb.New(a.CreatedAt),
+	}
+}
+
 func usageToProto(usage domain.Usage) *controlv1.Usage {
 	return &controlv1.Usage{
 		InputTokens:       usage.InputTokens,
@@ -176,6 +224,30 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 				IsError:    p.IsError,
 				Truncated:  p.Truncated,
 				DurationMs: p.DurationMS,
+			},
+		}
+
+	case domain.ApprovalRequested:
+		out.Payload = &controlv1.Event_ApprovalRequested{
+			ApprovalRequested: &controlv1.ApprovalRequested{
+				ApprovalId: string(p.ApprovalID),
+				CallId:     string(p.CallID),
+				ToolName:   p.ToolName,
+				Arguments:  p.Arguments,
+				Summary:    p.Summary,
+				Effects:    p.Effects,
+			},
+		}
+
+	case domain.ApprovalResolved:
+		out.Payload = &controlv1.Event_ApprovalResolved{
+			ApprovalResolved: &controlv1.ApprovalResolved{
+				ApprovalId: string(p.ApprovalID),
+				CallId:     string(p.CallID),
+				ToolName:   p.ToolName,
+				Status:     approvalStatusToProto(p.Status),
+				Scope:      rememberScopeToProto(p.Scope),
+				DecidedBy:  p.DecidedBy,
 			},
 		}
 

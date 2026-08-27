@@ -42,16 +42,17 @@ func newRestartableRuntime(t *testing.T, dbPath string, chunkDelay time.Duration
 	}
 
 	rt := runtime.New(ctx, runtime.Options{
-		Store:        store,
-		Hub:          event.NewHub(),
-		Provider:     fake.New(chunkDelay),
-		Model:        fake.ModelID,
-		NewSessionID: next("ses"),
-		NewRunID:     next("run"),
-		NewMessageID: next("msg"),
-		NewEventID:   next("evt"),
-		Now:          time.Now,
-		Logger:       slog.New(slog.DiscardHandler),
+		Store:         store,
+		Hub:           event.NewHub(),
+		Provider:      fake.New(chunkDelay),
+		Model:         fake.ModelID,
+		NewSessionID:  next("ses"),
+		NewRunID:      next("run"),
+		NewMessageID:  next("msg"),
+		NewEventID:    next("evt"),
+		NewApprovalID: next("apr"),
+		Now:           time.Now,
+		Logger:        slog.New(slog.DiscardHandler),
 	})
 
 	return rt, store

@@ -73,6 +73,46 @@ message InterruptRunResponse {
   RunStatus status = 1;
 }
 
+message Approval {
+  string id = 1;
+  string session_id = 2;
+  string run_id = 3;
+
+  string tool_call_id = 4;
+  string tool_name = 5;
+  string arguments = 6;
+
+  string summary = 7;
+  repeated string effects = 8;
+
+  ApprovalStatus status = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message ListApprovalsRequest {
+  string session_id = 1;
+}
+
+message ListApprovalsResponse {
+  repeated Approval approvals = 1;
+}
+
+message DecideApprovalRequest {
+  RequestMeta meta = 1;
+
+  string approval_id = 2;
+
+  // The decision itself. Whether a human may make it, and what it is allowed
+  // to unlock, is settled by the daemon's policy rather than by the client.
+  bool allow = 3;
+
+  RememberScope remember = 4;
+}
+
+message DecideApprovalResponse {
+  Approval approval = 1;
+}
+
 // Frames carried by SubscribeEvents. Named for its RPC per buf's standard
 // lint rules; "hello" arrives first, then events, with heartbeats when idle.
 message SubscribeEventsResponse {
@@ -88,4 +128,6 @@ service SessionService {
   rpc SendTurn(SendTurnRequest) returns (SendTurnResponse);
   rpc SubscribeEvents(SubscribeEventsRequest) returns (stream SubscribeEventsResponse);
   rpc InterruptRun(InterruptRunRequest) returns (InterruptRunResponse);
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
+  rpc DecideApproval(DecideApprovalRequest) returns (DecideApprovalResponse);
 }

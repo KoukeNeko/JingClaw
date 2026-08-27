@@ -90,11 +90,14 @@ func newToolHarness(t *testing.T, turns [][]provider.Event) (*runtime.Runtime, *
 		t.Fatalf("open workspace: %v", err)
 	}
 
+	observed := builtin.NewObserver()
+
 	registry := tool.NewRegistry()
 	registry.MustRegister(
-		&builtin.ReadFile{Workspace: ws},
+		&builtin.ReadFile{Workspace: ws, Observer: observed},
 		&builtin.GlobFiles{Workspace: ws},
 		&builtin.Grep{Workspace: ws},
+		&builtin.WriteFile{Workspace: ws, Observer: observed},
 	)
 
 	var counter atomic.Uint64
@@ -119,6 +122,7 @@ func newToolHarness(t *testing.T, turns [][]provider.Event) (*runtime.Runtime, *
 		NewRunID:      next("run"),
 		NewMessageID:  next("msg"),
 		NewEventID:    next("evt"),
+		NewApprovalID: next("apr"),
 		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
 		Logger:        slog.New(slog.DiscardHandler),
 	})
@@ -295,7 +299,7 @@ func TestToolLoopStopsAtTheIterationBudget(t *testing.T) {
 	if !ok {
 		t.Fatalf("last event is %T", events[len(events)-1].Payload)
 	}
-	if !strings.Contains(last.Reason, "iterations") {
+	if !strings.Contains(last.Reason, "model turns") {
 		t.Errorf("the budget stop is not explained: %q", last.Reason)
 	}
 }

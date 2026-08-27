@@ -259,3 +259,87 @@ func (u Usage) Add(other Usage) Usage {
 func (u Usage) TotalTokens() int64 {
 	return u.InputTokens + u.OutputTokens + u.ReasoningTokens
 }
+
+type ApprovalID string
+
+type ApprovalStatus string
+
+const (
+	ApprovalPending ApprovalStatus = "pending"
+	ApprovalAllowed ApprovalStatus = "allowed"
+	ApprovalDenied  ApprovalStatus = "denied"
+)
+
+// RememberScope is how far a human's answer carries.
+//
+// There is deliberately no "forever" option here. A standing permission that
+// outlives the session is a policy change, and policy changes belong in
+// configuration a person can read back, not in a button pressed mid-run.
+type RememberScope string
+
+const (
+	RememberOnce    RememberScope = "once"
+	RememberSession RememberScope = "session"
+)
+
+// Approval is a paused tool call waiting on a human.
+//
+// It is persisted rather than held in memory because the pause has to survive
+// a restart: a run stopped at a permission prompt is not an orphan to clean
+// up, it is work waiting for an answer that may come hours later.
+type Approval struct {
+	ID        ApprovalID
+	SessionID SessionID
+	RunID     RunID
+
+	ToolCallID ToolCallID
+	ToolName   string
+
+	// Arguments are stored as the tool will receive them, so a reviewer judges
+	// the real call rather than a rendering of it.
+	Arguments string
+
+	Summary string
+	Effects []string
+
+	Status ApprovalStatus
+	Scope  RememberScope
+
+	CreatedAt time.Time
+	DecidedAt *time.Time
+
+	// DecidedBy identifies the client that answered, for the audit trail.
+	DecidedBy string
+}
+
+// IsPending reports whether this approval is still waiting.
+func (a Approval) IsPending() bool { return a.Status == ApprovalPending }
+
+const (
+	EventApprovalRequested EventKind = "approval.requested"
+	EventApprovalResolved  EventKind = "approval.resolved"
+)
+
+// ApprovalRequested announces that a run has paused. Every client sees it, so
+// whoever is nearest can answer.
+type ApprovalRequested struct {
+	ApprovalID ApprovalID
+	CallID     ToolCallID
+	ToolName   string
+	Arguments  string
+	Summary    string
+	Effects    []string
+}
+
+// ApprovalResolved records the answer and who gave it.
+type ApprovalResolved struct {
+	ApprovalID ApprovalID
+	CallID     ToolCallID
+	ToolName   string
+	Status     ApprovalStatus
+	Scope      RememberScope
+	DecidedBy  string
+}
+
+func (ApprovalRequested) isEventPayload() {}
+func (ApprovalResolved) isEventPayload()  {}

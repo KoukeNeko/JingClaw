@@ -44,16 +44,17 @@ func newServer(t *testing.T, chunkDelay time.Duration) controlv1connect.SessionS
 	t.Cleanup(cancel)
 
 	rt := runtime.New(ctx, runtime.Options{
-		Store:        store,
-		Hub:          hub,
-		Provider:     fake.New(chunkDelay),
-		Model:        fake.ModelID,
-		NewSessionID: next("ses"),
-		NewRunID:     next("run"),
-		NewMessageID: next("msg"),
-		NewEventID:   next("evt"),
-		Now:          clock,
-		Logger:       slog.New(slog.DiscardHandler),
+		Store:         store,
+		Hub:           hub,
+		Provider:      fake.New(chunkDelay),
+		Model:         fake.ModelID,
+		NewSessionID:  next("ses"),
+		NewRunID:      next("run"),
+		NewMessageID:  next("msg"),
+		NewEventID:    next("evt"),
+		NewApprovalID: next("apr"),
+		Now:           clock,
+		Logger:        slog.New(slog.DiscardHandler),
 	})
 
 	mux := http.NewServeMux()

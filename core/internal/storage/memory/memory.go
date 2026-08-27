@@ -10,25 +10,28 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
 
 type Store struct {
-	mu       sync.RWMutex
-	sessions map[domain.SessionID]domain.Session
-	runs     map[domain.RunID]domain.Run
-	events   map[domain.SessionID][]domain.Event
+	mu        sync.RWMutex
+	sessions  map[domain.SessionID]domain.Session
+	runs      map[domain.RunID]domain.Run
+	events    map[domain.SessionID][]domain.Event
+	approvals map[domain.ApprovalID]domain.Approval
 }
 
 var _ storage.Store = (*Store)(nil)
 
 func New() *Store {
 	return &Store{
-		sessions: make(map[domain.SessionID]domain.Session),
-		runs:     make(map[domain.RunID]domain.Run),
-		events:   make(map[domain.SessionID][]domain.Event),
+		sessions:  make(map[domain.SessionID]domain.Session),
+		runs:      make(map[domain.RunID]domain.Run),
+		events:    make(map[domain.SessionID][]domain.Event),
+		approvals: make(map[domain.ApprovalID]domain.Approval),
 	}
 }
 
@@ -226,4 +229,114 @@ func (s *Store) Head(ctx context.Context, id domain.SessionID) (domain.Seq, erro
 		return 0, storage.ErrSessionNotFound
 	}
 	return domain.Seq(len(s.events[id])), nil
+}
+
+func (s *Store) CreateApproval(ctx context.Context, approval domain.Approval) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.approvals == nil {
+		s.approvals = make(map[domain.ApprovalID]domain.Approval)
+	}
+	for _, existing := range s.approvals {
+		// Mirrors the unique index: one approval per tool call, so the same
+		// prompt cannot be raised or answered twice.
+		if existing.RunID == approval.RunID && existing.ToolCallID == approval.ToolCallID {
+			return storage.ErrApprovalDecided
+		}
+	}
+
+	s.approvals[approval.ID] = approval
+	return nil
+}
+
+func (s *Store) Approval(ctx context.Context, id domain.ApprovalID) (domain.Approval, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Approval{}, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	approval, ok := s.approvals[id]
+	if !ok {
+		return domain.Approval{}, storage.ErrApprovalNotFound
+	}
+	return approval, nil
+}
+
+func (s *Store) DecideApproval(
+	ctx context.Context,
+	id domain.ApprovalID,
+	status domain.ApprovalStatus,
+	scope domain.RememberScope,
+	decidedBy string,
+	at time.Time,
+) (domain.Approval, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Approval{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	approval, ok := s.approvals[id]
+	if !ok {
+		return domain.Approval{}, storage.ErrApprovalNotFound
+	}
+	if !approval.IsPending() {
+		return domain.Approval{}, storage.ErrApprovalDecided
+	}
+
+	approval.Status = status
+	approval.Scope = scope
+	approval.DecidedBy = decidedBy
+	approval.DecidedAt = &at
+	s.approvals[id] = approval
+
+	return approval, nil
+}
+
+func (s *Store) PendingApprovals(ctx context.Context, session domain.SessionID) ([]domain.Approval, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var pending []domain.Approval
+	for _, approval := range s.approvals {
+		if approval.SessionID == session && approval.IsPending() {
+			pending = append(pending, approval)
+		}
+	}
+
+	sort.Slice(pending, func(i, j int) bool {
+		if !pending[i].CreatedAt.Equal(pending[j].CreatedAt) {
+			return pending[i].CreatedAt.Before(pending[j].CreatedAt)
+		}
+		return pending[i].ID < pending[j].ID
+	})
+	return pending, nil
+}
+
+func (s *Store) ApprovalForCall(ctx context.Context, run domain.RunID, call domain.ToolCallID) (domain.Approval, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Approval{}, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, approval := range s.approvals {
+		if approval.RunID == run && approval.ToolCallID == call {
+			return approval, nil
+		}
+	}
+	return domain.Approval{}, storage.ErrApprovalNotFound
 }

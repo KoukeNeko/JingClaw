@@ -10,6 +10,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 )
@@ -23,6 +24,12 @@ var (
 	// replayed.
 	ErrDuplicateSession = errors.New("storage: session already exists")
 	ErrDuplicateRun     = errors.New("storage: run already exists")
+
+	ErrApprovalNotFound = errors.New("storage: approval not found")
+
+	// ErrApprovalDecided guards the race where two clients answer the same
+	// prompt: the second answer must not run the tool again.
+	ErrApprovalDecided = errors.New("storage: approval has already been decided")
 )
 
 type SessionStore interface {
@@ -47,6 +54,26 @@ type RunStore interface {
 	UnfinishedRuns(ctx context.Context) ([]domain.Run, error)
 }
 
+type ApprovalStore interface {
+	CreateApproval(ctx context.Context, approval domain.Approval) error
+
+	Approval(ctx context.Context, id domain.ApprovalID) (domain.Approval, error)
+
+	// DecideApproval settles a pending approval. It must fail rather than
+	// overwrite when the approval is already decided, so a duplicate answer
+	// cannot cause a second execution.
+	DecideApproval(ctx context.Context, id domain.ApprovalID, status domain.ApprovalStatus,
+		scope domain.RememberScope, decidedBy string, at time.Time) (domain.Approval, error)
+
+	// PendingApprovals lists what is waiting, so a client that connects late
+	// can still answer.
+	PendingApprovals(ctx context.Context, session domain.SessionID) ([]domain.Approval, error)
+
+	// ApprovalForCall finds the decision made about a specific tool call,
+	// which is how a resumed run learns what it was told.
+	ApprovalForCall(ctx context.Context, run domain.RunID, call domain.ToolCallID) (domain.Approval, error)
+}
+
 type EventStore interface {
 	// Append assigns the next sequence number for the session and returns it.
 	// Allocation and insertion must be atomic: a number handed out before the
@@ -66,5 +93,6 @@ type EventStore interface {
 type Store interface {
 	SessionStore
 	RunStore
+	ApprovalStore
 	EventStore
 }

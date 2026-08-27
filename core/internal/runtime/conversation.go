@@ -122,3 +122,74 @@ func (b *conversationBuilder) finish() []provider.Message {
 	b.flushResults()
 	return b.messages
 }
+
+// pendingCall is a tool the model asked for that has no result yet.
+type pendingCall struct {
+	CallID    domain.ToolCallID
+	Name      string
+	Arguments []byte
+}
+
+// outstandingCalls finds tool calls with no recorded result.
+//
+// Derived from the log rather than tracked in memory, so a run resumed in a
+// different process sees exactly what the one that requested them saw. A call
+// with no result is also precisely what a crash leaves behind, which makes
+// this the natural resume point.
+func (r *Runtime) outstandingCalls(ctx context.Context, run domain.Run) ([]pendingCall, error) {
+	events, err := r.opts.Store.ListAfter(ctx, run.SessionID, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		requested []pendingCall
+		completed = make(map[domain.ToolCallID]bool)
+	)
+
+	for _, event := range events {
+		// Scoped to this run: an unfinished call from an earlier run belongs
+		// to that run's history, not to this one's work.
+		if event.RunID != run.ID {
+			continue
+		}
+
+		switch payload := event.Payload.(type) {
+		case domain.ToolCallRequested:
+			requested = append(requested, pendingCall{
+				CallID:    payload.CallID,
+				Name:      payload.Name,
+				Arguments: []byte(payload.Arguments),
+			})
+		case domain.ToolCallCompleted:
+			completed[payload.CallID] = true
+		}
+	}
+
+	outstanding := make([]pendingCall, 0, len(requested))
+	for _, call := range requested {
+		if !completed[call.CallID] {
+			outstanding = append(outstanding, call)
+		}
+	}
+	return outstanding, nil
+}
+
+// modelTurns counts completed model turns in this run.
+//
+// The budget is measured against the log rather than a loop counter so a run
+// resumed in a new process cannot silently start its allowance over.
+func (r *Runtime) modelTurns(ctx context.Context, run domain.Run) (int, error) {
+	events, err := r.opts.Store.ListAfter(ctx, run.SessionID, 0, 0)
+	if err != nil {
+		return 0, err
+	}
+
+	turns := 0
+	for _, event := range events {
+		if event.RunID == run.ID && event.Kind == domain.EventAssistantMessageCompleted {
+			turns++
+		}
+	}
+	return turns, nil
+}

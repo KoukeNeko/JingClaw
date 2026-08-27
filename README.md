@@ -25,17 +25,16 @@ you left off.
 
 State persists to SQLite and survives a restart, including runs orphaned by a
 crash. Real models answer through the Gemini provider, and the agent loop runs
-tools: it can search a workspace, read what it finds, and act on what a failed
-call told it. Everything it can reach is read-only and confined to one
-directory.
+tools: it searches a workspace, reads what it finds, acts on what a failed call
+told it, and stops for a human before it changes anything.
 
-Deliberately absent until the rest of M1: write and shell tools, the permission
-engine with human approval, context compaction, MCP, and every GUI.
+Deliberately absent until the rest of M1: targeted edits and shell execution,
+context compaction, MCP, and every GUI.
 
 | Milestone | Scope |
 |---|---|
 | M0 | walking skeleton — done |
-| **M1a** | SQLite ✓, providers ✓, read tools ✓, write tools, permissions |
+| **M1a** | SQLite ✓, providers ✓, read tools ✓, permissions ✓, edits, shell |
 | M1b | `gatewayd` + Discord |
 | M2 | SwiftUI, WinUI 3 and web clients at parity |
 | M3 | subagents, replay, sandboxing, remote fleet |
@@ -80,6 +79,18 @@ core/bin/agentd --provider=gemini --model=gemma-4-31b-it --workspace .
 `--workspace` is the only directory tools can reach. Paths are resolved and
 symlink-checked against it before any I/O, so neither traversal nor a symlink
 pointing elsewhere gets out.
+
+Reads run unattended; anything that modifies the workspace stops for a
+decision:
+
+```bash
+core/bin/agent approvals <session-id>
+core/bin/agent approve <approval-id>     # --session to allow that tool for the session
+core/bin/agent deny <approval-id>
+```
+
+The pause is durable. A run waiting for an answer survives a daemon restart and
+can be answered hours later, by a client that never saw the original prompt.
 
 The key comes from `GEMINI_API_KEY`, or a mode-600 file at
 `gemini.key` under the config directory. `--list-models` prints what the
@@ -152,7 +163,12 @@ These are load-bearing. Breaking one is a design change, not a refactor.
 10. **A failed tool is an observation, not an error.** Structured codes and a
    suggested next step go back to the model; "exit status 1" leaves it retrying
    the same call until the budget runs out.
-11. **Credentials never reach a log.** They load from an environment variable or
+11. **Permission and correctness are separate.** Approval answers "may you touch
+   this"; the write rules answer "do you know what you are touching". A human
+   saying yes does not let the agent overwrite a file it never read.
+12. **A paused run is not an orphan.** Waiting on a human is a legitimate state,
+   so startup leaves it alone instead of failing it.
+13. **Credentials never reach a log.** They load from an environment variable or
    a mode-600 file into a type whose `String`, `Format` and `MarshalJSON` all
    redact.
 

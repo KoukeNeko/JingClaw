@@ -89,6 +89,24 @@ message Usage {
   int64 reasoning_tokens = 4;
 }
 
+enum ApprovalStatus {
+  APPROVAL_STATUS_UNSPECIFIED = 0;
+  APPROVAL_STATUS_PENDING = 1;
+  APPROVAL_STATUS_ALLOWED = 2;
+  APPROVAL_STATUS_DENIED = 3;
+}
+
+// How far a human's answer carries.
+//
+// There is deliberately no "forever": a permission outliving the session is a
+// policy change, and those belong in configuration a person can read back, not
+// in a button pressed mid-run.
+enum RememberScope {
+  REMEMBER_SCOPE_UNSPECIFIED = 0;
+  REMEMBER_SCOPE_ONCE = 1;
+  REMEMBER_SCOPE_SESSION = 2;
+}
+
 enum StopReason {
   STOP_REASON_UNSPECIFIED = 0;
   STOP_REASON_END_TURN = 1;

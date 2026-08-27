@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -37,16 +38,17 @@ func newHarness(t *testing.T, modelProvider provider.Provider) (*runtime.Runtime
 	t.Cleanup(cancel)
 
 	rt := runtime.New(ctx, runtime.Options{
-		Store:        store,
-		Hub:          hub,
-		Provider:     modelProvider,
-		Model:        fake.ModelID,
-		NewSessionID: next("ses"),
-		NewRunID:     next("run"),
-		NewMessageID: next("msg"),
-		NewEventID:   next("evt"),
-		Now:          clock,
-		Logger:       slog.New(slog.DiscardHandler),
+		Store:         store,
+		Hub:           hub,
+		Provider:      modelProvider,
+		Model:         fake.ModelID,
+		NewSessionID:  next("ses"),
+		NewRunID:      next("run"),
+		NewMessageID:  next("msg"),
+		NewEventID:    next("evt"),
+		NewApprovalID: next("apr"),
+		Now:           clock,
+		Logger:        slog.New(slog.DiscardHandler),
 	})
 
 	return rt, store, hub
@@ -434,4 +436,52 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("condition not met within timeout")
+}
+
+// A wiring mistake must stop the daemon at startup. Finding it through a nil
+// call halfway through a run crashes in the middle of someone's work, and
+// points the stack trace at the symptom rather than the cause.
+func TestNewPanicsOnMissingCollaborators(t *testing.T) {
+	complete := func() runtime.Options {
+		return runtime.Options{
+			Store:         memory.New(),
+			Hub:           event.NewHub(),
+			Provider:      fake.New(0),
+			NewSessionID:  func() string { return "ses" },
+			NewRunID:      func() string { return "run" },
+			NewMessageID:  func() string { return "msg" },
+			NewEventID:    func() string { return "evt" },
+			NewApprovalID: func() string { return "apr" },
+			Logger:        slog.New(slog.DiscardHandler),
+		}
+	}
+
+	clear := map[string]func(*runtime.Options){
+		"Store":         func(o *runtime.Options) { o.Store = nil },
+		"Hub":           func(o *runtime.Options) { o.Hub = nil },
+		"Provider":      func(o *runtime.Options) { o.Provider = nil },
+		"NewSessionID":  func(o *runtime.Options) { o.NewSessionID = nil },
+		"NewRunID":      func(o *runtime.Options) { o.NewRunID = nil },
+		"NewMessageID":  func(o *runtime.Options) { o.NewMessageID = nil },
+		"NewEventID":    func(o *runtime.Options) { o.NewEventID = nil },
+		"NewApprovalID": func(o *runtime.Options) { o.NewApprovalID = nil },
+	}
+
+	for name, drop := range clear {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				recovered := recover()
+				if recovered == nil {
+					t.Fatalf("New accepted Options with no %s", name)
+				}
+				if message, ok := recovered.(string); ok && !strings.Contains(message, name) {
+					t.Errorf("the panic does not name the missing option: %s", message)
+				}
+			}()
+
+			opts := complete()
+			drop(&opts)
+			runtime.New(context.Background(), opts)
+		})
+	}
 }

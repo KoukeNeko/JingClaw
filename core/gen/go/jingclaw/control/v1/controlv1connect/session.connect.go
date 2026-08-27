@@ -44,6 +44,12 @@ const (
 	// SessionServiceInterruptRunProcedure is the fully-qualified name of the SessionService's
 	// InterruptRun RPC.
 	SessionServiceInterruptRunProcedure = "/jingclaw.control.v1.SessionService/InterruptRun"
+	// SessionServiceListApprovalsProcedure is the fully-qualified name of the SessionService's
+	// ListApprovals RPC.
+	SessionServiceListApprovalsProcedure = "/jingclaw.control.v1.SessionService/ListApprovals"
+	// SessionServiceDecideApprovalProcedure is the fully-qualified name of the SessionService's
+	// DecideApproval RPC.
+	SessionServiceDecideApprovalProcedure = "/jingclaw.control.v1.SessionService/DecideApproval"
 )
 
 // SessionServiceClient is a client for the jingclaw.control.v1.SessionService service.
@@ -52,6 +58,8 @@ type SessionServiceClient interface {
 	SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error)
 	SubscribeEvents(context.Context, *connect.Request[v1.SubscribeEventsRequest]) (*connect.ServerStreamForClient[v1.SubscribeEventsResponse], error)
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
+	ListApprovals(context.Context, *connect.Request[v1.ListApprovalsRequest]) (*connect.Response[v1.ListApprovalsResponse], error)
+	DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error)
 }
 
 // NewSessionServiceClient constructs a client for the jingclaw.control.v1.SessionService service.
@@ -89,6 +97,18 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("InterruptRun")),
 			connect.WithClientOptions(opts...),
 		),
+		listApprovals: connect.NewClient[v1.ListApprovalsRequest, v1.ListApprovalsResponse](
+			httpClient,
+			baseURL+SessionServiceListApprovalsProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("ListApprovals")),
+			connect.WithClientOptions(opts...),
+		),
+		decideApproval: connect.NewClient[v1.DecideApprovalRequest, v1.DecideApprovalResponse](
+			httpClient,
+			baseURL+SessionServiceDecideApprovalProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("DecideApproval")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -98,6 +118,8 @@ type sessionServiceClient struct {
 	sendTurn        *connect.Client[v1.SendTurnRequest, v1.SendTurnResponse]
 	subscribeEvents *connect.Client[v1.SubscribeEventsRequest, v1.SubscribeEventsResponse]
 	interruptRun    *connect.Client[v1.InterruptRunRequest, v1.InterruptRunResponse]
+	listApprovals   *connect.Client[v1.ListApprovalsRequest, v1.ListApprovalsResponse]
+	decideApproval  *connect.Client[v1.DecideApprovalRequest, v1.DecideApprovalResponse]
 }
 
 // CreateSession calls jingclaw.control.v1.SessionService.CreateSession.
@@ -120,12 +142,24 @@ func (c *sessionServiceClient) InterruptRun(ctx context.Context, req *connect.Re
 	return c.interruptRun.CallUnary(ctx, req)
 }
 
+// ListApprovals calls jingclaw.control.v1.SessionService.ListApprovals.
+func (c *sessionServiceClient) ListApprovals(ctx context.Context, req *connect.Request[v1.ListApprovalsRequest]) (*connect.Response[v1.ListApprovalsResponse], error) {
+	return c.listApprovals.CallUnary(ctx, req)
+}
+
+// DecideApproval calls jingclaw.control.v1.SessionService.DecideApproval.
+func (c *sessionServiceClient) DecideApproval(ctx context.Context, req *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error) {
+	return c.decideApproval.CallUnary(ctx, req)
+}
+
 // SessionServiceHandler is an implementation of the jingclaw.control.v1.SessionService service.
 type SessionServiceHandler interface {
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
 	SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error)
 	SubscribeEvents(context.Context, *connect.Request[v1.SubscribeEventsRequest], *connect.ServerStream[v1.SubscribeEventsResponse]) error
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
+	ListApprovals(context.Context, *connect.Request[v1.ListApprovalsRequest]) (*connect.Response[v1.ListApprovalsResponse], error)
+	DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error)
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -159,6 +193,18 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("InterruptRun")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceListApprovalsHandler := connect.NewUnaryHandler(
+		SessionServiceListApprovalsProcedure,
+		svc.ListApprovals,
+		connect.WithSchema(sessionServiceMethods.ByName("ListApprovals")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceDecideApprovalHandler := connect.NewUnaryHandler(
+		SessionServiceDecideApprovalProcedure,
+		svc.DecideApproval,
+		connect.WithSchema(sessionServiceMethods.ByName("DecideApproval")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -169,6 +215,10 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceSubscribeEventsHandler.ServeHTTP(w, r)
 		case SessionServiceInterruptRunProcedure:
 			sessionServiceInterruptRunHandler.ServeHTTP(w, r)
+		case SessionServiceListApprovalsProcedure:
+			sessionServiceListApprovalsHandler.ServeHTTP(w, r)
+		case SessionServiceDecideApprovalProcedure:
+			sessionServiceDecideApprovalHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -192,4 +242,12 @@ func (UnimplementedSessionServiceHandler) SubscribeEvents(context.Context, *conn
 
 func (UnimplementedSessionServiceHandler) InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.InterruptRun is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) ListApprovals(context.Context, *connect.Request[v1.ListApprovalsRequest]) (*connect.Response[v1.ListApprovalsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.ListApprovals is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.DecideApproval is not implemented"))
 }

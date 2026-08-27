@@ -201,6 +201,112 @@ func (RunOriginKind) EnumDescriptor() ([]byte, []int) {
 	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{2}
 }
 
+type ApprovalStatus int32
+
+const (
+	ApprovalStatus_APPROVAL_STATUS_UNSPECIFIED ApprovalStatus = 0
+	ApprovalStatus_APPROVAL_STATUS_PENDING     ApprovalStatus = 1
+	ApprovalStatus_APPROVAL_STATUS_ALLOWED     ApprovalStatus = 2
+	ApprovalStatus_APPROVAL_STATUS_DENIED      ApprovalStatus = 3
+)
+
+// Enum value maps for ApprovalStatus.
+var (
+	ApprovalStatus_name = map[int32]string{
+		0: "APPROVAL_STATUS_UNSPECIFIED",
+		1: "APPROVAL_STATUS_PENDING",
+		2: "APPROVAL_STATUS_ALLOWED",
+		3: "APPROVAL_STATUS_DENIED",
+	}
+	ApprovalStatus_value = map[string]int32{
+		"APPROVAL_STATUS_UNSPECIFIED": 0,
+		"APPROVAL_STATUS_PENDING":     1,
+		"APPROVAL_STATUS_ALLOWED":     2,
+		"APPROVAL_STATUS_DENIED":      3,
+	}
+)
+
+func (x ApprovalStatus) Enum() *ApprovalStatus {
+	p := new(ApprovalStatus)
+	*p = x
+	return p
+}
+
+func (x ApprovalStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ApprovalStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_jingclaw_control_v1_common_proto_enumTypes[3].Descriptor()
+}
+
+func (ApprovalStatus) Type() protoreflect.EnumType {
+	return &file_jingclaw_control_v1_common_proto_enumTypes[3]
+}
+
+func (x ApprovalStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ApprovalStatus.Descriptor instead.
+func (ApprovalStatus) EnumDescriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{3}
+}
+
+// How far a human's answer carries.
+//
+// There is deliberately no "forever": a permission outliving the session is a
+// policy change, and those belong in configuration a person can read back, not
+// in a button pressed mid-run.
+type RememberScope int32
+
+const (
+	RememberScope_REMEMBER_SCOPE_UNSPECIFIED RememberScope = 0
+	RememberScope_REMEMBER_SCOPE_ONCE        RememberScope = 1
+	RememberScope_REMEMBER_SCOPE_SESSION     RememberScope = 2
+)
+
+// Enum value maps for RememberScope.
+var (
+	RememberScope_name = map[int32]string{
+		0: "REMEMBER_SCOPE_UNSPECIFIED",
+		1: "REMEMBER_SCOPE_ONCE",
+		2: "REMEMBER_SCOPE_SESSION",
+	}
+	RememberScope_value = map[string]int32{
+		"REMEMBER_SCOPE_UNSPECIFIED": 0,
+		"REMEMBER_SCOPE_ONCE":        1,
+		"REMEMBER_SCOPE_SESSION":     2,
+	}
+)
+
+func (x RememberScope) Enum() *RememberScope {
+	p := new(RememberScope)
+	*p = x
+	return p
+}
+
+func (x RememberScope) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RememberScope) Descriptor() protoreflect.EnumDescriptor {
+	return file_jingclaw_control_v1_common_proto_enumTypes[4].Descriptor()
+}
+
+func (RememberScope) Type() protoreflect.EnumType {
+	return &file_jingclaw_control_v1_common_proto_enumTypes[4]
+}
+
+func (x RememberScope) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RememberScope.Descriptor instead.
+func (RememberScope) EnumDescriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{4}
+}
+
 type StopReason int32
 
 const (
@@ -249,11 +355,11 @@ func (x StopReason) String() string {
 }
 
 func (StopReason) Descriptor() protoreflect.EnumDescriptor {
-	return file_jingclaw_control_v1_common_proto_enumTypes[3].Descriptor()
+	return file_jingclaw_control_v1_common_proto_enumTypes[5].Descriptor()
 }
 
 func (StopReason) Type() protoreflect.EnumType {
-	return &file_jingclaw_control_v1_common_proto_enumTypes[3]
+	return &file_jingclaw_control_v1_common_proto_enumTypes[5]
 }
 
 func (x StopReason) Number() protoreflect.EnumNumber {
@@ -262,7 +368,7 @@ func (x StopReason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StopReason.Descriptor instead.
 func (StopReason) EnumDescriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{3}
+	return file_jingclaw_control_v1_common_proto_rawDescGZIP(), []int{5}
 }
 
 // Metadata attached to every mutating request.
@@ -641,7 +747,16 @@ const file_jingclaw_control_v1_common_proto_rawDesc = "" +
 	"\rRunOriginKind\x12\x1f\n" +
 	"\x1bRUN_ORIGIN_KIND_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cRUN_ORIGIN_KIND_LOCAL_CLIENT\x10\x01\x12\x1b\n" +
-	"\x17RUN_ORIGIN_KIND_GATEWAY\x10\x02*\xcb\x01\n" +
+	"\x17RUN_ORIGIN_KIND_GATEWAY\x10\x02*\x87\x01\n" +
+	"\x0eApprovalStatus\x12\x1f\n" +
+	"\x1bAPPROVAL_STATUS_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17APPROVAL_STATUS_PENDING\x10\x01\x12\x1b\n" +
+	"\x17APPROVAL_STATUS_ALLOWED\x10\x02\x12\x1a\n" +
+	"\x16APPROVAL_STATUS_DENIED\x10\x03*d\n" +
+	"\rRememberScope\x12\x1e\n" +
+	"\x1aREMEMBER_SCOPE_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13REMEMBER_SCOPE_ONCE\x10\x01\x12\x1a\n" +
+	"\x16REMEMBER_SCOPE_SESSION\x10\x02*\xcb\x01\n" +
 	"\n" +
 	"StopReason\x12\x1b\n" +
 	"\x17STOP_REASON_UNSPECIFIED\x10\x00\x12\x18\n" +
@@ -665,22 +780,24 @@ func file_jingclaw_control_v1_common_proto_rawDescGZIP() []byte {
 	return file_jingclaw_control_v1_common_proto_rawDescData
 }
 
-var file_jingclaw_control_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_jingclaw_control_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_jingclaw_control_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_jingclaw_control_v1_common_proto_goTypes = []any{
 	(TrustLevel)(0),           // 0: jingclaw.control.v1.TrustLevel
 	(RunStatus)(0),            // 1: jingclaw.control.v1.RunStatus
 	(RunOriginKind)(0),        // 2: jingclaw.control.v1.RunOriginKind
-	(StopReason)(0),           // 3: jingclaw.control.v1.StopReason
-	(*RequestMeta)(nil),       // 4: jingclaw.control.v1.RequestMeta
-	(*ExternalPrincipal)(nil), // 5: jingclaw.control.v1.ExternalPrincipal
-	(*RunOrigin)(nil),         // 6: jingclaw.control.v1.RunOrigin
-	(*Usage)(nil),             // 7: jingclaw.control.v1.Usage
-	(*DeliveryTarget)(nil),    // 8: jingclaw.control.v1.DeliveryTarget
+	(ApprovalStatus)(0),       // 3: jingclaw.control.v1.ApprovalStatus
+	(RememberScope)(0),        // 4: jingclaw.control.v1.RememberScope
+	(StopReason)(0),           // 5: jingclaw.control.v1.StopReason
+	(*RequestMeta)(nil),       // 6: jingclaw.control.v1.RequestMeta
+	(*ExternalPrincipal)(nil), // 7: jingclaw.control.v1.ExternalPrincipal
+	(*RunOrigin)(nil),         // 8: jingclaw.control.v1.RunOrigin
+	(*Usage)(nil),             // 9: jingclaw.control.v1.Usage
+	(*DeliveryTarget)(nil),    // 10: jingclaw.control.v1.DeliveryTarget
 }
 var file_jingclaw_control_v1_common_proto_depIdxs = []int32{
 	2, // 0: jingclaw.control.v1.RunOrigin.kind:type_name -> jingclaw.control.v1.RunOriginKind
-	5, // 1: jingclaw.control.v1.RunOrigin.principal:type_name -> jingclaw.control.v1.ExternalPrincipal
+	7, // 1: jingclaw.control.v1.RunOrigin.principal:type_name -> jingclaw.control.v1.ExternalPrincipal
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -698,7 +815,7 @@ func file_jingclaw_control_v1_common_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jingclaw_control_v1_common_proto_rawDesc), len(file_jingclaw_control_v1_common_proto_rawDesc)),
-			NumEnums:      4,
+			NumEnums:      6,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
