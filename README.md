@@ -23,18 +23,19 @@ you left off.
 
 ## Status: M0 — walking skeleton
 
-M0 proved the skeleton conducts: protocol, runtime, streaming event loop, and
-the boundary between them. State persists to SQLite and survives a restart,
-including runs orphaned by a crash, and real models answer through the Gemini
-provider. There are no tools yet, so it talks but cannot act.
+State persists to SQLite and survives a restart, including runs orphaned by a
+crash. Real models answer through the Gemini provider, and the agent loop runs
+tools: it can search a workspace, read what it finds, and act on what a failed
+call told it. Everything it can reach is read-only and confined to one
+directory.
 
-Deliberately absent until the rest of M1: file and shell tools, the permission
-engine, MCP, and every GUI.
+Deliberately absent until the rest of M1: write and shell tools, the permission
+engine with human approval, context compaction, MCP, and every GUI.
 
 | Milestone | Scope |
 |---|---|
 | M0 | walking skeleton — done |
-| **M1a** | SQLite ✓, providers ✓, file/shell tools, permissions |
+| **M1a** | SQLite ✓, providers ✓, read tools ✓, write tools, permissions |
 | M1b | `gatewayd` + Discord |
 | M2 | SwiftUI, WinUI 3 and web clients at parity |
 | M3 | subagents, replay, sandboxing, remote fleet |
@@ -73,8 +74,12 @@ core/bin/agentd --dev-fake
 Or against a real model:
 
 ```bash
-core/bin/agentd --provider=gemini --model=gemma-4-31b-it
+core/bin/agentd --provider=gemini --model=gemma-4-31b-it --workspace .
 ```
+
+`--workspace` is the only directory tools can reach. Paths are resolved and
+symlink-checked against it before any I/O, so neither traversal nor a symlink
+pointing elsewhere gets out.
 
 The key comes from `GEMINI_API_KEY`, or a mode-600 file at
 `gemini.key` under the config directory. `--list-models` prints what the
@@ -141,7 +146,13 @@ These are load-bearing. Breaking one is a design change, not a refactor.
    streams a few characters at a time must not turn every keystroke into a
    database write — but interrupting a reply still flushes what was already
    generated, because losing it would be worse than never batching.
-9. **Credentials never reach a log.** They load from an environment variable or
+9. **A model's cooperation is not a security control.** The system prompt says
+   what the agent may reach, but the workspace boundary is enforced in code and
+   tested by forcing the calls a well-behaved model would decline to make.
+10. **A failed tool is an observation, not an error.** Structured codes and a
+   suggested next step go back to the model; "exit status 1" leaves it retrying
+   the same call until the budget runs out.
+11. **Credentials never reach a log.** They load from an environment variable or
    a mode-600 file into a type whose `String`, `Format` and `MarshalJSON` all
    redact.
 

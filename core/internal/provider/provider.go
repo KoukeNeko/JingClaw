@@ -13,6 +13,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 )
@@ -70,6 +71,11 @@ type Request struct {
 	MaxOutputTokens int
 	Temperature     *float64
 
+	// Tools the model may call this turn. Declared per request rather than per
+	// provider, because which tools are available depends on the session's
+	// policy, not on the vendor.
+	Tools []ToolDeclaration
+
 	// ProviderOptions is the escape hatch for genuinely provider-specific
 	// settings. Flattening those away would force every provider down to the
 	// weakest one's feature set.
@@ -81,6 +87,11 @@ type Role string
 const (
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
+
+	// RoleTool carries observations back. Providers model this differently —
+	// some as a distinct role, some as a user turn — which is precisely why
+	// the runtime uses one vocabulary and lets adapters translate.
+	RoleTool Role = "tool"
 )
 
 type Message struct {
@@ -99,7 +110,37 @@ type TextBlock struct {
 	Text string
 }
 
-func (TextBlock) contentBlock() {}
+// ToolUseBlock records a tool the model asked for. It goes back into the
+// conversation on the next turn so the model can see what it already decided.
+type ToolUseBlock struct {
+	ID   string
+	Name string
+	Args json.RawMessage
+}
+
+// ToolResultBlock carries an observation back to the model. A failed tool is
+// still a result: the model needs to read the error to do something different.
+type ToolResultBlock struct {
+	ToolUseID string
+	Name      string
+	Content   string
+	IsError   bool
+}
+
+func (TextBlock) contentBlock()       {}
+func (ToolUseBlock) contentBlock()    {}
+func (ToolResultBlock) contentBlock() {}
+
+// ToolDeclaration is a tool as the model sees it.
+type ToolDeclaration struct {
+	Name        string
+	Description string
+
+	// InputSchema is a JSON Schema object, passed through rather than
+	// translated: the schema the model is shown must be the same one its
+	// arguments are validated against.
+	InputSchema json.RawMessage
+}
 
 // Text is a shorthand for the common single-text-block message.
 func Text(text string) []ContentBlock {
@@ -118,6 +159,14 @@ type TextDelta struct {
 	Text string
 }
 
+// ToolCallRequested is the model asking for a tool. Arguments arrive complete
+// rather than streamed: a half-parsed call cannot be validated, let alone run.
+type ToolCallRequested struct {
+	ID   string
+	Name string
+	Args json.RawMessage
+}
+
 // UsageDelta reports token accounting. Providers send it at different points,
 // so the runtime treats each one as the latest known total rather than
 // something to accumulate.
@@ -130,9 +179,10 @@ type Completed struct {
 	StopReason domain.StopReason
 }
 
-func (TextDelta) isEvent()  {}
-func (UsageDelta) isEvent() {}
-func (Completed) isEvent()  {}
+func (TextDelta) isEvent()         {}
+func (ToolCallRequested) isEvent() {}
+func (UsageDelta) isEvent()        {}
+func (Completed) isEvent()         {}
 
 // Stream yields Events until the generation ends or ctx is cancelled.
 type Stream interface {

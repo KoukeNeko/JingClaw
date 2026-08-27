@@ -36,6 +36,22 @@ type assistantMessageCompletedJSON struct {
 	StopReason string `json:"stop_reason,omitempty"`
 }
 
+type toolCallRequestedJSON struct {
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type toolCallCompletedJSON struct {
+	CallID     string `json:"call_id"`
+	Name       string `json:"name"`
+	Summary    string `json:"summary,omitempty"`
+	Content    string `json:"content"`
+	IsError    bool   `json:"is_error,omitempty"`
+	Truncated  bool   `json:"truncated,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
+}
+
 type usageChangedJSON struct {
 	InputTokens       int64 `json:"input_tokens,omitempty"`
 	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"`
@@ -84,6 +100,24 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 		return json.Marshal(assistantMessageCompletedJSON{
 			MessageID:  string(p.MessageID),
 			StopReason: string(p.StopReason),
+		})
+
+	case domain.ToolCallRequested:
+		return json.Marshal(toolCallRequestedJSON{
+			CallID:    string(p.CallID),
+			Name:      p.Name,
+			Arguments: p.Arguments,
+		})
+
+	case domain.ToolCallCompleted:
+		return json.Marshal(toolCallCompletedJSON{
+			CallID:     string(p.CallID),
+			Name:       p.Name,
+			Summary:    p.Summary,
+			Content:    p.Content,
+			IsError:    p.IsError,
+			Truncated:  p.Truncated,
+			DurationMS: p.DurationMS,
 		})
 
 	case domain.UsageChanged:
@@ -144,6 +178,32 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 		return domain.AssistantMessageCompleted{
 			MessageID:  domain.MessageID(p.MessageID),
 			StopReason: domain.StopReason(p.StopReason),
+		}, nil
+
+	case domain.EventToolCallRequested:
+		var p toolCallRequestedJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		return domain.ToolCallRequested{
+			CallID:    domain.ToolCallID(p.CallID),
+			Name:      p.Name,
+			Arguments: p.Arguments,
+		}, nil
+
+	case domain.EventToolCallCompleted:
+		var p toolCallCompletedJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		return domain.ToolCallCompleted{
+			CallID:     domain.ToolCallID(p.CallID),
+			Name:       p.Name,
+			Summary:    p.Summary,
+			Content:    p.Content,
+			IsError:    p.IsError,
+			Truncated:  p.Truncated,
+			DurationMS: p.DurationMS,
 		}, nil
 
 	case domain.EventUsageChanged:

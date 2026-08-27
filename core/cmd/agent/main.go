@@ -225,6 +225,18 @@ func describe(ev *controlv1.Event) (label, detail string) {
 		// A truncated or filtered answer must not look like a normal finish.
 		return "assistant.completed", strings.ToLower(strings.TrimPrefix(reason.String(), "STOP_REASON_"))
 
+	case *controlv1.Event_ToolCallRequested:
+		call := payload.ToolCallRequested
+		return "tool.requested", fmt.Sprintf("%s %s", call.GetName(), compact(call.GetArguments(), 120))
+
+	case *controlv1.Event_ToolCallCompleted:
+		done := payload.ToolCallCompleted
+		status := done.GetSummary()
+		if done.GetIsError() {
+			status = "error: " + compact(done.GetContent(), 160)
+		}
+		return "tool.completed", fmt.Sprintf("%s (%dms) %s", done.GetName(), done.GetDurationMs(), status)
+
 	case *controlv1.Event_UsageChanged:
 		usage := payload.UsageChanged.GetUsage()
 		return "usage", fmt.Sprintf("in=%d out=%d cached=%d reasoning=%d",
@@ -275,4 +287,14 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
 	clone.Header.Set("Authorization", "Bearer "+t.token)
 	return t.base.RoundTrip(clone)
+}
+
+// compact renders a value on one line, bounded, so a tool argument or error
+// cannot flood the terminal.
+func compact(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > limit {
+		return value[:limit] + "…"
+	}
+	return value
 }

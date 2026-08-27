@@ -25,6 +25,8 @@ message Event {
     AssistantTextDelta assistant_text_delta = 12;
     AssistantMessageCompleted assistant_message_completed = 13;
     UsageChanged usage_changed = 14;
+    ToolCallRequested tool_call_requested = 15;
+    ToolCallCompleted tool_call_completed = 16;
   }
 }
 
@@ -53,6 +55,35 @@ message AssistantTextDelta {
 message AssistantMessageCompleted {
   string message_id = 1;
   StopReason stop_reason = 2;
+}
+
+// The model asking for a tool, recorded before anything runs. Kept separate
+// from the result so a client can show work in progress, and so a call that
+// never completed stays visible after a crash.
+message ToolCallRequested {
+  string call_id = 1;
+  string name = 2;
+
+  // Arguments as JSON, after validation against the tool's schema.
+  string arguments = 3;
+}
+
+// The observation handed back to the model.
+message ToolCallCompleted {
+  string call_id = 1;
+  string name = 2;
+
+  // A short line for a UI timeline.
+  string summary = 3;
+
+  // What the model actually saw. Stored in full because the next turn's
+  // conversation is rebuilt from this log.
+  string content = 4;
+
+  bool is_error = 5;
+  bool truncated = 6;
+
+  int64 duration_ms = 7;
 }
 
 // Cumulative usage for the run so far. Sent as its own event so cost is

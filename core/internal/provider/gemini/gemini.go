@@ -7,6 +7,7 @@ package gemini
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -81,10 +82,8 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 			MaxOutputTokens: int64(model.OutputTokenLimit),
 			Capabilities: provider.Capabilities{
 				Streaming: true,
-				// Tool calling and structured output arrive with the tool
-				// loop; claiming them before the runtime can honour them
-				// would make capability discovery a lie.
-				Vision: true,
+				Tools:     true,
+				Vision:    true,
 			},
 		})
 	}
@@ -131,6 +130,14 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request) (provider
 	if req.Temperature != nil {
 		temperature := float32(*req.Temperature)
 		config.Temperature = &temperature
+	}
+	if len(req.Tools) > 0 {
+		declarations, err := toFunctionDeclarations(req.Tools)
+		if err != nil {
+			return nil, provider.NewError(provider.KindInvalidRequest, providerName, req.Model,
+				err.Error(), err)
+		}
+		config.Tools = []*genai.Tool{{FunctionDeclarations: declarations}}
 	}
 
 	// The SDK returns a pull-style iterator. Errors surface per item, so the
@@ -281,6 +288,31 @@ func toParts(blocks []provider.ContentBlock) ([]*genai.Part, error) {
 				continue
 			}
 			parts = append(parts, genai.NewPartFromText(b.Text))
+
+		case provider.ToolUseBlock:
+			var args map[string]any
+			if len(b.Args) > 0 {
+				if err := json.Unmarshal(b.Args, &args); err != nil {
+					return nil, fmt.Errorf("gemini: tool call %s has invalid arguments: %w", b.Name, err)
+				}
+			}
+			parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{
+				ID: b.ID, Name: b.Name, Args: args,
+			}})
+
+		case provider.ToolResultBlock:
+			// The API distinguishes output from error by key, which is how the
+			// model learns a call failed rather than returned odd output.
+			key := "output"
+			if b.IsError {
+				key = "error"
+			}
+			parts = append(parts, &genai.Part{FunctionResponse: &genai.FunctionResponse{
+				ID:       b.ToolUseID,
+				Name:     b.Name,
+				Response: map[string]any{key: b.Content},
+			}})
+
 		default:
 			return nil, fmt.Errorf("gemini: unsupported content block %T", block)
 		}
@@ -289,7 +321,9 @@ func toParts(blocks []provider.ContentBlock) ([]*genai.Part, error) {
 	return parts, nil
 }
 
-// geminiRole maps the canonical roles. Gemini calls the assistant "model".
+// geminiRole maps the canonical roles. Gemini calls the assistant "model" and
+// has no separate tool role: observations come back as a user turn carrying
+// function responses.
 func geminiRole(role provider.Role) string {
 	if role == provider.RoleAssistant {
 		return genai.RoleModel
@@ -297,10 +331,37 @@ func geminiRole(role provider.Role) string {
 	return genai.RoleUser
 }
 
+func toFunctionDeclarations(tools []provider.ToolDeclaration) ([]*genai.FunctionDeclaration, error) {
+	declarations := make([]*genai.FunctionDeclaration, 0, len(tools))
+
+	for _, t := range tools {
+		declaration := &genai.FunctionDeclaration{
+			Name:        t.Name,
+			Description: t.Description,
+		}
+
+		if len(t.InputSchema) > 0 {
+			// ParametersJsonSchema takes the schema as-is, so the model is
+			// shown exactly what the registry validates against.
+			var schema any
+			if err := json.Unmarshal(t.InputSchema, &schema); err != nil {
+				return nil, fmt.Errorf("gemini: tool %s has an invalid input schema: %w", t.Name, err)
+			}
+			declaration.ParametersJsonSchema = schema
+		}
+
+		declarations = append(declarations, declaration)
+	}
+
+	return declarations, nil
+}
+
 func toStopReason(reason genai.FinishReason) domain.StopReason {
 	switch reason {
 	case genai.FinishReasonStop:
 		return domain.StopEndTurn
+	case genai.FinishReasonMalformedFunctionCall:
+		return domain.StopError
 	case genai.FinishReasonMaxTokens:
 		return domain.StopMaxTokens
 	case genai.FinishReasonSafety, genai.FinishReasonRecitation, genai.FinishReasonBlocklist,
@@ -400,9 +461,27 @@ func eventsFrom(resp *genai.GenerateContentResponse) []provider.Event {
 
 		if candidate.Content != nil {
 			for _, part := range candidate.Content.Parts {
+				if part == nil {
+					continue
+				}
+
+				if call := part.FunctionCall; call != nil {
+					args, err := json.Marshal(call.Args)
+					if err != nil {
+						// Unmarshalable arguments are the model's problem to
+						// fix, so they travel as an empty object rather than
+						// killing the stream.
+						args = []byte("{}")
+					}
+					events = append(events, provider.ToolCallRequested{
+						ID: call.ID, Name: call.Name, Args: args,
+					})
+					continue
+				}
+
 				// Thought parts are billed reasoning, not answer text; passing
 				// them through would put the model's scratchpad in the reply.
-				if part == nil || part.Text == "" || part.Thought {
+				if part.Text == "" || part.Thought {
 					continue
 				}
 				events = append(events, provider.TextDelta{Text: part.Text})

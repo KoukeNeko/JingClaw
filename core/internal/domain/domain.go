@@ -121,7 +121,12 @@ const (
 	EventAssistantTextDelta        EventKind = "assistant.delta"
 	EventAssistantMessageCompleted EventKind = "assistant.completed"
 	EventUsageChanged              EventKind = "usage.changed"
+	EventToolCallRequested         EventKind = "tool.requested"
+	EventToolCallCompleted         EventKind = "tool.completed"
 )
+
+// ToolCallID identifies one tool invocation within a run.
+type ToolCallID string
 
 type Event struct {
 	ID         EventID
@@ -162,6 +167,33 @@ type AssistantMessageCompleted struct {
 	StopReason StopReason
 }
 
+// ToolCallRequested records the model asking for a tool, before anything runs.
+// Persisting the request separately from the result is what lets a client show
+// work in progress, and what makes a call that never completed visible after a
+// crash.
+type ToolCallRequested struct {
+	CallID    ToolCallID
+	Name      string
+	Arguments string
+}
+
+// ToolCallCompleted records the observation handed back to the model.
+//
+// Content is stored, not just summarised, because the conversation for the
+// next turn is rebuilt from this log: a result that cannot be replayed is a
+// conversation that cannot be resumed.
+type ToolCallCompleted struct {
+	CallID  ToolCallID
+	Name    string
+	Summary string
+	Content string
+
+	IsError   bool
+	Truncated bool
+
+	DurationMS int64
+}
+
 // UsageChanged reports cumulative usage for the run so far, so cost is visible
 // while a run is in flight rather than only once it ends.
 type UsageChanged struct {
@@ -173,6 +205,8 @@ func (RunStateChanged) isEventPayload()           {}
 func (AssistantTextDelta) isEventPayload()        {}
 func (AssistantMessageCompleted) isEventPayload() {}
 func (UsageChanged) isEventPayload()              {}
+func (ToolCallRequested) isEventPayload()         {}
+func (ToolCallCompleted) isEventPayload()         {}
 
 // StopReason says why a generation ended. Providers spell this differently;
 // the runtime needs one vocabulary to decide whether a turn is genuinely

@@ -157,6 +157,28 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 			},
 		}
 
+	case domain.ToolCallRequested:
+		out.Payload = &controlv1.Event_ToolCallRequested{
+			ToolCallRequested: &controlv1.ToolCallRequested{
+				CallId:    string(p.CallID),
+				Name:      p.Name,
+				Arguments: p.Arguments,
+			},
+		}
+
+	case domain.ToolCallCompleted:
+		out.Payload = &controlv1.Event_ToolCallCompleted{
+			ToolCallCompleted: &controlv1.ToolCallCompleted{
+				CallId:     string(p.CallID),
+				Name:       p.Name,
+				Summary:    p.Summary,
+				Content:    p.Content,
+				IsError:    p.IsError,
+				Truncated:  p.Truncated,
+				DurationMs: p.DurationMS,
+			},
+		}
+
 	case domain.UsageChanged:
 		out.Payload = &controlv1.Event_UsageChanged{
 			UsageChanged: &controlv1.UsageChanged{Usage: usageToProto(p.Usage)},

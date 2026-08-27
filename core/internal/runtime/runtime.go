@@ -18,6 +18,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
+	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 )
 
 var (
@@ -39,6 +40,10 @@ const orphanReason = "runtime: interrupted by daemon restart"
 // write, and buries the events that carry meaning. Deltas are therefore
 // coalesced into chunks a human would actually notice before they are
 // appended.
+// defaultMaxIterations is deliberately modest. Real work rarely needs more,
+// and a runaway loop is expensive in both tokens and wall-clock.
+const defaultMaxIterations = 12
+
 const (
 	textFlushBytes    = 240
 	textFlushInterval = 200 * time.Millisecond
@@ -61,6 +66,18 @@ type Options struct {
 	// Model names the model each run uses. The daemon owns this; clients ask
 	// rather than deciding for themselves.
 	Model string
+
+	// Tools available to a run. Nil means the model answers from context
+	// alone, which is exactly what the walking skeleton did.
+	Tools *tool.Registry
+
+	// SystemPrompt is prepended to every request.
+	SystemPrompt string
+
+	// MaxIterations bounds the tool loop. A model that keeps calling tools
+	// without converging must stop somewhere, and stopping with a recorded
+	// reason beats burning quota until a human notices.
+	MaxIterations int
 
 	NewSessionID IDGenerator
 	NewRunID     IDGenerator
@@ -242,85 +259,65 @@ func (r *Runtime) SendTurn(ctx context.Context, sessionID domain.SessionID, text
 
 		// A failing run is a normal outcome recorded in the log, not a reason
 		// to tear down the whole daemon, so this never returns a non-nil error.
-		r.execute(runCtx, run, text)
+		r.execute(runCtx, run)
 		return nil
 	})
 
 	return runID, messageID, nil
 }
 
-func (r *Runtime) execute(ctx context.Context, run domain.Run, userText string) {
+func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 	if err := r.transition(ctx, run, domain.RunRunning, ""); err != nil {
 		r.finish(context.WithoutCancel(ctx), run, domain.RunFailed, err.Error())
 		return
 	}
 
-	messageID := domain.MessageID(r.opts.NewMessageID())
-
-	// One model turn. The step sequence is what matters: tools slot in between
-	// the stream and the terminal state without reshaping this.
-	stream, err := r.opts.Provider.Generate(ctx, provider.Request{
-		Model: r.opts.Model,
-		Messages: []provider.Message{{
-			Role:    provider.RoleUser,
-			Content: provider.Text(userText),
-		}},
-	})
-	if err != nil {
-		r.finishFromError(ctx, run, err)
-		return
+	maxIterations := r.opts.MaxIterations
+	if maxIterations <= 0 {
+		maxIterations = defaultMaxIterations
 	}
-	defer func() { _ = stream.Close() }()
 
-	stopReason := domain.StopEndTurn
-	output := r.newCoalescer(run, messageID)
+	declarations := r.toolDeclarations()
 
-	for {
-		ev, err := stream.Recv(ctx)
-		if errors.Is(err, io.EOF) {
-			break
-		}
+	// The loop is the agent: generate, act on what the model asked for,
+	// generate again with what was observed. It ends when the model stops
+	// asking for tools, or when the budget runs out.
+	for iteration := 1; ; iteration++ {
+		messages, err := r.buildConversation(ctx, run.SessionID)
 		if err != nil {
-			r.abort(ctx, run, output, err)
+			r.finishFromError(ctx, run, err)
 			return
 		}
 
-		switch e := ev.(type) {
-		case provider.TextDelta:
-			if err := output.addText(ctx, e.Text); err != nil {
-				r.abort(ctx, run, output, err)
-				return
-			}
+		calls, err := r.generateTurn(ctx, run, provider.Request{
+			Model:    r.opts.Model,
+			System:   r.systemPrompt(),
+			Messages: messages,
+			Tools:    declarations,
+		})
+		if err != nil {
+			// generateTurn has already recorded the outcome.
+			return
+		}
 
-		case provider.UsageDelta:
-			// Providers report cumulative totals, so the latest wins rather
-			// than being summed.
-			if err := output.setUsage(ctx, e.Usage); err != nil {
-				r.abort(ctx, run, output, err)
-				return
-			}
+		if len(calls) == 0 {
+			r.finish(ctx, run, domain.RunCompleted, "")
+			return
+		}
 
-		case provider.Completed:
-			stopReason = e.StopReason
+		if iteration >= maxIterations {
+			// Say why it stopped. A run that simply ends after N silent
+			// iterations is indistinguishable from one that finished.
+			r.finish(ctx, run, domain.RunFailed,
+				fmt.Sprintf("runtime: stopped after %d tool iterations without a final answer", maxIterations))
+			return
+		}
+
+		if err := r.runTools(ctx, run, calls); err != nil {
+			r.finishFromError(ctx, run, err)
+			return
 		}
 	}
-
-	// Anything still buffered has to land before the turn is declared over,
-	// or a client would see a completed message missing its last words.
-	if err := output.flush(ctx); err != nil {
-		r.abort(ctx, run, output, err)
-		return
-	}
-
-	if err := r.append(ctx, run.SessionID, run.ID, domain.EventAssistantMessageCompleted, domain.AssistantMessageCompleted{
-		MessageID:  messageID,
-		StopReason: stopReason,
-	}); err != nil {
-		r.abort(ctx, run, output, err)
-		return
-	}
-
-	r.finish(ctx, run, domain.RunCompleted, "")
 }
 
 // abort ends a run that could not continue, preserving whatever the model
@@ -564,4 +561,165 @@ func (c *coalescer) flushUsage(ctx context.Context) error {
 
 	return c.rt.append(ctx, c.run.SessionID, c.run.ID, domain.EventUsageChanged,
 		domain.UsageChanged{Usage: c.usage})
+}
+
+// generateTurn runs one model call, recording its output, and returns any
+// tools the model asked for.
+//
+// On failure it records the terminal state itself and returns an error purely
+// to tell the caller to stop; the outcome is already in the log.
+func (r *Runtime) generateTurn(
+	ctx context.Context,
+	run domain.Run,
+	request provider.Request,
+) ([]provider.ToolCallRequested, error) {
+	messageID := domain.MessageID(r.opts.NewMessageID())
+	output := r.newCoalescer(run, messageID)
+
+	stream, err := r.opts.Provider.Generate(ctx, request)
+	if err != nil {
+		r.finishFromError(ctx, run, err)
+		return nil, err
+	}
+	defer func() { _ = stream.Close() }()
+
+	var (
+		calls      []provider.ToolCallRequested
+		stopReason = domain.StopEndTurn
+	)
+
+	for {
+		ev, recvErr := stream.Recv(ctx)
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			r.abort(ctx, run, output, recvErr)
+			return nil, recvErr
+		}
+
+		switch e := ev.(type) {
+		case provider.TextDelta:
+			if err := output.addText(ctx, e.Text); err != nil {
+				r.abort(ctx, run, output, err)
+				return nil, err
+			}
+
+		case provider.ToolCallRequested:
+			// Text buffered before the call belongs with the call, in the
+			// order the model produced it.
+			if err := output.flushText(ctx); err != nil {
+				r.abort(ctx, run, output, err)
+				return nil, err
+			}
+			if e.ID == "" {
+				// Some providers omit the id. One is still needed to pair the
+				// result with its request.
+				e.ID = r.opts.NewEventID()
+			}
+			calls = append(calls, e)
+
+			if err := r.append(ctx, run.SessionID, run.ID, domain.EventToolCallRequested,
+				domain.ToolCallRequested{
+					CallID:    domain.ToolCallID(e.ID),
+					Name:      e.Name,
+					Arguments: string(e.Args),
+				}); err != nil {
+				r.abort(ctx, run, output, err)
+				return nil, err
+			}
+
+		case provider.UsageDelta:
+			// Providers report cumulative totals, so the latest wins rather
+			// than being summed.
+			if err := output.setUsage(ctx, e.Usage); err != nil {
+				r.abort(ctx, run, output, err)
+				return nil, err
+			}
+
+		case provider.Completed:
+			stopReason = e.StopReason
+		}
+	}
+
+	// Anything still buffered has to land before the turn is declared over,
+	// or a client would see a completed message missing its last words.
+	if err := output.flush(ctx); err != nil {
+		r.abort(ctx, run, output, err)
+		return nil, err
+	}
+
+	if err := r.append(ctx, run.SessionID, run.ID, domain.EventAssistantMessageCompleted,
+		domain.AssistantMessageCompleted{MessageID: messageID, StopReason: stopReason}); err != nil {
+		r.abort(ctx, run, output, err)
+		return nil, err
+	}
+
+	return calls, nil
+}
+
+// runTools executes the calls the model asked for, in order.
+//
+// Sequential execution is the conservative default: the registry knows which
+// tools are parallel-safe, but two calls can still contend for the same file,
+// and getting that wrong is far more expensive than the latency saved.
+func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []provider.ToolCallRequested) error {
+	for _, call := range calls {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		started := r.opts.Now()
+
+		var result tool.Result
+		if r.opts.Tools == nil {
+			result = tool.Errorf(tool.CodeNotFound, "",
+				"no tools are available in this session").Result()
+		} else {
+			result = r.opts.Tools.Execute(ctx, tool.Call{
+				ID:        call.ID,
+				Name:      call.Name,
+				Arguments: call.Args,
+			})
+		}
+
+		if err := r.append(ctx, run.SessionID, run.ID, domain.EventToolCallCompleted,
+			domain.ToolCallCompleted{
+				CallID:     domain.ToolCallID(call.ID),
+				Name:       call.Name,
+				Summary:    result.Summary,
+				Content:    result.Content,
+				IsError:    result.IsError,
+				Truncated:  result.Truncated,
+				DurationMS: r.opts.Now().Sub(started).Milliseconds(),
+			}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *Runtime) toolDeclarations() []provider.ToolDeclaration {
+	if r.opts.Tools == nil {
+		return nil
+	}
+
+	specs := r.opts.Tools.Specs()
+	declarations := make([]provider.ToolDeclaration, 0, len(specs))
+	for _, spec := range specs {
+		declarations = append(declarations, provider.ToolDeclaration{
+			Name:        spec.Name,
+			Description: spec.Description,
+			InputSchema: spec.InputSchema,
+		})
+	}
+	return declarations
+}
+
+func (r *Runtime) systemPrompt() []provider.ContentBlock {
+	if r.opts.SystemPrompt == "" {
+		return nil
+	}
+	return provider.Text(r.opts.SystemPrompt)
 }
