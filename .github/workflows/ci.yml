@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  BUF_VERSION: 1.72.0
+  GO_VERSION: "1.26"
+
+jobs:
+  # The protobuf files are the contract shared by the Go core and, later, the
+  # SwiftUI, WinUI and web clients. Checking in generated code means those
+  # projects can build without installing buf; this job is what keeps the
+  # checked-in output honest.
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install buf
+        run: go install github.com/bufbuild/buf/cmd/buf@v${{ env.BUF_VERSION }}
+
+      - run: buf format --diff --exit-code
+      - run: buf lint
+
+      - name: Check for breaking changes
+        if: github.event_name == 'pull_request'
+        # Passed through the environment rather than interpolated into the
+        # shell, so a ref name can never be executed as a command.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: buf breaking --against ".git#branch=origin/${BASE_REF}"
+
+      - name: Generated code is up to date
+        run: |
+          buf generate
+          git diff --exit-code -- core/gen
+
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Process handling, path semantics and file replacement differ enough
+        # per platform that cross-compiling and declaring victory would be
+        # meaningless. Each OS runs its own tests.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      - name: Formatting
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l . | grep -v '^gen/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed for:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go test -race ./...
