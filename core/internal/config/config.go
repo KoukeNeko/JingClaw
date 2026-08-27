@@ -10,10 +10,12 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -294,57 +296,220 @@ func Load(path string) (Config, string, error) {
 	return cfg, used, nil
 }
 
-// Validate rejects settings that would misbehave.
+// Problem is one setting that will not do.
 //
-// Making something configurable is exactly when it needs checking: a value
+// It carries the key and the value as written so the report can point at the
+// line an operator has to edit, rather than describing the mistake and leaving
+// them to find it.
+type Problem struct {
+	Key   string
+	Value string
+	Why   string
+	Fix   string
+}
+
+// InvalidError is everything wrong with a configuration.
+type InvalidError struct {
+	Problems []Problem
+}
+
+func (e *InvalidError) Error() string {
+	parts := make([]string, 0, len(e.Problems))
+	for _, p := range e.Problems {
+		parts = append(parts, fmt.Sprintf("%s %s %s", p.Key, p.Value, p.Why))
+	}
+	return "config: " + strings.Join(parts, "; ")
+}
+
+// Report renders the problems for a terminal.
+//
+// The one-line Error is for logs. Somebody who has just mistyped a setting is
+// about to open the file, so the report names the file, quotes each value back
+// as they wrote it, and says what to write instead.
+func (e *InvalidError) Report(file string) string {
+	var b strings.Builder
+
+	if file == "" {
+		// Nothing was read, so the values came from the environment or from
+		// flags; sending the reader to a file would waste their time.
+		b.WriteString("\nConfiguration problem (no configuration file was read)\n\n")
+	} else {
+		fmt.Fprintf(&b, "\nConfiguration problem in %s\n\n", file)
+	}
+
+	for _, p := range e.Problems {
+		fmt.Fprintf(&b, "  %s = %s\n", p.Key, p.Value)
+		fmt.Fprintf(&b, "      %s\n", p.Why)
+		if p.Fix != "" {
+			fmt.Fprintf(&b, "      %s\n", p.Fix)
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("Run \"agentd --print-config\" to see every setting with its default.\n\n")
+	return b.String()
+}
+
+// Report writes a readable account of a configuration problem to w, and says
+// whether err was one.
+//
+// It lives here so that every command reports the same way; a daemon and a
+// gateway explaining the same mistake differently is how an operator learns to
+// distrust both.
+func Report(w io.Writer, err error, file string) bool {
+	var invalid *InvalidError
+	if !errors.As(err, &invalid) {
+		return false
+	}
+
+	fmt.Fprint(w, invalid.Report(file))
+	return true
+}
+
+// Validate reports every setting that will not do.
+//
+// All of them at once, rather than stopping at the first: an operator who has
+// to restart the daemon to discover the next mistake is doing work the program
+// could have done in one pass.
+//
+// Making something configurable is exactly when it needs checking. A value
 // nobody could previously write is now one somebody can, and finding out at
 // the moment it matters is worse than finding out at startup.
 func (c Config) Validate() error {
-	if err := validateLoopback(c.Server.Addr); err != nil {
-		return err
+	var problems []Problem
+
+	problems = append(problems, c.addressProblems()...)
+	problems = append(problems, c.choiceProblems()...)
+	problems = append(problems, c.rangeProblems()...)
+
+	if len(problems) == 0 {
+		return nil
+	}
+	return &InvalidError{Problems: problems}
+}
+
+func (c Config) addressProblems() []Problem {
+	host, _, err := net.SplitHostPort(c.Server.Addr)
+	if err != nil {
+		return []Problem{{
+			Key: "server.addr", Value: quote(c.Server.Addr),
+			Why: "is not written as host:port",
+			Fix: `Write it as "127.0.0.1:0"; port 0 picks a free one.`,
+		}}
 	}
 
-	if _, ok := profileNames[c.Agent.PermissionProfile]; !ok {
-		return fmt.Errorf("config: agent.permission_profile %q is not a known profile", c.Agent.PermissionProfile)
+	if isLoopback(host) {
+		return nil
+	}
+
+	// This API can read files and run programs. Binding it to a reachable
+	// interface is not a preference to be expressed in a config line; it is a
+	// decision that needs a deliberate, visible mechanism, and there is not
+	// one yet.
+	return []Problem{{
+		Key: "server.addr", Value: quote(c.Server.Addr),
+		Why: "is not a loopback address",
+		Fix: "This API can run programs and is not safe to expose. Use 127.0.0.1, ::1 or localhost.",
+	}}
+}
+
+func (c Config) choiceProblems() []Problem {
+	var problems []Problem
+
+	if !profileNames[c.Agent.PermissionProfile] {
+		problems = append(problems, Problem{
+			Key: "agent.permission_profile", Value: quote(c.Agent.PermissionProfile),
+			Why: "is not a profile that exists",
+			Fix: `Use "local", or "gateway" to refuse to run programs at all.`,
+		})
 	}
 	if _, ok := logLevels[strings.ToLower(c.Server.LogLevel)]; !ok {
-		return fmt.Errorf("config: server.log_level %q is not one of debug, info, warn, error", c.Server.LogLevel)
+		problems = append(problems, Problem{
+			Key: "server.log_level", Value: quote(c.Server.LogLevel),
+			Why: "is not a level that exists",
+			Fix: "Use debug, info, warn or error.",
+		})
+	}
+	if !providerNames[c.Model.Provider] {
+		problems = append(problems, Problem{
+			Key: "model.provider", Value: quote(c.Model.Provider),
+			Why: "is not a provider that exists",
+			Fix: `Use "gemini", or "fake" for the offline provider.`,
+		})
+	}
+	if !platformNames[c.Gateway.Platform] {
+		problems = append(problems, Problem{
+			Key: "gateway.platform", Value: quote(c.Gateway.Platform),
+			Why: "is not a platform that exists",
+			Fix: `Only "discord" is implemented.`,
+		})
 	}
 
-	positive := map[string]int64{
-		"agent.max_iterations":      int64(c.Agent.MaxIterations),
-		"model.retry.max_attempts":  int64(c.Model.Retry.MaxAttempts),
-		"tools.read_limit":          c.Tools.ReadLimit,
-		"tools.max_readable_file":   c.Tools.MaxReadableFile,
-		"tools.glob_results":        int64(c.Tools.GlobResults),
-		"tools.grep_results":        int64(c.Tools.GrepResults),
-		"tools.max_command_output":  int64(c.Tools.MaxCommandOutput),
-		"delivery.text_flush_bytes": int64(c.Delivery.TextFlushBytes),
+	return problems
+}
+
+func (c Config) rangeProblems() []Problem {
+	var problems []Problem
+
+	// An explicit slice rather than a map, so two operators fixing the same
+	// file are told about their mistakes in the same order.
+	positive := []struct {
+		key   string
+		value int64
+		fix   string
+	}{
+		{"agent.max_iterations", int64(c.Agent.MaxIterations), "A run needs at least one model turn to do anything."},
+		{"model.retry.max_attempts", int64(c.Model.Retry.MaxAttempts), "One attempt means no retry; zero means no request."},
+		{"tools.read_limit", c.Tools.ReadLimit, "This is how much of a file one read returns."},
+		{"tools.max_readable_file", c.Tools.MaxReadableFile, "Zero would make every file too large to read."},
+		{"tools.max_overwrite_bytes", c.Tools.MaxOverwriteBytes, "Zero would refuse every whole-file write."},
+		{"tools.max_searchable_file", c.Tools.MaxSearchableFile, "Zero would make every file too large to search."},
+		{"tools.glob_results", int64(c.Tools.GlobResults), "Zero would return no matches however many there are."},
+		{"tools.grep_results", int64(c.Tools.GrepResults), "Zero would return no matches however many there are."},
+		{"tools.max_command_output", int64(c.Tools.MaxCommandOutput), "Zero would discard everything a program printed."},
+		{"delivery.text_flush_bytes", int64(c.Delivery.TextFlushBytes), "Zero would write an event per character."},
 	}
-	for name, value := range positive {
-		if value <= 0 {
-			return fmt.Errorf("config: %s must be greater than zero", name)
+	for _, setting := range positive {
+		if setting.value <= 0 {
+			problems = append(problems, Problem{
+				Key: setting.key, Value: fmt.Sprint(setting.value),
+				Why: "must be greater than zero",
+				Fix: setting.fix,
+			})
 		}
 	}
 
 	if c.Tools.CommandTimeout > c.Tools.MaxCommandTimeout {
-		return fmt.Errorf("config: tools.command_timeout (%s) is above tools.max_command_timeout (%s)",
-			c.Tools.CommandTimeout, c.Tools.MaxCommandTimeout)
+		problems = append(problems, Problem{
+			Key: "tools.command_timeout", Value: quote(c.Tools.CommandTimeout.String()),
+			Why: fmt.Sprintf("is above tools.max_command_timeout (%s)", c.Tools.MaxCommandTimeout),
+			Fix: "The default a program gets cannot exceed the most it may ask for.",
+		})
 	}
 	if c.Model.Retry.BaseDelay > c.Model.Retry.MaxDelay {
-		return fmt.Errorf("config: model.retry.base_delay (%s) is above model.retry.max_delay (%s)",
-			c.Model.Retry.BaseDelay, c.Model.Retry.MaxDelay)
+		problems = append(problems, Problem{
+			Key: "model.retry.base_delay", Value: quote(c.Model.Retry.BaseDelay.String()),
+			Why: fmt.Sprintf("is above model.retry.max_delay (%s)", c.Model.Retry.MaxDelay),
+			Fix: "The first wait cannot be longer than the longest wait.",
+		})
 	}
 	if c.Model.Retry.Jitter < 0 || c.Model.Retry.Jitter > 1 {
-		return fmt.Errorf("config: model.retry.jitter must be between 0 and 1")
+		problems = append(problems, Problem{
+			Key: "model.retry.jitter", Value: fmt.Sprint(c.Model.Retry.Jitter),
+			Why: "is not between 0 and 1",
+			Fix: "It is the fraction of a delay that is randomised: 0.3 spreads retries by up to 30%.",
+		})
 	}
 
-	return nil
+	return problems
 }
 
 var (
-	profileNames = map[string]bool{"local": true, "gateway": true}
-	logLevels    = map[string]slog.Level{
+	profileNames  = map[string]bool{"local": true, "gateway": true}
+	providerNames = map[string]bool{"fake": true, "gemini": true}
+	platformNames = map[string]bool{"discord": true}
+
+	logLevels = map[string]slog.Level{
 		"debug": slog.LevelDebug,
 		"info":  slog.LevelInfo,
 		"warn":  slog.LevelWarn,
@@ -357,30 +522,59 @@ func (c Config) LogLevel() slog.Level {
 	return logLevels[strings.ToLower(c.Server.LogLevel)]
 }
 
-// validateLoopback refuses to serve anywhere but the local machine.
-//
-// This API can read files and run programs. Binding it to a reachable
-// interface is not a preference to be expressed in a config line; it is a
-// decision that needs a deliberate, visible mechanism, and there is not one
-// yet.
-func validateLoopback(addr string) error {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return fmt.Errorf("config: server.addr %q is not host:port: %w", addr, err)
-	}
-
+func isLoopback(host string) bool {
 	switch host {
 	case "localhost", "127.0.0.1", "::1":
-		return nil
+		return true
 	}
 
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return nil
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// quote shows a value the way the operator wrote it, so an empty setting reads
+// as "" rather than as nothing at all.
+func quote(value string) string {
+	return strconv.Quote(value)
+}
+
+// EnsureFile writes the example to the default location when nothing is there.
+//
+// The example is entirely commented, so creating it changes no behaviour. It
+// exists so that configuring the agent means editing a file already sitting in
+// front of you with every setting in it, rather than first finding out what to
+// write and where to put it.
+func EnsureFile() (path string, created bool, err error) {
+	path, err = DefaultPath()
+	if err != nil {
+		return "", false, err
 	}
 
-	return fmt.Errorf(
-		"config: server.addr %q is not a loopback address; this API can run programs and is not safe to expose",
-		addr)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", false, fmt.Errorf("config: create config directory: %w", err)
+	}
+
+	// O_EXCL rather than a Stat and then a write: two daemons starting
+	// together must not both find the file missing and race to create it, and
+	// an existing file must never be overwritten by a process that is only
+	// trying to be helpful.
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return path, false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("config: create %s: %w", path, err)
+	}
+
+	if _, err := file.WriteString(Example); err != nil {
+		_ = file.Close()
+		return "", false, fmt.Errorf("config: write %s: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return "", false, fmt.Errorf("config: write %s: %w", path, err)
+	}
+
+	return path, true, nil
 }
 
 // DefaultPath is where the configuration lives when none is given.

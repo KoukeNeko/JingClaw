@@ -79,6 +79,18 @@ func run() error {
 		return nil
 	}
 
+	// Nothing to configure means nothing to read, and an operator asking "where
+	// do I put this?" is a question the program can answer by putting it there.
+	// Only the default location, and only when it is empty: a file the operator
+	// named themselves and that is missing is a mistake, not an invitation.
+	var createdConfig bool
+	if *configPath == "" {
+		var err error
+		if _, createdConfig, err = config.EnsureFile(); err != nil {
+			return err
+		}
+	}
+
 	cfg, configFile, err := config.Load(*configPath)
 	if err != nil {
 		return err
@@ -96,6 +108,12 @@ func run() error {
 	// exactly when it needs validating: a value nobody could previously write
 	// is now one somebody can.
 	if err := cfg.Validate(); err != nil {
+		// Reported here rather than left to main: a mistyped setting is
+		// something a person is about to go and edit, and a JSON log line is
+		// not what they need to do that.
+		if config.Report(os.Stderr, err, configFile) {
+			os.Exit(1)
+		}
 		return err
 	}
 
@@ -299,8 +317,9 @@ func run() error {
 		"discovery", discoveryPath,
 	)
 	// Human-facing line on stdout; the structured log goes to stderr.
-	fmt.Printf("JingClaw daemon\nListening: %s\nProvider:  %s\nModel:     %s\nWorkspace: %s\nDatabase:  %s\nDiscovery: %s\n",
-		baseURL, modelProvider.Name(), selectedModel, ws.Root(), dbPath, discoveryPath)
+	fmt.Printf("JingClaw daemon\nListening: %s\nConfig:    %s\nProvider:  %s\nModel:     %s\nWorkspace: %s\nDatabase:  %s\nDiscovery: %s\n",
+		baseURL, describeConfigFile(configFile, createdConfig), modelProvider.Name(), selectedModel,
+		ws.Root(), dbPath, discoveryPath)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
@@ -349,6 +368,18 @@ func databasePath(dataDir string) (string, error) {
 // buildProvider constructs the configured provider. Real providers are wrapped
 // in retry here rather than inside each adapter, so backoff policy is one
 // decision instead of one per vendor.
+// describeConfigFile says where the settings came from, and whether this run
+// is the one that put the file there.
+func describeConfigFile(path string, created bool) string {
+	if path == "" {
+		return "(none)"
+	}
+	if created {
+		return path + " (created, all defaults)"
+	}
+	return path
+}
+
 func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, error) {
 	switch cfg.Model.Provider {
 	case "fake":

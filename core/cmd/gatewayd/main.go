@@ -52,11 +52,16 @@ func run() error {
 
 	// The gateway reads the same file as the daemon, so a deployment is
 	// described in one place rather than in two that can disagree.
-	cfg, _, err := config.Load(*configPath)
+	cfg, configFile, err := config.Load(*configPath)
 	if err != nil {
 		return err
 	}
 	if err := cfg.Validate(); err != nil {
+		// The same report the daemon gives. One mistake explained two ways by
+		// two processes is how an operator learns to distrust both.
+		if config.Report(os.Stderr, err, configFile) {
+			os.Exit(1)
+		}
 		return err
 	}
 
@@ -71,10 +76,6 @@ func run() error {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel()}))
 	slog.SetDefault(logger)
-
-	if cfg.Gateway.Platform != "discord" {
-		return fmt.Errorf("unknown platform %q; only discord is implemented", cfg.Gateway.Platform)
-	}
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -104,8 +105,8 @@ func run() error {
 
 	logger.Info("gateway starting",
 		"platform", cfg.Gateway.Platform, "account_id", cfg.Gateway.AccountID)
-	fmt.Printf("JingClaw gateway\nPlatform: %s\nAccount:  %s\n",
-		cfg.Gateway.Platform, cfg.Gateway.AccountID)
+	fmt.Printf("JingClaw gateway\nConfig:   %s\nPlatform: %s\nAccount:  %s\n",
+		configFile, cfg.Gateway.Platform, cfg.Gateway.AccountID)
 
 	group, ctx := errgroup.WithContext(rootCtx)
 

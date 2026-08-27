@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -307,5 +308,59 @@ func TestValidateAcceptsEveryLoopbackSpelling(t *testing.T) {
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("%s was refused: %v", addr, err)
 		}
+	}
+}
+
+// Every mistake at once, not the first one. Restarting a daemon to find out
+// what else is wrong is work the program can do in a single pass.
+func TestValidateReportsEveryProblemTogether(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Server.Addr = "0.0.0.0:8080"
+	cfg.Server.LogLevel = "verbose"
+	cfg.Agent.MaxIterations = 0
+
+	var invalid *config.InvalidError
+	if err := cfg.Validate(); !errors.As(err, &invalid) {
+		t.Fatalf("want an InvalidError, got %v", err)
+	}
+	if len(invalid.Problems) != 3 {
+		t.Fatalf("found %d problems, want 3: %v", len(invalid.Problems), invalid.Problems)
+	}
+}
+
+// The report is read by somebody who is about to open the file, so it has to
+// say which file, which line, and what to write instead.
+func TestReportNamesTheFileAndEachSetting(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Server.Addr = "0.0.0.0:8080"
+	cfg.Model.Provider = "openai"
+
+	var out strings.Builder
+	if !config.Report(&out, cfg.Validate(), "/etc/jingclaw/config.toml") {
+		t.Fatal("Report did not recognise a configuration problem")
+	}
+
+	for _, want := range []string{
+		"/etc/jingclaw/config.toml", // which file
+		`server.addr = "0.0.0.0:8080"`,
+		"loopback",
+		`model.provider = "openai"`,
+		`Use "gemini"`, // what to write instead
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the report does not mention %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// Anything else has to fall through to the caller's own error handling, or a
+// missing file would be swallowed by the reporter for configuration mistakes.
+func TestReportIgnoresOtherErrors(t *testing.T) {
+	var out strings.Builder
+	if config.Report(&out, errors.New("disk on fire"), "") {
+		t.Error("Report claimed an unrelated error was a configuration problem")
+	}
+	if out.Len() != 0 {
+		t.Errorf("Report wrote something for an unrelated error: %s", out.String())
 	}
 }

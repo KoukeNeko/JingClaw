@@ -1,0 +1,134 @@
+# JingClaw configuration.
+#
+# Every setting here has a default; a value only needs to appear if it differs.
+# Flags override this file, and JINGCLAW_-prefixed environment variables sit
+# between the two (JINGCLAW_AGENT_NAME sets agent.name, and so on).
+#
+# Durations are written the way Go writes them: "500ms", "2s", "10m".
+
+[agent]
+# What the agent calls itself. Leave empty to have it not claim a name, which
+# is the honest choice when the account it speaks through is called something
+# else.
+# name = "JingClaw"
+
+# Extra identity: tone, stance, what this deployment is for.
+# persona = """
+# You are careful and concise. You work on this team's Go services.
+# """
+
+# Standing directions for every session.
+# instructions = """
+# Prefer table-driven tests. Do not add dependencies without saying why.
+# """
+
+# Files read from the workspace when they exist. AGENTS.md is a convention
+# several tools already share.
+# instruction_files = ["AGENTS.md", "JINGCLAW.md"]
+
+# How many model turns a single run may take before it gives up.
+# max_iterations = 12
+
+# What local sessions may do without being asked: "local" allows reading and
+# editing the workspace and asks before running programs; "gateway" refuses to
+# run programs at all. Choose "gateway" on a machine you share.
+# permission_profile = "local"
+
+[model]
+# "gemini" talks to Google; "fake" is the offline provider, which needs no
+# credential and is what the tests and demos use.
+# provider = "fake"
+
+# model = "gemma-4-31b-it"
+
+# Where the API key comes from. Both are consulted, environment first. The key
+# is never written to a log and never passed to a program the agent runs.
+# api_key_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+
+# Read from the config directory, and only if it is mode 600.
+# api_key_file = "gemini.key"
+
+# How fast the offline provider pretends to think, so streaming and
+# interruption can be watched at human speed.
+# fake_delay = "150ms"
+
+[model.retry]
+# The right numbers depend on the account: a free tier hitting a daily quota
+# and a paid plan with generous limits want different behaviour.
+# max_attempts = 4
+# base_delay = "500ms"
+# max_delay = "30s"
+
+# Spreads retries so several clients recovering from one outage do not resend
+# in lockstep. Between 0 and 1.
+# jitter = 0.3
+
+[tools]
+# How much of a file one read returns.
+# read_limit = 65536
+
+# Files above this are not read at all; the answer for one of those is to
+# search it instead.
+# max_readable_file = 8388608
+
+# The ceiling on replacing a file in full. A model rewriting something large is
+# nearly always making the wrong shape of edit.
+# max_overwrite_bytes = 131072
+
+# Files above this are skipped when searching. They are generated or minified
+# far more often than they are the answer.
+# max_searchable_file = 2097152
+
+# How many results glob_files and grep return before they stop and say so.
+# glob_results = 200
+# grep_results = 100
+
+# How long a program may run when it does not ask for a limit of its own, and
+# the most it may ask for.
+# command_timeout = "2m"
+# max_command_timeout = "10m"
+
+# How much of a program's output is kept. The middle is dropped first: the
+# start says what ran and the end says how it ended.
+# max_command_output = 32768
+
+[delivery]
+# How provider output becomes events. These bound the event log by the clock
+# rather than by whatever chunk size the provider happens to use, which is what
+# stops one talkative model turning every few characters into a write.
+# text_flush_bytes = 240
+# text_flush_interval = "200ms"
+# usage_flush_interval = "2s"
+
+[workspace]
+# The only directory tools can reach. Relative paths are resolved against the
+# directory the daemon starts in.
+# root = "."
+
+[server]
+# Loopback only. This API can run programs; exposing it deserves more thought
+# than a config line, so a non-loopback address is refused at startup.
+# addr = "127.0.0.1:0"
+
+# Where the database lives. Empty uses the platform's own location.
+# data_dir = ""
+
+# Where the discovery file lives, which is how the CLI and the gateway find a
+# running daemon. Empty uses the platform's own location.
+# runtime_dir = ""
+
+# One of debug, info, warn, error.
+# log_level = "info"
+
+[gateway]
+# Read by gatewayd, not by the daemon. Only "discord" is implemented.
+# platform = "discord"
+
+# Names this bot account within JingClaw, so channel bindings and the delivery
+# queue belong to it. Running a second bot means a second account_id.
+# account_id = "main"
+
+# Where the bot token comes from. As with the API key, the file has to be mode
+# 600 and the value never reaches a log.
+# token_env = ["DISCORD_BOT_TOKEN"]
+# token_file = "discord.token"

@@ -166,17 +166,27 @@ session, its runs and the sequence all continue where they were.
 
 ## Configuration
 
-Every setting the daemon, the CLI and the gateway have can be written in one
-file. Flags exist so a single run can differ from it, not so that a deployment
-has to be described on a command line.
+Every setting the daemon, the CLI and the gateway have is written in one file.
+Flags exist so a single run can differ from it, not so that a deployment has to
+be described on a command line.
 
-```bash
-core/bin/agentd --print-config > ~/.config/JingClaw/config.toml
+The daemon writes the file the first time it starts, so there is nothing to
+find out and nowhere to put it:
+
+```
+$ core/bin/agentd
+JingClaw daemon
+Listening: http://127.0.0.1:54832
+Config:    /Users/you/.config/JingClaw/config.toml (created, all defaults)
 ```
 
-That prints an example with every setting present and commented, so copying it
-changes nothing until a line is deliberately uncommented. The location is the
-platform config directory — `~/Library/Application Support/JingClaw/` on macOS,
+Every setting is in it and every line is commented, so its arrival changes
+nothing until a line is deliberately uncommented. An existing file is never
+touched. [`core/config.example.toml`](core/config.example.toml) is the same
+content, checked in so it can be read without running anything, and
+`--print-config` writes it to stdout.
+
+The location is the platform config directory — `~/Library/Application Support/JingClaw/` on macOS,
 `%AppData%\JingClaw\` on Windows, `~/.config/JingClaw/` on Linux and on macOS
 when a file is already there. `--config` names another one.
 
@@ -201,10 +211,25 @@ layer is deliberately not configurable: the contract that tells the model how
 tools behave and what a refusal means. Letting an operator edit that would let
 them describe a system that does not exist.
 
-Settings are validated at startup rather than at the moment they matter.
-`server.addr` off the loopback interface is refused outright — this API runs
-programs, and exposing it deserves a more deliberate mechanism than a config
-line.
+Settings are checked at startup rather than at the moment they matter, and all
+of them at once — restarting a daemon to discover the next mistake is work the
+program can do in one pass:
+
+```
+Configuration problem in /Users/you/.config/JingClaw/config.toml
+
+  server.addr = "0.0.0.0:9977"
+      is not a loopback address
+      This API can run programs and is not safe to expose. Use 127.0.0.1, ::1 or localhost.
+
+  model.provider = "openai"
+      is not a provider that exists
+      Use "gemini", or "fake" for the offline provider.
+```
+
+That last refusal is not a preference. This API reads files and runs programs;
+binding it somewhere reachable needs a more deliberate mechanism than a config
+line, and there is not one.
 
 ## Design rules
 
