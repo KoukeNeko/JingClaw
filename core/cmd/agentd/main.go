@@ -313,6 +313,7 @@ func run() error {
 	mux.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub)))
 	mux.Handle(controlv1connect.NewGatewayIngressServiceHandler(
 		control.NewGatewayServer(plane.Ingress, store, time.Now)))
+	mux.Handle(controlv1connect.NewArtifactServiceHandler(control.NewArtifactServer(artifacts)))
 	mux.Handle(controlv1connect.NewChannelServiceHandler(
 		control.NewChannelServer(store, func() string { return id.WithPrefix("bnd") }, time.Now)))
 

@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+import "jingclaw/control/v1/common.proto";
+
+// ArtifactService serves content the daemon kept because it was too large to
+// put in front of a model.
+//
+// It is a separate service from SessionService because it carries bytes rather
+// than state, and because a credential that may read stored output is not
+// necessarily one that may start a run.
+service ArtifactService {
+  // StatArtifact reports what the daemon holds under an id, without moving it.
+  rpc StatArtifact(StatArtifactRequest) returns (StatArtifactResponse);
+
+  // ReadArtifact streams a window of an artifact.
+  //
+  // Streaming rather than one message because an artifact is exactly the thing
+  // that did not fit somewhere else, and a client showing one wants to start
+  // drawing before the last byte arrives.
+  rpc ReadArtifact(ReadArtifactRequest) returns (stream ReadArtifactResponse);
+}
+
+message StatArtifactRequest {
+  RequestMeta meta = 1;
+  string id = 2;
+}
+
+message StatArtifactResponse {
+  string id = 1;
+  int64 size = 2;
+}
+
+message ReadArtifactRequest {
+  RequestMeta meta = 1;
+  string id = 2;
+
+  // Byte to start at.
+  int64 offset = 3;
+
+  // How many bytes to read. Zero reads to the end.
+  int64 limit = 4;
+}
+
+message ReadArtifactResponse {
+  bytes chunk = 1;
+
+  // The whole artifact's size, on every message, so a client rendering
+  // progress does not have to have asked separately first.
+  int64 total_size = 2;
+}

@@ -73,7 +73,8 @@ func newRootCommand() *cobra.Command {
 		"configuration file; defaults to the one in the config directory")
 
 	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand(),
-		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand())
+		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand(),
+		newArtifactCommand())
 	return root
 }
 
@@ -412,6 +413,90 @@ func dialChannels() (controlv1connect.ChannelServiceClient, error) {
 		return nil, err
 	}
 	return controlv1connect.NewChannelServiceClient(httpClient, baseURL), nil
+}
+
+// newArtifactCommand fetches output the daemon kept because it was too large
+// to put in front of the model.
+//
+// It writes bytes to stdout by default rather than pretty-printing them: what
+// is in an artifact is a build log or a diff, and the useful thing to do with
+// one is pipe it somewhere.
+func newArtifactCommand() *cobra.Command {
+	artifact := &cobra.Command{Use: "artifact", Short: "Read stored tool output"}
+
+	var (
+		out    string
+		offset int64
+		limit  int64
+	)
+
+	get := &cobra.Command{
+		Use:   "get <artifact-id>",
+		Short: "Write an artifact to stdout, or to a file",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := dialArtifacts()
+			if err != nil {
+				return err
+			}
+
+			stream, err := client.ReadArtifact(cmd.Context(),
+				connect.NewRequest(&controlv1.ReadArtifactRequest{
+					Meta:   newMeta(),
+					Id:     args[0],
+					Offset: offset,
+					Limit:  limit,
+				}))
+			if err != nil {
+				return err
+			}
+			defer func() { _ = stream.Close() }()
+
+			destination := cmd.OutOrStdout()
+			if out != "" {
+				file, err := os.Create(out)
+				if err != nil {
+					return err
+				}
+				// Closed explicitly as well, so a write that fails on flush is
+				// reported rather than discarded by a deferred close.
+				defer func() { _ = file.Close() }()
+				destination = file
+			}
+
+			for stream.Receive() {
+				if _, err := destination.Write(stream.Msg().GetChunk()); err != nil {
+					return err
+				}
+			}
+			if err := stream.Err(); err != nil {
+				return err
+			}
+
+			if file, ok := destination.(*os.File); ok && out != "" {
+				if err := file.Close(); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "wrote %s\n", out)
+			}
+			return nil
+		},
+	}
+
+	get.Flags().StringVar(&out, "out", "", "write to this file instead of stdout")
+	get.Flags().Int64Var(&offset, "offset", 0, "byte to start at")
+	get.Flags().Int64Var(&limit, "limit", 0, "how many bytes to read; 0 reads to the end")
+
+	artifact.AddCommand(get)
+	return artifact
+}
+
+func dialArtifacts() (controlv1connect.ArtifactServiceClient, error) {
+	httpClient, baseURL, err := authenticated()
+	if err != nil {
+		return nil, err
+	}
+	return controlv1connect.NewArtifactServiceClient(httpClient, baseURL), nil
 }
 
 // dial reads the daemon's discovery file and returns an authenticated client.

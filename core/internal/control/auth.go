@@ -43,6 +43,7 @@ var servicesForScope = map[Scope]map[string]bool{
 		"jingclaw.control.v1.SessionService":        true,
 		"jingclaw.control.v1.ChannelService":        true,
 		"jingclaw.control.v1.GatewayIngressService": true,
+		"jingclaw.control.v1.ArtifactService":       true,
 	},
 	ScopeGateway: {
 		"jingclaw.control.v1.GatewayIngressService": true,

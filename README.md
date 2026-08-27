@@ -231,6 +231,44 @@ That last refusal is not a preference. This API reads files and runs programs;
 binding it somewhere reachable needs a more deliberate mechanism than a config
 line, and there is not one.
 
+## Large output
+
+A build log that fails at line 40,000 is the most useful thing in a session and
+the least printable. Truncating it throws away the part somebody wanted;
+keeping it whole ends the session. So the model gets an excerpt and an
+identifier:
+
+```
+/bin/cat big.txt
+exit status 0 after 12ms
+
+line-0-padding-padding-padding
+...
+[... 132890 bytes omitted ...]
+...
+line-3999-padding-padding-padding
+[the whole output is 134890 bytes; read it with read_artifact on sha256-2d932a66...]
+```
+
+The model reads the rest with `read_artifact`, which reports the window and how
+much remains, so a caller paging through does not have to hold its own belief
+about how much there is. A person gets the same bytes:
+
+```bash
+core/bin/agent artifact get sha256-2d932a66... > build.log
+```
+
+Content is addressed by its digest, so running a failing suite four times in an
+afternoon stores one log rather than four. The reference lives in the
+`tool.completed` event rather than in a table of its own — the event already
+records which session, which run and which tool produced it, and a second place
+holding the same fact is a second place for it to be wrong. A failure carries
+the reference as readily as a success: a command that timed out is exactly the
+one whose output somebody wants.
+
+Identifiers reach the store from a model, so they are input rather than facts.
+Only an exact lowercase sha256 digest resolves to a path.
+
 ## Tool servers
 
 Tools that speak the Model Context Protocol run as child processes of the
