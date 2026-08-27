@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>JingClaw</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="app" hidden>
+  <aside id="sidebar">
+    <header>
+      <h1>JingClaw</h1>
+      <button id="new-session" type="button">New session</button>
+    </header>
+    <ul id="sessions" aria-label="Sessions"></ul>
+    <footer id="daemon-status">connecting…</footer>
+  </aside>
+
+  <main>
+    <header id="session-header">
+      <h2 id="session-title">No session selected</h2>
+      <div class="controls">
+        <span id="run-status"></span>
+        <button id="interrupt" type="button" hidden>Interrupt</button>
+      </div>
+    </header>
+
+    <section id="approvals" hidden aria-label="Waiting for a decision"></section>
+
+    <ol id="timeline" aria-label="Timeline" aria-live="polite"></ol>
+
+    <form id="composer">
+      <textarea id="input" rows="3" placeholder="Say something. Enter sends, Shift+Enter makes a new line."
+                autocomplete="off" spellcheck="false" disabled></textarea>
+      <button id="send" type="submit" disabled>Send</button>
+    </form>
+  </main>
+</div>
+
+<div id="locked">
+  <div class="card">
+    <h1>JingClaw</h1>
+    <p>This console needs the address <code>agentd</code> printed when it started.</p>
+    <p class="hint">It looks like <code>http://127.0.0.1:PORT/?t=…</code>. The token is in
+       the daemon's own output, not here, so a page that has not been given it cannot do anything.</p>
+    <form id="unlock">
+      <label for="token">Or paste the token</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false">
+      <button type="submit">Unlock</button>
+    </form>
+    <p id="unlock-error" role="alert" hidden></p>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

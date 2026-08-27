@@ -192,6 +192,11 @@
 # One of debug, info, warn, error.
 # log_level = "info"
 
+# Serve the built-in console from the same loopback address. The daemon prints
+# the URL, which carries a one-time-visible token; the page keeps it for the
+# tab and takes it back out of the address bar. Over SSH, forward the port.
+# web_console = true
+
 [gateway]
 # Read by gatewayd, not by the daemon. Only "discord" is implemented.
 # platform = "discord"

@@ -326,10 +326,15 @@ func decide(cmd *cobra.Command, approvalID string, allow, forSession bool) error
 		remember = controlv1.RememberScope_REMEMBER_SCOPE_SESSION
 	}
 
+	decision := controlv1.ApprovalDecision_APPROVAL_DECISION_DENY
+	if allow {
+		decision = controlv1.ApprovalDecision_APPROVAL_DECISION_ALLOW
+	}
+
 	resp, err := client.DecideApproval(cmd.Context(), connect.NewRequest(&controlv1.DecideApprovalRequest{
 		Meta:       newMeta(),
 		ApprovalId: approvalID,
-		Allow:      allow,
+		Decision:   decision,
 		Remember:   remember,
 	}))
 	if err != nil {

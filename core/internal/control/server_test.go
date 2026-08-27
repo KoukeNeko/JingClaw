@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -355,5 +356,28 @@ func TestListingRunsWithoutASessionIsRefused(t *testing.T) {
 		connect.NewRequest(&controlv1.ListRunsRequest{}))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("code is %s, want invalid_argument", connect.CodeOf(err))
+	}
+}
+
+// A decision that says nothing must be refused, not read as a deny.
+//
+// A boolean could not tell the two apart, which is how a client with a
+// mistyped field name came to refuse tools on the operator's behalf and report
+// success. That is a very quiet way to be wrong about a security decision.
+func TestADecisionThatSaysNothingIsRefused(t *testing.T) {
+	client := newServer(t, 0)
+
+	_, err := client.DecideApproval(context.Background(),
+		connect.NewRequest(&controlv1.DecideApprovalRequest{
+			Meta:       &controlv1.RequestMeta{ClientId: "test"},
+			ApprovalId: "apr_whatever",
+			Remember:   controlv1.RememberScope_REMEMBER_SCOPE_ONCE,
+		}))
+
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("code is %s, want invalid_argument", connect.CodeOf(err))
+	}
+	if !strings.Contains(err.Error(), "APPROVAL_DECISION_ALLOW") {
+		t.Errorf("the error does not say what to send instead: %v", err)
 	}
 }

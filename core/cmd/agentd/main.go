@@ -42,6 +42,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/sqlite"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool/builtin"
+	"github.com/KoukeNeko/JingClaw/core/internal/webui"
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
@@ -309,17 +310,36 @@ func run() error {
 	// ingress is completed here rather than taking a half-built runtime.
 	plane.Ingress.Runtime = rt
 
-	mux := http.NewServeMux()
-	mux.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub)))
-	mux.Handle(controlv1connect.NewGatewayIngressServiceHandler(
+	api := http.NewServeMux()
+	api.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub)))
+	api.Handle(controlv1connect.NewGatewayIngressServiceHandler(
 		control.NewGatewayServer(plane.Ingress, store, time.Now)))
-	mux.Handle(controlv1connect.NewArtifactServiceHandler(control.NewArtifactServer(artifacts)))
-	mux.Handle(controlv1connect.NewChannelServiceHandler(
+	api.Handle(controlv1connect.NewArtifactServiceHandler(control.NewArtifactServer(artifacts)))
+	api.Handle(controlv1connect.NewChannelServiceHandler(
 		control.NewChannelServer(store, func() string { return id.WithPrefix("bnd") }, time.Now)))
+
+	// Everything that can do something sits behind the credential check. The
+	// console's own files do not, because a browser cannot present a bearer
+	// token on the request that fetches the page it would get one from, and
+	// those files are code rather than data.
+	guarded := control.AuthMiddleware([]control.Token{controlToken, gatewayToken}, port, api)
+
+	root := http.NewServeMux()
+	for _, service := range []string{
+		controlv1connect.SessionServiceName,
+		controlv1connect.ArtifactServiceName,
+		controlv1connect.ChannelServiceName,
+		controlv1connect.GatewayIngressServiceName,
+	} {
+		root.Handle("/"+service+"/", guarded)
+	}
+	if cfg.Server.WebConsole {
+		root.Handle("/", control.RequireLoopbackHost(port, webui.Handler()))
+	}
 
 	// h2c so a gRPC client (the Windows client will use grpc-dotnet) can reach
 	// the same endpoint as Connect and gRPC-Web over plaintext loopback.
-	handler := control.AuthMiddleware([]control.Token{controlToken, gatewayToken}, port, mux)
+	handler := root
 	server := &http.Server{
 		Handler:           h2c.NewHandler(handler, &http2.Server{}),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -340,7 +360,14 @@ func run() error {
 		_ = listener.Close()
 		return err
 	}
-	defer func() { _ = os.Remove(discoveryPath) }()
+	// Only if it still describes this process. A daemon that has been replaced
+	// must not delete its replacement's file on the way out, which would leave
+	// a running daemon no client can find.
+	defer func() {
+		if err := discovery.RemoveIfOwnedBy(discoveryPath, os.Getpid()); err != nil {
+			logger.Warn("could not remove the discovery file", "error", err)
+		}
+	}()
 
 	logger.Info("jingclaw daemon listening",
 		"base_url", baseURL,
@@ -357,6 +384,13 @@ func run() error {
 	fmt.Printf("JingClaw daemon\nListening: %s\nConfig:    %s\nProvider:  %s\nModel:     %s\nWorkspace: %s\nTools:     %s\nDatabase:  %s\nDiscovery: %s\n",
 		baseURL, describeConfigFile(configFile, createdConfig), modelProvider.Name(), selected.ID,
 		ws.Root(), describeTools(tools, servers, cfg), dbPath, discoveryPath)
+
+	if cfg.Server.WebConsole {
+		// Printed here and nowhere else. The token is the operator's own
+		// credential, so it belongs in their terminal rather than in a log
+		// file somebody else might read.
+		fmt.Printf("Console:   %s/?t=%s\n", baseURL, controlToken.Value)
+	}
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()

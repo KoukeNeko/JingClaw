@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,4 +100,28 @@ func Read(path string) (File, error) {
 	}
 
 	return d, nil
+}
+
+// RemoveIfOwnedBy deletes the discovery file, unless it now describes some
+// other process.
+//
+// A daemon shutting down must clean up after itself, but a daemon shutting
+// down after a replacement has already started must not delete the
+// replacement's file. Getting that wrong leaves a running daemon that no
+// client can find, which looks from the outside like the daemon is down.
+func RemoveIfOwnedBy(path string, pid int) error {
+	found, err := Read(path)
+	if err != nil {
+		// Already gone, or unreadable: either way there is nothing here that
+		// this process should be removing.
+		return nil
+	}
+	if found.PID != pid {
+		return nil
+	}
+
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("discovery: remove %s: %w", path, err)
+	}
+	return nil
 }

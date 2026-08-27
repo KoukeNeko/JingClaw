@@ -78,12 +78,7 @@ func AuthMiddleware(tokens []Token, allowedPort string, next http.Handler) http.
 		byValue[token.Value] = token.Scope
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !hostAllowed(r.Host, allowedPort) {
-			http.Error(w, "forbidden host", http.StatusForbidden)
-			return
-		}
-
+	return RequireLoopbackHost(allowedPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		provided, ok := bearerToken(r.Header.Get("Authorization"))
 		if !ok {
 			w.Header().Set("WWW-Authenticate", "Bearer")
@@ -106,6 +101,23 @@ func AuthMiddleware(tokens []Token, allowedPort string, next http.Handler) http.
 			return
 		}
 
+		next.ServeHTTP(w, r)
+	}))
+}
+
+// RequireLoopbackHost rejects a request whose Host header does not name the
+// loopback address and the port this daemon is listening on.
+//
+// It defends against DNS rebinding: an attacker-controlled name can resolve to
+// 127.0.0.1, so the socket alone proves nothing about who is calling. It is
+// separate from the credential check because everything this daemon serves
+// needs it, including the pages that are served without a credential.
+func RequireLoopbackHost(allowedPort string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hostAllowed(r.Host, allowedPort) {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

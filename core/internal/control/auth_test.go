@@ -194,3 +194,38 @@ func TestNewTokenIsUniqueAndNonEmpty(t *testing.T) {
 		seen[token.Value] = true
 	}
 }
+
+// The console is served without a credential — a browser cannot present one on
+// the request that fetches the page it would get the token from — but the Host
+// check still applies. An attacker-controlled name resolving to 127.0.0.1 must
+// not reach anything this daemon serves.
+func TestTheHostCheckAppliesWithoutACredential(t *testing.T) {
+	served := control.RequireLoopbackHost("7777", http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+
+	for name, host := range map[string]string{
+		"a name that resolves here": "evil.example.com:7777",
+		"the wrong port":            "127.0.0.1:9999",
+		"no port at all":            "127.0.0.1",
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Host = host
+
+		recorder := httptest.NewRecorder()
+		served.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusForbidden {
+			t.Errorf("%s (%q) got %d, want 403", name, host, recorder.Code)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Host = "127.0.0.1:7777"
+
+	recorder := httptest.NewRecorder()
+	served.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("the loopback address itself got %d", recorder.Code)
+	}
+}

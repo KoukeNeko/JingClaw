@@ -231,6 +231,39 @@ That last refusal is not a preference. This API reads files and runs programs;
 binding it somewhere reachable needs a more deliberate mechanism than a config
 line, and there is not one.
 
+## The console
+
+The machine this agent is most useful on often has no desktop: a server reached
+over SSH, a container, somebody else's Linux box. So a console ships inside the
+binary, and the daemon prints where it is:
+
+```
+Console:   http://127.0.0.1:54832/?t=A-Z2a1JB8valNeI…
+```
+
+Open it and you get the session list, a live timeline, approvals with
+allow/deny, interrupt, and stored output shown inline next to the line that
+produced it. Over SSH, forward the port — nothing else has to be installed at
+the other end.
+
+It is one page with no build step, talking Connect over JSON: a unary call is a
+POST whose body is the message, a stream is the same POST answered in
+length-prefixed frames. That is deliberate. A static binary that needs a
+`node_modules` directory to have been present on the machine that built it is
+not a static binary, and the browser needs no proxy to reach the same endpoint
+the CLI uses.
+
+The token is in the URL because a browser cannot present a bearer token on the
+request that loads the page it would get one from. The page takes it back out
+of the address bar immediately and keeps it for the tab; the files themselves
+are served without a credential, because they are code rather than data and
+everything the console can *do* is behind the check. The Host validation
+applies either way.
+
+A session started from the terminal shows up in the console, and a turn sent
+from the terminal streams into it while it is open — which is what "clients are
+projections" has to mean in practice rather than only in the design.
+
 ## Large output
 
 A build log that fails at line 40,000 is the most useful thing in a session and

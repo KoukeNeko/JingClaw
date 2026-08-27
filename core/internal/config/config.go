@@ -264,6 +264,11 @@ type Server struct {
 	RuntimeDir string `koanf:"runtime_dir"`
 
 	LogLevel string `koanf:"log_level"`
+
+	// WebConsole serves the built-in console from the same address. It is the
+	// answer for a machine with no desktop on it, which is where this agent is
+	// most useful and where a native client cannot go.
+	WebConsole bool `koanf:"web_console"`
 }
 
 // Defaults are what runs when nothing says otherwise.
@@ -320,8 +325,9 @@ func Defaults() Config {
 			Root: ".",
 		},
 		Server: Server{
-			Addr:     "127.0.0.1:0",
-			LogLevel: "info",
+			Addr:       "127.0.0.1:0",
+			LogLevel:   "info",
+			WebConsole: true,
 		},
 		Gateway: Gateway{
 			Platform:  "discord",
@@ -992,6 +998,11 @@ const Example = `# JingClaw configuration.
 
 # One of debug, info, warn, error.
 # log_level = "info"
+
+# Serve the built-in console from the same loopback address. The daemon prints
+# the URL, which carries a one-time-visible token; the page keeps it for the
+# tab and takes it back out of the address bar. Over SSH, forward the port.
+# web_console = true
 
 [gateway]
 # Read by gatewayd, not by the daemon. Only "discord" is implemented.

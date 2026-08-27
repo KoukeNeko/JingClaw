@@ -102,11 +102,18 @@ message DecideApprovalRequest {
 
   string approval_id = 2;
 
-  // The decision itself. Whether a human may make it, and what it is allowed
-  // to unlock, is settled by the daemon's policy rather than by the client.
-  bool allow = 3;
+  // Field 3 was "bool allow". A boolean could not tell a deny from a field the
+  // server did not understand, so a client with a typo refused tools on the
+  // operator's behalf and reported success.
+  reserved 3;
+  reserved "allow";
 
   RememberScope remember = 4;
+
+  // The decision itself, which must be stated. Whether a human may make it,
+  // and what it is allowed to unlock, is settled by the daemon's policy rather
+  // than by the client.
+  ApprovalDecision decision = 5;
 }
 
 message DecideApprovalResponse {

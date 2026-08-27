@@ -179,11 +179,21 @@ func (s *Server) DecideApproval(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("approval_id is required"))
 	}
 
+	// A decision that says nothing is refused rather than read as a deny. The
+	// two are indistinguishable to a boolean, which is how a client with a
+	// mistyped field name comes to refuse tools on the operator's behalf and
+	// report success.
+	decision := req.Msg.GetDecision()
+	if decision == controlv1.ApprovalDecision_APPROVAL_DECISION_UNSPECIFIED {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			errors.New("decision must be APPROVAL_DECISION_ALLOW or APPROVAL_DECISION_DENY"))
+	}
+
 	// The client says allow or deny; the daemon owns what that unlocks. A
 	// client cannot widen its own permissions by asking nicely.
 	approval, err := s.rt.DecideApproval(ctx,
 		domain.ApprovalID(req.Msg.GetApprovalId()),
-		req.Msg.GetAllow(),
+		decision == controlv1.ApprovalDecision_APPROVAL_DECISION_ALLOW,
 		rememberScopeFromProto(req.Msg.GetRemember()),
 		req.Msg.GetMeta().GetClientId(),
 	)

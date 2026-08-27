@@ -101,6 +101,18 @@ enum ApprovalStatus {
 // There is deliberately no "forever": a permission outliving the session is a
 // policy change, and those belong in configuration a person can read back, not
 // in a button pressed mid-run.
+// ApprovalDecision is what a person decided.
+//
+// It is an enum rather than a boolean because a boolean cannot tell "deny"
+// from "the field was not understood". A client that mistypes a field name
+// would otherwise refuse a tool on the operator's behalf and report success,
+// which is a very quiet way to be wrong about a security decision.
+enum ApprovalDecision {
+  APPROVAL_DECISION_UNSPECIFIED = 0;
+  APPROVAL_DECISION_ALLOW = 1;
+  APPROVAL_DECISION_DENY = 2;
+}
+
 enum RememberScope {
   REMEMBER_SCOPE_UNSPECIFIED = 0;
   REMEMBER_SCOPE_ONCE = 1;

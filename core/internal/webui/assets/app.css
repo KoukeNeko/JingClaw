@@ -1,0 +1,249 @@
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfaf8;
+  --panel: #ffffff;
+  --line: #e3e0da;
+  --ink: #1d1c1a;
+  --ink-dim: #6b6862;
+  --accent: #8a5a2b;
+  --accent-ink: #ffffff;
+  --error: #a02c26;
+  --ok: #2f6b45;
+  --code-bg: #f2efe9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14130f;
+    --panel: #1c1a16;
+    --line: #302c25;
+    --ink: #eae6dd;
+    --ink-dim: #9c968a;
+    --accent: #d9a066;
+    --accent-ink: #1c1a16;
+    --error: #e2837c;
+    --ok: #7fbf95;
+    --code-bg: #24211b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* Layout rules below set display on elements that also use the hidden
+   attribute, and a selector with an id beats the browser's own [hidden]
+   rule. Without this the panels that are meant to be gone are merely
+   invisible-looking. */
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, system-ui, "Noto Sans TC", "PingFang TC", sans-serif;
+}
+
+code, pre, .mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.88em;
+}
+
+#app { display: flex; height: 100%; }
+
+#sidebar {
+  width: 17rem;
+  flex: 0 0 auto;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#sidebar header {
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+#sidebar h1 { font-size: 1rem; margin: 0; letter-spacing: 0.02em; }
+
+#sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0.4rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+#sessions li { margin-bottom: 0.15rem; }
+
+#sessions button {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.3;
+}
+
+#sessions button:hover { background: var(--code-bg); }
+#sessions button[aria-current="true"] { background: var(--accent); color: var(--accent-ink); }
+#sessions .when { display: block; font-size: 0.78em; opacity: 0.7; }
+
+#daemon-status {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+}
+
+main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+#session-header {
+  padding: 0.8rem 1.2rem;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+#session-header h2 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The status and the interrupt button are the part somebody needs during a
+   run, so a long session title gives way to them rather than pushing them
+   off the edge. */
+#session-header .controls { display: flex; align-items: center; gap: 0.6rem; flex: 0 0 auto; }
+#run-status { font-size: 0.8rem; color: var(--ink-dim); }
+
+button {
+  font: inherit;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.danger { color: var(--error); }
+
+#approvals {
+  border-bottom: 1px solid var(--line);
+  background: var(--code-bg);
+  padding: 0.7rem 1.2rem;
+}
+
+.approval { display: flex; gap: 0.75rem; align-items: flex-start; padding: 0.35rem 0; }
+.approval .what { flex: 1 1 auto; min-width: 0; }
+.approval .tool { font-weight: 600; }
+.approval .args { color: var(--ink-dim); word-break: break-all; }
+.approval .effects { font-size: 0.78rem; color: var(--error); }
+
+#timeline {
+  list-style: none;
+  margin: 0;
+  padding: 1rem 1.2rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+#timeline li { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.75rem; padding: 0.18rem 0; }
+
+.kind { color: var(--ink-dim); font-size: 0.76rem; text-align: right; padding-top: 0.25rem; }
+.body { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+li.user .body { font-weight: 600; }
+li.error .body { color: var(--error); }
+li.tool .body { color: var(--ink-dim); }
+li.meta .body { color: var(--ink-dim); font-size: 0.85em; }
+
+.body .artifact { display: inline-block; margin-left: 0.4rem; }
+
+.artifact-body {
+  margin: 0.5rem 0 0.2rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  max-height: 22rem;
+  overflow: auto;
+  white-space: pre;
+  font-size: 0.82em;
+  line-height: 1.45;
+}
+
+#composer {
+  border-top: 1px solid var(--line);
+  padding: 0.75rem 1.2rem;
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+  background: var(--panel);
+}
+
+#input {
+  flex: 1 1 auto;
+  resize: vertical;
+  font: inherit;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+#locked {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 1.5rem;
+}
+
+#locked .card {
+  max-width: 34rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.6rem 1.8rem;
+}
+
+#locked h1 { margin-top: 0; font-size: 1.15rem; }
+#locked .hint { color: var(--ink-dim); font-size: 0.88rem; }
+#locked code { background: var(--code-bg); padding: 0.1rem 0.3rem; border-radius: 4px; }
+
+#unlock { display: flex; gap: 0.5rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
+#unlock label { width: 100%; font-size: 0.85rem; color: var(--ink-dim); }
+#unlock input { flex: 1 1 14rem; padding: 0.45rem 0.6rem; border: 1px solid var(--line);
+                border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+
+#unlock-error { color: var(--error); }
+
+@media (max-width: 44rem) {
+  #app { flex-direction: column; }
+  #sidebar { width: auto; max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  #timeline li { grid-template-columns: 1fr; gap: 0; }
+  .kind { text-align: left; }
+}
