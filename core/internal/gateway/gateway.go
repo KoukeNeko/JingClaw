@@ -15,6 +15,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
@@ -277,4 +278,42 @@ func ConversationFromTarget(target domain.DeliveryTarget) (ConversationRef, bool
 		return ConversationRef{}, false
 	}
 	return ref, ref.Platform != ""
+}
+
+// Plane is both halves of the gateway: messages coming in and replies going
+// out.
+//
+// They are constructed together because a system with only one half is broken
+// in a way nothing catches. An ingress without a projector accepts requests
+// and answers into the void; a projector without an ingress has nothing to
+// project. Both compile perfectly well alone, and the failure only shows up
+// when somebody is waiting in a channel for a reply that will never arrive.
+type Plane struct {
+	Ingress   *Ingress
+	Projector *Projector
+}
+
+// NewPlane wires the gateway.
+func NewPlane(
+	store Store,
+	rt Runtime,
+	binder ProfileBinder,
+	newID func() string,
+	now func() time.Time,
+	logger *slog.Logger,
+) *Plane {
+	if now == nil {
+		now = time.Now
+	}
+
+	return &Plane{
+		Ingress: &Ingress{
+			Store:   store,
+			Runtime: rt,
+			Binder:  binder,
+			Now:     now,
+			Logger:  logger,
+		},
+		Projector: NewProjector(store, newID, now),
+	}
 }

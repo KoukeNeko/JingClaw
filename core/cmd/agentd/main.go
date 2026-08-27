@@ -128,6 +128,12 @@ func run() error {
 
 	hub := event.NewHub()
 
+	// Both halves of the gateway at once: accepting messages without routing
+	// replies back would answer into the void, and the two are built together
+	// so that cannot be half-configured.
+	plane := gateway.NewPlane(store, nil, permissions,
+		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
+
 	rt := runtime.New(rootCtx, runtime.Options{
 		Store:         store,
 		Hub:           hub,
@@ -135,6 +141,7 @@ func run() error {
 		Model:         selectedModel,
 		Tools:         tools,
 		Permissions:   permissions,
+		Delivery:      plane.Projector,
 		SystemPrompt:  systemPrompt(ws),
 		MaxIterations: *maxIters,
 		NewSessionID:  func() string { return id.WithPrefix("ses") },
@@ -182,18 +189,14 @@ func run() error {
 	port := fmt.Sprintf("%d", tcpAddr.Port)
 	baseURL := "http://" + net.JoinHostPort("127.0.0.1", port)
 
-	ingress := &gateway.Ingress{
-		Store:   store,
-		Runtime: rt,
-		Binder:  permissions,
-		Now:     time.Now,
-		Logger:  logger,
-	}
+	// The runtime does not exist until after the options are built, so the
+	// ingress is completed here rather than taking a half-built runtime.
+	plane.Ingress.Runtime = rt
 
 	mux := http.NewServeMux()
 	mux.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub)))
 	mux.Handle(controlv1connect.NewGatewayIngressServiceHandler(
-		control.NewGatewayServer(ingress, store, time.Now)))
+		control.NewGatewayServer(plane.Ingress, store, time.Now)))
 	mux.Handle(controlv1connect.NewChannelServiceHandler(
 		control.NewChannelServer(store, func() string { return id.WithPrefix("bnd") }, time.Now)))
 
