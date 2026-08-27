@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/disgo"
@@ -60,7 +61,15 @@ type Adapter struct {
 	sink   Sink
 
 	client *bot.Client
-	selfID snowflake.ID
+
+	// selfID is written by the Ready handler and read by the message handler,
+	// which run on different goroutines.
+	//
+	// It is not read from the cache after connecting: the gateway returns
+	// before READY has necessarily been processed, and a zero id means every
+	// mention comparison fails and the bot silently ignores the channel it was
+	// invited to.
+	selfID atomic.Uint64
 }
 
 func New(config Config, sink Sink) *Adapter {
@@ -83,6 +92,7 @@ func (a *Adapter) Run(ctx context.Context) error {
 			gateway.WithIntents(gateway.IntentGuildMessages|gateway.IntentDirectMessages),
 			gateway.WithAutoReconnect(true),
 		),
+		bot.WithEventListenerFunc(a.onReady),
 		bot.WithEventListenerFunc(a.onMessage),
 	)
 	if err != nil {
@@ -95,17 +105,56 @@ func (a *Adapter) Run(ctx context.Context) error {
 		return fmt.Errorf("discord: open gateway: %w", err)
 	}
 
-	if self, ok := client.Caches.SelfUser(); ok {
-		a.selfID = self.ID
+	// Discord sends READY before anything else, but the handler for it runs
+	// asynchronously. Waiting means the process does not report itself
+	// connected while still unable to recognise its own name.
+	if err := a.awaitIdentity(ctx); err != nil {
+		return err
 	}
 
 	a.config.Logger.Info("connected to discord",
 		"account_id", a.config.AccountID,
-		"bot_user", a.selfID.String(),
+		"bot_user", a.self().String(),
 	)
 
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// onReady records who this bot is.
+func (a *Adapter) onReady(event *events.Ready) {
+	a.selfID.Store(uint64(event.User.ID))
+}
+
+func (a *Adapter) self() snowflake.ID {
+	return snowflake.ID(a.selfID.Load())
+}
+
+// awaitIdentity blocks until the bot knows its own id.
+//
+// Without it the adapter can start handling messages while every mention
+// comparison is against zero, which looks exactly like a bot that was never
+// invited: it connects, logs happily, and ignores everything.
+func (a *Adapter) awaitIdentity(ctx context.Context) error {
+	const (
+		timeout = 30 * time.Second
+		poll    = 50 * time.Millisecond
+	)
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if a.self() != 0 {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+
+	return fmt.Errorf("discord: connected but never received a ready event within %s", timeout)
 }
 
 // onMessage turns a Discord message into an inbound message, or ignores it.
@@ -122,7 +171,7 @@ func (a *Adapter) onMessage(event *events.MessageCreate) {
 	if message.Author.Bot || message.WebhookID != nil {
 		return
 	}
-	if a.selfID != 0 && message.Author.ID == a.selfID {
+	if self := a.self(); self != 0 && message.Author.ID == self {
 		return
 	}
 
@@ -157,8 +206,17 @@ func (a *Adapter) triggerFor(message discord.Message, guildID *snowflake.ID) (jc
 		return jcgateway.TriggerDirect, true
 	}
 
+	self := a.self()
+	if self == 0 {
+		// Nothing can be recognised as addressed to a bot that does not know
+		// its own name. Saying so beats ignoring the channel in silence.
+		a.config.Logger.Warn("ignoring a message: the bot identity is not known yet",
+			"channel_id", message.ChannelID.String())
+		return jcgateway.TriggerAmbient, false
+	}
+
 	for _, mentioned := range message.Mentions {
-		if mentioned.ID == a.selfID {
+		if mentioned.ID == self {
 			return jcgateway.TriggerMention, true
 		}
 	}
@@ -219,7 +277,7 @@ func (a *Adapter) toInbound(
 		IdempotencyKey: "discord:" + message.ID.String(),
 		Principal:      principal,
 		Conversation:   conversation,
-		Text:           stripMention(message.Content, a.selfID),
+		Text:           stripMention(message.Content, a.self()),
 		Trigger:        trigger,
 		OccurredAt:     message.CreatedAt,
 	}
