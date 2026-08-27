@@ -94,40 +94,131 @@ func LocalProfile() Profile {
 	}
 }
 
+// GatewayProfile is for turns arriving from an external messaging platform.
+//
+// It is deliberately stricter than the local one, because the trust is
+// different in kind rather than degree. A local turn is typed by the person
+// who owns the machine; a gateway turn arrives from an account on somebody
+// else's service, which may be compromised, and through a channel other people
+// can also type into.
+//
+// Execution is refused outright rather than merely gated. "Request from chat →
+// approve from the same chat → shell" is one unbroken chain: an attacker who
+// takes the account gets both halves, and the approval adds nothing. Anything
+// that runs a program therefore has to be authorised from a control-plane
+// client, where the operator is at the machine.
+func GatewayProfile() Profile {
+	return Profile{
+		Name: "gateway",
+		Defaults: map[tool.Level]Decision{
+			tool.LevelInternal:       Allow,
+			tool.LevelWorkspaceRead:  Allow,
+			tool.LevelWorkspaceWrite: Ask,
+			tool.LevelExecute:        Deny,
+			tool.LevelHighImpact:     Deny,
+		},
+	}
+}
+
+// ProfileByName resolves a configured profile name.
+//
+// An unknown name is an error rather than a fallback: quietly substituting the
+// permissive profile for a misspelled strict one is the worst possible way to
+// handle a typo.
+func ProfileByName(name string) (Profile, bool) {
+	switch name {
+	case "local":
+		return LocalProfile(), true
+	case "gateway":
+		return GatewayProfile(), true
+	default:
+		return Profile{}, false
+	}
+}
+
 // Engine evaluates calls against a profile plus whatever a human has already
 // agreed to in this session.
 type Engine struct {
-	profile Profile
+	// profiles are selected per session. One daemon serves both a local
+	// operator and a chat channel, and they must not get the same answers.
+	profiles map[string]Profile
+	fallback Profile
 
 	mu sync.RWMutex
+
+	// sessionProfile records which profile a session was opened under.
+	sessionProfile map[domain.SessionID]string
+
 	// granted records standing permissions from earlier decisions, keyed by
 	// session and grant key.
 	granted map[domain.SessionID]map[string]bool
 }
 
 func New(profile Profile) *Engine {
-	return &Engine{
-		profile: profile,
-		granted: make(map[domain.SessionID]map[string]bool),
+	engine := &Engine{
+		profiles:       map[string]Profile{profile.Name: profile},
+		fallback:       profile,
+		sessionProfile: make(map[domain.SessionID]string),
+		granted:        make(map[domain.SessionID]map[string]bool),
 	}
+
+	// The gateway profile is always available, so a session opened from a
+	// channel cannot silently fall back to the local one.
+	gateway := GatewayProfile()
+	if _, ok := engine.profiles[gateway.Name]; !ok {
+		engine.profiles[gateway.Name] = gateway
+	}
+	return engine
 }
 
-func (e *Engine) Profile() string { return e.profile.Name }
+// UseProfile records which profile a session runs under. Unknown names are
+// refused rather than defaulted, since a typo must not widen permissions.
+func (e *Engine) UseProfile(session domain.SessionID, name string) error {
+	if name == "" {
+		return nil
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if _, ok := e.profiles[name]; !ok {
+		return fmt.Errorf("permission: no profile named %q", name)
+	}
+	e.sessionProfile[session] = name
+	return nil
+}
+
+// Profile is the default profile's name, for reporting.
+func (e *Engine) Profile() string { return e.fallback.Name }
+
+// profileFor returns the profile a session runs under.
+func (e *Engine) profileFor(session domain.SessionID) Profile {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if name, ok := e.sessionProfile[session]; ok {
+		if profile, ok := e.profiles[name]; ok {
+			return profile
+		}
+	}
+	return e.fallback
+}
 
 // Evaluate decides one call.
 func (e *Engine) Evaluate(_ context.Context, req Request) Outcome {
 	summary, effects := describe(req)
+	profile := e.profileFor(req.SessionID)
 
-	if e.profile.DenyTools[req.Spec.Name] {
+	if profile.DenyTools[req.Spec.Name] {
 		return Outcome{
 			Decision: Deny,
 			Summary:  summary,
 			Effects:  effects,
-			Reason:   fmt.Sprintf("%s is not permitted by the %s profile", req.Spec.Name, e.profile.Name),
+			Reason:   fmt.Sprintf("%s is not permitted by the %s profile", req.Spec.Name, profile.Name),
 		}
 	}
 
-	decision, ok := e.profile.Defaults[req.Spec.Level]
+	decision, ok := profile.Defaults[req.Spec.Level]
 	if !ok {
 		// An unclassified level is a gap in the policy, and a gap must fail
 		// closed. Defaulting to Allow would mean every new tool ships
@@ -137,7 +228,7 @@ func (e *Engine) Evaluate(_ context.Context, req Request) Outcome {
 			Summary:  summary,
 			Effects:  effects,
 			Reason: fmt.Sprintf("the %s profile has no rule for %s tools",
-				e.profile.Name, req.Spec.Level),
+				profile.Name, req.Spec.Level),
 		}
 	}
 
@@ -154,7 +245,7 @@ func (e *Engine) Evaluate(_ context.Context, req Request) Outcome {
 		Decision: decision,
 		Summary:  summary,
 		Effects:  effects,
-		Reason:   fmt.Sprintf("%s tools are set to %s in the %s profile", req.Spec.Level, decision, e.profile.Name),
+		Reason:   fmt.Sprintf("%s tools are set to %s in the %s profile", req.Spec.Level, decision, profile.Name),
 	}
 }
 
