@@ -113,6 +113,179 @@ message DecideApprovalResponse {
   Approval approval = 1;
 }
 
+// A message that arrived from an external platform.
+message InboundMessage {
+  string platform = 1;
+  string account_id = 2;
+  string tenant_id = 3;
+  string channel_id = 4;
+  string thread_id = 5;
+  string root_message_id = 6;
+
+  string platform_message_id = 7;
+
+  // Deduplicates redelivery. Platforms resend on reconnect, and without this
+  // one dropped connection becomes several runs doing the same work.
+  string idempotency_key = 8;
+
+  // The platform's stable identifier for the sender. Authorization reads this
+  // and never display_name, which its owner can change at will.
+  string principal_id = 9;
+  string principal_display_name = 10;
+  bool principal_is_bot = 11;
+  repeated PrincipalClaim principal_claims = 12;
+
+  string text = 13;
+
+  // Why this arrived. Overheard text is not a request.
+  MessageTrigger trigger = 14;
+
+  google.protobuf.Timestamp occurred_at = 15;
+}
+
+message PrincipalClaim {
+  // Namespace identifies the meaning, e.g. "discord.role". Kept opaque because
+  // a Discord role and a GitHub collaborator status are not the same kind of
+  // thing.
+  string namespace = 1;
+  string value = 2;
+}
+
+enum MessageTrigger {
+  MESSAGE_TRIGGER_UNSPECIFIED = 0;
+  MESSAGE_TRIGGER_MENTION = 1;
+  MESSAGE_TRIGGER_COMMAND = 2;
+  MESSAGE_TRIGGER_DIRECT = 3;
+
+  // Overheard in a channel. Never a reason to act on its own.
+  MESSAGE_TRIGGER_AMBIENT = 4;
+}
+
+message DeliverInboundRequest {
+  InboundMessage message = 1;
+}
+
+message DeliverInboundResponse {
+  string session_id = 1;
+  string run_id = 2;
+
+  // Set when the message had already been handled. The caller should post
+  // nothing: the reply to the original is already on its way.
+  bool duplicate = 3;
+}
+
+enum DispatchKind {
+  DISPATCH_KIND_UNSPECIFIED = 0;
+  DISPATCH_KIND_MESSAGE = 1;
+  DISPATCH_KIND_APPROVAL = 2;
+  DISPATCH_KIND_STATUS = 3;
+}
+
+message Dispatch {
+  string id = 1;
+
+  // Monotonic per gateway account. Deliberately not a session's event
+  // sequence and not a platform's own; conflating them leaves nobody able to
+  // say what a number refers to.
+  uint64 seq = 2;
+
+  string session_id = 3;
+  string run_id = 4;
+
+  // Where to post it, as an opaque conversation reference the adapter decodes.
+  string target = 5;
+
+  DispatchKind kind = 6;
+  string payload = 7;
+
+  google.protobuf.Timestamp created_at = 8;
+}
+
+// One dispatch, wrapped as the stream's response type per the lint rules.
+message SubscribeDispatchesResponse {
+  Dispatch dispatch = 1;
+}
+
+message SubscribeDispatchesRequest {
+  string account_id = 1;
+
+  // The cursor to resume from, so a reconnecting gateway is not handed work it
+  // already posted.
+  uint64 after_seq = 2;
+}
+
+message AcknowledgeDispatchRequest {
+  RequestMeta meta = 1;
+
+  string dispatch_id = 2;
+
+  // What the platform called the messages this created, recorded so a later
+  // edit can find them.
+  repeated string platform_message_ids = 3;
+}
+
+message AcknowledgeDispatchResponse {}
+
+message Binding {
+  string id = 1;
+
+  string platform = 2;
+  string account_id = 3;
+  string tenant_id = 4;
+  string channel_id = 5;
+
+  string workspace_id = 6;
+  string permission_profile = 7;
+
+  repeated string allowed_principals = 8;
+  repeated PrincipalClaim allowed_claims = 9;
+
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message ListBindingsRequest {}
+
+message ListBindingsResponse {
+  repeated Binding bindings = 1;
+}
+
+message UpsertBindingRequest {
+  RequestMeta meta = 1;
+  Binding binding = 2;
+}
+
+message UpsertBindingResponse {
+  Binding binding = 1;
+}
+
+message DeleteBindingRequest {
+  RequestMeta meta = 1;
+  string binding_id = 2;
+}
+
+message DeleteBindingResponse {}
+
+// The ingress a gateway process speaks.
+//
+// It is a separate service from SessionService so a gateway can be issued a
+// credential that reaches only this. A process holding a Discord bot token has
+// no business being able to execute tools or read secrets: if its library is
+// compromised, the blast radius should be "can deliver messages inward".
+service GatewayIngressService {
+  rpc DeliverInbound(DeliverInboundRequest) returns (DeliverInboundResponse);
+  rpc SubscribeDispatches(SubscribeDispatchesRequest) returns (stream SubscribeDispatchesResponse);
+  rpc AcknowledgeDispatch(AcknowledgeDispatchRequest) returns (AcknowledgeDispatchResponse);
+}
+
+// Binding management, spoken by an operator's control client rather than by a
+// gateway: which channels may reach which workspace is the operator's decision,
+// not something the gateway gets to assert about itself.
+service ChannelService {
+  rpc ListBindings(ListBindingsRequest) returns (ListBindingsResponse);
+  rpc UpsertBinding(UpsertBindingRequest) returns (UpsertBindingResponse);
+  rpc DeleteBinding(DeleteBindingRequest) returns (DeleteBindingResponse);
+}
+
 // Frames carried by SubscribeEvents. Named for its RPC per buf's standard
 // lint rules; "hello" arrives first, then events, with heartbeats when idle.
 message SubscribeEventsResponse {

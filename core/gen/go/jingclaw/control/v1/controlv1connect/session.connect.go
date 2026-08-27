@@ -21,6 +21,10 @@ import (
 const _ = connect.IsAtLeastVersion1_13_0
 
 const (
+	// GatewayIngressServiceName is the fully-qualified name of the GatewayIngressService service.
+	GatewayIngressServiceName = "jingclaw.control.v1.GatewayIngressService"
+	// ChannelServiceName is the fully-qualified name of the ChannelService service.
+	ChannelServiceName = "jingclaw.control.v1.ChannelService"
 	// SessionServiceName is the fully-qualified name of the SessionService service.
 	SessionServiceName = "jingclaw.control.v1.SessionService"
 )
@@ -33,6 +37,24 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// GatewayIngressServiceDeliverInboundProcedure is the fully-qualified name of the
+	// GatewayIngressService's DeliverInbound RPC.
+	GatewayIngressServiceDeliverInboundProcedure = "/jingclaw.control.v1.GatewayIngressService/DeliverInbound"
+	// GatewayIngressServiceSubscribeDispatchesProcedure is the fully-qualified name of the
+	// GatewayIngressService's SubscribeDispatches RPC.
+	GatewayIngressServiceSubscribeDispatchesProcedure = "/jingclaw.control.v1.GatewayIngressService/SubscribeDispatches"
+	// GatewayIngressServiceAcknowledgeDispatchProcedure is the fully-qualified name of the
+	// GatewayIngressService's AcknowledgeDispatch RPC.
+	GatewayIngressServiceAcknowledgeDispatchProcedure = "/jingclaw.control.v1.GatewayIngressService/AcknowledgeDispatch"
+	// ChannelServiceListBindingsProcedure is the fully-qualified name of the ChannelService's
+	// ListBindings RPC.
+	ChannelServiceListBindingsProcedure = "/jingclaw.control.v1.ChannelService/ListBindings"
+	// ChannelServiceUpsertBindingProcedure is the fully-qualified name of the ChannelService's
+	// UpsertBinding RPC.
+	ChannelServiceUpsertBindingProcedure = "/jingclaw.control.v1.ChannelService/UpsertBinding"
+	// ChannelServiceDeleteBindingProcedure is the fully-qualified name of the ChannelService's
+	// DeleteBinding RPC.
+	ChannelServiceDeleteBindingProcedure = "/jingclaw.control.v1.ChannelService/DeleteBinding"
 	// SessionServiceCreateSessionProcedure is the fully-qualified name of the SessionService's
 	// CreateSession RPC.
 	SessionServiceCreateSessionProcedure = "/jingclaw.control.v1.SessionService/CreateSession"
@@ -51,6 +73,252 @@ const (
 	// DecideApproval RPC.
 	SessionServiceDecideApprovalProcedure = "/jingclaw.control.v1.SessionService/DecideApproval"
 )
+
+// GatewayIngressServiceClient is a client for the jingclaw.control.v1.GatewayIngressService
+// service.
+type GatewayIngressServiceClient interface {
+	DeliverInbound(context.Context, *connect.Request[v1.DeliverInboundRequest]) (*connect.Response[v1.DeliverInboundResponse], error)
+	SubscribeDispatches(context.Context, *connect.Request[v1.SubscribeDispatchesRequest]) (*connect.ServerStreamForClient[v1.SubscribeDispatchesResponse], error)
+	AcknowledgeDispatch(context.Context, *connect.Request[v1.AcknowledgeDispatchRequest]) (*connect.Response[v1.AcknowledgeDispatchResponse], error)
+}
+
+// NewGatewayIngressServiceClient constructs a client for the
+// jingclaw.control.v1.GatewayIngressService service. By default, it uses the Connect protocol with
+// the binary Protobuf Codec, asks for gzipped responses, and sends uncompressed requests. To use
+// the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewGatewayIngressServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) GatewayIngressServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	gatewayIngressServiceMethods := v1.File_jingclaw_control_v1_session_proto.Services().ByName("GatewayIngressService").Methods()
+	return &gatewayIngressServiceClient{
+		deliverInbound: connect.NewClient[v1.DeliverInboundRequest, v1.DeliverInboundResponse](
+			httpClient,
+			baseURL+GatewayIngressServiceDeliverInboundProcedure,
+			connect.WithSchema(gatewayIngressServiceMethods.ByName("DeliverInbound")),
+			connect.WithClientOptions(opts...),
+		),
+		subscribeDispatches: connect.NewClient[v1.SubscribeDispatchesRequest, v1.SubscribeDispatchesResponse](
+			httpClient,
+			baseURL+GatewayIngressServiceSubscribeDispatchesProcedure,
+			connect.WithSchema(gatewayIngressServiceMethods.ByName("SubscribeDispatches")),
+			connect.WithClientOptions(opts...),
+		),
+		acknowledgeDispatch: connect.NewClient[v1.AcknowledgeDispatchRequest, v1.AcknowledgeDispatchResponse](
+			httpClient,
+			baseURL+GatewayIngressServiceAcknowledgeDispatchProcedure,
+			connect.WithSchema(gatewayIngressServiceMethods.ByName("AcknowledgeDispatch")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// gatewayIngressServiceClient implements GatewayIngressServiceClient.
+type gatewayIngressServiceClient struct {
+	deliverInbound      *connect.Client[v1.DeliverInboundRequest, v1.DeliverInboundResponse]
+	subscribeDispatches *connect.Client[v1.SubscribeDispatchesRequest, v1.SubscribeDispatchesResponse]
+	acknowledgeDispatch *connect.Client[v1.AcknowledgeDispatchRequest, v1.AcknowledgeDispatchResponse]
+}
+
+// DeliverInbound calls jingclaw.control.v1.GatewayIngressService.DeliverInbound.
+func (c *gatewayIngressServiceClient) DeliverInbound(ctx context.Context, req *connect.Request[v1.DeliverInboundRequest]) (*connect.Response[v1.DeliverInboundResponse], error) {
+	return c.deliverInbound.CallUnary(ctx, req)
+}
+
+// SubscribeDispatches calls jingclaw.control.v1.GatewayIngressService.SubscribeDispatches.
+func (c *gatewayIngressServiceClient) SubscribeDispatches(ctx context.Context, req *connect.Request[v1.SubscribeDispatchesRequest]) (*connect.ServerStreamForClient[v1.SubscribeDispatchesResponse], error) {
+	return c.subscribeDispatches.CallServerStream(ctx, req)
+}
+
+// AcknowledgeDispatch calls jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch.
+func (c *gatewayIngressServiceClient) AcknowledgeDispatch(ctx context.Context, req *connect.Request[v1.AcknowledgeDispatchRequest]) (*connect.Response[v1.AcknowledgeDispatchResponse], error) {
+	return c.acknowledgeDispatch.CallUnary(ctx, req)
+}
+
+// GatewayIngressServiceHandler is an implementation of the
+// jingclaw.control.v1.GatewayIngressService service.
+type GatewayIngressServiceHandler interface {
+	DeliverInbound(context.Context, *connect.Request[v1.DeliverInboundRequest]) (*connect.Response[v1.DeliverInboundResponse], error)
+	SubscribeDispatches(context.Context, *connect.Request[v1.SubscribeDispatchesRequest], *connect.ServerStream[v1.SubscribeDispatchesResponse]) error
+	AcknowledgeDispatch(context.Context, *connect.Request[v1.AcknowledgeDispatchRequest]) (*connect.Response[v1.AcknowledgeDispatchResponse], error)
+}
+
+// NewGatewayIngressServiceHandler builds an HTTP handler from the service implementation. It
+// returns the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewGatewayIngressServiceHandler(svc GatewayIngressServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	gatewayIngressServiceMethods := v1.File_jingclaw_control_v1_session_proto.Services().ByName("GatewayIngressService").Methods()
+	gatewayIngressServiceDeliverInboundHandler := connect.NewUnaryHandler(
+		GatewayIngressServiceDeliverInboundProcedure,
+		svc.DeliverInbound,
+		connect.WithSchema(gatewayIngressServiceMethods.ByName("DeliverInbound")),
+		connect.WithHandlerOptions(opts...),
+	)
+	gatewayIngressServiceSubscribeDispatchesHandler := connect.NewServerStreamHandler(
+		GatewayIngressServiceSubscribeDispatchesProcedure,
+		svc.SubscribeDispatches,
+		connect.WithSchema(gatewayIngressServiceMethods.ByName("SubscribeDispatches")),
+		connect.WithHandlerOptions(opts...),
+	)
+	gatewayIngressServiceAcknowledgeDispatchHandler := connect.NewUnaryHandler(
+		GatewayIngressServiceAcknowledgeDispatchProcedure,
+		svc.AcknowledgeDispatch,
+		connect.WithSchema(gatewayIngressServiceMethods.ByName("AcknowledgeDispatch")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/jingclaw.control.v1.GatewayIngressService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case GatewayIngressServiceDeliverInboundProcedure:
+			gatewayIngressServiceDeliverInboundHandler.ServeHTTP(w, r)
+		case GatewayIngressServiceSubscribeDispatchesProcedure:
+			gatewayIngressServiceSubscribeDispatchesHandler.ServeHTTP(w, r)
+		case GatewayIngressServiceAcknowledgeDispatchProcedure:
+			gatewayIngressServiceAcknowledgeDispatchHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedGatewayIngressServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedGatewayIngressServiceHandler struct{}
+
+func (UnimplementedGatewayIngressServiceHandler) DeliverInbound(context.Context, *connect.Request[v1.DeliverInboundRequest]) (*connect.Response[v1.DeliverInboundResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.GatewayIngressService.DeliverInbound is not implemented"))
+}
+
+func (UnimplementedGatewayIngressServiceHandler) SubscribeDispatches(context.Context, *connect.Request[v1.SubscribeDispatchesRequest], *connect.ServerStream[v1.SubscribeDispatchesResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.GatewayIngressService.SubscribeDispatches is not implemented"))
+}
+
+func (UnimplementedGatewayIngressServiceHandler) AcknowledgeDispatch(context.Context, *connect.Request[v1.AcknowledgeDispatchRequest]) (*connect.Response[v1.AcknowledgeDispatchResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch is not implemented"))
+}
+
+// ChannelServiceClient is a client for the jingclaw.control.v1.ChannelService service.
+type ChannelServiceClient interface {
+	ListBindings(context.Context, *connect.Request[v1.ListBindingsRequest]) (*connect.Response[v1.ListBindingsResponse], error)
+	UpsertBinding(context.Context, *connect.Request[v1.UpsertBindingRequest]) (*connect.Response[v1.UpsertBindingResponse], error)
+	DeleteBinding(context.Context, *connect.Request[v1.DeleteBindingRequest]) (*connect.Response[v1.DeleteBindingResponse], error)
+}
+
+// NewChannelServiceClient constructs a client for the jingclaw.control.v1.ChannelService service.
+// By default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped
+// responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewChannelServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ChannelServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	channelServiceMethods := v1.File_jingclaw_control_v1_session_proto.Services().ByName("ChannelService").Methods()
+	return &channelServiceClient{
+		listBindings: connect.NewClient[v1.ListBindingsRequest, v1.ListBindingsResponse](
+			httpClient,
+			baseURL+ChannelServiceListBindingsProcedure,
+			connect.WithSchema(channelServiceMethods.ByName("ListBindings")),
+			connect.WithClientOptions(opts...),
+		),
+		upsertBinding: connect.NewClient[v1.UpsertBindingRequest, v1.UpsertBindingResponse](
+			httpClient,
+			baseURL+ChannelServiceUpsertBindingProcedure,
+			connect.WithSchema(channelServiceMethods.ByName("UpsertBinding")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteBinding: connect.NewClient[v1.DeleteBindingRequest, v1.DeleteBindingResponse](
+			httpClient,
+			baseURL+ChannelServiceDeleteBindingProcedure,
+			connect.WithSchema(channelServiceMethods.ByName("DeleteBinding")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// channelServiceClient implements ChannelServiceClient.
+type channelServiceClient struct {
+	listBindings  *connect.Client[v1.ListBindingsRequest, v1.ListBindingsResponse]
+	upsertBinding *connect.Client[v1.UpsertBindingRequest, v1.UpsertBindingResponse]
+	deleteBinding *connect.Client[v1.DeleteBindingRequest, v1.DeleteBindingResponse]
+}
+
+// ListBindings calls jingclaw.control.v1.ChannelService.ListBindings.
+func (c *channelServiceClient) ListBindings(ctx context.Context, req *connect.Request[v1.ListBindingsRequest]) (*connect.Response[v1.ListBindingsResponse], error) {
+	return c.listBindings.CallUnary(ctx, req)
+}
+
+// UpsertBinding calls jingclaw.control.v1.ChannelService.UpsertBinding.
+func (c *channelServiceClient) UpsertBinding(ctx context.Context, req *connect.Request[v1.UpsertBindingRequest]) (*connect.Response[v1.UpsertBindingResponse], error) {
+	return c.upsertBinding.CallUnary(ctx, req)
+}
+
+// DeleteBinding calls jingclaw.control.v1.ChannelService.DeleteBinding.
+func (c *channelServiceClient) DeleteBinding(ctx context.Context, req *connect.Request[v1.DeleteBindingRequest]) (*connect.Response[v1.DeleteBindingResponse], error) {
+	return c.deleteBinding.CallUnary(ctx, req)
+}
+
+// ChannelServiceHandler is an implementation of the jingclaw.control.v1.ChannelService service.
+type ChannelServiceHandler interface {
+	ListBindings(context.Context, *connect.Request[v1.ListBindingsRequest]) (*connect.Response[v1.ListBindingsResponse], error)
+	UpsertBinding(context.Context, *connect.Request[v1.UpsertBindingRequest]) (*connect.Response[v1.UpsertBindingResponse], error)
+	DeleteBinding(context.Context, *connect.Request[v1.DeleteBindingRequest]) (*connect.Response[v1.DeleteBindingResponse], error)
+}
+
+// NewChannelServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewChannelServiceHandler(svc ChannelServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	channelServiceMethods := v1.File_jingclaw_control_v1_session_proto.Services().ByName("ChannelService").Methods()
+	channelServiceListBindingsHandler := connect.NewUnaryHandler(
+		ChannelServiceListBindingsProcedure,
+		svc.ListBindings,
+		connect.WithSchema(channelServiceMethods.ByName("ListBindings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	channelServiceUpsertBindingHandler := connect.NewUnaryHandler(
+		ChannelServiceUpsertBindingProcedure,
+		svc.UpsertBinding,
+		connect.WithSchema(channelServiceMethods.ByName("UpsertBinding")),
+		connect.WithHandlerOptions(opts...),
+	)
+	channelServiceDeleteBindingHandler := connect.NewUnaryHandler(
+		ChannelServiceDeleteBindingProcedure,
+		svc.DeleteBinding,
+		connect.WithSchema(channelServiceMethods.ByName("DeleteBinding")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/jingclaw.control.v1.ChannelService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case ChannelServiceListBindingsProcedure:
+			channelServiceListBindingsHandler.ServeHTTP(w, r)
+		case ChannelServiceUpsertBindingProcedure:
+			channelServiceUpsertBindingHandler.ServeHTTP(w, r)
+		case ChannelServiceDeleteBindingProcedure:
+			channelServiceDeleteBindingHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedChannelServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedChannelServiceHandler struct{}
+
+func (UnimplementedChannelServiceHandler) ListBindings(context.Context, *connect.Request[v1.ListBindingsRequest]) (*connect.Response[v1.ListBindingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ChannelService.ListBindings is not implemented"))
+}
+
+func (UnimplementedChannelServiceHandler) UpsertBinding(context.Context, *connect.Request[v1.UpsertBindingRequest]) (*connect.Response[v1.UpsertBindingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ChannelService.UpsertBinding is not implemented"))
+}
+
+func (UnimplementedChannelServiceHandler) DeleteBinding(context.Context, *connect.Request[v1.DeleteBindingRequest]) (*connect.Response[v1.DeleteBindingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ChannelService.DeleteBinding is not implemented"))
+}
 
 // SessionServiceClient is a client for the jingclaw.control.v1.SessionService service.
 type SessionServiceClient interface {

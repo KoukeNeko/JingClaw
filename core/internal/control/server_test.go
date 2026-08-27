@@ -62,7 +62,8 @@ func newServer(t *testing.T, chunkDelay time.Duration) controlv1connect.SessionS
 
 	// The port is unknown until the test server starts, so host validation is
 	// exercised separately in TestAuthMiddleware.
-	handler := control.AuthMiddleware(testToken, "", mux)
+	handler := control.AuthMiddleware(
+		[]control.Token{{Value: testToken, Scope: control.ScopeControl}}, "", mux)
 	server := httptest.NewUnstartedServer(h2c.NewHandler(handler, &http2.Server{}))
 	server.EnableHTTP2 = true
 	server.Start()

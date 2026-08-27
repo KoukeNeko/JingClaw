@@ -17,9 +17,11 @@ func TestAuthMiddleware(t *testing.T) {
 		port  = "49231"
 	)
 
-	handler := control.AuthMiddleware(token, port, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
+	handler := control.AuthMiddleware(
+		[]control.Token{{Value: token, Scope: control.ScopeControl}},
+		port,
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+	)
 
 	cases := []struct {
 		name       string
@@ -78,7 +80,8 @@ func TestAuthMiddleware(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "http://"+tc.host+"/rpc", nil)
+			req := httptest.NewRequest(http.MethodPost,
+				"http://"+tc.host+"/jingclaw.control.v1.SessionService/CreateSession", nil)
 			req.Host = tc.host
 			if tc.authHeader != "" {
 				req.Header.Set("Authorization", tc.authHeader)
@@ -94,20 +97,100 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 }
 
+// A gateway process holds somebody else's bot token and runs a library that
+// talks to the internet. If it is compromised, the blast radius must be "can
+// deliver messages inward", not "can execute tools".
+func TestGatewayCredentialCannotReachToolExecutingServices(t *testing.T) {
+	const (
+		controlValue = "control-token"
+		gatewayValue = "gateway-token"
+		port         = "49231"
+	)
+
+	handler := control.AuthMiddleware(
+		[]control.Token{
+			{Value: controlValue, Scope: control.ScopeControl},
+			{Value: gatewayValue, Scope: control.ScopeGateway},
+		},
+		port,
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+	)
+
+	cases := []struct {
+		name       string
+		token      string
+		path       string
+		wantStatus int
+	}{
+		{
+			name:       "gateway reaches the ingress",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.GatewayIngressService/DeliverInbound",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "gateway cannot start a run directly",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.SessionService/SendTurn",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot approve a tool call",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.SessionService/DecideApproval",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot rewrite its own binding",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ChannelService/UpsertBinding",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "control reaches everything",
+			token:      controlValue,
+			path:       "/jingclaw.control.v1.SessionService/SendTurn",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "an unknown service is unreachable by anyone",
+			token:      controlValue,
+			path:       "/jingclaw.control.v1.FutureService/DoThing",
+			wantStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			host := "127.0.0.1:" + port
+			req := httptest.NewRequest(http.MethodPost, "http://"+host+tc.path, nil)
+			req.Host = host
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Errorf("got status %d, want %d", rec.Code, tc.wantStatus)
+			}
+		})
+	}
+}
+
 func TestNewTokenIsUniqueAndNonEmpty(t *testing.T) {
 	seen := make(map[string]bool)
 
 	for range 100 {
-		token, err := control.NewToken()
+		token, err := control.NewToken(control.ScopeControl)
 		if err != nil {
 			t.Fatalf("new token: %v", err)
 		}
-		if token == "" {
+		if token.Value == "" {
 			t.Fatal("token is empty")
 		}
-		if seen[token] {
-			t.Fatalf("token %q generated twice", token)
+		if seen[token.Value] {
+			t.Fatal("the same token was generated twice")
 		}
-		seen[token] = true
+		seen[token.Value] = true
 	}
 }

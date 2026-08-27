@@ -17,22 +17,66 @@ import (
 
 const tokenBytes = 32 // 256 bits
 
-// NewToken returns a fresh control token.
-func NewToken() (string, error) {
-	buf := make([]byte, tokenBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("control: generate token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
+// Scope is a set of services a credential may reach.
+//
+// Scopes exist because not every caller deserves the whole API. A gateway
+// process holds a bot token for somebody else's service and runs a library
+// that talks to the internet; if it is compromised, the blast radius should be
+// "can deliver messages inward", not "can execute tools".
+type Scope string
+
+const (
+	// ScopeControl is the operator's own credential: everything.
+	ScopeControl Scope = "control"
+
+	// ScopeGateway reaches the ingress and nothing else.
+	ScopeGateway Scope = "gateway"
+)
+
+// servicesForScope lists the fully-qualified proto services a scope may call.
+//
+// The mapping is explicit rather than derived from a prefix, so adding a
+// service does not silently widen an existing credential: a new service is
+// unreachable until somebody decides which scopes should have it.
+var servicesForScope = map[Scope]map[string]bool{
+	ScopeControl: {
+		"jingclaw.control.v1.SessionService":        true,
+		"jingclaw.control.v1.ChannelService":        true,
+		"jingclaw.control.v1.GatewayIngressService": true,
+	},
+	ScopeGateway: {
+		"jingclaw.control.v1.GatewayIngressService": true,
+	},
 }
 
-// AuthMiddleware rejects requests without the daemon's bearer token, and
-// requests whose Host header does not name the loopback address.
+// Token is a credential and what it may reach.
+type Token struct {
+	Value string
+	Scope Scope
+}
+
+// NewToken returns a fresh credential for a scope.
+func NewToken(scope Scope) (Token, error) {
+	buf := make([]byte, tokenBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return Token{}, fmt.Errorf("control: generate token: %w", err)
+	}
+	return Token{Value: base64.RawURLEncoding.EncodeToString(buf), Scope: scope}, nil
+}
+
+// AuthMiddleware rejects requests without a known bearer token, requests whose
+// Host header does not name the loopback address, and requests for a service
+// the presented credential does not cover.
 //
 // The Host check defends against DNS rebinding: an attacker-controlled name
 // can resolve to 127.0.0.1, so the socket alone proves nothing about who is
 // calling.
-func AuthMiddleware(token string, allowedPort string, next http.Handler) http.Handler {
+func AuthMiddleware(tokens []Token, allowedPort string, next http.Handler) http.Handler {
+	byValue := make(map[string]Scope, len(tokens))
+	for _, token := range tokens {
+		byValue[token.Value] = token.Scope
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !hostAllowed(r.Host, allowedPort) {
 			http.Error(w, "forbidden host", http.StatusForbidden)
@@ -40,14 +84,56 @@ func AuthMiddleware(token string, allowedPort string, next http.Handler) http.Ha
 		}
 
 		provided, ok := bearerToken(r.Header.Get("Authorization"))
-		if !ok || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+		if !ok {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
+		scope, matched := lookupToken(byValue, provided)
+		if !matched {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		if !servicesForScope[scope][serviceOf(r.URL.Path)] {
+			// The credential is genuine but does not cover this service.
+			// Forbidden rather than unauthorized: retrying with the same token
+			// will never help.
+			http.Error(w, "forbidden for this credential", http.StatusForbidden)
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
+}
+
+// lookupToken compares against every known credential rather than indexing by
+// the presented value, so the time taken does not reveal which token matched a
+// prefix.
+func lookupToken(known map[string]Scope, provided string) (Scope, bool) {
+	var (
+		scope   Scope
+		matched bool
+	)
+
+	for value, candidate := range known {
+		if subtle.ConstantTimeCompare([]byte(value), []byte(provided)) == 1 {
+			scope, matched = candidate, true
+		}
+	}
+	return scope, matched
+}
+
+// serviceOf extracts the proto service from a Connect path, which has the
+// shape /package.Service/Method.
+func serviceOf(path string) string {
+	trimmed := strings.TrimPrefix(path, "/")
+	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
+		return trimmed[:index]
+	}
+	return trimmed
 }
 
 func bearerToken(header string) (string, bool) {

@@ -16,9 +16,14 @@ const ProtocolVersion = "jingclaw.control.v1"
 // The daemon listens on an ephemeral port, so this file — not a well-known
 // port — is the rendezvous point.
 type File struct {
-	PID             int    `json:"pid"`
-	BaseURL         string `json:"base_url"`
-	Token           string `json:"token"`
+	PID     int    `json:"pid"`
+	BaseURL string `json:"base_url"`
+	Token   string `json:"token"`
+
+	// GatewayToken reaches the ingress and nothing else. It is written here so
+	// a gateway started by the same operator can find it, and it is separate so
+	// that handing it out never hands out the full control credential.
+	GatewayToken    string `json:"gateway_token,omitempty"`
 	ProtocolVersion string `json:"protocol_version"`
 }
 

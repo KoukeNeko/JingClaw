@@ -28,6 +28,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
+	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
 	"github.com/KoukeNeko/JingClaw/core/internal/permission"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
@@ -156,7 +157,14 @@ func run() error {
 		logger.Warn("resolved runs orphaned by a previous shutdown", "count", recovered)
 	}
 
-	token, err := control.NewToken()
+	controlToken, err := control.NewToken(control.ScopeControl)
+	if err != nil {
+		return err
+	}
+	// A separate, narrower credential for gateway processes. One that could
+	// also execute tools would make a compromised chat library equivalent to a
+	// compromised daemon.
+	gatewayToken, err := control.NewToken(control.ScopeGateway)
 	if err != nil {
 		return err
 	}
@@ -174,12 +182,22 @@ func run() error {
 	port := fmt.Sprintf("%d", tcpAddr.Port)
 	baseURL := "http://" + net.JoinHostPort("127.0.0.1", port)
 
+	ingress := &gateway.Ingress{
+		Store:   store,
+		Runtime: rt,
+		Binder:  permissions,
+		Now:     time.Now,
+		Logger:  logger,
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub)))
+	mux.Handle(controlv1connect.NewGatewayIngressServiceHandler(
+		control.NewGatewayServer(ingress, store, time.Now)))
 
 	// h2c so a gRPC client (the Windows client will use grpc-dotnet) can reach
 	// the same endpoint as Connect and gRPC-Web over plaintext loopback.
-	handler := control.AuthMiddleware(token, port, mux)
+	handler := control.AuthMiddleware([]control.Token{controlToken, gatewayToken}, port, mux)
 	server := &http.Server{
 		Handler:           h2c.NewHandler(handler, &http2.Server{}),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -193,7 +211,8 @@ func run() error {
 	if err := discovery.Write(discoveryPath, discovery.File{
 		PID:             os.Getpid(),
 		BaseURL:         baseURL,
-		Token:           token,
+		Token:           controlToken.Value,
+		GatewayToken:    gatewayToken.Value,
 		ProtocolVersion: discovery.ProtocolVersion,
 	}); err != nil {
 		_ = listener.Close()
