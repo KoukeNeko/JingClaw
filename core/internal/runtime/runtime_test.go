@@ -88,9 +88,9 @@ func TestSendTurnProducesOrderedEventLog(t *testing.T) {
 
 	want := []domain.EventKind{
 		domain.EventUserMessageAdded,
-		domain.EventRunStateChanged,    // running
-		domain.EventAssistantTextDelta, // prefix
-		domain.EventAssistantTextDelta, // echoed input
+		domain.EventRunStateChanged, // running
+		// The provider's two chunks coalesce into one persisted delta.
+		domain.EventAssistantTextDelta,
 		domain.EventUsageChanged,
 		domain.EventAssistantMessageCompleted,
 		domain.EventRunStateChanged, // completed
@@ -191,15 +191,11 @@ func TestInterruptMidStreamCancelsAndRecordsTerminalState(t *testing.T) {
 		t.Fatalf("send turn: %v", err)
 	}
 
-	// Let the first chunk land so the interrupt genuinely arrives mid-stream.
+	// Wait until the run is actually generating, so the interrupt arrives
+	// mid-stream rather than before the provider was even called.
 	waitFor(t, func() bool {
-		events, _ := store.ListAfter(ctx, session.ID, 0, 0)
-		for _, ev := range events {
-			if ev.Kind == domain.EventAssistantTextDelta {
-				return true
-			}
-		}
-		return false
+		run, err := rt.Run(ctx, runID)
+		return err == nil && run.Status == domain.RunRunning
 	})
 
 	if _, err := rt.InterruptRun(ctx, runID, "user pressed stop"); err != nil {
@@ -227,6 +223,18 @@ func TestInterruptMidStreamCancelsAndRecordsTerminalState(t *testing.T) {
 	}
 	if changed.Status != domain.RunCancelled {
 		t.Errorf("last event records status %q, want %q", changed.Status, domain.RunCancelled)
+	}
+
+	// Coalescing buffers deltas, so an interrupt must still flush what the
+	// model already produced. Losing it would be worse than not batching.
+	var sawText bool
+	for _, ev := range events {
+		if ev.Kind == domain.EventAssistantTextDelta {
+			sawText = true
+		}
+	}
+	if !sawText {
+		t.Error("interrupting discarded the partial output that had already been generated")
 	}
 }
 

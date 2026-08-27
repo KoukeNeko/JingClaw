@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -229,21 +230,22 @@ func buildProvider(ctx context.Context, name string, chunkDelay time.Duration) (
 		return fake.New(chunkDelay), nil
 
 	case "gemini":
-		keyFile, err := secret.DefaultFile("gemini.key")
+		keyFiles, err := secret.DefaultFiles("gemini.key")
 		if err != nil {
 			return nil, err
 		}
 
 		apiKey, err := secret.Load(secret.LoadOptions{
 			EnvVars: []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
-			File:    keyFile,
+			Files:   keyFiles,
 		})
 		if err != nil {
 			return nil, err
 		}
 		if !apiKey.IsSet() {
 			return nil, fmt.Errorf(
-				"no Gemini API key: set GEMINI_API_KEY or write it to %s with mode 600", keyFile)
+				"no Gemini API key: set GEMINI_API_KEY, or write it with mode 600 to one of: %s",
+				strings.Join(keyFiles, ", "))
 		}
 
 		p, err := gemini.New(ctx, gemini.Config{APIKey: apiKey.Reveal()})

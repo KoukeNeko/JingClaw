@@ -62,7 +62,7 @@ func TestLoadPrefersEnvironment(t *testing.T) {
 
 	value, err := secret.Load(secret.LoadOptions{
 		EnvVars: []string{"JINGCLAW_TEST_KEY"},
-		File:    path,
+		Files:   []string{path},
 	})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -77,7 +77,7 @@ func TestLoadFallsBackToFile(t *testing.T) {
 
 	value, err := secret.Load(secret.LoadOptions{
 		EnvVars: []string{"JINGCLAW_TEST_UNSET_KEY"},
-		File:    path,
+		Files:   []string{path},
 	})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -93,7 +93,7 @@ func TestLoadFallsBackToFile(t *testing.T) {
 func TestLoadRefusesWorldReadableFile(t *testing.T) {
 	path := writeKeyFile(t, "exposed", 0o644)
 
-	_, err := secret.Load(secret.LoadOptions{File: path})
+	_, err := secret.Load(secret.LoadOptions{Files: []string{path}})
 	if err == nil {
 		t.Fatal("loaded a world-readable credential without complaint")
 	}
@@ -109,7 +109,7 @@ func TestLoadRefusesWorldReadableFile(t *testing.T) {
 // feature it unlocks is required.
 func TestLoadMissingFileIsNotAnError(t *testing.T) {
 	value, err := secret.Load(secret.LoadOptions{
-		File: filepath.Join(t.TempDir(), "absent.key"),
+		Files: []string{filepath.Join(t.TempDir(), "absent.key")},
 	})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -125,7 +125,7 @@ func TestEmptyEnvVarFallsThrough(t *testing.T) {
 
 	value, err := secret.Load(secret.LoadOptions{
 		EnvVars: []string{"JINGCLAW_TEST_KEY"},
-		File:    path,
+		Files:   []string{path},
 	})
 	if err != nil {
 		t.Fatalf("load: %v", err)

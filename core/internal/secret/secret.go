@@ -49,8 +49,9 @@ type LoadOptions struct {
 	// EnvVars are checked in order. First non-empty wins.
 	EnvVars []string
 
-	// File is a fallback path, expected to contain only the credential.
-	File string
+	// Files are fallback paths checked in order, each expected to contain only
+	// the credential. First readable file wins.
+	Files []string
 }
 
 // Load reads a credential from the environment or a file.
@@ -66,40 +67,69 @@ func Load(opts LoadOptions) (Value, error) {
 		}
 	}
 
-	if opts.File == "" {
-		return Value{}, nil
-	}
-
-	info, err := os.Stat(opts.File)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return Value{}, nil
+	for _, path := range opts.Files {
+		if path == "" {
+			continue
 		}
-		return Value{}, fmt.Errorf("secret: stat %s: %w", opts.File, err)
+
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return Value{}, fmt.Errorf("secret: stat %s: %w", path, err)
+		}
+
+		// A credential readable by other local accounts is a credential to
+		// treat as compromised, so this refuses rather than quietly using it.
+		// Refusing beats skipping: silently falling through to the next
+		// candidate would hide the exposure.
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			return Value{}, fmt.Errorf(
+				"secret: %s is mode %#o; it must not be readable by group or others (chmod 600)",
+				path, mode)
+		}
+
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return Value{}, fmt.Errorf("secret: read %s: %w", path, err)
+		}
+		if strings.TrimSpace(string(raw)) == "" {
+			continue
+		}
+
+		return New(string(raw)), nil
 	}
 
-	// A credential readable by other local accounts is a credential to treat
-	// as compromised, so this refuses rather than quietly using it.
-	if mode := info.Mode().Perm(); mode&0o077 != 0 {
-		return Value{}, fmt.Errorf(
-			"secret: %s is mode %#o; it must not be readable by group or others (chmod 600)",
-			opts.File, mode)
-	}
-
-	raw, err := os.ReadFile(opts.File)
-	if err != nil {
-		return Value{}, fmt.Errorf("secret: read %s: %w", opts.File, err)
-	}
-
-	return New(string(raw)), nil
+	return Value{}, nil
 }
 
-// DefaultFile returns the conventional path for a named credential inside the
-// JingClaw config directory.
-func DefaultFile(name string) (string, error) {
+// DefaultFiles returns the conventional locations for a named credential, in
+// search order.
+//
+// The platform-native config directory comes first. On macOS that is
+// ~/Library/Application Support, but developer tools there commonly follow the
+// XDG convention instead, and a headless macOS build box is usually set up
+// that way, so ~/.config is also accepted. On Linux os.UserConfigDir already
+// resolves to ~/.config and the two collapse into one entry.
+func DefaultFiles(name string) ([]string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("secret: locate config dir: %w", err)
+		return nil, fmt.Errorf("secret: locate config dir: %w", err)
 	}
-	return filepath.Join(base, "JingClaw", name), nil
+
+	files := []string{filepath.Join(base, appDir, name)}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return files, nil
+	}
+
+	xdg := filepath.Join(home, ".config", appDir, name)
+	if xdg != files[0] {
+		files = append(files, xdg)
+	}
+	return files, nil
 }
+
+const appDir = "JingClaw"

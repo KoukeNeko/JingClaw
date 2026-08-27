@@ -24,17 +24,17 @@ you left off.
 ## Status: M0 — walking skeleton
 
 M0 proved the skeleton conducts: protocol, runtime, streaming event loop, and
-the boundary between them. State now persists to SQLite and survives a
-restart, including runs orphaned by a crash. There is still a deterministic
-fake provider and no tools.
+the boundary between them. State persists to SQLite and survives a restart,
+including runs orphaned by a crash, and real models answer through the Gemini
+provider. There are no tools yet, so it talks but cannot act.
 
-Deliberately absent until the rest of M1: real model providers, file and shell
-tools, the permission engine, MCP, and every GUI.
+Deliberately absent until the rest of M1: file and shell tools, the permission
+engine, MCP, and every GUI.
 
 | Milestone | Scope |
 |---|---|
 | M0 | walking skeleton — done |
-| **M1a** | SQLite ✓, real providers, file/shell tools, permissions |
+| **M1a** | SQLite ✓, providers ✓, file/shell tools, permissions |
 | M1b | `gatewayd` + Discord |
 | M2 | SwiftUI, WinUI 3 and web clients at parity |
 | M3 | subagents, replay, sandboxing, remote fleet |
@@ -69,6 +69,17 @@ Three terminals. First, the daemon:
 ```bash
 core/bin/agentd --dev-fake
 ```
+
+Or against a real model:
+
+```bash
+core/bin/agentd --provider=gemini --model=gemma-4-31b-it
+```
+
+The key comes from `GEMINI_API_KEY`, or a mode-600 file at
+`gemini.key` under the config directory. `--list-models` prints what the
+provider actually serves; a `--model` it does not serve fails at startup
+rather than on the first message.
 
 It binds an ephemeral port on loopback and writes a `0600` discovery file
 holding the address and a bearer token; the CLI finds it from there. State
@@ -126,6 +137,13 @@ These are load-bearing. Breaking one is a design change, not a refactor.
 7. **A dead process must not strand a run.** Startup resolves runs left live by
    a crash and records the outcome as an event, so a reconnecting client learns
    it the same way it learns everything else.
+8. **Provider deltas are coalesced before they are persisted.** A model that
+   streams a few characters at a time must not turn every keystroke into a
+   database write — but interrupting a reply still flushes what was already
+   generated, because losing it would be worse than never batching.
+9. **Credentials never reach a log.** They load from an environment variable or
+   a mode-600 file into a type whose `String`, `Format` and `MarshalJSON` all
+   redact.
 
 `internal/architecture` asserts rules 3–4 mechanically: the CLI cannot import
 the runtime, and the runtime cannot import generated protobuf.

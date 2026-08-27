@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,22 @@ var (
 
 // orphanReason is recorded on runs that were live when the process stopped.
 const orphanReason = "runtime: interrupted by daemon restart"
+
+// Providers stream in whatever granularity suits them, sometimes a few
+// characters or one token-count update at a time. Persisting each delta as its
+// own event makes the log unreadable, turns every keystroke into a database
+// write, and buries the events that carry meaning. Deltas are therefore
+// coalesced into chunks a human would actually notice before they are
+// appended.
+const (
+	textFlushBytes    = 240
+	textFlushInterval = 200 * time.Millisecond
+
+	// Usage is cumulative, so intermediate values are only progress
+	// indicators. A couple of seconds keeps cost visible during a long run
+	// without letting accounting dominate the log.
+	usageFlushInterval = 2 * time.Second
+)
 
 // IDGenerator produces identifiers. Injected so tests can be deterministic.
 type IDGenerator func() string
@@ -256,7 +273,7 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run, userText string) 
 	defer func() { _ = stream.Close() }()
 
 	stopReason := domain.StopEndTurn
-	var usage domain.Usage
+	output := r.newCoalescer(run, messageID)
 
 	for {
 		ev, err := stream.Recv(ctx)
@@ -264,28 +281,22 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run, userText string) 
 			break
 		}
 		if err != nil {
-			r.finishFromError(ctx, run, err)
+			r.abort(ctx, run, output, err)
 			return
 		}
 
 		switch e := ev.(type) {
 		case provider.TextDelta:
-			if err := r.append(ctx, run.SessionID, run.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{
-				MessageID: messageID,
-				Text:      e.Text,
-			}); err != nil {
-				r.finishFromError(ctx, run, err)
+			if err := output.addText(ctx, e.Text); err != nil {
+				r.abort(ctx, run, output, err)
 				return
 			}
 
 		case provider.UsageDelta:
 			// Providers report cumulative totals, so the latest wins rather
 			// than being summed.
-			usage = e.Usage
-			if err := r.append(ctx, run.SessionID, run.ID, domain.EventUsageChanged, domain.UsageChanged{
-				Usage: usage,
-			}); err != nil {
-				r.finishFromError(ctx, run, err)
+			if err := output.setUsage(ctx, e.Usage); err != nil {
+				r.abort(ctx, run, output, err)
 				return
 			}
 
@@ -294,15 +305,39 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run, userText string) 
 		}
 	}
 
+	// Anything still buffered has to land before the turn is declared over,
+	// or a client would see a completed message missing its last words.
+	if err := output.flush(ctx); err != nil {
+		r.abort(ctx, run, output, err)
+		return
+	}
+
 	if err := r.append(ctx, run.SessionID, run.ID, domain.EventAssistantMessageCompleted, domain.AssistantMessageCompleted{
 		MessageID:  messageID,
 		StopReason: stopReason,
 	}); err != nil {
-		r.finishFromError(ctx, run, err)
+		r.abort(ctx, run, output, err)
 		return
 	}
 
 	r.finish(ctx, run, domain.RunCompleted, "")
+}
+
+// abort ends a run that could not continue, preserving whatever the model
+// already produced.
+//
+// Buffered text has to be written even when the run is being cancelled:
+// interrupting a reply and finding the words already on screen have vanished
+// is worse than never having coalesced at all. The write uses a context that
+// outlives the cancellation, since the run's own context is already dead.
+func (r *Runtime) abort(ctx context.Context, run domain.Run, output *coalescer, cause error) {
+	if flushErr := output.flush(context.WithoutCancel(ctx)); flushErr != nil {
+		r.opts.Logger.Error("failed to persist partial output",
+			"run_id", string(run.ID),
+			"error", flushErr,
+		)
+	}
+	r.finishFromError(ctx, run, cause)
 }
 
 func (r *Runtime) finishFromError(ctx context.Context, run domain.Run, err error) {
@@ -447,4 +482,86 @@ func (r *Runtime) append(ctx context.Context, sessionID domain.SessionID, runID 
 
 	r.opts.Hub.Publish(sessionID)
 	return nil
+}
+
+// coalescer batches provider deltas into events worth persisting.
+type coalescer struct {
+	rt        *Runtime
+	run       domain.Run
+	messageID domain.MessageID
+
+	text          strings.Builder
+	lastTextFlush time.Time
+
+	usage          domain.Usage
+	usagePending   bool
+	lastUsageFlush time.Time
+}
+
+func (r *Runtime) newCoalescer(run domain.Run, messageID domain.MessageID) *coalescer {
+	now := r.opts.Now()
+	return &coalescer{
+		rt:             r,
+		run:            run,
+		messageID:      messageID,
+		lastTextFlush:  now,
+		lastUsageFlush: now,
+	}
+}
+
+func (c *coalescer) addText(ctx context.Context, text string) error {
+	if text == "" {
+		return nil
+	}
+	c.text.WriteString(text)
+
+	elapsed := c.rt.opts.Now().Sub(c.lastTextFlush)
+	if c.text.Len() < textFlushBytes && elapsed < textFlushInterval {
+		return nil
+	}
+	return c.flushText(ctx)
+}
+
+func (c *coalescer) setUsage(ctx context.Context, usage domain.Usage) error {
+	c.usage = usage
+	c.usagePending = true
+
+	if c.rt.opts.Now().Sub(c.lastUsageFlush) < usageFlushInterval {
+		return nil
+	}
+	return c.flushUsage(ctx)
+}
+
+// flush emits everything still buffered. Text goes first so the reply reads in
+// order before the accounting that describes it.
+func (c *coalescer) flush(ctx context.Context) error {
+	if err := c.flushText(ctx); err != nil {
+		return err
+	}
+	return c.flushUsage(ctx)
+}
+
+func (c *coalescer) flushText(ctx context.Context) error {
+	if c.text.Len() == 0 {
+		return nil
+	}
+
+	text := c.text.String()
+	c.text.Reset()
+	c.lastTextFlush = c.rt.opts.Now()
+
+	return c.rt.append(ctx, c.run.SessionID, c.run.ID, domain.EventAssistantTextDelta,
+		domain.AssistantTextDelta{MessageID: c.messageID, Text: text})
+}
+
+func (c *coalescer) flushUsage(ctx context.Context) error {
+	if !c.usagePending {
+		return nil
+	}
+
+	c.usagePending = false
+	c.lastUsageFlush = c.rt.opts.Now()
+
+	return c.rt.append(ctx, c.run.SessionID, c.run.ID, domain.EventUsageChanged,
+		domain.UsageChanged{Usage: c.usage})
 }
