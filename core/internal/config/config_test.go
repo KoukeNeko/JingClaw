@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -138,12 +139,44 @@ func TestExampleParsesAndChangesNothing(t *testing.T) {
 		t.Errorf("the example changes behaviour despite being fully commented:\n%+v", cfg)
 	}
 
-	// Every setting should appear, commented, so an operator can find it
-	// without reading the source.
-	for _, setting := range []string{"name", "persona", "instructions", "instruction_files",
-		"max_iterations", "provider", "model", "root", "addr", "data_dir"} {
-		if !strings.Contains(config.Example, setting) {
-			t.Errorf("the example does not mention %q", setting)
+}
+
+// Every setting has to appear in the example, or an operator can only discover
+// it by reading the source.
+//
+// The list of settings is taken from the struct rather than written out here.
+// A hand-written list has to be updated in two places whenever a field is
+// added, and the failure mode is silent: the check passes while the new
+// setting is undocumented.
+func TestExampleDocumentsEverySetting(t *testing.T) {
+	for _, key := range koanfKeys(reflect.TypeOf(config.Config{})) {
+		if !strings.Contains(config.Example, key) {
+			t.Errorf("the example does not document %q; add it, commented out", key)
 		}
 	}
+}
+
+// koanfKeys collects the koanf tag of every leaf field, walking into nested
+// structs.
+func koanfKeys(t reflect.Type) []string {
+	var keys []string
+
+	for i := range t.NumField() {
+		field := t.Field(i)
+
+		tag := field.Tag.Get("koanf")
+		if tag == "" || tag == "-" {
+			continue
+		}
+
+		if field.Type.Kind() == reflect.Struct {
+			// A section name is not a setting; its fields are.
+			keys = append(keys, koanfKeys(field.Type)...)
+			continue
+		}
+
+		keys = append(keys, tag)
+	}
+
+	return keys
 }
