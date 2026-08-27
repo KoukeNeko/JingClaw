@@ -1,0 +1,293 @@
+package builtin
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/KoukeNeko/JingClaw/core/internal/tool"
+	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
+)
+
+const (
+	defaultCommandTimeout = 2 * time.Minute
+	maxCommandTimeout     = 10 * time.Minute
+
+	// Output beyond this is truncated from the middle: the beginning says what
+	// ran and the end says how it failed, while the middle of a build log
+	// rarely earns its place in a context window.
+	maxCommandOutput = 32 * 1024
+)
+
+// ExecCommand runs a program in the workspace.
+//
+// Arguments are passed as a list rather than a command line. A model producing
+// text that gets handed to a shell is a quoting bug waiting to happen, and it
+// makes the policy engine reason about a string instead of about what will
+// actually be executed.
+type ExecCommand struct {
+	Workspace *workspace.Workspace
+
+	// Env is the environment child processes receive. Left empty, a minimal
+	// one is derived: inheriting the daemon's would hand every command its API
+	// keys.
+	Env []string
+}
+
+func (t *ExecCommand) Spec() tool.Spec {
+	return tool.Spec{
+		Name: "exec_command",
+		Description: "Run a program in the workspace and return its output. " +
+			"Give the program and its arguments separately; there is no shell, so pipes, redirection and " +
+			"variable expansion are not interpreted. Waits for the program to finish.",
+		InputSchema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "program": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Executable to run, e.g. go, npm, git."
+    },
+    "args": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Arguments, one per element. Do not put them all in one string."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "Working directory relative to the workspace root. Defaults to the root."
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 600,
+      "description": "How long to wait before killing the program. Defaults to 120."
+    }
+  },
+  "required": ["program"],
+  "additionalProperties": false
+}`),
+		Level: tool.LevelExecute,
+		Capabilities: tool.Capabilities{
+			ReadFS:  true,
+			WriteFS: true,
+			Execute: true,
+			// A command can do anything the user can, including reach the
+			// network. Claiming otherwise would let a policy under-estimate it.
+			Network:     true,
+			Destructive: true,
+		},
+	}
+}
+
+type execArgs struct {
+	Program        string   `json:"program"`
+	Args           []string `json:"args"`
+	Cwd            string   `json:"cwd"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+}
+
+func (t *ExecCommand) Execute(ctx context.Context, call tool.Call) (tool.Result, error) {
+	var args execArgs
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		return tool.Result{}, tool.Errorf(tool.CodeInvalidArguments, "", "%v", err)
+	}
+
+	workingDir, err := t.Workspace.Resolve(args.Cwd)
+	if err != nil {
+		return tool.Result{}, pathError(orDot(args.Cwd), err)
+	}
+	if info, statErr := os.Stat(workingDir); statErr != nil || !info.IsDir() {
+		return tool.Result{}, tool.Errorf(tool.CodeNotFound,
+			"Give a directory inside the workspace, or omit cwd for the root.",
+			"%s is not a directory in the workspace", orDot(args.Cwd))
+	}
+
+	timeout := defaultCommandTimeout
+	if args.TimeoutSeconds > 0 {
+		timeout = time.Duration(args.TimeoutSeconds) * time.Second
+		if timeout > maxCommandTimeout {
+			timeout = maxCommandTimeout
+		}
+	}
+
+	// The timeout descends from the run's context, so interrupting a run also
+	// kills whatever it started rather than leaving it running unattended.
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	command := exec.CommandContext(runCtx, args.Program, args.Args...)
+	command.Dir = workingDir
+	command.Env = t.environment()
+
+	// Killing the process alone leaves its children behind, holding the pipes
+	// open and the port bound. The whole group has to go.
+	configureProcessGroup(command)
+	command.Cancel = func() error { return terminateGroup(command) }
+	command.WaitDelay = 5 * time.Second
+
+	var combined bytes.Buffer
+	command.Stdout = &combined
+	command.Stderr = &combined
+	// A program that reads stdin would otherwise block forever waiting for
+	// input nobody is going to type.
+	command.Stdin = nil
+
+	started := time.Now()
+	runErr := command.Run()
+	elapsed := time.Since(started)
+
+	return t.result(args, combined.Bytes(), runErr, runCtx, elapsed)
+}
+
+func (t *ExecCommand) result(
+	args execArgs,
+	rawOutput []byte,
+	runErr error,
+	runCtx context.Context,
+	elapsed time.Duration,
+) (tool.Result, error) {
+	display := commandLine(args)
+	output, truncated := boundOutput(rawOutput)
+
+	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		// Timeouts carry the output produced so far: a hung test suite usually
+		// says where it hung before it stops saying anything.
+		return tool.Result{}, &tool.Error{
+			Code: tool.CodeTimeout,
+			Message: fmt.Sprintf("%s did not finish within %s\n\n%s",
+				display, elapsed.Round(time.Second), output),
+			SuggestedAction: "Raise timeout_seconds, or run something narrower.",
+			Retryable:       true,
+		}
+	}
+
+	var notFound *exec.Error
+	if errors.As(runErr, &notFound) {
+		return tool.Result{}, tool.Errorf(tool.CodeNotFound,
+			"Check the program name, or use one that is installed here.",
+			"%s is not available on this machine", args.Program)
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		// A non-zero exit is the answer to the question, not a malfunction: a
+		// failing test suite is exactly what the agent asked to find out.
+		return tool.Result{
+			Content: fmt.Sprintf("%s\nexit status %d after %s\n\n%s",
+				display, exitErr.ExitCode(), elapsed.Round(time.Millisecond), output),
+			Summary:   fmt.Sprintf("%s: exit %d", display, exitErr.ExitCode()),
+			IsError:   true,
+			Truncated: truncated,
+		}, nil
+	}
+
+	if runErr != nil {
+		return tool.Result{}, tool.Errorf(tool.CodeInternal, "", "%s: %v", display, runErr)
+	}
+
+	body := output
+	if strings.TrimSpace(body) == "" {
+		body = "(no output)"
+	}
+
+	return tool.Result{
+		Content: fmt.Sprintf("%s\nexit status 0 after %s\n\n%s",
+			display, elapsed.Round(time.Millisecond), body),
+		Summary:       fmt.Sprintf("%s: ok", display),
+		Truncated:     truncated,
+		OriginalBytes: int64(len(rawOutput)),
+	}, nil
+}
+
+// environment builds the child's environment.
+//
+// The daemon's own environment holds provider credentials. Passing it through
+// would hand an API key to every command the model decides to run, so only the
+// variables a build actually needs are forwarded.
+func (t *ExecCommand) environment() []string {
+	if len(t.Env) > 0 {
+		return t.Env
+	}
+
+	keep := []string{"PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP",
+		"LANG", "LC_ALL", "SystemRoot", "ComSpec", "PATHEXT"}
+
+	env := make([]string, 0, len(keep))
+	for _, name := range keep {
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
+		}
+	}
+
+	// Tools that phone home or open a pager are a poor fit for a
+	// non-interactive caller with no terminal.
+	env = append(env, "CI=1", "TERM=dumb", "NO_COLOR=1", "PAGER=cat", "GIT_PAGER=cat")
+	return env
+}
+
+// boundOutput trims the middle of long output.
+//
+// The start says what ran and the end says how it ended; the middle of a build
+// log is where the least information per byte lives.
+func boundOutput(raw []byte) (string, bool) {
+	if len(raw) <= maxCommandOutput {
+		return string(raw), false
+	}
+
+	half := maxCommandOutput / 2
+	head := string(raw[:half])
+	tail := string(raw[len(raw)-half:])
+
+	return fmt.Sprintf("%s\n\n[... %d bytes omitted ...]\n\n%s",
+		head, len(raw)-2*half, tail), true
+}
+
+func commandLine(args execArgs) string {
+	parts := append([]string{args.Program}, args.Args...)
+	return strings.Join(parts, " ")
+}
+
+func orDot(path string) string {
+	if path == "" {
+		return "."
+	}
+	return path
+}
+
+// ShellFor reports the interactive shell available on this platform, for a
+// caller that genuinely needs pipes or redirection.
+//
+// Windows is a first-class target: an agent that requires bash there is an
+// agent that does not run on Windows. Nothing uses this yet; it exists so the
+// eventual shell mode does not assume a POSIX system.
+func ShellFor() (program string, prefix []string, ok bool) {
+	if runtime.GOOS == "windows" {
+		for _, candidate := range []string{"pwsh.exe", "powershell.exe"} {
+			if path, err := exec.LookPath(candidate); err == nil {
+				return path, []string{"-NoProfile", "-NonInteractive", "-Command"}, true
+			}
+		}
+		if path, err := exec.LookPath("cmd.exe"); err == nil {
+			return path, []string{"/d", "/s", "/c"}, true
+		}
+		return "", nil, false
+	}
+
+	for _, candidate := range []string{os.Getenv("SHELL"), "/bin/zsh", "/bin/bash", "/bin/sh"} {
+		if candidate == "" {
+			continue
+		}
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path, []string{"-c"}, true
+		}
+	}
+	return "", nil, false
+}
