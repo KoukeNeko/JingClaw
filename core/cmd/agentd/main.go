@@ -107,16 +107,19 @@ func run() error {
 		return err
 	}
 
-	// One observer shared by the tools, so a write can tell whether the file
-	// it is about to replace is one the agent actually read.
+	// One observer shared by the tools, so a write can tell whether the file it
+	// is about to replace is one the agent actually read, and one lock set so
+	// two writes to the same file cannot interleave.
 	observed := builtin.NewObserver()
+	locks := builtin.NewFileLocks()
 
 	tools := tool.NewRegistry()
 	tools.MustRegister(
 		&builtin.ReadFile{Workspace: ws, Observer: observed},
 		&builtin.GlobFiles{Workspace: ws},
 		&builtin.Grep{Workspace: ws},
-		&builtin.WriteFile{Workspace: ws, Observer: observed},
+		builtin.NewWriteFile(ws, observed, locks),
+		builtin.NewEditFile(ws, observed, locks),
 	)
 
 	permissions := permission.New(permission.LocalProfile())

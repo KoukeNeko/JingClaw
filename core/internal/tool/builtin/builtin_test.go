@@ -51,13 +51,15 @@ func newFixture(t *testing.T) (*workspace.Workspace, *tool.Registry, string) {
 	}
 
 	observed := builtin.NewObserver()
+	locks := builtin.NewFileLocks()
 
 	registry := tool.NewRegistry()
 	registry.MustRegister(
 		&builtin.ReadFile{Workspace: ws, Observer: observed},
 		&builtin.GlobFiles{Workspace: ws},
 		&builtin.Grep{Workspace: ws},
-		&builtin.WriteFile{Workspace: ws, Observer: observed},
+		builtin.NewWriteFile(ws, observed, locks),
+		builtin.NewEditFile(ws, observed, locks),
 	)
 
 	return ws, registry, root

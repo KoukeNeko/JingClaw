@@ -72,6 +72,13 @@ func hashBytes(content []byte) string {
 type WriteFile struct {
 	Workspace *workspace.Workspace
 	Observer  *Observer
+
+	// Locks is shared with EditFile so the two cannot interleave on one file.
+	Locks *keyedMutex
+}
+
+func NewWriteFile(ws *workspace.Workspace, observer *Observer, locks *keyedMutex) *WriteFile {
+	return &WriteFile{Workspace: ws, Observer: observer, Locks: locks}
 }
 
 func (t *WriteFile) Spec() tool.Spec {
@@ -123,6 +130,9 @@ func (t *WriteFile) Execute(_ context.Context, call tool.Call) (tool.Result, err
 		return tool.Result{}, pathError(args.Path, err)
 	}
 
+	release := t.Locks.Lock(absolute)
+	defer release()
+
 	if !utf8.ValidString(args.Content) {
 		return tool.Result{}, tool.Errorf(tool.CodeUnsupported,
 			"Write valid UTF-8 text.",
@@ -136,19 +146,22 @@ func (t *WriteFile) Execute(_ context.Context, call tool.Call) (tool.Result, err
 
 	content := args.Content
 	if existed {
-		// Preserve the file's line endings. Silently rewriting every line of a
-		// CRLF file because the model emitted LF turns a one-line change into
-		// a whole-file diff.
-		content = matchNewlineStyle(string(existing), content)
+		// Preserve how the file is written down. Silently dropping a BOM or
+		// rewriting every line ending turns a one-line change into a
+		// whole-file diff that nobody asked for.
+		if shape, ok := parseTextFile(existing); ok {
+			content = shape.Render(strings.ReplaceAll(content, "\r\n", "\n"))
+		}
 	}
 
 	if err := atomicWrite(absolute, []byte(content)); err != nil {
 		return tool.Result{}, tool.Errorf(tool.CodeInternal, "", "%v", err)
 	}
 
-	// The observation is now stale by definition: the file on disk is what
-	// this call just wrote, not what was read earlier.
-	t.Observer.Forget(absolute)
+	// The file on disk is now what this call wrote, so the recorded
+	// observation is updated rather than dropped: a follow-up edit should not
+	// have to read the file again to change what the agent itself just made.
+	t.Observer.Observe(absolute, hashBytes([]byte(content)))
 
 	verb := "created"
 	if existed {
@@ -209,19 +222,6 @@ func (t *WriteFile) inspectExisting(relative, absolute string) ([]byte, bool, er
 	}
 
 	return existing, true, nil
-}
-
-// matchNewlineStyle makes new content use the line endings the file already
-// had, so a write does not turn into a whole-file reformat.
-func matchNewlineStyle(existing, content string) string {
-	if !strings.Contains(existing, "\r\n") {
-		return content
-	}
-
-	// Normalise first so content that already mixes styles cannot produce
-	// "\r\r\n".
-	normalised := strings.ReplaceAll(content, "\r\n", "\n")
-	return strings.ReplaceAll(normalised, "\n", "\r\n")
 }
 
 // atomicWrite replaces a file's contents without ever leaving it half-written.

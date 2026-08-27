@@ -91,13 +91,15 @@ func newToolHarness(t *testing.T, turns [][]provider.Event) (*runtime.Runtime, *
 	}
 
 	observed := builtin.NewObserver()
+	locks := builtin.NewFileLocks()
 
 	registry := tool.NewRegistry()
 	registry.MustRegister(
 		&builtin.ReadFile{Workspace: ws, Observer: observed},
 		&builtin.GlobFiles{Workspace: ws},
 		&builtin.Grep{Workspace: ws},
-		&builtin.WriteFile{Workspace: ws, Observer: observed},
+		builtin.NewWriteFile(ws, observed, locks),
+		builtin.NewEditFile(ws, observed, locks),
 	)
 
 	var counter atomic.Uint64
