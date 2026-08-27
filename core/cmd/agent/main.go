@@ -24,10 +24,17 @@ import (
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
+	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 )
 
 const clientName = "jingclaw-cli"
+
+// runtimeDir is where the daemon publishes itself, taken from the same
+// configuration file the daemon reads. It is process-wide state, which a
+// larger CLI would thread through a context instead; here every command needs
+// exactly this one value and nothing else from the file.
+var runtimeDir string
 
 func main() {
 	if err := newRootCommand().Execute(); err != nil {
@@ -37,12 +44,33 @@ func main() {
 }
 
 func newRootCommand() *cobra.Command {
+	var configPath string
+
 	root := &cobra.Command{
 		Use:           "agent",
 		Short:         "Control the JingClaw agent daemon",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// The daemon can be told to publish itself somewhere other than the
+		// platform default, and a client that does not read the same file
+		// would then be unable to find it.
+		//
+		// Only the location is taken. Validate is deliberately not called: the
+		// checks it makes are about running a daemon, and refusing to let an
+		// operator interrupt a run because some unrelated setting is out of
+		// range would be its own kind of failure.
+		PersistentPreRunE: func(*cobra.Command, []string) error {
+			cfg, _, err := config.Load(configPath)
+			if err != nil {
+				return err
+			}
+			runtimeDir = cfg.Server.RuntimeDir
+			return nil
+		},
 	}
+
+	root.PersistentFlags().StringVar(&configPath, "config", "",
+		"configuration file; defaults to the one in the config directory")
 
 	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand(),
 		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand())
@@ -382,7 +410,7 @@ func dial() (controlv1connect.SessionServiceClient, error) {
 }
 
 func authenticated() (*http.Client, string, error) {
-	path, err := discovery.Path()
+	path, err := discovery.PathIn(runtimeDir)
 	if err != nil {
 		return nil, "", err
 	}

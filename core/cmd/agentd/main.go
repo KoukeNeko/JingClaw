@@ -54,28 +54,25 @@ func main() {
 
 func run() error {
 	var (
-		configPath   = flag.String("config", "", "configuration file; defaults to the one in the config directory")
-		printPrompt  = flag.Bool("print-prompt", false, "print the assembled system prompt with its sources and exit")
-		printConfig  = flag.Bool("print-config", false, "print an example configuration file and exit")
-		providerName = flag.String("provider", "fake", "model provider: fake or gemini")
-		model        = flag.String("model", "", "model to use; required for real providers")
-		addr         = flag.String("addr", "127.0.0.1:0", "loopback address to listen on; port 0 picks a free one")
-		chunkDelay   = flag.Duration("fake-delay", 150*time.Millisecond, "delay between fake provider chunks")
-		dataDir      = flag.String("data-dir", "", "directory for the database; defaults to the user config directory")
-		listModels   = flag.Bool("list-models", false, "print the provider's available models and exit")
-		workspaceDir = flag.String("workspace", ".", "directory the agent may read; tools cannot reach outside it")
-		maxIters     = flag.Int("max-iterations", 0, "cap on tool iterations per run; 0 uses the default")
+		configPath  = flag.String("config", "", "configuration file; defaults to the one in the config directory")
+		printPrompt = flag.Bool("print-prompt", false, "print the assembled system prompt with its sources and exit")
+		printConfig = flag.Bool("print-config", false, "print an example configuration file and exit")
+		listModels  = flag.Bool("list-models", false, "print the provider's available models and exit")
+
+		// Every flag below has a setting of the same meaning in the
+		// configuration file, and exists only so one run can differ from it.
+		// They carry no defaults of their own: the file already holds those,
+		// and a second copy here would be one more place for them to disagree.
+		providerName = flag.String("provider", "", "model provider: fake or gemini")
+		model        = flag.String("model", "", "model to use")
+		addr         = flag.String("addr", "", "loopback address to listen on; port 0 picks a free one")
+		dataDir      = flag.String("data-dir", "", "directory for the database")
+		workspaceDir = flag.String("workspace", "", "directory the agent may read; tools cannot reach outside it")
+		maxIters     = flag.Int("max-iterations", 0, "cap on tool iterations per run")
 	)
 	// Retained so existing invocations keep working.
 	devFake := flag.Bool("dev-fake", false, "alias for --provider=fake")
 	flag.Parse()
-
-	if *devFake {
-		*providerName = "fake"
-	}
-
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	slog.SetDefault(logger)
 
 	if *printConfig {
 		fmt.Print(config.Example)
@@ -91,6 +88,19 @@ func run() error {
 	// with. Only a flag the operator actually typed counts, so an unset flag
 	// does not overwrite a configured value with a default.
 	applyFlagOverrides(&cfg, providerName, model, workspaceDir, dataDir, addr, maxIters)
+	if *devFake {
+		cfg.Model.Provider = "fake"
+	}
+
+	// Settings are checked once, here. Making something configurable is
+	// exactly when it needs validating: a value nobody could previously write
+	// is now one somebody can.
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel()}))
+	slog.SetDefault(logger)
 
 	// Signal-aware root context. Everything the daemon owns descends from it,
 	// so one Ctrl+C unwinds the whole tree.
@@ -108,7 +118,7 @@ func run() error {
 	}
 	defer func() { _ = store.Close() }()
 
-	modelProvider, err := buildProvider(rootCtx, cfg.Model.Provider, *chunkDelay)
+	modelProvider, err := buildProvider(rootCtx, cfg)
 	if err != nil {
 		return err
 	}
@@ -133,17 +143,37 @@ func run() error {
 	observed := builtin.NewObserver()
 	locks := builtin.NewFileLocks()
 
+	limits := builtin.Limits{
+		ReadLimit:         cfg.Tools.ReadLimit,
+		MaxReadableFile:   cfg.Tools.MaxReadableFile,
+		MaxOverwriteBytes: cfg.Tools.MaxOverwriteBytes,
+		MaxSearchableFile: cfg.Tools.MaxSearchableFile,
+		GlobResults:       cfg.Tools.GlobResults,
+		GrepResults:       cfg.Tools.GrepResults,
+		CommandTimeout:    cfg.Tools.CommandTimeout,
+		MaxCommandTimeout: cfg.Tools.MaxCommandTimeout,
+		MaxCommandOutput:  cfg.Tools.MaxCommandOutput,
+	}
+
+	writeFile := builtin.NewWriteFile(ws, observed, locks)
+	writeFile.Limits = limits
+	editFile := builtin.NewEditFile(ws, observed, locks)
+
 	tools := tool.NewRegistry()
 	tools.MustRegister(
-		&builtin.ReadFile{Workspace: ws, Observer: observed},
-		&builtin.GlobFiles{Workspace: ws},
-		&builtin.Grep{Workspace: ws},
-		builtin.NewWriteFile(ws, observed, locks),
-		builtin.NewEditFile(ws, observed, locks),
-		&builtin.ExecCommand{Workspace: ws},
+		&builtin.ReadFile{Workspace: ws, Observer: observed, Limits: limits},
+		&builtin.GlobFiles{Workspace: ws, Limits: limits},
+		&builtin.Grep{Workspace: ws, Limits: limits},
+		writeFile,
+		editFile,
+		&builtin.ExecCommand{Workspace: ws, Limits: limits},
 	)
 
-	permissions := permission.New(permission.LocalProfile())
+	profile, ok := permission.ProfileByName(cfg.Agent.PermissionProfile)
+	if !ok {
+		return fmt.Errorf("unknown permission profile %q", cfg.Agent.PermissionProfile)
+	}
+	permissions := permission.New(profile)
 
 	layers, err := buildPrompt(cfg, ws, tools)
 	if err != nil {
@@ -163,13 +193,18 @@ func run() error {
 		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
 
 	rt := runtime.New(rootCtx, runtime.Options{
-		Store:         store,
-		Hub:           hub,
-		Provider:      modelProvider,
-		Model:         selectedModel,
-		Tools:         tools,
-		Permissions:   permissions,
-		Delivery:      plane.Projector,
+		Store:       store,
+		Hub:         hub,
+		Provider:    modelProvider,
+		Model:       selectedModel,
+		Tools:       tools,
+		Permissions: permissions,
+		Delivery:    plane.Projector,
+		Coalescing: runtime.Coalescing{
+			TextFlushBytes:     cfg.Delivery.TextFlushBytes,
+			TextFlushInterval:  cfg.Delivery.TextFlushInterval,
+			UsageFlushInterval: cfg.Delivery.UsageFlushInterval,
+		},
 		SystemPrompt:  prompt.Render(layers),
 		MaxIterations: cfg.Agent.MaxIterations,
 		NewSessionID:  func() string { return id.WithPrefix("ses") },
@@ -236,7 +271,7 @@ func run() error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	discoveryPath, err := discovery.Path()
+	discoveryPath, err := discovery.PathIn(cfg.Server.RuntimeDir)
 	if err != nil {
 		_ = listener.Close()
 		return err
@@ -314,19 +349,19 @@ func databasePath(dataDir string) (string, error) {
 // buildProvider constructs the configured provider. Real providers are wrapped
 // in retry here rather than inside each adapter, so backoff policy is one
 // decision instead of one per vendor.
-func buildProvider(ctx context.Context, name string, chunkDelay time.Duration) (provider.Provider, error) {
-	switch name {
+func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, error) {
+	switch cfg.Model.Provider {
 	case "fake":
-		return fake.New(chunkDelay), nil
+		return fake.New(cfg.Model.FakeDelay), nil
 
 	case "gemini":
-		keyFiles, err := secret.DefaultFiles("gemini.key")
+		keyFiles, err := secret.DefaultFiles(cfg.Model.APIKeyFile)
 		if err != nil {
 			return nil, err
 		}
 
 		apiKey, err := secret.Load(secret.LoadOptions{
-			EnvVars: []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+			EnvVars: cfg.Model.APIKeyEnv,
 			Files:   keyFiles,
 		})
 		if err != nil {
@@ -334,18 +369,24 @@ func buildProvider(ctx context.Context, name string, chunkDelay time.Duration) (
 		}
 		if !apiKey.IsSet() {
 			return nil, fmt.Errorf(
-				"no Gemini API key: set GEMINI_API_KEY, or write it with mode 600 to one of: %s",
-				strings.Join(keyFiles, ", "))
+				"no Gemini API key: set %s, or write it with mode 600 to one of: %s",
+				strings.Join(cfg.Model.APIKeyEnv, " or "), strings.Join(keyFiles, ", "))
 		}
 
 		p, err := gemini.New(ctx, gemini.Config{APIKey: apiKey.Reveal()})
 		if err != nil {
 			return nil, err
 		}
-		return provider.WithRetry(p, provider.DefaultRetryPolicy()), nil
+
+		return provider.WithRetry(p, provider.RetryPolicy{
+			MaxAttempts: cfg.Model.Retry.MaxAttempts,
+			BaseDelay:   cfg.Model.Retry.BaseDelay,
+			MaxDelay:    cfg.Model.Retry.MaxDelay,
+			Jitter:      cfg.Model.Retry.Jitter,
+		}), nil
 
 	default:
-		return nil, fmt.Errorf("unknown provider %q; use fake or gemini", name)
+		return nil, fmt.Errorf("unknown provider %q; use fake or gemini", cfg.Model.Provider)
 	}
 }
 

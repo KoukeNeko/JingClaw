@@ -16,18 +16,6 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
-const (
-	// A model that asks for a whole file gets a bounded slice of it. Without a
-	// ceiling, one generated lock file can consume the entire context window
-	// and leave no room for the work.
-	defaultReadLimit = 64 * 1024
-	maxReadLimit     = 512 * 1024
-
-	// Beyond this a file is not something to read into a prompt at all; the
-	// model should search it instead.
-	maxReadableFile = 8 * 1024 * 1024
-)
-
 // ReadFile reads a range of lines from a workspace file.
 type ReadFile struct {
 	Workspace *workspace.Workspace
@@ -35,6 +23,8 @@ type ReadFile struct {
 	// Observer records what was seen, which is what later lets a write refuse
 	// to clobber a file the agent never looked at.
 	Observer *Observer
+
+	Limits Limits
 }
 
 func (t *ReadFile) Spec() tool.Spec {
@@ -103,10 +93,11 @@ func (t *ReadFile) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 			"Use glob_files to list a directory.",
 			"%s is a directory", args.Path)
 	}
-	if info.Size() > maxReadableFile {
+	limits := t.Limits.withDefaults()
+	if info.Size() > limits.MaxReadableFile {
 		return tool.Result{}, tool.Errorf(tool.CodeTooLarge,
 			"Use grep to locate the relevant lines, then read that range.",
-			"%s is %d bytes, over the %d byte read limit", args.Path, info.Size(), maxReadableFile)
+			"%s is %d bytes, over the %d byte read limit", args.Path, info.Size(), limits.MaxReadableFile)
 	}
 
 	raw, err := os.ReadFile(absolute)
@@ -120,7 +111,7 @@ func (t *ReadFile) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 			"start_line %d is after end_line %d", args.StartLine, args.EndLine)
 	}
 
-	result, err := readLines(ctx, bytes.NewReader(raw), args, info.Size())
+	result, err := readLines(ctx, bytes.NewReader(raw), args, info.Size(), limits.ReadLimit)
 	if err != nil {
 		return result, err
 	}
@@ -135,7 +126,7 @@ func (t *ReadFile) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 	return result, nil
 }
 
-func readLines(ctx context.Context, source io.Reader, args readFileArgs, size int64) (tool.Result, error) {
+func readLines(ctx context.Context, source io.Reader, args readFileArgs, size, readLimit int64) (tool.Result, error) {
 	scanner := bufio.NewScanner(source)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -175,7 +166,7 @@ func readLines(ctx context.Context, source io.Reader, args readFileArgs, size in
 				"%s contains binary data", args.Path)
 		}
 
-		if out.Len()+len(line) > defaultReadLimit {
+		if int64(out.Len()+len(line)) > readLimit {
 			truncated = true
 			break
 		}

@@ -27,7 +27,20 @@ type File struct {
 	ProtocolVersion string `json:"protocol_version"`
 }
 
-// DiscoveryPath returns the per-user location of the discovery file.
+// PathIn returns the discovery file's location, preferring an explicit
+// directory.
+//
+// A configured directory matters for running more than one daemon on a machine:
+// two instances sharing a discovery file would have the second silently steal
+// every client from the first.
+func PathIn(dir string) (string, error) {
+	if dir != "" {
+		return filepath.Join(dir, "daemon.json"), nil
+	}
+	return Path()
+}
+
+// Path returns the per-user location of the discovery file.
 func Path() (string, error) {
 	if dir := os.Getenv("JINGCLAW_RUNTIME_DIR"); dir != "" {
 		return filepath.Join(dir, "daemon.json"), nil

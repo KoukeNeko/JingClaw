@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 )
@@ -179,4 +180,132 @@ func koanfKeys(t reflect.Type) []string {
 	}
 
 	return keys
+}
+
+// The defaults have to survive their own validation, or nothing runs.
+func TestDefaultsAreValid(t *testing.T) {
+	if err := config.Defaults().Validate(); err != nil {
+		t.Fatalf("the defaults do not validate: %v", err)
+	}
+}
+
+// The example is what an operator starts from, so its uncommented state must
+// also pass.
+func TestExampleIsValid(t *testing.T) {
+	cfg, _, err := config.Load(writeConfig(t, config.Example))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("the example does not validate: %v", err)
+	}
+}
+
+// Durations are written the way people write them, not in nanoseconds.
+func TestDurationsAreReadAsText(t *testing.T) {
+	path := writeConfig(t, `
+[tools]
+command_timeout = "45s"
+
+[model.retry]
+base_delay = "1500ms"
+`)
+
+	cfg, _, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Tools.CommandTimeout != 45*time.Second {
+		t.Errorf("command_timeout is %s, want 45s", cfg.Tools.CommandTimeout)
+	}
+	if cfg.Model.Retry.BaseDelay != 1500*time.Millisecond {
+		t.Errorf("base_delay is %s, want 1.5s", cfg.Model.Retry.BaseDelay)
+	}
+}
+
+// A setting nobody could previously write is now one somebody can, so each new
+// one is checked at startup rather than at the moment it matters.
+func TestValidateRejectsBadValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*config.Config)
+		mention string
+	}{
+		{
+			// The important one: this API can run programs, so an address that
+			// reaches the network is refused however it was written.
+			name:    "an address off the loopback interface",
+			mutate:  func(c *config.Config) { c.Server.Addr = "0.0.0.0:8080" },
+			mention: "loopback",
+		},
+		{
+			name:    "an address that is not host:port",
+			mutate:  func(c *config.Config) { c.Server.Addr = "127.0.0.1" },
+			mention: "host:port",
+		},
+		{
+			name:    "a permission profile that does not exist",
+			mutate:  func(c *config.Config) { c.Agent.PermissionProfile = "trusted" },
+			mention: "permission_profile",
+		},
+		{
+			name:    "a log level that does not exist",
+			mutate:  func(c *config.Config) { c.Server.LogLevel = "verbose" },
+			mention: "log_level",
+		},
+		{
+			name:    "a run that may take no turns at all",
+			mutate:  func(c *config.Config) { c.Agent.MaxIterations = 0 },
+			mention: "max_iterations",
+		},
+		{
+			name: "a default command timeout above the ceiling on one",
+			mutate: func(c *config.Config) {
+				c.Tools.CommandTimeout = time.Hour
+				c.Tools.MaxCommandTimeout = time.Minute
+			},
+			mention: "command_timeout",
+		},
+		{
+			name: "a retry that starts slower than it is allowed to get",
+			mutate: func(c *config.Config) {
+				c.Model.Retry.BaseDelay = time.Minute
+				c.Model.Retry.MaxDelay = time.Second
+			},
+			mention: "base_delay",
+		},
+		{
+			name:    "jitter outside the fraction it is",
+			mutate:  func(c *config.Config) { c.Model.Retry.Jitter = 2 },
+			mention: "jitter",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.Defaults()
+			test.mutate(&cfg)
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			if !strings.Contains(err.Error(), test.mention) {
+				t.Errorf("the error does not say which setting is wrong: %v", err)
+			}
+		})
+	}
+}
+
+// Loopback is spelled several ways, and refusing the ones an operator actually
+// types would push them towards the address that is not safe.
+func TestValidateAcceptsEveryLoopbackSpelling(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:0", "localhost:7777", "[::1]:7777", "127.0.0.2:0"} {
+		cfg := config.Defaults()
+		cfg.Server.Addr = addr
+
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%s was refused: %v", addr, err)
+		}
+	}
 }

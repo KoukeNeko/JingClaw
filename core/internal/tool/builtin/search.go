@@ -18,15 +18,6 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
-const (
-	defaultGlobResults = 200
-	defaultGrepResults = 100
-
-	// Files above this are skipped when searching: they are generated,
-	// minified or binary far more often than they are the answer.
-	maxSearchableFile = 2 * 1024 * 1024
-)
-
 // skippedDirs are never worth walking. They dominate the results of any search
 // that includes them and almost never contain what was being looked for.
 var skippedDirs = map[string]bool{
@@ -52,6 +43,8 @@ var skippedDirs = map[string]bool{
 // text into a command line.
 type GlobFiles struct {
 	Workspace *workspace.Workspace
+
+	Limits Limits
 }
 
 func (t *GlobFiles) Spec() tool.Spec {
@@ -104,7 +97,7 @@ func (t *GlobFiles) Execute(ctx context.Context, call tool.Call) (tool.Result, e
 
 	limit := args.MaxResults
 	if limit <= 0 {
-		limit = defaultGlobResults
+		limit = t.Limits.withDefaults().GlobResults
 	}
 
 	matches, truncated, err := t.walk(ctx, args.Pattern, limit)
@@ -191,6 +184,8 @@ func (t *GlobFiles) walk(ctx context.Context, pattern string, limit int) ([]stri
 // Grep searches file contents.
 type Grep struct {
 	Workspace *workspace.Workspace
+
+	Limits Limits
 }
 
 func (t *Grep) Spec() tool.Spec {
@@ -266,7 +261,7 @@ func (t *Grep) Execute(ctx context.Context, call tool.Call) (tool.Result, error)
 
 	limit := args.MaxResults
 	if limit <= 0 {
-		limit = defaultGrepResults
+		limit = t.Limits.withDefaults().GrepResults
 	}
 
 	matches, filesSearched, truncated, searchErr := t.search(ctx, args, matcher, limit)
@@ -347,7 +342,7 @@ func (t *Grep) search(
 		}
 
 		info, statErr := entry.Info()
-		if statErr != nil || info.Size() > maxSearchableFile {
+		if statErr != nil || info.Size() > t.Limits.withDefaults().MaxSearchableFile {
 			return nil
 		}
 

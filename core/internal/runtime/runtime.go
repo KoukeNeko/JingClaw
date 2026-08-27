@@ -36,25 +36,50 @@ var (
 // orphanReason is recorded on runs that were live when the process stopped.
 const orphanReason = "runtime: interrupted by daemon restart"
 
+// Coalescing bounds how often provider deltas become events.
+//
 // Providers stream in whatever granularity suits them, sometimes a few
 // characters or one token-count update at a time. Persisting each delta as its
 // own event makes the log unreadable, turns every keystroke into a database
-// write, and buries the events that carry meaning. Deltas are therefore
-// coalesced into chunks a human would actually notice before they are
-// appended.
+// write, and buries the events that carry meaning. These bound the log by the
+// clock rather than by the provider's chunk rate.
+type Coalescing struct {
+	TextFlushBytes    int
+	TextFlushInterval time.Duration
+
+	// UsageFlushInterval paces token accounting. Usage is cumulative, so
+	// intermediate values are only progress indicators.
+	UsageFlushInterval time.Duration
+}
+
+func DefaultCoalescing() Coalescing {
+	return Coalescing{
+		TextFlushBytes:     240,
+		TextFlushInterval:  200 * time.Millisecond,
+		UsageFlushInterval: 2 * time.Second,
+	}
+}
+
+// withDefaults fills anything left unset, so a caller can set one field
+// without the others silently becoming zero and flushing on every delta.
+func (c Coalescing) withDefaults() Coalescing {
+	defaults := DefaultCoalescing()
+
+	if c.TextFlushBytes <= 0 {
+		c.TextFlushBytes = defaults.TextFlushBytes
+	}
+	if c.TextFlushInterval <= 0 {
+		c.TextFlushInterval = defaults.TextFlushInterval
+	}
+	if c.UsageFlushInterval <= 0 {
+		c.UsageFlushInterval = defaults.UsageFlushInterval
+	}
+	return c
+}
+
 // defaultMaxIterations is deliberately modest. Real work rarely needs more,
 // and a runaway loop is expensive in both tokens and wall-clock.
 const defaultMaxIterations = 12
-
-const (
-	textFlushBytes    = 240
-	textFlushInterval = 200 * time.Millisecond
-
-	// Usage is cumulative, so intermediate values are only progress
-	// indicators. A couple of seconds keeps cost visible during a long run
-	// without letting accounting dominate the log.
-	usageFlushInterval = 2 * time.Second
-)
 
 // isDurablyPaused reports whether a run is waiting on a human rather than
 // abandoned by a crash.
@@ -102,6 +127,9 @@ type Options struct {
 	// never learns what a Discord channel is. It forwards; whoever implements
 	// this decides what is worth sending and how to render it.
 	Delivery DeliveryObserver
+
+	// Coalescing paces how provider deltas become events.
+	Coalescing Coalescing
 
 	// MaxIterations bounds the tool loop. A model that keeps calling tools
 	// without converging must stop somewhere, and stopping with a recorded
@@ -671,6 +699,8 @@ type coalescer struct {
 	run       domain.Run
 	messageID domain.MessageID
 
+	limits Coalescing
+
 	text          strings.Builder
 	lastTextFlush time.Time
 
@@ -685,6 +715,7 @@ func (r *Runtime) newCoalescer(run domain.Run, messageID domain.MessageID) *coal
 		rt:             r,
 		run:            run,
 		messageID:      messageID,
+		limits:         r.opts.Coalescing.withDefaults(),
 		lastTextFlush:  now,
 		lastUsageFlush: now,
 	}
@@ -697,7 +728,7 @@ func (c *coalescer) addText(ctx context.Context, text string) error {
 	c.text.WriteString(text)
 
 	elapsed := c.rt.opts.Now().Sub(c.lastTextFlush)
-	if c.text.Len() < textFlushBytes && elapsed < textFlushInterval {
+	if c.text.Len() < c.limits.TextFlushBytes && elapsed < c.limits.TextFlushInterval {
 		return nil
 	}
 	return c.flushText(ctx)
@@ -707,7 +738,7 @@ func (c *coalescer) setUsage(ctx context.Context, usage domain.Usage) error {
 	c.usage = usage
 	c.usagePending = true
 
-	if c.rt.opts.Now().Sub(c.lastUsageFlush) < usageFlushInterval {
+	if c.rt.opts.Now().Sub(c.lastUsageFlush) < c.limits.UsageFlushInterval {
 		return nil
 	}
 	return c.flushUsage(ctx)

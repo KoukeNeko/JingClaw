@@ -164,6 +164,48 @@ core/bin/agent attach <session-id> --after 3
 Only events 4, 5 and 6 arrive. Restarting the daemon changes nothing: the
 session, its runs and the sequence all continue where they were.
 
+## Configuration
+
+Every setting the daemon, the CLI and the gateway have can be written in one
+file. Flags exist so a single run can differ from it, not so that a deployment
+has to be described on a command line.
+
+```bash
+core/bin/agentd --print-config > ~/.config/JingClaw/config.toml
+```
+
+That prints an example with every setting present and commented, so copying it
+changes nothing until a line is deliberately uncommented. The location is the
+platform config directory — `~/Library/Application Support/JingClaw/` on macOS,
+`%AppData%\JingClaw\` on Windows, `~/.config/JingClaw/` on Linux and on macOS
+when a file is already there. `--config` names another one.
+
+Precedence runs defaults → file → `JINGCLAW_`-prefixed environment →
+flags, so `JINGCLAW_AGENT_NAME` overrides `agent.name`, and `--model` overrides
+both. Only a flag actually typed counts; an unset one does not quietly replace
+a configured value with a default.
+
+What the agent says it is comes from here too:
+
+```toml
+[agent]
+name = "江委員"
+persona = """
+You are careful and concise. You work on this team's Go services.
+"""
+```
+
+The prompt is assembled in layers, each with a stated source, and
+`--print-prompt` shows the whole thing with where every part came from. One
+layer is deliberately not configurable: the contract that tells the model how
+tools behave and what a refusal means. Letting an operator edit that would let
+them describe a system that does not exist.
+
+Settings are validated at startup rather than at the moment they matter.
+`server.addr` off the loopback interface is refused outright — this API runs
+programs, and exposing it deserves a more deliberate mechanism than a config
+line.
+
 ## Design rules
 
 These are load-bearing. Breaking one is a design change, not a refactor.

@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
 	"github.com/KoukeNeko/JingClaw/core/internal/adapter/discord"
+	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
 	"github.com/KoukeNeko/JingClaw/core/internal/secret"
@@ -42,46 +44,68 @@ func main() {
 
 func run() error {
 	var (
-		platform  = flag.String("platform", "discord", "messaging platform to serve")
-		accountID = flag.String("account", "main", "name for this bot account within JingClaw")
+		configPath = flag.String("config", "", "configuration file; defaults to the one in the config directory")
+		platform   = flag.String("platform", "", "messaging platform to serve; overrides the configuration")
+		accountID  = flag.String("account", "", "bot account name within JingClaw; overrides the configuration")
 	)
 	flag.Parse()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	// The gateway reads the same file as the daemon, so a deployment is
+	// described in one place rather than in two that can disagree.
+	cfg, _, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "platform":
+			cfg.Gateway.Platform = *platform
+		case "account":
+			cfg.Gateway.AccountID = *accountID
+		}
+	})
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel()}))
 	slog.SetDefault(logger)
 
-	if *platform != "discord" {
-		return fmt.Errorf("unknown platform %q; only discord is implemented", *platform)
+	if cfg.Gateway.Platform != "discord" {
+		return fmt.Errorf("unknown platform %q; only discord is implemented", cfg.Gateway.Platform)
 	}
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	client, err := dialAgent()
+	client, err := dialAgent(cfg.Server.RuntimeDir)
 	if err != nil {
 		return err
 	}
 
-	botToken, err := loadBotToken()
+	botToken, err := loadBotToken(cfg)
 	if err != nil {
 		return err
 	}
 
 	relay := &relay{
 		client:    client,
-		accountID: *accountID,
+		accountID: cfg.Gateway.AccountID,
 		logger:    logger,
 	}
 
 	adapter := discord.New(discord.Config{
 		Token:     botToken.Reveal(),
-		AccountID: *accountID,
+		AccountID: cfg.Gateway.AccountID,
 		Logger:    logger,
 	}, relay)
 	relay.poster = adapter
 
-	logger.Info("gateway starting", "platform", *platform, "account_id", *accountID)
-	fmt.Printf("JingClaw gateway\nPlatform: %s\nAccount:  %s\n", *platform, *accountID)
+	logger.Info("gateway starting",
+		"platform", cfg.Gateway.Platform, "account_id", cfg.Gateway.AccountID)
+	fmt.Printf("JingClaw gateway\nPlatform: %s\nAccount:  %s\n",
+		cfg.Gateway.Platform, cfg.Gateway.AccountID)
 
 	group, ctx := errgroup.WithContext(rootCtx)
 
@@ -217,8 +241,8 @@ func (r *relay) post(ctx context.Context, dispatch *controlv1.Dispatch) error {
 }
 
 // dialAgent connects to agentd with the gateway-scoped credential.
-func dialAgent() (controlv1connect.GatewayIngressServiceClient, error) {
-	path, err := discovery.Path()
+func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient, error) {
+	path, err := discovery.PathIn(runtimeDir)
 	if err != nil {
 		return nil, err
 	}
@@ -237,14 +261,14 @@ func dialAgent() (controlv1connect.GatewayIngressServiceClient, error) {
 	return controlv1connect.NewGatewayIngressServiceClient(httpClient, found.BaseURL), nil
 }
 
-func loadBotToken() (secret.Value, error) {
-	files, err := secret.DefaultFiles("discord.token")
+func loadBotToken(cfg config.Config) (secret.Value, error) {
+	files, err := secret.DefaultFiles(cfg.Gateway.TokenFile)
 	if err != nil {
 		return secret.Value{}, err
 	}
 
 	token, err := secret.Load(secret.LoadOptions{
-		EnvVars: []string{"DISCORD_BOT_TOKEN"},
+		EnvVars: cfg.Gateway.TokenEnv,
 		Files:   files,
 	})
 	if err != nil {
@@ -252,7 +276,8 @@ func loadBotToken() (secret.Value, error) {
 	}
 	if !token.IsSet() {
 		return secret.Value{}, fmt.Errorf(
-			"no Discord bot token: set DISCORD_BOT_TOKEN, or write it with mode 600 to one of: %v", files)
+			"no bot token: set %s, or write it with mode 600 to one of: %v",
+			strings.Join(cfg.Gateway.TokenEnv, " or "), files)
 	}
 
 	return token, nil

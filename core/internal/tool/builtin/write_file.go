@@ -16,11 +16,6 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
-// Overwriting an existing file is capped well below the read limit. A model
-// rewriting something large in full is nearly always the wrong shape of edit,
-// and the right answer is a targeted change rather than a bigger ceiling.
-const maxOverwriteBytes = 128 * 1024
-
 // Observer records what the agent has actually seen on disk.
 //
 // It exists so a write can refuse to clobber a file the model never read, and
@@ -75,6 +70,8 @@ type WriteFile struct {
 
 	// Locks is shared with EditFile so the two cannot interleave on one file.
 	Locks *keyedMutex
+
+	Limits Limits
 }
 
 func NewWriteFile(ws *workspace.Workspace, observer *Observer, locks *keyedMutex) *WriteFile {
@@ -192,7 +189,7 @@ func (t *WriteFile) inspectExisting(relative, absolute string) ([]byte, bool, er
 			"Choose a file path, not a directory.",
 			"%s is a directory", relative)
 	}
-	if info.Size() > maxOverwriteBytes {
+	if info.Size() > t.Limits.withDefaults().MaxOverwriteBytes {
 		return nil, false, tool.Errorf(tool.CodeTooLarge,
 			"Read the region you need to change and make a targeted edit instead.",
 			"%s is %d bytes, too large to replace in full", relative, info.Size())

@@ -16,16 +16,6 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
-const (
-	defaultCommandTimeout = 2 * time.Minute
-	maxCommandTimeout     = 10 * time.Minute
-
-	// Output beyond this is truncated from the middle: the beginning says what
-	// ran and the end says how it failed, while the middle of a build log
-	// rarely earns its place in a context window.
-	maxCommandOutput = 32 * 1024
-)
-
 // ExecCommand runs a program in the workspace.
 //
 // Arguments are passed as a list rather than a command line. A model producing
@@ -34,6 +24,8 @@ const (
 // actually be executed.
 type ExecCommand struct {
 	Workspace *workspace.Workspace
+
+	Limits Limits
 
 	// Env is the environment child processes receive. Left empty, a minimal
 	// one is derived: inheriting the daemon's would hand every command its API
@@ -110,11 +102,13 @@ func (t *ExecCommand) Execute(ctx context.Context, call tool.Call) (tool.Result,
 			"%s is not a directory in the workspace", orDot(args.Cwd))
 	}
 
-	timeout := defaultCommandTimeout
+	limits := t.Limits.withDefaults()
+
+	timeout := limits.CommandTimeout
 	if args.TimeoutSeconds > 0 {
 		timeout = time.Duration(args.TimeoutSeconds) * time.Second
-		if timeout > maxCommandTimeout {
-			timeout = maxCommandTimeout
+		if timeout > limits.MaxCommandTimeout {
+			timeout = limits.MaxCommandTimeout
 		}
 	}
 
@@ -144,7 +138,7 @@ func (t *ExecCommand) Execute(ctx context.Context, call tool.Call) (tool.Result,
 	runErr := command.Run()
 	elapsed := time.Since(started)
 
-	return t.result(args, combined.Bytes(), runErr, runCtx, elapsed)
+	return t.result(args, combined.Bytes(), runErr, runCtx, elapsed, limits.MaxCommandOutput)
 }
 
 func (t *ExecCommand) result(
@@ -153,9 +147,10 @@ func (t *ExecCommand) result(
 	runErr error,
 	runCtx context.Context,
 	elapsed time.Duration,
+	maxOutput int,
 ) (tool.Result, error) {
 	display := commandLine(args)
-	output, truncated := boundOutput(rawOutput)
+	output, truncated := boundOutput(rawOutput, maxOutput)
 
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		// Timeouts carry the output produced so far: a hung test suite usually
@@ -237,12 +232,12 @@ func (t *ExecCommand) environment() []string {
 //
 // The start says what ran and the end says how it ended; the middle of a build
 // log is where the least information per byte lives.
-func boundOutput(raw []byte) (string, bool) {
-	if len(raw) <= maxCommandOutput {
+func boundOutput(raw []byte, maxOutput int) (string, bool) {
+	if len(raw) <= maxOutput {
 		return string(raw), false
 	}
 
-	half := maxCommandOutput / 2
+	half := maxOutput / 2
 	head := string(raw[:half])
 	tail := string(raw[len(raw)-half:])
 
