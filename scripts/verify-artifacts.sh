@@ -1,0 +1,152 @@
+#!/bin/sh
+# Proves output too large to show is not output that is lost: the model runs a
+# command, sees an excerpt with an artifact id, the id reaches the event log
+# and a client, and the whole thing streams back through the control API.
+#
+# It uses the real model, because the seam under test is "a tool truncated,
+# and the id got all the way out" — and only a model calls tools.
+set -eu
+
+cd "$(dirname "$0")/../core"
+
+
+WORK=$(mktemp -d)
+go build -o "$WORK/agentd" ./cmd/agentd
+go build -o "$WORK/agent" ./cmd/agent
+
+DAEMON=""
+ATTACH=""
+cleanup() {
+	[ -n "$ATTACH" ] && kill "$ATTACH" 2>/dev/null
+	[ -n "$DAEMON" ] && kill "$DAEMON" 2>/dev/null
+	rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+
+# This one needs a real model, because the seam under test is "a tool
+# truncated and the id got all the way out" and only a model calls tools.
+have_credential() {
+	[ -n "${GEMINI_API_KEY:-}" ] && return 0
+	[ -n "${GOOGLE_API_KEY:-}" ] && return 0
+	# The same two places the daemon looks. Existence only; nothing here reads
+	# the file, and nothing prints it.
+	[ -f "$HOME/.config/JingClaw/gemini.key" ] && return 0
+	[ -f "$HOME/Library/Application Support/JingClaw/gemini.key" ] && return 0
+	return 1
+}
+
+if ! have_credential; then
+	printf 'skipped: no provider credential, and this check needs a real model\n'
+	exit 0
+fi
+
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+
+# A file with a distinctive line in the middle, so "the excerpt dropped it but
+# the artifact kept it" is something the test can actually check.
+awk 'BEGIN { for (i = 0; i < 4000; i++) print "line-" i "-padding-padding-padding" }' > "$WORK/ws/big.txt"
+grep -q 'line-2000-padding' "$WORK/ws/big.txt" || fail "the fixture is wrong"
+
+cat > "$WORK/config.toml" <<EOF
+[agent]
+# Room for the model to look around first. Four was enough on one run and not
+# on the next, which made this check about the model's patience rather than
+# about whether the artifact came back.
+max_iterations = 10
+permission_profile = "local"
+
+[model]
+provider = "gemini"
+model = "gemma-4-31b-it"
+
+[tools]
+max_command_output = 2000
+
+[workspace]
+root = "$WORK/ws"
+
+[server]
+runtime_dir = "$WORK/run"
+data_dir = "$WORK/data"
+log_level = "info"
+EOF
+
+"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+DAEMON=$!
+
+WAITED=0
+while [ ! -f "$WORK/run/daemon.json" ]; do
+	WAITED=$((WAITED + 1))
+	[ "$WAITED" -gt 150 ] && fail "the daemon did not start: $(cat "$WORK/daemon.err")"
+	sleep 0.1
+done
+
+SESSION=$("$WORK/agent" --config "$WORK/config.toml" session create | tr -d '\r\n')
+"$WORK/agent" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+ATTACH=$!
+
+"$WORK/agent" --config "$WORK/config.toml" send "$SESSION" \
+	"Run: /bin/cat big.txt   — then tell me in one sentence how many lines it printed." >/dev/null
+
+# Everything the run asks for is approved, for as long as it keeps asking. An
+# agent that reads a file and then counts its lines is doing ordinary work, so
+# the loop cannot stop after the first decision.
+APPROVED=0
+WAITED=0
+while [ "$WAITED" -lt 240 ]; do
+	grep -q 'run.completed\|run.failed' "$WORK/events" && break
+
+	APPROVAL=$("$WORK/agent" --config "$WORK/config.toml" approvals "$SESSION" 2>/dev/null |
+		grep -o 'apr_[A-Za-z0-9]*' | head -1 || true)
+	if [ -n "$APPROVAL" ]; then
+		"$WORK/agent" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null 2>&1 &&
+			APPROVED=$((APPROVED + 1))
+	fi
+
+	WAITED=$((WAITED + 1))
+	sleep 0.5
+done
+
+grep -q 'run.completed\|run.failed' "$WORK/events" || fail "the run never finished:
+$(cut -c1-120 "$WORK/events" | tail -20)"
+[ "$APPROVED" -ge 1 ] || fail "nothing was ever approved, so no command ran"
+printf 'ok   %d command(s) approved and run\n' "$APPROVED"
+
+grep -q 'run.failed' "$WORK/events" &&
+	fail "the run failed:
+$(cut -c1-160 "$WORK/events" | tail -20)"
+[ "$APPROVED" = 1 ] && printf 'ok   the command was approved and ran\n'
+
+# 1. The id reached a client.
+ID=$(grep -o 'sha256-[0-9a-f]\{64\}' "$WORK/events" | head -1)
+[ -n "$ID" ] || fail "no artifact id reached the client:
+$(cut -c1-200 "$WORK/events" | tail -20)"
+printf 'ok   the artifact id reached a client through the event log\n'
+
+grep -q 'bytes kept as sha256-' "$WORK/events" ||
+	fail "the timeline does not say output was kept"
+printf 'ok   the timeline says how much was kept and where\n'
+
+# 2. The whole thing comes back through the control API.
+"$WORK/agent" --config "$WORK/config.toml" artifact get "$ID" > "$WORK/whole.txt" ||
+	fail "fetching the artifact failed"
+
+if ! cmp -s "$WORK/whole.txt" "$WORK/ws/big.txt"; then
+	fail "what came back is not what the command printed ($(wc -c < "$WORK/whole.txt") bytes against $(wc -c < "$WORK/ws/big.txt"))"
+fi
+printf 'ok   the whole output streams back byte for byte\n'
+
+# 3. The part the excerpt dropped is in there.
+grep -q 'line-2000-padding' "$WORK/whole.txt" ||
+	fail "the middle the excerpt cut is missing from the artifact"
+printf 'ok   the middle the excerpt cut is in the artifact\n'
+
+# 4. A window of it.
+"$WORK/agent" --config "$WORK/config.toml" artifact get "$ID" --offset 0 --limit 6 > "$WORK/window.txt"
+[ "$(cat "$WORK/window.txt")" = "line-0" ] ||
+	fail "a six-byte window returned $(cat "$WORK/window.txt")"
+printf 'ok   a window of it can be asked for\n'
+
+printf '\nall checks passed\n'

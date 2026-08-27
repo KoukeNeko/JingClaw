@@ -376,6 +376,25 @@ model served by something that does not report one; with neither, compaction
 stays off, because summarising against a guessed window would either throw work
 away early or fail to save the session that needed saving.
 
+## Verifying
+
+```bash
+cd core && go test -race ./...
+./scripts/verify-all.sh
+```
+
+The scripts are separate from the tests on purpose. Every serious defect this
+project has had was in an assembly seam rather than in logic a unit test was
+looking at: the daemon that never wired the projector, so runs completed and
+Discord got nothing; the storage codec that did not know an event, so
+compaction worked in memory and vanished on SQLite; the bot that connected,
+logged cleanly, and ignored every message. None were visible to a unit test.
+All were visible within seconds of running the thing.
+
+So each script starts a real daemon, drives it the way a person would, and
+checks what came out. `verify-artifacts.sh` needs a provider credential —
+only a model calls tools — and skips itself when there is none.
+
 ## Design rules
 
 These are load-bearing. Breaking one is a design change, not a refactor.
