@@ -35,6 +35,7 @@ type turn struct {
 	session domain.SessionID
 	text    string
 	origin  domain.RunOrigin
+	targets []domain.DeliveryTarget
 }
 
 func (r *fakeRuntime) CreateSession(ctx context.Context, title string) (domain.Session, error) {
@@ -52,13 +53,14 @@ func (r *fakeRuntime) CreateSession(ctx context.Context, title string) (domain.S
 	return session, nil
 }
 
-func (r *fakeRuntime) SendTurn(
+func (r *fakeRuntime) SendTurnTo(
 	_ context.Context,
 	session domain.SessionID,
 	text string,
 	origin domain.RunOrigin,
+	targets []domain.DeliveryTarget,
 ) (domain.RunID, domain.MessageID, error) {
-	r.turns = append(r.turns, turn{session: session, text: text, origin: origin})
+	r.turns = append(r.turns, turn{session: session, text: text, origin: origin, targets: targets})
 	return domain.RunID("run-" + text), "msg", nil
 }
 

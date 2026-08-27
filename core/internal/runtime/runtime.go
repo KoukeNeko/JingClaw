@@ -62,6 +62,15 @@ func isDurablyPaused(status domain.RunStatus) bool {
 	return status == domain.RunAwaitingApproval || status == domain.RunAwaitingInput
 }
 
+// DeliveryObserver receives events for runs with an external delivery target.
+//
+// A failure here must not fail the run: the work happened, and being unable to
+// tell a chat channel about it is a delivery problem, not a reason to discard
+// what was done.
+type DeliveryObserver interface {
+	Observe(ctx context.Context, run domain.Run, event domain.Event) error
+}
+
 // IDGenerator produces identifiers. Injected so tests can be deterministic.
 type IDGenerator func() string
 
@@ -85,6 +94,14 @@ type Options struct {
 
 	// SystemPrompt is prepended to every request.
 	SystemPrompt string
+
+	// Delivery is told about events on runs whose output belongs somewhere
+	// other than a control-plane client.
+	//
+	// The interface is declared here and implemented elsewhere, so the runtime
+	// never learns what a Discord channel is. It forwards; whoever implements
+	// this decides what is worth sending and how to render it.
+	Delivery DeliveryObserver
 
 	// MaxIterations bounds the tool loop. A model that keeps calling tools
 	// without converging must stop somewhere, and stopping with a recorded
@@ -251,10 +268,34 @@ func (r *Runtime) Run(ctx context.Context, id domain.RunID) (domain.Run, error) 
 	return r.opts.Store.Run(ctx, id)
 }
 
-// SendTurn records the user's message and starts a run. It returns as soon as
-// the run is accepted; the answer arrives over the event stream, so a client
-// disconnecting never cancels an in-flight generation.
-func (r *Runtime) SendTurn(ctx context.Context, sessionID domain.SessionID, text string, origin domain.RunOrigin) (domain.RunID, domain.MessageID, error) {
+// SendTurn starts a run whose output goes back to the client that asked for
+// it.
+//
+// It returns as soon as the run is accepted; the answer arrives over the event
+// stream, so a client disconnecting never cancels an in-flight generation.
+func (r *Runtime) SendTurn(
+	ctx context.Context,
+	sessionID domain.SessionID,
+	text string,
+	origin domain.RunOrigin,
+) (domain.RunID, domain.MessageID, error) {
+	return r.SendTurnTo(ctx, sessionID, text, origin,
+		[]domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient, Ref: origin.ClientID}})
+}
+
+// SendTurnTo starts a run whose output is delivered somewhere named by the
+// caller.
+//
+// Targets belong to the run rather than the session, so taking over a
+// conversation from a GUI does not echo the operator's own notes back to the
+// channel it came from.
+func (r *Runtime) SendTurnTo(
+	ctx context.Context,
+	sessionID domain.SessionID,
+	text string,
+	origin domain.RunOrigin,
+	targets []domain.DeliveryTarget,
+) (domain.RunID, domain.MessageID, error) {
 	r.mu.RLock()
 	draining := r.draining
 	r.mu.RUnlock()
@@ -277,7 +318,7 @@ func (r *Runtime) SendTurn(ctx context.Context, sessionID domain.SessionID, text
 		SessionID:       sessionID,
 		Status:          domain.RunQueued,
 		Origin:          origin,
-		DeliveryTargets: []domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient, Ref: origin.ClientID}},
+		DeliveryTargets: targets,
 		CreatedAt:       r.opts.Now(),
 	}
 	if err := r.opts.Store.CreateRun(ctx, run); err != nil {
@@ -567,20 +608,61 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 // append writes to the log and then wakes subscribers. Order matters: the
 // event must be readable before anyone is told to go read it.
 func (r *Runtime) append(ctx context.Context, sessionID domain.SessionID, runID domain.RunID, kind domain.EventKind, payload domain.EventPayload) error {
-	_, err := r.opts.Store.Append(ctx, domain.Event{
+	event := domain.Event{
 		ID:         domain.EventID(r.opts.NewEventID()),
 		SessionID:  sessionID,
 		RunID:      runID,
 		OccurredAt: r.opts.Now(),
 		Kind:       kind,
 		Payload:    payload,
-	})
+	}
+
+	seq, err := r.opts.Store.Append(ctx, event)
 	if err != nil {
 		return err
 	}
+	event.Seq = seq
 
 	r.opts.Hub.Publish(sessionID)
+	r.notifyDelivery(ctx, runID, event)
+
 	return nil
+}
+
+// notifyDelivery forwards an event to the delivery observer, if the run has
+// somewhere external to send it.
+//
+// Errors are logged rather than returned. The work already happened; failing
+// the run because a chat channel could not be told about it would discard
+// something that succeeded.
+func (r *Runtime) notifyDelivery(ctx context.Context, runID domain.RunID, event domain.Event) {
+	if r.opts.Delivery == nil || runID == "" {
+		return
+	}
+
+	run, err := r.opts.Store.Run(ctx, runID)
+	if err != nil || !hasExternalTarget(run) {
+		return
+	}
+
+	if err := r.opts.Delivery.Observe(ctx, run, event); err != nil {
+		r.opts.Logger.Error("failed to queue a delivery",
+			"run_id", string(runID),
+			"event", string(event.Kind),
+			"error", err,
+		)
+	}
+}
+
+// hasExternalTarget reports whether a run's output belongs anywhere other than
+// the control client that started it.
+func hasExternalTarget(run domain.Run) bool {
+	for _, target := range run.DeliveryTargets {
+		if target.Kind != domain.DeliveryLocalClient {
+			return true
+		}
+	}
+	return false
 }
 
 // coalescer batches provider deltas into events worth persisting.

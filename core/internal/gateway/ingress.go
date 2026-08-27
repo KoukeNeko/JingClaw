@@ -17,7 +17,11 @@ import (
 // untrusted text reach run lifecycle and permissions.
 type Runtime interface {
 	CreateSession(ctx context.Context, title string) (domain.Session, error)
-	SendTurn(ctx context.Context, session domain.SessionID, text string, origin domain.RunOrigin) (domain.RunID, domain.MessageID, error)
+
+	// SendTurnTo starts a run whose output goes back to the conversation it
+	// came from rather than to a control client.
+	SendTurnTo(ctx context.Context, session domain.SessionID, text string,
+		origin domain.RunOrigin, targets []domain.DeliveryTarget) (domain.RunID, domain.MessageID, error)
 }
 
 // ProfileBinder records which permission profile a session runs under.
@@ -107,7 +111,10 @@ func (i *Ingress) Accept(ctx context.Context, message InboundMessage) (Accepted,
 	// recorded as the origin, not the operator running the daemon.
 	origin := message.Principal.Origin()
 
-	runID, _, err := i.Runtime.SendTurn(ctx, session, message.Text, origin)
+	// The reply belongs in the conversation the request came from.
+	targets := []domain.DeliveryTarget{message.Conversation.DeliveryTarget()}
+
+	runID, _, err := i.Runtime.SendTurnTo(ctx, session, message.Text, origin, targets)
 	if err != nil {
 		return Accepted{}, err
 	}
