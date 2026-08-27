@@ -224,3 +224,120 @@ func gatewayError(err error) error {
 		return toConnectError(err)
 	}
 }
+
+// ChannelServer manages bindings.
+//
+// It is spoken by an operator's control client, not by a gateway. Which
+// channels may reach which workspace is the operator's decision, and letting
+// the gateway assert it about itself would make the allowlist meaningless.
+type ChannelServer struct {
+	store gateway.Store
+	newID func() string
+	now   func() time.Time
+}
+
+func NewChannelServer(store gateway.Store, newID func() string, now func() time.Time) *ChannelServer {
+	if now == nil {
+		now = time.Now
+	}
+	return &ChannelServer{store: store, newID: newID, now: now}
+}
+
+func (s *ChannelServer) ListBindings(
+	ctx context.Context,
+	_ *connect.Request[controlv1.ListBindingsRequest],
+) (*connect.Response[controlv1.ListBindingsResponse], error) {
+	bindings, err := s.store.ListBindings(ctx)
+	if err != nil {
+		return nil, gatewayError(err)
+	}
+
+	out := make([]*controlv1.Binding, 0, len(bindings))
+	for _, binding := range bindings {
+		out = append(out, bindingToProto(binding))
+	}
+
+	return connect.NewResponse(&controlv1.ListBindingsResponse{Bindings: out}), nil
+}
+
+func (s *ChannelServer) UpsertBinding(
+	ctx context.Context,
+	req *connect.Request[controlv1.UpsertBindingRequest],
+) (*connect.Response[controlv1.UpsertBindingResponse], error) {
+	incoming := req.Msg.GetBinding()
+	if incoming == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("binding is required"))
+	}
+	if incoming.GetPlatform() == "" || incoming.GetChannelId() == "" || incoming.GetWorkspaceId() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			errors.New("platform, channel_id and workspace_id are required"))
+	}
+
+	binding := bindingFromProto(incoming)
+	if binding.ID == "" {
+		binding.ID = s.newID()
+	}
+	if binding.PermissionProfile == "" {
+		// Traffic from a channel gets the strict profile unless an operator
+		// deliberately says otherwise.
+		binding.PermissionProfile = "gateway"
+	}
+	binding.CreatedAt = s.now()
+
+	if err := s.store.UpsertBinding(ctx, binding); err != nil {
+		return nil, gatewayError(err)
+	}
+
+	return connect.NewResponse(&controlv1.UpsertBindingResponse{
+		Binding: bindingToProto(binding),
+	}), nil
+}
+
+func (s *ChannelServer) DeleteBinding(
+	ctx context.Context,
+	req *connect.Request[controlv1.DeleteBindingRequest],
+) (*connect.Response[controlv1.DeleteBindingResponse], error) {
+	if err := s.store.DeleteBinding(ctx, req.Msg.GetBindingId()); err != nil {
+		return nil, gatewayError(err)
+	}
+	return connect.NewResponse(&controlv1.DeleteBindingResponse{}), nil
+}
+
+func bindingToProto(binding gateway.Binding) *controlv1.Binding {
+	claims := make([]*controlv1.PrincipalClaim, 0, len(binding.AllowedClaims))
+	for _, claim := range binding.AllowedClaims {
+		claims = append(claims, &controlv1.PrincipalClaim{Namespace: claim.Namespace, Value: claim.Value})
+	}
+
+	return &controlv1.Binding{
+		Id:                binding.ID,
+		Platform:          string(binding.Platform),
+		AccountId:         binding.AccountID,
+		TenantId:          binding.TenantID,
+		ChannelId:         binding.ChannelID,
+		WorkspaceId:       binding.WorkspaceID,
+		PermissionProfile: binding.PermissionProfile,
+		AllowedPrincipals: binding.AllowedPrincipals,
+		AllowedClaims:     claims,
+		CreatedAt:         timestamppb.New(binding.CreatedAt),
+	}
+}
+
+func bindingFromProto(binding *controlv1.Binding) gateway.Binding {
+	claims := make([]gateway.Claim, 0, len(binding.GetAllowedClaims()))
+	for _, claim := range binding.GetAllowedClaims() {
+		claims = append(claims, gateway.Claim{Namespace: claim.GetNamespace(), Value: claim.GetValue()})
+	}
+
+	return gateway.Binding{
+		ID:                binding.GetId(),
+		Platform:          gateway.Platform(binding.GetPlatform()),
+		AccountID:         binding.GetAccountId(),
+		TenantID:          binding.GetTenantId(),
+		ChannelID:         binding.GetChannelId(),
+		WorkspaceID:       binding.GetWorkspaceId(),
+		PermissionProfile: binding.GetPermissionProfile(),
+		AllowedPrincipals: binding.GetAllowedPrincipals(),
+		AllowedClaims:     claims,
+	}
+}

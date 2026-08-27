@@ -194,6 +194,8 @@ func run() error {
 	mux.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub)))
 	mux.Handle(controlv1connect.NewGatewayIngressServiceHandler(
 		control.NewGatewayServer(ingress, store, time.Now)))
+	mux.Handle(controlv1connect.NewChannelServiceHandler(
+		control.NewChannelServer(store, func() string { return id.WithPrefix("bnd") }, time.Now)))
 
 	// h2c so a gRPC client (the Windows client will use grpc-dotnet) can reach
 	// the same endpoint as Connect and gRPC-Web over plaintext loopback.

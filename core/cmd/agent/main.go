@@ -45,7 +45,7 @@ func newRootCommand() *cobra.Command {
 	}
 
 	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand(),
-		newApprovalsCommand(), newApproveCommand(), newDenyCommand())
+		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand())
 	return root
 }
 
@@ -361,23 +361,40 @@ func newMeta() *controlv1.RequestMeta {
 	}
 }
 
-// dial reads the daemon's discovery file and returns an authenticated client.
-func dial() (controlv1connect.SessionServiceClient, error) {
-	path, err := discovery.Path()
+// dialChannels returns a client for binding management, which uses the same
+// control credential: deciding which channels may reach a workspace is the
+// operator's business, not the gateway's.
+func dialChannels() (controlv1connect.ChannelServiceClient, error) {
+	httpClient, baseURL, err := authenticated()
 	if err != nil {
 		return nil, err
+	}
+	return controlv1connect.NewChannelServiceClient(httpClient, baseURL), nil
+}
+
+// dial reads the daemon's discovery file and returns an authenticated client.
+func dial() (controlv1connect.SessionServiceClient, error) {
+	httpClient, baseURL, err := authenticated()
+	if err != nil {
+		return nil, err
+	}
+	return controlv1connect.NewSessionServiceClient(httpClient, baseURL), nil
+}
+
+func authenticated() (*http.Client, string, error) {
+	path, err := discovery.Path()
+	if err != nil {
+		return nil, "", err
 	}
 
 	d, err := discovery.Read(path)
 	if err != nil {
-		return nil, fmt.Errorf("%w (is agentd running?)", err)
+		return nil, "", fmt.Errorf("%w (is agentd running?)", err)
 	}
 
-	httpClient := &http.Client{
+	return &http.Client{
 		Transport: &bearerTransport{token: d.Token, base: http.DefaultTransport},
-	}
-
-	return controlv1connect.NewSessionServiceClient(httpClient, d.BaseURL), nil
+	}, d.BaseURL, nil
 }
 
 type bearerTransport struct {

@@ -34,8 +34,8 @@ and every GUI.
 | Milestone | Scope |
 |---|---|
 | M0 | walking skeleton — done |
-| **M1a** | durable runtime, providers, tools, permissions — done |
-| M1b | `gatewayd` + Discord |
+| M1a | durable runtime, providers, tools, permissions — done |
+| **M1b** | gateway plane ✓, Discord adapter ✓ |
 | M2 | SwiftUI, WinUI 3 and web clients at parity |
 | M3 | subagents, replay, sandboxing, remote fleet |
 
@@ -51,6 +51,23 @@ An edit must target text that appears exactly once, in a file the agent has
 read and that has not changed since. `exec_command` takes a program and an
 argument list — there is no shell — and a cancelled command takes its whole
 process group with it.
+
+### From a chat channel
+
+`gatewayd` connects a Discord bot to the same runtime, so a mention in a bound
+channel starts work and the reply comes back to that thread.
+
+```bash
+agent bindings add --channel <id> --guild <id> --workspace ws --user <your-user-id>
+gatewayd --account main
+```
+
+Every default is no: a channel with no binding is unreachable, a binding with
+nobody allowed permits nobody, overheard text is not a request, and bots are
+refused whatever the allowlist says. Runs from a channel use a stricter
+profile that denies execution outright — approving from the same account that
+asked is one unbroken chain, so anything that runs a program has to be
+authorised from a local client.
 
 ## Layout
 
