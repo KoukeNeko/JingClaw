@@ -76,7 +76,7 @@ func originToProto(o domain.RunOrigin) *controlv1.RunOrigin {
 	return out
 }
 
-func sessionToProto(s *domain.Session) *controlv1.Session {
+func sessionToProto(s domain.Session) *controlv1.Session {
 	return &controlv1.Session{
 		Id:        string(s.ID),
 		Title:     s.Title,

@@ -1,3 +1,6 @@
+// Package event carries live notifications between the runtime and stream
+// subscribers. Durable state lives in internal/storage; nothing here survives
+// a restart, and nothing here needs to.
 package event
 
 import (

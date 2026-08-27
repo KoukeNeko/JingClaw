@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
+	"github.com/KoukeNeko/JingClaw/core/internal/storage/sqlite"
 )
 
 const shutdownGrace = 10 * time.Second
@@ -44,6 +46,7 @@ func run() error {
 		devFake    = flag.Bool("dev-fake", false, "use the deterministic fake provider (the only option in M0)")
 		addr       = flag.String("addr", "127.0.0.1:0", "loopback address to listen on; port 0 picks a free one")
 		chunkDelay = flag.Duration("fake-delay", 150*time.Millisecond, "delay between fake provider chunks")
+		dataDir    = flag.String("data-dir", "", "directory for the database; defaults to the user config directory")
 	)
 	flag.Parse()
 
@@ -59,7 +62,17 @@ func run() error {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store := event.NewMemoryStore(id.New, time.Now)
+	dbPath, err := databasePath(*dataDir)
+	if err != nil {
+		return err
+	}
+
+	store, err := sqlite.Open(rootCtx, dbPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.Close() }()
+
 	hub := event.NewHub()
 
 	rt := runtime.New(rootCtx, runtime.Options{
@@ -71,7 +84,19 @@ func run() error {
 		NewMessageID: func() string { return id.WithPrefix("msg") },
 		NewEventID:   func() string { return id.WithPrefix("evt") },
 		Now:          time.Now,
+		Logger:       logger,
 	})
+
+	// Runs that were live when this process last stopped have nobody driving
+	// them. Resolving them before serving means clients never see a run that
+	// can no longer make progress.
+	recovered, err := rt.RecoverOrphanedRuns(rootCtx)
+	if err != nil {
+		return err
+	}
+	if recovered > 0 {
+		logger.Warn("resolved runs orphaned by a previous shutdown", "count", recovered)
+	}
 
 	token, err := control.NewToken()
 	if err != nil {
@@ -121,10 +146,12 @@ func run() error {
 	logger.Info("jingclaw daemon listening",
 		"base_url", baseURL,
 		"provider", "fake",
+		"database", dbPath,
 		"discovery", discoveryPath,
 	)
 	// Human-facing line on stdout; the structured log goes to stderr.
-	fmt.Printf("JingClaw daemon\nListening: %s\nProvider:  fake\nDiscovery: %s\n", baseURL, discoveryPath)
+	fmt.Printf("JingClaw daemon\nListening: %s\nProvider:  fake\nDatabase:  %s\nDiscovery: %s\n",
+		baseURL, dbPath, discoveryPath)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
@@ -151,4 +178,21 @@ func run() error {
 
 	logger.Info("stopped")
 	return nil
+}
+
+// databasePath resolves where state is kept. An explicit --data-dir wins so a
+// test or a second instance can be fully isolated.
+func databasePath(dataDir string) (string, error) {
+	if dataDir == "" {
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return "", fmt.Errorf("locate config dir: %w", err)
+		}
+		dataDir = filepath.Join(base, "JingClaw")
+	}
+
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return "", fmt.Errorf("create data dir: %w", err)
+	}
+	return filepath.Join(dataDir, "jingclaw.db"), nil
 }

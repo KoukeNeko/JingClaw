@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,12 +14,13 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
+	"github.com/KoukeNeko/JingClaw/core/internal/storage/memory"
 )
 
 // A fixed clock and counter-based IDs keep every assertion below exact. The
 // whole point of the fake provider is that the walking skeleton has no
 // nondeterminism left to explain away.
-func newHarness(t *testing.T, provider runtime.Provider) (*runtime.Runtime, *event.MemoryStore, *event.Hub) {
+func newHarness(t *testing.T, provider runtime.Provider) (*runtime.Runtime, *memory.Store, *event.Hub) {
 	t.Helper()
 
 	var counter atomic.Uint64
@@ -27,7 +29,7 @@ func newHarness(t *testing.T, provider runtime.Provider) (*runtime.Runtime, *eve
 	}
 	clock := func() time.Time { return time.Unix(0, 0).UTC() }
 
-	store := event.NewMemoryStore(func() string { return fmt.Sprintf("evt_%d", counter.Add(1)) }, clock)
+	store := memory.New()
 	hub := event.NewHub()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -42,6 +44,7 @@ func newHarness(t *testing.T, provider runtime.Provider) (*runtime.Runtime, *eve
 		NewMessageID: next("msg"),
 		NewEventID:   next("evt"),
 		Now:          clock,
+		Logger:       slog.New(slog.DiscardHandler),
 	})
 
 	return rt, store, hub
@@ -201,9 +204,9 @@ func TestInterruptMidStreamCancelsAndRecordsTerminalState(t *testing.T) {
 	}
 	waitForRun(t, rt, runID)
 
-	run, ok := rt.Run(runID)
-	if !ok {
-		t.Fatal("run disappeared")
+	run, err := rt.Run(ctx, runID)
+	if err != nil {
+		t.Fatalf("read run: %v", err)
 	}
 	if run.Status != domain.RunCancelled {
 		t.Errorf("got status %q, want %q", run.Status, domain.RunCancelled)
@@ -215,8 +218,8 @@ func TestInterruptMidStreamCancelsAndRecordsTerminalState(t *testing.T) {
 	}
 
 	last := events[len(events)-1]
-	changed, ok := last.Payload.(domain.RunStateChanged)
-	if !ok {
+	changed, isStateChange := last.Payload.(domain.RunStateChanged)
+	if !isStateChange {
 		t.Fatalf("last event is %T, want RunStateChanged", last.Payload)
 	}
 	if changed.Status != domain.RunCancelled {
@@ -270,7 +273,10 @@ func TestProviderErrorFailsRunWithoutKillingRuntime(t *testing.T) {
 	}
 	waitForRun(t, rt, runID)
 
-	run, _ := rt.Run(runID)
+	run, err := rt.Run(ctx, runID)
+	if err != nil {
+		t.Fatalf("read run: %v", err)
+	}
 	if run.Status != domain.RunFailed {
 		t.Errorf("got status %q, want %q", run.Status, domain.RunFailed)
 	}
@@ -313,7 +319,10 @@ func TestShutdownDrainsActiveRuns(t *testing.T) {
 		t.Fatalf("shutdown: %v", err)
 	}
 
-	run, _ := rt.Run(runID)
+	run, err := rt.Run(ctx, runID)
+	if err != nil {
+		t.Fatalf("read run: %v", err)
+	}
 	if !run.Status.IsTerminal() {
 		t.Errorf("run left in non-terminal state %q after shutdown", run.Status)
 	}

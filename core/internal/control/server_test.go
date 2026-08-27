@@ -3,6 +3,7 @@ package control_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
+	"github.com/KoukeNeko/JingClaw/core/internal/storage/memory"
 )
 
 const testToken = "test-token"
@@ -35,7 +37,7 @@ func newServer(t *testing.T, chunkDelay time.Duration) controlv1connect.SessionS
 	}
 	clock := func() time.Time { return time.Unix(0, 0).UTC() }
 
-	store := event.NewMemoryStore(func() string { return fmt.Sprintf("evt_%d", counter.Add(1)) }, clock)
+	store := memory.New()
 	hub := event.NewHub()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -50,6 +52,7 @@ func newServer(t *testing.T, chunkDelay time.Duration) controlv1connect.SessionS
 		NewMessageID: next("msg"),
 		NewEventID:   next("evt"),
 		Now:          clock,
+		Logger:       slog.New(slog.DiscardHandler),
 	})
 
 	mux := http.NewServeMux()

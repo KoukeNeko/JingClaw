@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -14,12 +15,12 @@ import (
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
+	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
 
 var (
-	ErrSessionNotFound = errors.New("runtime: session not found")
-	ErrRunNotFound     = errors.New("runtime: run not found")
-	ErrShuttingDown    = errors.New("runtime: shutting down")
+	ErrRunNotFound  = errors.New("runtime: run not found")
+	ErrShuttingDown = errors.New("runtime: shutting down")
 
 	// ErrUserInterrupted is the cancellation cause set by InterruptRun. It
 	// distinguishes a deliberate stop from a failure, which is what decides
@@ -27,12 +28,16 @@ var (
 	ErrUserInterrupted = errors.New("runtime: interrupted by user")
 )
 
+// orphanReason is recorded on runs that were live when the process stopped.
+const orphanReason = "runtime: interrupted by daemon restart"
+
 // IDGenerator produces identifiers. Injected so tests can be deterministic.
 type IDGenerator func() string
 
 type Options struct {
-	Store    event.Store
-	Hub      *event.Hub
+	Store storage.Store
+	Hub   *event.Hub
+
 	Provider Provider
 
 	NewSessionID IDGenerator
@@ -40,15 +45,15 @@ type Options struct {
 	NewMessageID IDGenerator
 	NewEventID   IDGenerator
 
-	Now func() time.Time
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 type Runtime struct {
 	opts Options
 
 	mu       sync.RWMutex
-	sessions map[domain.SessionID]*domain.Session
-	runs     map[domain.RunID]*managedRun
+	active   map[domain.RunID]*activeRun
 	draining bool
 
 	// group owns every run goroutine, so shutdown can wait for them instead of
@@ -57,90 +62,136 @@ type Runtime struct {
 	groupCtx context.Context
 }
 
-type managedRun struct {
-	run    *domain.Run
+// activeRun tracks a run this process is currently driving. Runs that have
+// finished, or that belong to a previous process, live only in storage.
+type activeRun struct {
 	cancel context.CancelCauseFunc
 	done   chan struct{}
 }
 
 func New(ctx context.Context, opts Options) *Runtime {
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+
 	group, groupCtx := errgroup.WithContext(ctx)
 
 	return &Runtime{
 		opts:     opts,
-		sessions: make(map[domain.SessionID]*domain.Session),
-		runs:     make(map[domain.RunID]*managedRun),
+		active:   make(map[domain.RunID]*activeRun),
 		group:    group,
 		groupCtx: groupCtx,
 	}
 }
 
-func (r *Runtime) CreateSession(ctx context.Context, title string) (*domain.Session, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+// RecoverOrphanedRuns resolves runs that were still live when the process last
+// stopped.
+//
+// Without this, a crash leaves runs marked running forever and every client
+// watches a spinner that will never resolve. They are marked failed rather
+// than cancelled because nobody chose to stop them, and the distinction is
+// what someone reading the log later needs.
+func (r *Runtime) RecoverOrphanedRuns(ctx context.Context) (int, error) {
+	orphans, err := r.opts.Store.UnfinishedRuns(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, run := range orphans {
+		now := r.opts.Now()
+		run.Status = domain.RunFailed
+		run.FinishedAt = &now
+
+		if err := r.opts.Store.UpdateRun(ctx, run); err != nil {
+			return 0, fmt.Errorf("runtime: recover run %s: %w", run.ID, err)
+		}
+
+		// The terminal event matters as much as the row: a client resuming
+		// from its last sequence number learns the outcome the same way it
+		// learns everything else.
+		if err := r.append(ctx, run.SessionID, run.ID, domain.EventRunStateChanged, domain.RunStateChanged{
+			Status: domain.RunFailed,
+			Reason: orphanReason,
+		}); err != nil {
+			return 0, fmt.Errorf("runtime: record recovery for run %s: %w", run.ID, err)
+		}
+
+		r.opts.Logger.Warn("recovered orphaned run",
+			"run_id", string(run.ID),
+			"session_id", string(run.SessionID),
+		)
+	}
+
+	return len(orphans), nil
+}
+
+func (r *Runtime) CreateSession(ctx context.Context, title string) (domain.Session, error) {
+	r.mu.RLock()
+	draining := r.draining
+	r.mu.RUnlock()
+
+	if draining {
+		return domain.Session{}, ErrShuttingDown
 	}
 
 	now := r.opts.Now()
-	session := &domain.Session{
+	session := domain.Session{
 		ID:        domain.SessionID(r.opts.NewSessionID()),
 		Title:     title,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 
-	r.mu.Lock()
-	if r.draining {
-		r.mu.Unlock()
-		return nil, ErrShuttingDown
+	if err := r.opts.Store.CreateSession(ctx, session); err != nil {
+		return domain.Session{}, err
 	}
-	r.sessions[session.ID] = session
-	r.mu.Unlock()
-
-	// Register the session in the log so subscribing before the first turn is
-	// not mistaken for a missing session.
-	if ensurer, ok := r.opts.Store.(interface{ EnsureSession(domain.SessionID) }); ok {
-		ensurer.EnsureSession(session.ID)
-	}
-
 	return session, nil
 }
 
-func (r *Runtime) Session(id domain.SessionID) (*domain.Session, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	session, ok := r.sessions[id]
-	return session, ok
+func (r *Runtime) Session(ctx context.Context, id domain.SessionID) (domain.Session, error) {
+	return r.opts.Store.Session(ctx, id)
 }
 
-func (r *Runtime) Run(id domain.RunID) (*domain.Run, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *Runtime) ListSessions(ctx context.Context) ([]domain.Session, error) {
+	return r.opts.Store.ListSessions(ctx)
+}
 
-	managed, ok := r.runs[id]
-	if !ok {
-		return nil, false
-	}
-	return managed.run, true
+func (r *Runtime) Run(ctx context.Context, id domain.RunID) (domain.Run, error) {
+	return r.opts.Store.Run(ctx, id)
 }
 
 // SendTurn records the user's message and starts a run. It returns as soon as
 // the run is accepted; the answer arrives over the event stream, so a client
 // disconnecting never cancels an in-flight generation.
 func (r *Runtime) SendTurn(ctx context.Context, sessionID domain.SessionID, text string, origin domain.RunOrigin) (domain.RunID, domain.MessageID, error) {
-	r.mu.Lock()
-	if r.draining {
-		r.mu.Unlock()
+	r.mu.RLock()
+	draining := r.draining
+	r.mu.RUnlock()
+
+	if draining {
 		return "", "", ErrShuttingDown
 	}
-	if _, ok := r.sessions[sessionID]; !ok {
-		r.mu.Unlock()
-		return "", "", ErrSessionNotFound
+
+	// Reading the session first turns an unknown ID into a clean not-found
+	// rather than a failure partway through writing the log.
+	if _, err := r.opts.Store.Session(ctx, sessionID); err != nil {
+		return "", "", err
 	}
-	r.mu.Unlock()
 
 	runID := domain.RunID(r.opts.NewRunID())
 	messageID := domain.MessageID(r.opts.NewMessageID())
+
+	run := domain.Run{
+		ID:              runID,
+		SessionID:       sessionID,
+		Status:          domain.RunQueued,
+		Origin:          origin,
+		DeliveryTargets: []domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient, Ref: origin.ClientID}},
+		CreatedAt:       r.opts.Now(),
+	}
+	if err := r.opts.Store.CreateRun(ctx, run); err != nil {
+		return "", "", err
+	}
 
 	if err := r.append(ctx, sessionID, runID, domain.EventUserMessageAdded, domain.UserMessageAdded{
 		MessageID: messageID,
@@ -157,45 +208,28 @@ func (r *Runtime) SendTurn(ctx context.Context, sessionID domain.SessionID, text
 	// request, so the run outlives the RPC that started it.
 	runCtx, cancel := context.WithCancelCause(r.groupCtx)
 
-	managed := &managedRun{
-		run: &domain.Run{
-			ID:              runID,
-			SessionID:       sessionID,
-			Status:          domain.RunQueued,
-			Origin:          origin,
-			DeliveryTargets: []domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient, Ref: origin.ClientID}},
-			CreatedAt:       r.opts.Now(),
-		},
-		cancel: cancel,
-		done:   make(chan struct{}),
-	}
+	tracked := &activeRun{cancel: cancel, done: make(chan struct{})}
 
 	r.mu.Lock()
-	r.runs[runID] = managed
+	r.active[runID] = tracked
 	r.mu.Unlock()
 
 	r.group.Go(func() error {
-		defer close(managed.done)
+		defer close(tracked.done)
 		defer cancel(nil)
 
 		// A failing run is a normal outcome recorded in the log, not a reason
 		// to tear down the whole daemon, so this never returns a non-nil error.
-		r.execute(runCtx, managed, text)
+		r.execute(runCtx, run, text)
 		return nil
 	})
 
 	return runID, messageID, nil
 }
 
-func (r *Runtime) execute(ctx context.Context, managed *managedRun, userText string) {
-	sessionID := managed.run.SessionID
-	runID := managed.run.ID
-
-	r.setStatus(managed, domain.RunRunning)
-	if err := r.append(ctx, sessionID, runID, domain.EventRunStateChanged, domain.RunStateChanged{
-		Status: domain.RunRunning,
-	}); err != nil {
-		r.finish(context.WithoutCancel(ctx), managed, domain.RunFailed, err.Error())
+func (r *Runtime) execute(ctx context.Context, run domain.Run, userText string) {
+	if err := r.transition(ctx, run, domain.RunRunning, ""); err != nil {
+		r.finish(context.WithoutCancel(ctx), run, domain.RunFailed, err.Error())
 		return
 	}
 
@@ -205,7 +239,7 @@ func (r *Runtime) execute(ctx context.Context, managed *managedRun, userText str
 	// slot in between the stream and the terminal state without reshaping this.
 	stream, err := r.opts.Provider.Generate(ctx, ModelRequest{LastUserText: userText})
 	if err != nil {
-		r.finishFromError(ctx, managed, err)
+		r.finishFromError(ctx, run, err)
 		return
 	}
 	defer func() { _ = stream.Close() }()
@@ -216,7 +250,7 @@ func (r *Runtime) execute(ctx context.Context, managed *managedRun, userText str
 			break
 		}
 		if err != nil {
-			r.finishFromError(ctx, managed, err)
+			r.finishFromError(ctx, run, err)
 			return
 		}
 
@@ -225,95 +259,110 @@ func (r *Runtime) execute(ctx context.Context, managed *managedRun, userText str
 			continue
 		}
 
-		if err := r.append(ctx, sessionID, runID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{
+		if err := r.append(ctx, run.SessionID, run.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{
 			MessageID: messageID,
 			Text:      delta.Text,
 		}); err != nil {
-			r.finishFromError(ctx, managed, err)
+			r.finishFromError(ctx, run, err)
 			return
 		}
 	}
 
-	if err := r.append(ctx, sessionID, runID, domain.EventAssistantMessageCompleted, domain.AssistantMessageCompleted{
+	if err := r.append(ctx, run.SessionID, run.ID, domain.EventAssistantMessageCompleted, domain.AssistantMessageCompleted{
 		MessageID: messageID,
 	}); err != nil {
-		r.finishFromError(ctx, managed, err)
+		r.finishFromError(ctx, run, err)
 		return
 	}
 
-	r.finish(ctx, managed, domain.RunCompleted, "")
+	r.finish(ctx, run, domain.RunCompleted, "")
 }
 
-func (r *Runtime) finishFromError(ctx context.Context, managed *managedRun, err error) {
+func (r *Runtime) finishFromError(ctx context.Context, run domain.Run, err error) {
 	// The run's own context is already dead by this point, so the terminal
-	// event has to be written with a context that outlives it. Without this,
+	// state has to be written with a context that outlives it. Without this,
 	// an interrupted run would leave no record of how it ended.
 	writeCtx := context.WithoutCancel(ctx)
 
 	if cause := context.Cause(ctx); errors.Is(cause, ErrUserInterrupted) {
-		r.finish(writeCtx, managed, domain.RunCancelled, cause.Error())
+		r.finish(writeCtx, run, domain.RunCancelled, cause.Error())
 		return
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		r.finish(writeCtx, managed, domain.RunCancelled, err.Error())
+		r.finish(writeCtx, run, domain.RunCancelled, err.Error())
 		return
 	}
 
-	r.finish(writeCtx, managed, domain.RunFailed, err.Error())
+	r.finish(writeCtx, run, domain.RunFailed, err.Error())
 }
 
-func (r *Runtime) finish(ctx context.Context, managed *managedRun, status domain.RunStatus, reason string) {
-	now := r.opts.Now()
+func (r *Runtime) finish(ctx context.Context, run domain.Run, status domain.RunStatus, reason string) {
+	if err := r.transition(ctx, run, status, reason); err != nil {
+		// Nowhere left to report this: the log itself is the reporting
+		// channel. Surfacing it in the daemon log is all that remains.
+		r.opts.Logger.Error("failed to record terminal run state",
+			"run_id", string(run.ID),
+			"status", string(status),
+			"error", err,
+		)
+	}
+}
 
-	r.mu.Lock()
-	managed.run.Status = status
-	managed.run.FinishedAt = &now
-	r.mu.Unlock()
+// transition writes the run's new state, then the event announcing it. Order
+// matters: a client that sees the event and immediately queries the run must
+// not find it still in the old state.
+func (r *Runtime) transition(ctx context.Context, run domain.Run, status domain.RunStatus, reason string) error {
+	run.Status = status
+	if status.IsTerminal() {
+		now := r.opts.Now()
+		run.FinishedAt = &now
+	}
 
-	// Best effort: if the log itself is failing there is nowhere left to
-	// report it, and the in-memory status above is already correct.
-	_ = r.append(ctx, managed.run.SessionID, managed.run.ID, domain.EventRunStateChanged, domain.RunStateChanged{
+	if err := r.opts.Store.UpdateRun(ctx, run); err != nil {
+		return err
+	}
+
+	return r.append(ctx, run.SessionID, run.ID, domain.EventRunStateChanged, domain.RunStateChanged{
 		Status: status,
 		Reason: reason,
 	})
 }
 
-// InterruptRun asks a run to stop. It is cooperative: the run transitions to
-// CANCELLING, the cancellation propagates into the provider and, in M1, into
-// tools and subprocesses, and the terminal event is written by the run itself.
+// InterruptRun asks a run to stop. It is cooperative: the cancellation
+// propagates into the provider and, in M1, into tools and subprocesses, and
+// the terminal event is written by the run itself.
 func (r *Runtime) InterruptRun(ctx context.Context, id domain.RunID, reason string) (domain.RunStatus, error) {
-	if err := ctx.Err(); err != nil {
+	run, err := r.opts.Store.Run(ctx, id)
+	if err != nil {
 		return "", err
 	}
+	if run.Status.IsTerminal() {
+		return run.Status, nil
+	}
 
-	r.mu.Lock()
-	managed, ok := r.runs[id]
+	r.mu.RLock()
+	tracked, ok := r.active[id]
+	r.mu.RUnlock()
+
 	if !ok {
-		r.mu.Unlock()
-		return "", ErrRunNotFound
+		// Known to storage but not driven by this process: it was orphaned by
+		// a restart and recovery has not resolved it yet.
+		return run.Status, ErrRunNotFound
 	}
-	if managed.run.Status.IsTerminal() {
-		status := managed.run.Status
-		r.mu.Unlock()
-		return status, nil
-	}
-	managed.run.Status = domain.RunCancelling
-	r.mu.Unlock()
 
 	cause := ErrUserInterrupted
 	if reason != "" {
 		cause = fmt.Errorf("%w: %s", ErrUserInterrupted, reason)
 	}
-	managed.cancel(cause)
+	tracked.cancel(cause)
 
 	return domain.RunCancelling, nil
 }
 
-// Wait blocks until a run reaches a terminal state. Used by tests and by
-// shutdown.
+// Wait blocks until a run this process is driving reaches a terminal state.
 func (r *Runtime) Wait(ctx context.Context, id domain.RunID) error {
 	r.mu.RLock()
-	managed, ok := r.runs[id]
+	tracked, ok := r.active[id]
 	r.mu.RUnlock()
 
 	if !ok {
@@ -323,7 +372,7 @@ func (r *Runtime) Wait(ctx context.Context, id domain.RunID) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-managed.done:
+	case <-tracked.done:
 		return nil
 	}
 }
@@ -333,16 +382,14 @@ func (r *Runtime) Wait(ctx context.Context, id domain.RunID) error {
 func (r *Runtime) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	r.draining = true
-	active := make([]*managedRun, 0, len(r.runs))
-	for _, managed := range r.runs {
-		if !managed.run.Status.IsTerminal() {
-			active = append(active, managed)
-		}
+	active := make([]*activeRun, 0, len(r.active))
+	for _, tracked := range r.active {
+		active = append(active, tracked)
 	}
 	r.mu.Unlock()
 
-	for _, managed := range active {
-		managed.cancel(ErrShuttingDown)
+	for _, tracked := range active {
+		tracked.cancel(ErrShuttingDown)
 	}
 
 	waited := make(chan error, 1)
@@ -354,12 +401,6 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	case err := <-waited:
 		return err
 	}
-}
-
-func (r *Runtime) setStatus(managed *managedRun, status domain.RunStatus) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	managed.run.Status = status
 }
 
 // append writes to the log and then wakes subscribers. Order matters: the

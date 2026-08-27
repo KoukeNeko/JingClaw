@@ -17,6 +17,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
+	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
 
 const (
@@ -32,11 +33,11 @@ const (
 
 type Server struct {
 	rt    *runtime.Runtime
-	store event.Store
+	store storage.EventStore
 	hub   *event.Hub
 }
 
-func NewServer(rt *runtime.Runtime, store event.Store, hub *event.Hub) *Server {
+func NewServer(rt *runtime.Runtime, store storage.EventStore, hub *event.Hub) *Server {
 	return &Server{rt: rt, store: store, hub: hub}
 }
 
@@ -184,7 +185,7 @@ func toConnectError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, runtime.ErrSessionNotFound), errors.Is(err, event.ErrSessionNotFound):
+	case errors.Is(err, storage.ErrSessionNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
 	case errors.Is(err, runtime.ErrRunNotFound):
 		return connect.NewError(connect.CodeNotFound, err)

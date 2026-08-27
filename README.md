@@ -23,17 +23,18 @@ you left off.
 
 ## Status: M0 — walking skeleton
 
-M0 exists to prove the skeleton conducts: protocol, runtime, streaming event
-loop, and the boundary between them. It uses a deterministic fake provider,
-keeps state in memory, and has no tools.
+M0 proved the skeleton conducts: protocol, runtime, streaming event loop, and
+the boundary between them. State now persists to SQLite and survives a
+restart, including runs orphaned by a crash. There is still a deterministic
+fake provider and no tools.
 
-Deliberately absent until M1: SQLite, real model providers, file and shell
+Deliberately absent until the rest of M1: real model providers, file and shell
 tools, the permission engine, MCP, and every GUI.
 
 | Milestone | Scope |
 |---|---|
-| **M0** | walking skeleton — this |
-| M1a | SQLite, real providers, file/shell tools, permissions |
+| M0 | walking skeleton — done |
+| **M1a** | SQLite ✓, real providers, file/shell tools, permissions |
 | M1b | `gatewayd` + Discord |
 | M2 | SwiftUI, WinUI 3 and web clients at parity |
 | M3 | subagents, replay, sandboxing, remote fleet |
@@ -70,7 +71,9 @@ core/bin/agentd --dev-fake
 ```
 
 It binds an ephemeral port on loopback and writes a `0600` discovery file
-holding the address and a bearer token; the CLI finds it from there.
+holding the address and a bearer token; the CLI finds it from there. State
+lives in `jingclaw.db` under the user config directory, or wherever
+`--data-dir` points.
 
 Then create a session and follow it:
 
@@ -101,7 +104,8 @@ stopped:
 core/bin/agent attach <session-id> --after 3
 ```
 
-Only events 4, 5 and 6 arrive.
+Only events 4, 5 and 6 arrive. Restarting the daemon changes nothing: the
+session, its runs and the sequence all continue where they were.
 
 ## Design rules
 
@@ -119,6 +123,9 @@ These are load-bearing. Breaking one is a design change, not a refactor.
    M0 so the gateway plane can arrive without a schema migration.
 6. **Loopback is not authentication.** Any web page can reach `127.0.0.1`, and
    this API will grow a shell.
+7. **A dead process must not strand a run.** Startup resolves runs left live by
+   a crash and records the outcome as an event, so a reconnecting client learns
+   it the same way it learns everything else.
 
 `internal/architecture` asserts rules 3–4 mechanically: the CLI cannot import
 the runtime, and the runtime cannot import generated protobuf.
