@@ -81,3 +81,25 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go test -race ./...
+
+  # The unit tests above have never caught this project's real defects. Those
+  # have all been in assembly seams — a daemon that never wired the projector,
+  # a codec that did not know an event, a bot that connected and then ignored
+  # everything — and every one of them was visible within seconds of running
+  # the daemon for real. So CI runs it for real.
+  #
+  # Linux only: these start processes and bind ports, and running the same
+  # checks three times would buy little for what it costs in flakiness.
+  end-to-end:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      # verify-artifacts needs a provider credential, because only a model
+      # calls tools. It skips itself here rather than failing.
+      - run: ./scripts/verify-all.sh
