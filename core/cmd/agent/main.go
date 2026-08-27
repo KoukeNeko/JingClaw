@@ -82,6 +82,42 @@ func newSessionCommand() *cobra.Command {
 	session := &cobra.Command{Use: "session", Short: "Manage sessions"}
 
 	var title string
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List sessions, newest first",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, err := dial()
+			if err != nil {
+				return err
+			}
+
+			resp, err := client.ListSessions(cmd.Context(),
+				connect.NewRequest(&controlv1.ListSessionsRequest{Meta: newMeta()}))
+			if err != nil {
+				return err
+			}
+
+			sessions := resp.Msg.GetSessions()
+			if len(sessions) == 0 {
+				fmt.Fprintln(cmd.ErrOrStderr(), "no sessions yet")
+				return nil
+			}
+
+			for _, session := range sessions {
+				title := session.GetTitle()
+				if title == "" {
+					title = "(untitled)"
+				}
+				fmt.Printf("%s  %s  %s\n",
+					session.GetId(),
+					session.GetUpdatedAt().AsTime().Local().Format("2006-01-02 15:04"),
+					title)
+			}
+			return nil
+		},
+	}
+
 	create := &cobra.Command{
 		Use:   "create",
 		Short: "Create a session and print its ID",
@@ -106,7 +142,7 @@ func newSessionCommand() *cobra.Command {
 	}
 	create.Flags().StringVar(&title, "title", "", "human-readable session title")
 
-	session.AddCommand(create)
+	session.AddCommand(create, list)
 	return session
 }
 

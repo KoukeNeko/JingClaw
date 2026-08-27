@@ -292,3 +292,68 @@ func drainUntilCompleted(t *testing.T, client controlv1connect.SessionServiceCli
 	}
 	return seqs
 }
+
+// A run outlives the client that began it, so a client that arrives later has
+// to be able to find what is going on without having been there. Without this
+// the web console opened after the fact would have nothing to attach to.
+func TestAClientThatArrivesLaterCanFindTheSession(t *testing.T) {
+	client := newServer(t, 0)
+	ctx := context.Background()
+
+	first, err := client.CreateSession(ctx, connect.NewRequest(&controlv1.CreateSessionRequest{
+		Meta: &controlv1.RequestMeta{ClientId: "test"}, Title: "started elsewhere",
+	}))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	sessionID := first.Msg.GetSession().GetId()
+
+	if _, err := client.SendTurn(ctx, connect.NewRequest(&controlv1.SendTurnRequest{
+		Meta: &controlv1.RequestMeta{ClientId: "test"}, SessionId: sessionID, Text: "hello",
+	})); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	listed, err := client.ListSessions(ctx, connect.NewRequest(&controlv1.ListSessionsRequest{}))
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+
+	found := false
+	for _, session := range listed.Msg.GetSessions() {
+		if session.GetId() == sessionID {
+			found = true
+			if session.GetTitle() != "started elsewhere" {
+				t.Errorf("title is %q", session.GetTitle())
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("%s is not in the listing", sessionID)
+	}
+
+	runs, err := client.ListRuns(ctx, connect.NewRequest(&controlv1.ListRunsRequest{
+		SessionId: sessionID,
+	}))
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs.Msg.GetRuns()) == 0 {
+		t.Fatal("the run started a moment ago is not listed")
+	}
+	if runs.Msg.GetRuns()[0].GetSessionId() != sessionID {
+		t.Error("a run was listed for the wrong session")
+	}
+}
+
+// Asking for the runs of nothing is a mistake worth reporting, not an empty
+// list that looks like a session with no runs.
+func TestListingRunsWithoutASessionIsRefused(t *testing.T) {
+	client := newServer(t, 0)
+
+	_, err := client.ListRuns(context.Background(),
+		connect.NewRequest(&controlv1.ListRunsRequest{}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("code is %s, want invalid_argument", connect.CodeOf(err))
+	}
+}

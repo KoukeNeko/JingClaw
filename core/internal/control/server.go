@@ -31,13 +31,26 @@ const (
 	heartbeatInterval = 20 * time.Second
 )
 
+// SessionStore is what the session service reads.
+//
+// Narrower than the whole of storage.Store: this server may not create a run
+// or resolve an approval behind the runtime's back, and an interface that
+// cannot express those calls is a stronger statement than a comment saying it
+// does not make them.
+type SessionStore interface {
+	storage.EventStore
+
+	ListSessions(ctx context.Context) ([]domain.Session, error)
+	ListRuns(ctx context.Context, session domain.SessionID) ([]domain.Run, error)
+}
+
 type Server struct {
 	rt    *runtime.Runtime
-	store storage.EventStore
+	store SessionStore
 	hub   *event.Hub
 }
 
-func NewServer(rt *runtime.Runtime, store storage.EventStore, hub *event.Hub) *Server {
+func NewServer(rt *runtime.Runtime, store SessionStore, hub *event.Hub) *Server {
 	return &Server{rt: rt, store: store, hub: hub}
 }
 
@@ -53,6 +66,51 @@ func (s *Server) CreateSession(
 	return connect.NewResponse(&controlv1.CreateSessionResponse{
 		Session: sessionToProto(session),
 	}), nil
+}
+
+// ListSessions is how a client that did not start a session finds it.
+//
+// A run outlives the client that began it. Without this, the web console
+// opened after the fact has no way to discover the session somebody started
+// from a terminal, which would make "clients are projections" untrue in
+// practice however true it is in the design.
+func (s *Server) ListSessions(
+	ctx context.Context,
+	_ *connect.Request[controlv1.ListSessionsRequest],
+) (*connect.Response[controlv1.ListSessionsResponse], error) {
+	sessions, err := s.store.ListSessions(ctx)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	converted := make([]*controlv1.Session, 0, len(sessions))
+	for _, session := range sessions {
+		converted = append(converted, sessionToProto(session))
+	}
+
+	return connect.NewResponse(&controlv1.ListSessionsResponse{Sessions: converted}), nil
+}
+
+func (s *Server) ListRuns(
+	ctx context.Context,
+	req *connect.Request[controlv1.ListRunsRequest],
+) (*connect.Response[controlv1.ListRunsResponse], error) {
+	sessionID := domain.SessionID(req.Msg.GetSessionId())
+	if sessionID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("session_id is required"))
+	}
+
+	runs, err := s.store.ListRuns(ctx, sessionID)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	converted := make([]*controlv1.Run, 0, len(runs))
+	for _, run := range runs {
+		converted = append(converted, runToProto(run))
+	}
+
+	return connect.NewResponse(&controlv1.ListRunsResponse{Runs: converted}), nil
 }
 
 func (s *Server) SendTurn(

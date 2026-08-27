@@ -161,6 +161,25 @@ func sessionToProto(s domain.Session) *controlv1.Session {
 	}
 }
 
+// runToProto is for a client that is looking at a session it did not start.
+//
+// Delivery targets are left out on purpose: they say where a reply is going,
+// which for a gateway run means a channel on somebody else's platform, and a
+// listing does not need it.
+func runToProto(r domain.Run) *controlv1.Run {
+	converted := &controlv1.Run{
+		Id:        string(r.ID),
+		SessionId: string(r.SessionID),
+		Status:    runStatusToProto(r.Status),
+		Origin:    originToProto(r.Origin),
+		CreatedAt: timestamppb.New(r.CreatedAt),
+	}
+	if r.FinishedAt != nil {
+		converted.FinishedAt = timestamppb.New(*r.FinishedAt)
+	}
+	return converted
+}
+
 func artifactToProto(ref *domain.Artifact) *controlv1.Artifact {
 	if ref == nil {
 		return nil

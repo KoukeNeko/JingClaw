@@ -58,6 +58,11 @@ const (
 	// SessionServiceCreateSessionProcedure is the fully-qualified name of the SessionService's
 	// CreateSession RPC.
 	SessionServiceCreateSessionProcedure = "/jingclaw.control.v1.SessionService/CreateSession"
+	// SessionServiceListSessionsProcedure is the fully-qualified name of the SessionService's
+	// ListSessions RPC.
+	SessionServiceListSessionsProcedure = "/jingclaw.control.v1.SessionService/ListSessions"
+	// SessionServiceListRunsProcedure is the fully-qualified name of the SessionService's ListRuns RPC.
+	SessionServiceListRunsProcedure = "/jingclaw.control.v1.SessionService/ListRuns"
 	// SessionServiceSendTurnProcedure is the fully-qualified name of the SessionService's SendTurn RPC.
 	SessionServiceSendTurnProcedure = "/jingclaw.control.v1.SessionService/SendTurn"
 	// SessionServiceSubscribeEventsProcedure is the fully-qualified name of the SessionService's
@@ -323,6 +328,13 @@ func (UnimplementedChannelServiceHandler) DeleteBinding(context.Context, *connec
 // SessionServiceClient is a client for the jingclaw.control.v1.SessionService service.
 type SessionServiceClient interface {
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
+	// ListSessions is how a client that did not start a session finds it.
+	//
+	// A run outlives the client that began it, so a second client — the web
+	// console, a GUI attaching later — has to be able to discover what is going
+	// on without having been there.
+	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
+	ListRuns(context.Context, *connect.Request[v1.ListRunsRequest]) (*connect.Response[v1.ListRunsResponse], error)
 	SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error)
 	SubscribeEvents(context.Context, *connect.Request[v1.SubscribeEventsRequest]) (*connect.ServerStreamForClient[v1.SubscribeEventsResponse], error)
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
@@ -345,6 +357,18 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			httpClient,
 			baseURL+SessionServiceCreateSessionProcedure,
 			connect.WithSchema(sessionServiceMethods.ByName("CreateSession")),
+			connect.WithClientOptions(opts...),
+		),
+		listSessions: connect.NewClient[v1.ListSessionsRequest, v1.ListSessionsResponse](
+			httpClient,
+			baseURL+SessionServiceListSessionsProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("ListSessions")),
+			connect.WithClientOptions(opts...),
+		),
+		listRuns: connect.NewClient[v1.ListRunsRequest, v1.ListRunsResponse](
+			httpClient,
+			baseURL+SessionServiceListRunsProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("ListRuns")),
 			connect.WithClientOptions(opts...),
 		),
 		sendTurn: connect.NewClient[v1.SendTurnRequest, v1.SendTurnResponse](
@@ -383,6 +407,8 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 // sessionServiceClient implements SessionServiceClient.
 type sessionServiceClient struct {
 	createSession   *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
+	listSessions    *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	listRuns        *connect.Client[v1.ListRunsRequest, v1.ListRunsResponse]
 	sendTurn        *connect.Client[v1.SendTurnRequest, v1.SendTurnResponse]
 	subscribeEvents *connect.Client[v1.SubscribeEventsRequest, v1.SubscribeEventsResponse]
 	interruptRun    *connect.Client[v1.InterruptRunRequest, v1.InterruptRunResponse]
@@ -393,6 +419,16 @@ type sessionServiceClient struct {
 // CreateSession calls jingclaw.control.v1.SessionService.CreateSession.
 func (c *sessionServiceClient) CreateSession(ctx context.Context, req *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error) {
 	return c.createSession.CallUnary(ctx, req)
+}
+
+// ListSessions calls jingclaw.control.v1.SessionService.ListSessions.
+func (c *sessionServiceClient) ListSessions(ctx context.Context, req *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error) {
+	return c.listSessions.CallUnary(ctx, req)
+}
+
+// ListRuns calls jingclaw.control.v1.SessionService.ListRuns.
+func (c *sessionServiceClient) ListRuns(ctx context.Context, req *connect.Request[v1.ListRunsRequest]) (*connect.Response[v1.ListRunsResponse], error) {
+	return c.listRuns.CallUnary(ctx, req)
 }
 
 // SendTurn calls jingclaw.control.v1.SessionService.SendTurn.
@@ -423,6 +459,13 @@ func (c *sessionServiceClient) DecideApproval(ctx context.Context, req *connect.
 // SessionServiceHandler is an implementation of the jingclaw.control.v1.SessionService service.
 type SessionServiceHandler interface {
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
+	// ListSessions is how a client that did not start a session finds it.
+	//
+	// A run outlives the client that began it, so a second client — the web
+	// console, a GUI attaching later — has to be able to discover what is going
+	// on without having been there.
+	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
+	ListRuns(context.Context, *connect.Request[v1.ListRunsRequest]) (*connect.Response[v1.ListRunsResponse], error)
 	SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error)
 	SubscribeEvents(context.Context, *connect.Request[v1.SubscribeEventsRequest], *connect.ServerStream[v1.SubscribeEventsResponse]) error
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
@@ -441,6 +484,18 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		SessionServiceCreateSessionProcedure,
 		svc.CreateSession,
 		connect.WithSchema(sessionServiceMethods.ByName("CreateSession")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceListSessionsHandler := connect.NewUnaryHandler(
+		SessionServiceListSessionsProcedure,
+		svc.ListSessions,
+		connect.WithSchema(sessionServiceMethods.ByName("ListSessions")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceListRunsHandler := connect.NewUnaryHandler(
+		SessionServiceListRunsProcedure,
+		svc.ListRuns,
+		connect.WithSchema(sessionServiceMethods.ByName("ListRuns")),
 		connect.WithHandlerOptions(opts...),
 	)
 	sessionServiceSendTurnHandler := connect.NewUnaryHandler(
@@ -477,6 +532,10 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
 			sessionServiceCreateSessionHandler.ServeHTTP(w, r)
+		case SessionServiceListSessionsProcedure:
+			sessionServiceListSessionsHandler.ServeHTTP(w, r)
+		case SessionServiceListRunsProcedure:
+			sessionServiceListRunsHandler.ServeHTTP(w, r)
 		case SessionServiceSendTurnProcedure:
 			sessionServiceSendTurnHandler.ServeHTTP(w, r)
 		case SessionServiceSubscribeEventsProcedure:
@@ -498,6 +557,14 @@ type UnimplementedSessionServiceHandler struct{}
 
 func (UnimplementedSessionServiceHandler) CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.CreateSession is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.ListSessions is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) ListRuns(context.Context, *connect.Request[v1.ListRunsRequest]) (*connect.Response[v1.ListRunsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.ListRuns is not implemented"))
 }
 
 func (UnimplementedSessionServiceHandler) SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error) {
