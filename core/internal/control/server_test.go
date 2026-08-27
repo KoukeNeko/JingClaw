@@ -1,0 +1,288 @@
+package control_test
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"connectrpc.com/connect"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
+	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
+	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
+	"github.com/KoukeNeko/JingClaw/core/internal/control"
+	"github.com/KoukeNeko/JingClaw/core/internal/event"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
+	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
+)
+
+const testToken = "test-token"
+
+// These tests drive the real Connect stack over a real socket rather than
+// calling handlers directly, because the things most likely to break — auth,
+// streaming, resume — only exist at that layer.
+func newServer(t *testing.T, chunkDelay time.Duration) controlv1connect.SessionServiceClient {
+	t.Helper()
+
+	var counter atomic.Uint64
+	next := func(prefix string) runtime.IDGenerator {
+		return func() string { return fmt.Sprintf("%s_%d", prefix, counter.Add(1)) }
+	}
+	clock := func() time.Time { return time.Unix(0, 0).UTC() }
+
+	store := event.NewMemoryStore(func() string { return fmt.Sprintf("evt_%d", counter.Add(1)) }, clock)
+	hub := event.NewHub()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	rt := runtime.New(ctx, runtime.Options{
+		Store:        store,
+		Hub:          hub,
+		Provider:     fake.New(chunkDelay),
+		NewSessionID: next("ses"),
+		NewRunID:     next("run"),
+		NewMessageID: next("msg"),
+		NewEventID:   next("evt"),
+		Now:          clock,
+	})
+
+	mux := http.NewServeMux()
+	mux.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub)))
+
+	// The port is unknown until the test server starts, so host validation is
+	// exercised separately in TestAuthMiddleware.
+	handler := control.AuthMiddleware(testToken, "", mux)
+	server := httptest.NewUnstartedServer(h2c.NewHandler(handler, &http2.Server{}))
+	server.EnableHTTP2 = true
+	server.Start()
+
+	t.Cleanup(func() {
+		server.Close()
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		_ = rt.Shutdown(shutdownCtx)
+	})
+
+	httpClient := &http.Client{Transport: &bearerTransport{token: testToken, base: server.Client().Transport}}
+	return controlv1connect.NewSessionServiceClient(httpClient, server.URL)
+}
+
+type bearerTransport struct {
+	token string
+	base  http.RoundTripper
+}
+
+func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	if t.token != "" {
+		clone.Header.Set("Authorization", "Bearer "+t.token)
+	}
+	return t.base.RoundTrip(clone)
+}
+
+func TestEndToEndTurnStreamsToCompletion(t *testing.T) {
+	client := newServer(t, 0)
+	ctx := context.Background()
+
+	created, err := client.CreateSession(ctx, connect.NewRequest(&controlv1.CreateSessionRequest{Title: "e2e"}))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sessionID := created.Msg.GetSession().GetId()
+
+	streamCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	stream, err := client.SubscribeEvents(streamCtx, connect.NewRequest(&controlv1.SubscribeEventsRequest{
+		SessionId: sessionID,
+		ClientId:  "test",
+	}))
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	if !stream.Receive() {
+		t.Fatalf("expected a hello frame: %v", stream.Err())
+	}
+	if stream.Msg().GetHello() == nil {
+		t.Fatalf("first frame is %T, want hello", stream.Msg().GetValue())
+	}
+
+	if _, err := client.SendTurn(ctx, connect.NewRequest(&controlv1.SendTurnRequest{
+		SessionId: sessionID,
+		Text:      "hello",
+	})); err != nil {
+		t.Fatalf("send turn: %v", err)
+	}
+
+	var seqs []uint64
+	for stream.Receive() {
+		ev := stream.Msg().GetEvent()
+		if ev == nil {
+			continue
+		}
+		seqs = append(seqs, ev.GetSeq())
+
+		if changed := ev.GetRunStateChanged(); changed != nil &&
+			changed.GetStatus() == controlv1.RunStatus_RUN_STATUS_COMPLETED {
+			break
+		}
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+
+	if len(seqs) == 0 {
+		t.Fatal("no events received")
+	}
+	for i, seq := range seqs {
+		if want := uint64(i + 1); seq != want {
+			t.Fatalf("event %d has seq %d, want %d", i, seq, want)
+		}
+	}
+}
+
+// The resume contract at the RPC layer: this is what lets a UI reconnect after
+// a dropped connection without replaying or losing anything.
+func TestSubscribeAfterSeqResumesExactly(t *testing.T) {
+	client := newServer(t, 0)
+	ctx := context.Background()
+
+	created, err := client.CreateSession(ctx, connect.NewRequest(&controlv1.CreateSessionRequest{Title: "resume"}))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sessionID := created.Msg.GetSession().GetId()
+
+	if _, err := client.SendTurn(ctx, connect.NewRequest(&controlv1.SendTurnRequest{
+		SessionId: sessionID,
+		Text:      "hello",
+	})); err != nil {
+		t.Fatalf("send turn: %v", err)
+	}
+
+	all := drainUntilCompleted(t, client, sessionID, 0)
+	if len(all) < 4 {
+		t.Fatalf("expected several events, got %d", len(all))
+	}
+
+	const after = uint64(3)
+	tail := drainUntilCompleted(t, client, sessionID, after)
+
+	if want := len(all) - int(after); len(tail) != want {
+		t.Fatalf("resuming after seq %d gave %d events, want %d", after, len(tail), want)
+	}
+	if tail[0] != after+1 {
+		t.Fatalf("resume started at seq %d, want %d", tail[0], after+1)
+	}
+}
+
+// Detaching is not cancelling: the daemon owns the run, so a client hanging up
+// mid-stream must leave it running.
+func TestDetachingDoesNotCancelRun(t *testing.T) {
+	client := newServer(t, 50*time.Millisecond)
+	ctx := context.Background()
+
+	created, err := client.CreateSession(ctx, connect.NewRequest(&controlv1.CreateSessionRequest{Title: "detach"}))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sessionID := created.Msg.GetSession().GetId()
+
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := client.SubscribeEvents(streamCtx, connect.NewRequest(&controlv1.SubscribeEventsRequest{
+		SessionId: sessionID,
+		ClientId:  "detacher",
+	}))
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	if _, err := client.SendTurn(ctx, connect.NewRequest(&controlv1.SendTurnRequest{
+		SessionId: sessionID,
+		Text:      "hello",
+	})); err != nil {
+		t.Fatalf("send turn: %v", err)
+	}
+
+	// Hang up as soon as the first real event arrives, mid-generation.
+	for stream.Receive() {
+		if stream.Msg().GetEvent() != nil {
+			break
+		}
+	}
+	cancel()
+	_ = stream.Close()
+
+	// Reattaching must show the run reached completion regardless.
+	seqs := drainUntilCompleted(t, client, sessionID, 0)
+	if len(seqs) == 0 {
+		t.Fatal("run produced no events after the client detached")
+	}
+}
+
+func TestSendTurnToUnknownSessionIsNotFound(t *testing.T) {
+	client := newServer(t, 0)
+
+	_, err := client.SendTurn(context.Background(), connect.NewRequest(&controlv1.SendTurnRequest{
+		SessionId: "ses_missing",
+		Text:      "hello",
+	}))
+	if got := connect.CodeOf(err); got != connect.CodeNotFound {
+		t.Fatalf("got code %v, want %v (err: %v)", got, connect.CodeNotFound, err)
+	}
+}
+
+func TestSendTurnWithoutSessionIDIsInvalidArgument(t *testing.T) {
+	client := newServer(t, 0)
+
+	_, err := client.SendTurn(context.Background(), connect.NewRequest(&controlv1.SendTurnRequest{Text: "hello"}))
+	if got := connect.CodeOf(err); got != connect.CodeInvalidArgument {
+		t.Fatalf("got code %v, want %v (err: %v)", got, connect.CodeInvalidArgument, err)
+	}
+}
+
+// drainUntilCompleted subscribes from after and returns the sequence numbers
+// seen up to and including the run's completion.
+func drainUntilCompleted(t *testing.T, client controlv1connect.SessionServiceClient, sessionID string, after uint64) []uint64 {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	stream, err := client.SubscribeEvents(ctx, connect.NewRequest(&controlv1.SubscribeEventsRequest{
+		SessionId: sessionID,
+		AfterSeq:  after,
+		ClientId:  "drain",
+	}))
+	if err != nil {
+		t.Fatalf("subscribe after %d: %v", after, err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	var seqs []uint64
+	for stream.Receive() {
+		ev := stream.Msg().GetEvent()
+		if ev == nil {
+			continue
+		}
+		seqs = append(seqs, ev.GetSeq())
+
+		if changed := ev.GetRunStateChanged(); changed != nil &&
+			changed.GetStatus() == controlv1.RunStatus_RUN_STATUS_COMPLETED {
+			return seqs
+		}
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("stream after %d: %v", after, err)
+	}
+	return seqs
+}
