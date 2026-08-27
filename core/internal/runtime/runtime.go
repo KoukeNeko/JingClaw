@@ -723,9 +723,10 @@ func (r *Runtime) generateTurn(
 
 			if err := r.append(ctx, run.SessionID, run.ID, domain.EventToolCallRequested,
 				domain.ToolCallRequested{
-					CallID:    domain.ToolCallID(e.ID),
-					Name:      e.Name,
-					Arguments: string(e.Args),
+					CallID:           domain.ToolCallID(e.ID),
+					Name:             e.Name,
+					Arguments:        string(e.Args),
+					ProviderMetadata: string(e.Opaque),
 				}); err != nil {
 				r.abort(ctx, run, output, err)
 				return nil, err

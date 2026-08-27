@@ -175,6 +175,15 @@ type ToolCallRequested struct {
 	CallID    ToolCallID
 	Name      string
 	Arguments string
+
+	// ProviderMetadata is opaque continuity state the provider attached to
+	// this call and expects back on the next turn.
+	//
+	// It is persisted because the conversation is rebuilt from this log: a
+	// provider that requires the metadata would reject every turn after a
+	// restart if it were only held in memory. Nothing outside the provider
+	// adapter interprets it.
+	ProviderMetadata string
 }
 
 // ToolCallCompleted records the observation handed back to the model.

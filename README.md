@@ -23,21 +23,34 @@ you left off.
 
 ## Status: M0 — walking skeleton
 
-State persists to SQLite and survives a restart, including runs orphaned by a
-crash. Real models answer through the Gemini provider, and the agent loop runs
-tools: it searches a workspace, reads what it finds, acts on what a failed call
-told it, and stops for a human before it changes anything.
+Given a repository with a failing test, JingClaw finds the cause, fixes it, and
+runs the tests to confirm — stopping for a human before each change. State
+persists to SQLite and survives a restart, including runs orphaned by a crash
+and runs parked on an approval.
 
-Deliberately absent until the rest of M1: targeted edits and shell execution,
-context compaction, MCP, and every GUI.
+Deliberately absent until M1b and beyond: context compaction, MCP, subagents,
+and every GUI.
 
 | Milestone | Scope |
 |---|---|
 | M0 | walking skeleton — done |
-| **M1a** | SQLite ✓, providers ✓, read tools ✓, permissions ✓, edits, shell |
+| **M1a** | durable runtime, providers, tools, permissions — done |
 | M1b | `gatewayd` + Discord |
 | M2 | SwiftUI, WinUI 3 and web clients at parity |
 | M3 | subagents, replay, sandboxing, remote fleet |
+
+### What it can do
+
+| Tool | Gate |
+|---|---|
+| `read_file`, `glob_files`, `grep` | runs unattended |
+| `write_file`, `edit_file` | asks first |
+| `exec_command` | asks first |
+
+An edit must target text that appears exactly once, in a file the agent has
+read and that has not changed since. `exec_command` takes a program and an
+argument list — there is no shell — and a cancelled command takes its whole
+process group with it.
 
 ## Layout
 

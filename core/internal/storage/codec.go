@@ -37,9 +37,10 @@ type assistantMessageCompletedJSON struct {
 }
 
 type toolCallRequestedJSON struct {
-	CallID    string `json:"call_id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	CallID           string `json:"call_id"`
+	Name             string `json:"name"`
+	Arguments        string `json:"arguments"`
+	ProviderMetadata string `json:"provider_metadata,omitempty"`
 }
 
 type toolCallCompletedJSON struct {
@@ -122,9 +123,10 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 
 	case domain.ToolCallRequested:
 		return json.Marshal(toolCallRequestedJSON{
-			CallID:    string(p.CallID),
-			Name:      p.Name,
-			Arguments: p.Arguments,
+			CallID:           string(p.CallID),
+			Name:             p.Name,
+			Arguments:        p.Arguments,
+			ProviderMetadata: p.ProviderMetadata,
 		})
 
 	case domain.ToolCallCompleted:
@@ -224,9 +226,10 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
 		}
 		return domain.ToolCallRequested{
-			CallID:    domain.ToolCallID(p.CallID),
-			Name:      p.Name,
-			Arguments: p.Arguments,
+			CallID:           domain.ToolCallID(p.CallID),
+			Name:             p.Name,
+			Arguments:        p.Arguments,
+			ProviderMetadata: p.ProviderMetadata,
 		}, nil
 
 	case domain.EventToolCallCompleted:

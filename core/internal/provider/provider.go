@@ -116,6 +116,16 @@ type ToolUseBlock struct {
 	ID   string
 	Name string
 	Args json.RawMessage
+
+	// Opaque carries provider continuity metadata verbatim.
+	//
+	// Some providers attach state to a tool call that must be echoed back on
+	// the following turn — Gemini's thought signatures are one — and that
+	// state has no meaning outside the adapter that produced it. Translating
+	// it into canonical types would be guesswork; dropping it makes the next
+	// request fail. It is therefore carried through untouched, and only the
+	// adapter that wrote it ever reads it.
+	Opaque json.RawMessage
 }
 
 // ToolResultBlock carries an observation back to the model. A failed tool is
@@ -165,6 +175,10 @@ type ToolCallRequested struct {
 	ID   string
 	Name string
 	Args json.RawMessage
+
+	// Opaque is provider continuity metadata to be returned with this call on
+	// the next turn. See ToolUseBlock.Opaque.
+	Opaque json.RawMessage
 }
 
 // UsageDelta reports token accounting. Providers send it at different points,

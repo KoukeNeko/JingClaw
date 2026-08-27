@@ -296,9 +296,16 @@ func toParts(blocks []provider.ContentBlock) ([]*genai.Part, error) {
 					return nil, fmt.Errorf("gemini: tool call %s has invalid arguments: %w", b.Name, err)
 				}
 			}
-			parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{
+
+			part := &genai.Part{FunctionCall: &genai.FunctionCall{
 				ID: b.ID, Name: b.Name, Args: args,
-			}})
+			}}
+			// Gemini 3 rejects a conversation whose function calls come back
+			// without the signature it issued, so it is restored verbatim.
+			if signature := decodeOpaque(b.Opaque); len(signature) > 0 {
+				part.ThoughtSignature = signature
+			}
+			parts = append(parts, part)
 
 		case provider.ToolResultBlock:
 			// The API distinguishes output from error by key, which is how the
@@ -474,7 +481,10 @@ func eventsFrom(resp *genai.GenerateContentResponse) []provider.Event {
 						args = []byte("{}")
 					}
 					events = append(events, provider.ToolCallRequested{
-						ID: call.ID, Name: call.Name, Args: args,
+						ID:     call.ID,
+						Name:   call.Name,
+						Args:   args,
+						Opaque: encodeOpaque(part.ThoughtSignature),
 					})
 					continue
 				}
@@ -511,4 +521,37 @@ func (s *stream) Close() error {
 		}
 	})
 	return nil
+}
+
+// opaqueState is what travels through the runtime on a tool call. It is
+// encoded rather than passed as raw bytes so the shape can grow without every
+// layer in between needing to know it changed.
+type opaqueState struct {
+	ThoughtSignature []byte `json:"thought_signature,omitempty"`
+}
+
+func encodeOpaque(signature []byte) json.RawMessage {
+	if len(signature) == 0 {
+		return nil
+	}
+
+	encoded, err := json.Marshal(opaqueState{ThoughtSignature: signature})
+	if err != nil {
+		return nil
+	}
+	return encoded
+}
+
+func decodeOpaque(raw json.RawMessage) []byte {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var state opaqueState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		// Metadata written by a different provider, or by an older version of
+		// this one. Continuing without it is better than failing the turn.
+		return nil
+	}
+	return state.ThoughtSignature
 }

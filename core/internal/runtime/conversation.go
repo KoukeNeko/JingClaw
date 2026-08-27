@@ -64,9 +64,10 @@ func (b *conversationBuilder) apply(event domain.Event) {
 	case domain.ToolCallRequested:
 		b.flushResults()
 		b.pendingToolCalls = append(b.pendingToolCalls, provider.ToolUseBlock{
-			ID:   string(payload.CallID),
-			Name: payload.Name,
-			Args: json.RawMessage(payload.Arguments),
+			ID:     string(payload.CallID),
+			Name:   payload.Name,
+			Args:   json.RawMessage(payload.Arguments),
+			Opaque: json.RawMessage(payload.ProviderMetadata),
 		})
 
 	case domain.ToolCallCompleted:
