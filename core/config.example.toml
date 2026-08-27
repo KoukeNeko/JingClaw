@@ -113,6 +113,45 @@
 # start says what ran and the end says how it ended.
 # max_command_output = 32768
 
+[mcp]
+# Tool servers speaking the Model Context Protocol, run as child processes.
+#
+# A server is somebody else's program. What it says about itself decides what
+# the model is told a tool does; it does not decide what the tool is allowed to
+# do. That is the level below, and it lives here rather than in the server.
+
+# How long a server has to start and answer the handshake.
+# start_timeout = "30s"
+
+# How long one tool call may take.
+# call_timeout = "2m"
+
+# The ceiling on one result, so a single call cannot fill the context window.
+# max_output = 32768
+
+# One table per server. Tools arrive named mcp_<server>_<tool>, so installing
+# one can never shadow a built-in: read_file keeps meaning the one that
+# respects the workspace boundary.
+#
+# [[mcp.servers]]
+# name = "sqlite"
+# command = "uvx"
+# args = ["mcp-server-sqlite", "--db-path", "/tmp/notes.db"]
+#
+# What its tools count as to the policy engine: internal, workspace_read,
+# workspace_write, execute or high_impact. Defaults to execute, the honest
+# floor for a call that makes another program on this machine act. Lower it
+# only for a server you have read.
+# level = "execute"
+#
+# Nothing is inherited from the daemon's environment that is not named here.
+# It holds the provider credentials, and a tool server is exactly the kind of
+# program that should not be handed them by default.
+# pass_env = ["GITHUB_TOKEN"]
+#
+# [mcp.servers.env]
+# LOG_LEVEL = "warn"
+
 [delivery]
 # How provider output becomes events. These bound the event log by the clock
 # rather than by whatever chunk size the provider happens to use, which is what

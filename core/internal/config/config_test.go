@@ -177,6 +177,15 @@ func koanfKeys(t reflect.Type) []string {
 			continue
 		}
 
+		// A list of tables is the same: the settings are inside its elements,
+		// and a server option nobody documents is one an operator can only
+		// find by reading the source.
+		if field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.Struct {
+			keys = append(keys, tag)
+			keys = append(keys, koanfKeys(field.Type.Elem())...)
+			continue
+		}
+
 		keys = append(keys, tag)
 	}
 

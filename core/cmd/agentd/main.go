@@ -30,6 +30,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
+	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
 	"github.com/KoukeNeko/JingClaw/core/internal/permission"
 	"github.com/KoukeNeko/JingClaw/core/internal/prompt"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
@@ -187,6 +188,27 @@ func run() error {
 		&builtin.ExecCommand{Workspace: ws, Limits: limits},
 	)
 
+	// Tool servers are started before the prompt is assembled, because what
+	// they offer is part of what the agent can do and the prompt says so.
+	//
+	// They are child processes of this daemon, so they are shut down with it;
+	// the defer is registered immediately, before anything else can fail and
+	// leave them running.
+	servers := mcp.Start(rootCtx, mcpServers(cfg), mcp.Limits{
+		StartTimeout: cfg.MCP.StartTimeout,
+		CallTimeout:  cfg.MCP.CallTimeout,
+		MaxOutput:    cfg.MCP.MaxOutput,
+	}, logger)
+	defer func() {
+		if err := servers.Close(); err != nil {
+			logger.Warn("an mcp server did not shut down cleanly", "error", err)
+		}
+	}()
+
+	if err := servers.Register(tools); err != nil {
+		return err
+	}
+
 	profile, ok := permission.ProfileByName(cfg.Agent.PermissionProfile)
 	if !ok {
 		return fmt.Errorf("unknown permission profile %q", cfg.Agent.PermissionProfile)
@@ -324,9 +346,9 @@ func run() error {
 		"discovery", discoveryPath,
 	)
 	// Human-facing line on stdout; the structured log goes to stderr.
-	fmt.Printf("JingClaw daemon\nListening: %s\nConfig:    %s\nProvider:  %s\nModel:     %s\nWorkspace: %s\nDatabase:  %s\nDiscovery: %s\n",
+	fmt.Printf("JingClaw daemon\nListening: %s\nConfig:    %s\nProvider:  %s\nModel:     %s\nWorkspace: %s\nTools:     %s\nDatabase:  %s\nDiscovery: %s\n",
 		baseURL, describeConfigFile(configFile, createdConfig), modelProvider.Name(), selected.ID,
-		ws.Root(), dbPath, discoveryPath)
+		ws.Root(), describeTools(tools, servers, cfg), dbPath, discoveryPath)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
@@ -375,6 +397,53 @@ func databasePath(dataDir string) (string, error) {
 // buildProvider constructs the configured provider. Real providers are wrapped
 // in retry here rather than inside each adapter, so backoff policy is one
 // decision instead of one per vendor.
+// mcpServers turns the configured servers into what the mcp package needs.
+//
+// The level is resolved here rather than in the config package so that there
+// is one definition of what the names mean, in the package that owns them.
+// An unknown name was already refused by validation; execute is the floor
+// anyway, so falling back to it cannot make anything more permissive.
+func mcpServers(cfg config.Config) []mcp.ServerConfig {
+	servers := make([]mcp.ServerConfig, 0, len(cfg.MCP.Servers))
+
+	for _, configured := range cfg.MCP.Servers {
+		level := tool.LevelExecute
+		if configured.Level != "" {
+			if resolved, ok := tool.LevelByName(configured.Level); ok {
+				level = resolved
+			}
+		}
+
+		servers = append(servers, mcp.ServerConfig{
+			Name:    configured.Name,
+			Command: configured.Command,
+			Args:    configured.Args,
+			Env:     configured.Env,
+			PassEnv: configured.PassEnv,
+			Level:   level,
+		})
+	}
+
+	return servers
+}
+
+// describeTools says what the model can reach, and says when a server that was
+// asked for is not there.
+//
+// A tool that is quietly absent looks exactly like one the model chose not to
+// use, which is the hardest kind of missing thing to notice.
+func describeTools(registry *tool.Registry, servers *mcp.Manager, cfg config.Config) string {
+	described := fmt.Sprintf("%d", len(registry.Specs()))
+
+	wanted := len(cfg.MCP.Servers)
+	if wanted == 0 {
+		return described
+	}
+
+	return fmt.Sprintf("%s (%d from %d of %d mcp servers)",
+		described, servers.ToolCount(), servers.Connected(), wanted)
+}
+
 // contextWindow settles how much room a run has.
 //
 // The provider is asked first because it knows; the setting exists for a local

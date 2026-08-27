@@ -67,6 +67,10 @@ func TestEnsureFileCreatesTheExample(t *testing.T) {
 	}
 
 	// Loading what was just created must change nothing.
+	//
+	// Compared against loading an empty file rather than against Defaults, so
+	// that the two go through the same decoding and the test is about the
+	// settings rather than about how a missing list decodes.
 	cfg, used, err := config.Load("")
 	if err != nil {
 		t.Fatalf("load what was created: %v", err)
@@ -74,8 +78,14 @@ func TestEnsureFileCreatesTheExample(t *testing.T) {
 	if used != path {
 		t.Errorf("loaded %q, want the file that was created at %q", used, path)
 	}
-	if !reflect.DeepEqual(cfg, config.Defaults()) {
-		t.Errorf("the created file changes behaviour despite being fully commented:\n%+v", cfg)
+
+	empty, _, err := config.Load(writeConfig(t, "# nothing at all\n"))
+	if err != nil {
+		t.Fatalf("load an empty config: %v", err)
+	}
+	if !reflect.DeepEqual(cfg, empty) {
+		t.Errorf("the created file changes behaviour despite being fully commented:\n got %+v\nwant %+v",
+			cfg, empty)
 	}
 }
 

@@ -231,6 +231,49 @@ That last refusal is not a preference. This API reads files and runs programs;
 binding it somewhere reachable needs a more deliberate mechanism than a config
 line, and there is not one.
 
+## Tool servers
+
+Tools that speak the Model Context Protocol run as child processes of the
+daemon and appear to the model as ordinary tools:
+
+```toml
+[[mcp.servers]]
+name = "sqlite"
+command = "uvx"
+args = ["mcp-server-sqlite", "--db-path", "notes.db"]
+level = "workspace_read"
+pass_env = ["SOME_TOKEN"]
+```
+
+```
+Tools:     12 (6 from 1 of 1 mcp servers)
+```
+
+Three things about that boundary are deliberate, because an MCP server is
+somebody else's program running on your machine.
+
+**A server does not get to say how dangerous it is.** The policy engine reads
+`Level` and `Capabilities`; if a server could set them, one that declared its
+tool read-only would walk straight past the approval a truthful one would have
+to stop for. The level comes from `level` in your configuration and defaults to
+`execute`, the honest floor for a call that makes another program act.
+Capabilities are assumed rather than asked: network, execute and destructive,
+none of idempotent or parallel-safe.
+
+**Names are prefixed, never passed through.** Tools arrive as
+`mcp_<server>_<tool>`, so installing a server cannot make `read_file` mean
+something other than the one that respects the workspace boundary. A name too
+long for a model to call is refused rather than truncated, because truncating
+invents collisions between tools that differ only in the part that was cut off.
+
+**Nothing is inherited that was not named.** The daemon's environment holds
+your provider credentials. A server gets `PATH` and the like, whatever `env`
+sets literally, and whatever `pass_env` names — nothing else.
+
+A server that will not start is logged and skipped rather than taken as a
+reason to refuse to run, and the banner says how many of how many answered: a
+tool that is quietly absent looks exactly like one the model chose not to use.
+
 ## Long sessions
 
 The conversation sent to the model is rebuilt from the event log every turn.

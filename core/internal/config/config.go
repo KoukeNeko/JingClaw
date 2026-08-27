@@ -42,6 +42,7 @@ type Config struct {
 	Model     Model     `koanf:"model"`
 	Context   Context   `koanf:"context"`
 	Tools     Tools     `koanf:"tools"`
+	MCP       MCP       `koanf:"mcp"`
 	Delivery  Delivery  `koanf:"delivery"`
 	Workspace Workspace `koanf:"workspace"`
 	Server    Server    `koanf:"server"`
@@ -165,6 +166,48 @@ type Tools struct {
 	MaxCommandOutput  int           `koanf:"max_command_output"`
 }
 
+// MCP is the tool servers this agent runs alongside itself.
+//
+// A server is somebody else's program. What it says about itself decides what
+// the model is told a tool does; it does not decide what the tool is allowed
+// to do, which is why the level lives here and not in the server's own
+// description of itself.
+type MCP struct {
+	StartTimeout time.Duration `koanf:"start_timeout"`
+	CallTimeout  time.Duration `koanf:"call_timeout"`
+
+	// MaxOutput bounds one result, for the same reason the built-in tools have
+	// a bound: a tool that can fill the context window in one call can end a
+	// session in one call.
+	MaxOutput int `koanf:"max_output"`
+
+	Servers []MCPServer `koanf:"servers"`
+}
+
+// MCPServer is one server to run.
+type MCPServer struct {
+	// Name prefixes this server's tools, so installing one can never shadow a
+	// built-in: read_file has to keep meaning the one that respects the
+	// workspace boundary.
+	Name string `koanf:"name"`
+
+	Command string   `koanf:"command"`
+	Args    []string `koanf:"args"`
+
+	// Env are literal values for the child, and PassEnv names variables
+	// forwarded from the daemon's own environment. Nothing else is inherited:
+	// the daemon's environment holds the provider credentials, and handing
+	// those to every server somebody installs would make installing one an act
+	// of trust nobody was asked for.
+	Env     map[string]string `koanf:"env"`
+	PassEnv []string          `koanf:"pass_env"`
+
+	// Level is what this server's tools count as to the policy engine. It
+	// defaults to execute, which is the honest floor for a call that makes
+	// another program on this machine act.
+	Level string `koanf:"level"`
+}
+
 // Delivery paces how provider output becomes events.
 //
 // Providers stream in whatever granularity suits them. These bound the log by
@@ -243,6 +286,11 @@ func Defaults() Config {
 			CommandTimeout:    2 * time.Minute,
 			MaxCommandTimeout: 10 * time.Minute,
 			MaxCommandOutput:  32 * 1024,
+		},
+		MCP: MCP{
+			StartTimeout: 30 * time.Second,
+			CallTimeout:  2 * time.Minute,
+			MaxOutput:    32 * 1024,
 		},
 		Delivery: Delivery{
 			TextFlushBytes:     240,
@@ -413,6 +461,7 @@ func (c Config) Validate() error {
 	problems = append(problems, c.addressProblems()...)
 	problems = append(problems, c.choiceProblems()...)
 	problems = append(problems, c.rangeProblems()...)
+	problems = append(problems, c.serverProblems()...)
 
 	if len(problems) == 0 {
 		return nil
@@ -480,6 +529,56 @@ func (c Config) choiceProblems() []Problem {
 	return problems
 }
 
+// serverProblems checks the tool servers.
+//
+// Each one is a child process this daemon will start, so a mistake here is a
+// program that does not run or, worse, one whose tools quietly arrive with the
+// wrong risk attached to them.
+func (c Config) serverProblems() []Problem {
+	var problems []Problem
+
+	seen := make(map[string]bool, len(c.MCP.Servers))
+
+	for index, server := range c.MCP.Servers {
+		where := fmt.Sprintf("mcp.servers[%d]", index)
+
+		switch {
+		case server.Name == "":
+			problems = append(problems, Problem{
+				Key: where + ".name", Value: `""`,
+				Why: "is empty",
+				Fix: "Every server needs a name; it is what prefixes its tools.",
+			})
+		case seen[server.Name]:
+			problems = append(problems, Problem{
+				Key: where + ".name", Value: quote(server.Name),
+				Why: "is used by more than one server",
+				Fix: "Names prefix tool names, so two servers sharing one would collide.",
+			})
+		default:
+			seen[server.Name] = true
+		}
+
+		if server.Command == "" {
+			problems = append(problems, Problem{
+				Key: where + ".command", Value: `""`,
+				Why: "is empty",
+				Fix: "Give the program to run, with its arguments in args.",
+			})
+		}
+
+		if server.Level != "" && !toolLevels[server.Level] {
+			problems = append(problems, Problem{
+				Key: where + ".level", Value: quote(server.Level),
+				Why: "is not a level that exists",
+				Fix: "Use internal, workspace_read, workspace_write, execute or high_impact.",
+			})
+		}
+	}
+
+	return problems
+}
+
 func (c Config) rangeProblems() []Problem {
 	var problems []Problem
 
@@ -501,6 +600,7 @@ func (c Config) rangeProblems() []Problem {
 		{"tools.max_command_output", int64(c.Tools.MaxCommandOutput), "Zero would discard everything a program printed."},
 		{"delivery.text_flush_bytes", int64(c.Delivery.TextFlushBytes), "Zero would write an event per character."},
 		{"context.summary_tokens", int64(c.Context.SummaryTokens), "A summary of nothing is not a summary."},
+		{"mcp.max_output", int64(c.MCP.MaxOutput), "Zero would discard whatever a tool server answered."},
 	}
 	for _, setting := range positive {
 		if setting.value <= 0 {
@@ -571,6 +671,13 @@ var (
 	profileNames  = map[string]bool{"local": true, "gateway": true}
 	providerNames = map[string]bool{"fake": true, "gemini": true}
 	platformNames = map[string]bool{"discord": true}
+	toolLevels    = map[string]bool{
+		"internal":        true,
+		"workspace_read":  true,
+		"workspace_write": true,
+		"execute":         true,
+		"high_impact":     true,
+	}
 
 	logLevels = map[string]slog.Level{
 		"debug": slog.LevelDebug,
@@ -786,6 +893,45 @@ const Example = `# JingClaw configuration.
 # How much of a program's output is kept. The middle is dropped first: the
 # start says what ran and the end says how it ended.
 # max_command_output = 32768
+
+[mcp]
+# Tool servers speaking the Model Context Protocol, run as child processes.
+#
+# A server is somebody else's program. What it says about itself decides what
+# the model is told a tool does; it does not decide what the tool is allowed to
+# do. That is the level below, and it lives here rather than in the server.
+
+# How long a server has to start and answer the handshake.
+# start_timeout = "30s"
+
+# How long one tool call may take.
+# call_timeout = "2m"
+
+# The ceiling on one result, so a single call cannot fill the context window.
+# max_output = 32768
+
+# One table per server. Tools arrive named mcp_<server>_<tool>, so installing
+# one can never shadow a built-in: read_file keeps meaning the one that
+# respects the workspace boundary.
+#
+# [[mcp.servers]]
+# name = "sqlite"
+# command = "uvx"
+# args = ["mcp-server-sqlite", "--db-path", "/tmp/notes.db"]
+#
+# What its tools count as to the policy engine: internal, workspace_read,
+# workspace_write, execute or high_impact. Defaults to execute, the honest
+# floor for a call that makes another program on this machine act. Lower it
+# only for a server you have read.
+# level = "execute"
+#
+# Nothing is inherited from the daemon's environment that is not named here.
+# It holds the provider credentials, and a tool server is exactly the kind of
+# program that should not be handed them by default.
+# pass_env = ["GITHUB_TOKEN"]
+#
+# [mcp.servers.env]
+# LOG_LEVEL = "warn"
 
 [delivery]
 # How provider output becomes events. These bound the event log by the clock

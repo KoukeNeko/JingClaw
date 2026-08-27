@@ -55,6 +55,21 @@ func (l Level) String() string {
 	}
 }
 
+// LevelByName resolves the name a configuration file uses.
+//
+// The names are the ones String produces, so what an operator writes and what
+// a log prints are the same word.
+func LevelByName(name string) (Level, bool) {
+	for _, level := range []Level{
+		LevelInternal, LevelWorkspaceRead, LevelWorkspaceWrite, LevelExecute, LevelHighImpact,
+	} {
+		if level.String() == name {
+			return level, true
+		}
+	}
+	return LevelInternal, false
+}
+
 // Capabilities describes what a tool can reach. A policy engine reads these
 // rather than pattern-matching on tool names.
 type Capabilities struct {
