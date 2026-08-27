@@ -168,3 +168,60 @@ func TestTranscriptRecordsCallsAndTheirResults(t *testing.T) {
 		}
 	}
 }
+
+// The case that is easy to miss: everything foldable has already been folded.
+//
+// Without this the runtime summarises the summary, records the same point in
+// the log, and comes out exactly the size it went in — then does it again next
+// turn. A compaction that does not advance is a loop with a model call in it.
+func TestCompactionRefusesToSummariseItsOwnSummary(t *testing.T) {
+	const alreadyFolded = domain.Seq(50)
+
+	// What is left after a compaction, when the one message kept is on its own
+	// larger than the budget: the summary, and that message.
+	messages := []boundedMessage{
+		{
+			Message: provider.Message{
+				Role:    provider.RoleUser,
+				Content: provider.Text(summaryPreamble + "everything up to here"),
+			},
+			LastSeq: alreadyFolded,
+		},
+		userMessage(60, strings.Repeat("a", 200_000)),
+	}
+
+	if _, _, ok := planCompaction(messages, alreadyFolded, 500); ok {
+		t.Error("it would fold only the summary it just wrote")
+	}
+}
+
+// And when there is something new to fold, it says so and names a point past
+// the last one.
+func TestCompactionProceedsWhenThereIsSomethingNewToFold(t *testing.T) {
+	const alreadyFolded = domain.Seq(50)
+
+	messages := []boundedMessage{
+		{
+			Message: provider.Message{
+				Role:    provider.RoleUser,
+				Content: provider.Text(summaryPreamble + "everything up to here"),
+			},
+			LastSeq: alreadyFolded,
+		},
+		userMessage(60, strings.Repeat("a", 8000)),
+		assistantCall(70, "call_1", "read_file"),
+		toolResult(80, "call_1", "read_file", strings.Repeat("b", 8000)),
+		userMessage(90, "and now?"),
+	}
+
+	cut, through, ok := planCompaction(messages, alreadyFolded, 200)
+	if !ok {
+		t.Fatal("it refused to fold history it had never folded")
+	}
+	if cut < 2 {
+		t.Errorf("cut is %d, which folds nothing but the summary", cut)
+	}
+	if through <= alreadyFolded {
+		t.Errorf("through is %d, not past the %d already folded", through, alreadyFolded)
+	}
+}

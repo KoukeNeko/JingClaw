@@ -16,7 +16,7 @@ import (
 // a restart with its history intact, and it means there is exactly one place
 // where "what the model has seen" is defined.
 func (r *Runtime) buildConversation(ctx context.Context, sessionID domain.SessionID) ([]provider.Message, error) {
-	bounded, err := r.buildBoundedConversation(ctx, sessionID)
+	bounded, _, err := r.buildBoundedConversation(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -49,13 +49,17 @@ func plainMessages(bounded []boundedMessage) []provider.Message {
 // before it, earlier summaries included. Events older than its ThroughSeq are
 // still in the log and still visible to clients; they are simply no longer
 // part of what the model sees.
+//
+// The sequence that summary replaces comes back with the messages, because the
+// next compaction has to be able to tell whether it would actually fold
+// anything new.
 func (r *Runtime) buildBoundedConversation(
 	ctx context.Context,
 	sessionID domain.SessionID,
-) ([]boundedMessage, error) {
+) ([]boundedMessage, domain.Seq, error) {
 	events, err := r.opts.Store.ListAfter(ctx, sessionID, 0, 0)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var (
@@ -85,7 +89,7 @@ func (r *Runtime) buildBoundedConversation(
 		builder.apply(event)
 	}
 
-	return builder.finish(), nil
+	return builder.finish(), throughSeq, nil
 }
 
 // summaryPreamble frames the summary as what it is. A model handed a condensed

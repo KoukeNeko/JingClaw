@@ -77,7 +77,7 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 		return
 	}
 
-	messages, err := r.buildBoundedConversation(ctx, run.SessionID)
+	messages, alreadyFolded, err := r.buildBoundedConversation(ctx, run.SessionID)
 	if err != nil {
 		r.opts.Logger.Warn("could not measure the conversation",
 			"run_id", string(run.ID), "error", err)
@@ -90,11 +90,14 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 	}
 
 	keep := int64(float64(budget.Window)*budget.KeepFraction) - overhead
-	cut := chooseCut(messages, keep)
-	if cut <= 0 {
-		// Nothing can be folded without leaving the conversation malformed,
-		// which happens when a single recent turn is itself over the budget.
-		r.opts.Logger.Warn("conversation is over budget but cannot be compacted",
+
+	cut, through, ok := planCompaction(messages, alreadyFolded, keep)
+	if !ok {
+		// Over budget and nothing to be done about it, which happens when the
+		// most recent turn is on its own larger than the window. Saying so is
+		// the honest outcome; the provider will say the same thing in a moment
+		// and in terms an operator can act on.
+		r.opts.Logger.Warn("conversation is over budget and cannot be compacted further",
 			"run_id", string(run.ID), "estimated_tokens", before)
 		return
 	}
@@ -111,7 +114,7 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 	if err := r.append(ctx, run.SessionID, run.ID, domain.EventConversationCompacted,
 		domain.ConversationCompacted{
 			Summary:        summary,
-			ThroughSeq:     messages[cut-1].LastSeq,
+			ThroughSeq:     through,
 			MessagesFolded: cut,
 			TokensBefore:   before,
 			TokensAfter:    after,
@@ -127,6 +130,31 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 		"tokens_before", before,
 		"tokens_after", after,
 	)
+}
+
+// planCompaction decides what to fold, and whether folding it is worth doing.
+//
+// The second question is the one that is easy to miss. A conversation whose
+// only foldable message is the summary already in front of it would summarise
+// a summary, record the same point in the log, and come out exactly the size
+// it went in — then do it again on the next turn, and the one after. A
+// compaction that does not advance is a loop with a model call in it.
+func planCompaction(
+	messages []boundedMessage,
+	alreadyFolded domain.Seq,
+	keep int64,
+) (cut int, through domain.Seq, ok bool) {
+	cut = chooseCut(messages, keep)
+	if cut <= 0 {
+		return 0, 0, false
+	}
+
+	through = messages[cut-1].LastSeq
+	if through <= alreadyFolded {
+		return 0, 0, false
+	}
+
+	return cut, through, true
 }
 
 // chooseCut decides how much history to fold, returning the index the verbatim
