@@ -24,6 +24,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
+	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
@@ -156,6 +157,11 @@ func run() error {
 		return err
 	}
 
+	artifacts, err := artifact.Open(artifactDir(cfg, dbPath), cfg.Artifacts.MaxBytes)
+	if err != nil {
+		return err
+	}
+
 	// One observer shared by the tools, so a write can tell whether the file it
 	// is about to replace is one the agent actually read, and one lock set so
 	// two writes to the same file cannot interleave.
@@ -185,7 +191,8 @@ func run() error {
 		&builtin.Grep{Workspace: ws, Limits: limits},
 		writeFile,
 		editFile,
-		&builtin.ExecCommand{Workspace: ws, Limits: limits},
+		&builtin.ExecCommand{Workspace: ws, Limits: limits, Artifacts: artifacts},
+		&builtin.ReadArtifact{Artifacts: artifacts, Limits: limits},
 	)
 
 	// Tool servers are started before the prompt is assembled, because what
@@ -198,7 +205,7 @@ func run() error {
 		StartTimeout: cfg.MCP.StartTimeout,
 		CallTimeout:  cfg.MCP.CallTimeout,
 		MaxOutput:    cfg.MCP.MaxOutput,
-	}, logger)
+	}, artifacts, logger)
 	defer func() {
 		if err := servers.Close(); err != nil {
 			logger.Warn("an mcp server did not shut down cleanly", "error", err)
@@ -397,6 +404,18 @@ func databasePath(dataDir string) (string, error) {
 // buildProvider constructs the configured provider. Real providers are wrapped
 // in retry here rather than inside each adapter, so backoff policy is one
 // decision instead of one per vendor.
+// artifactDir settles where stored output lives.
+//
+// Beside the database by default, because that is where this daemon's other
+// durable state already is and splitting the two across directories makes a
+// backup something an operator can half do.
+func artifactDir(cfg config.Config, dbPath string) string {
+	if cfg.Artifacts.Dir != "" {
+		return cfg.Artifacts.Dir
+	}
+	return filepath.Join(filepath.Dir(dbPath), "artifacts")
+}
+
 // mcpServers turns the configured servers into what the mcp package needs.
 //
 // The level is resolved here rather than in the config package so that there

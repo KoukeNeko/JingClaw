@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 )
 
@@ -26,12 +27,13 @@ func Start(
 	ctx context.Context,
 	configs []ServerConfig,
 	limits Limits,
+	artifacts *artifact.Store,
 	logger *slog.Logger,
 ) *Manager {
 	manager := &Manager{logger: logger}
 
 	for _, cfg := range configs {
-		server, err := Connect(ctx, cfg, limits, logger)
+		server, err := Connect(ctx, cfg, limits, artifacts, logger)
 		if err != nil {
 			logger.Error("an mcp server did not start", "server", cfg.Name, "error", err)
 			continue

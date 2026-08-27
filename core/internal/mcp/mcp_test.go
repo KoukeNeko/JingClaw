@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 )
@@ -29,8 +30,18 @@ func helperConfig(name string) mcp.ServerConfig {
 
 func connect(t *testing.T, cfg mcp.ServerConfig, limits mcp.Limits) *mcp.Server {
 	t.Helper()
+	return connectWithStore(t, cfg, limits, nil)
+}
 
-	server, err := mcp.Connect(context.Background(), cfg, limits,
+func connectWithStore(
+	t *testing.T,
+	cfg mcp.ServerConfig,
+	limits mcp.Limits,
+	artifacts *artifact.Store,
+) *mcp.Server {
+	t.Helper()
+
+	server, err := mcp.Connect(context.Background(), cfg, limits, artifacts,
 		slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -130,7 +141,7 @@ func TestToolNamesAreNamespaced(t *testing.T) {
 func TestAnUnusableNameIsRefusedRatherThanTruncated(t *testing.T) {
 	cfg := helperConfig(strings.Repeat("long", 20))
 
-	server, err := mcp.Connect(context.Background(), cfg, mcp.Limits{},
+	server, err := mcp.Connect(context.Background(), cfg, mcp.Limits{}, nil,
 		slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -183,6 +194,41 @@ func TestOneResultCannotFillTheContextWindow(t *testing.T) {
 		if !strings.Contains(result.Content, want) {
 			t.Errorf("the bounded result lost %q", want)
 		}
+	}
+}
+
+// An answer larger than fits is still an answer somebody asked for. Deciding
+// on their behalf that the middle did not matter is worse than keeping it.
+func TestAnOversizedAnswerIsKeptWhole(t *testing.T) {
+	store, err := artifact.Open(t.TempDir(), 0)
+	if err != nil {
+		t.Fatalf("open artifact store: %v", err)
+	}
+
+	server := connectWithStore(t, helperConfig("helper"), mcp.Limits{MaxOutput: 4000}, store)
+
+	result, err := toolNamed(t, server, "mcp_helper_huge").
+		Execute(context.Background(), tool.Call{ID: "call_1", Name: "mcp_helper_huge"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if result.Artifact == nil {
+		t.Fatal("an answer that did not fit was not kept")
+	}
+	if !strings.Contains(result.Content, result.Artifact.ID) {
+		t.Error("the model cannot see the id of what was kept")
+	}
+
+	window, total, err := store.ReadRange(result.Artifact.ID, 0, 8)
+	if err != nil {
+		t.Fatalf("read what was kept: %v", err)
+	}
+	if !strings.HasPrefix(string(window), "HEAD") {
+		t.Errorf("what was kept starts with %q", window)
+	}
+	if total <= 4000 {
+		t.Errorf("what was kept is %d bytes, no more than what was shown", total)
 	}
 }
 
@@ -279,7 +325,7 @@ func TestTheDaemonsEnvironmentIsNotInherited(t *testing.T) {
 func TestServersRegisterAlongsideTheBuiltIns(t *testing.T) {
 	manager := mcp.Start(context.Background(),
 		[]mcp.ServerConfig{helperConfig("one"), helperConfig("two")},
-		mcp.Limits{}, slog.New(slog.DiscardHandler))
+		mcp.Limits{}, nil, slog.New(slog.DiscardHandler))
 	t.Cleanup(func() { _ = manager.Close() })
 
 	if manager.Connected() != 2 {
@@ -313,7 +359,7 @@ func TestABrokenServerDoesNotStopTheOthers(t *testing.T) {
 
 	manager := mcp.Start(context.Background(),
 		[]mcp.ServerConfig{broken, helperConfig("working")},
-		mcp.Limits{}, slog.New(slog.DiscardHandler))
+		mcp.Limits{}, nil, slog.New(slog.DiscardHandler))
 	t.Cleanup(func() { _ = manager.Close() })
 
 	if manager.Connected() != 1 {

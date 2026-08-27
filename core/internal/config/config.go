@@ -42,6 +42,7 @@ type Config struct {
 	Model     Model     `koanf:"model"`
 	Context   Context   `koanf:"context"`
 	Tools     Tools     `koanf:"tools"`
+	Artifacts Artifacts `koanf:"artifacts"`
 	MCP       MCP       `koanf:"mcp"`
 	Delivery  Delivery  `koanf:"delivery"`
 	Workspace Workspace `koanf:"workspace"`
@@ -166,6 +167,21 @@ type Tools struct {
 	MaxCommandOutput  int           `koanf:"max_command_output"`
 }
 
+// Artifacts is where output too large to show the model is kept.
+//
+// Without a store, truncation is destruction: the model is told there was more
+// and given no way to reach it. With one, the excerpt it sees is a starting
+// point and the whole of it is a tool call away.
+type Artifacts struct {
+	// Dir holds the content. Empty puts it beside the database, which is where
+	// the rest of this daemon's durable state already lives.
+	Dir string `koanf:"dir"`
+
+	// MaxBytes bounds one artifact. Something larger is a file that belongs in
+	// the workspace, not output that was captured.
+	MaxBytes int64 `koanf:"max_bytes"`
+}
+
 // MCP is the tool servers this agent runs alongside itself.
 //
 // A server is somebody else's program. What it says about itself decides what
@@ -286,6 +302,9 @@ func Defaults() Config {
 			CommandTimeout:    2 * time.Minute,
 			MaxCommandTimeout: 10 * time.Minute,
 			MaxCommandOutput:  32 * 1024,
+		},
+		Artifacts: Artifacts{
+			MaxBytes: 64 << 20,
 		},
 		MCP: MCP{
 			StartTimeout: 30 * time.Second,
@@ -601,6 +620,7 @@ func (c Config) rangeProblems() []Problem {
 		{"delivery.text_flush_bytes", int64(c.Delivery.TextFlushBytes), "Zero would write an event per character."},
 		{"context.summary_tokens", int64(c.Context.SummaryTokens), "A summary of nothing is not a summary."},
 		{"mcp.max_output", int64(c.MCP.MaxOutput), "Zero would discard whatever a tool server answered."},
+		{"artifacts.max_bytes", c.Artifacts.MaxBytes, "Zero would mean nothing can be kept."},
 	}
 	for _, setting := range positive {
 		if setting.value <= 0 {
@@ -893,6 +913,18 @@ const Example = `# JingClaw configuration.
 # How much of a program's output is kept. The middle is dropped first: the
 # start says what ran and the end says how it ended.
 # max_command_output = 32768
+
+[artifacts]
+# Where output too large to show the model is kept, so that truncating it is
+# not the same as destroying it. The model is given an excerpt and an id, and
+# reads the rest with read_artifact.
+
+# Empty puts it beside the database, where the rest of the durable state is.
+# dir = ""
+
+# The ceiling on one artifact. Larger than this is a file that belongs in the
+# workspace rather than output that was captured.
+# max_bytes = 67108864
 
 [mcp]
 # Tool servers speaking the Model Context Protocol, run as child processes.

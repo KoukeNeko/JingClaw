@@ -113,6 +113,18 @@
 # start says what ran and the end says how it ended.
 # max_command_output = 32768
 
+[artifacts]
+# Where output too large to show the model is kept, so that truncating it is
+# not the same as destroying it. The model is given an excerpt and an id, and
+# reads the rest with read_artifact.
+
+# Empty puts it beside the database, where the rest of the durable state is.
+# dir = ""
+
+# The ceiling on one artifact. Larger than this is a file that belongs in the
+# workspace rather than output that was captured.
+# max_bytes = 67108864
+
 [mcp]
 # Tool servers speaking the Model Context Protocol, run as child processes.
 #

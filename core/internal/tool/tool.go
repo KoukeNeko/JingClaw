@@ -137,6 +137,24 @@ type Result struct {
 
 	// OriginalBytes is the untruncated size, for the same reason.
 	OriginalBytes int64
+
+	// Artifact points at the whole of what Content is an excerpt of.
+	//
+	// Truncation without this is destruction: the model is told there was
+	// more and given no way to reach it. With it, "the rest" is a tool call
+	// away and a client can show the whole thing.
+	Artifact *Artifact
+}
+
+// Artifact refers to stored content.
+//
+// It is a reference rather than the bytes because a Result travels through the
+// event log and into a request to a model; the point of the artifact store is
+// that the bytes do not go there.
+type Artifact struct {
+	ID        string
+	Size      int64
+	MediaType string
 }
 
 // Tool is a capability the model can invoke.
@@ -174,6 +192,13 @@ type Error struct {
 
 	// Retryable distinguishes "this will never work" from "try again".
 	Retryable bool
+
+	// Artifact points at output the failure produced.
+	//
+	// A command that timed out or exited non-zero is exactly the one whose
+	// output somebody wants, so a failure carries the reference as readily as
+	// a success does.
+	Artifact *Artifact
 }
 
 func (e *Error) Error() string {
@@ -196,13 +221,14 @@ func (e *Error) Result() Result {
 	// rather than having to parse prose.
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return Result{Content: e.Error(), Summary: e.Message, IsError: true}
+		return Result{Content: e.Error(), Summary: e.Message, IsError: true, Artifact: e.Artifact}
 	}
 
 	return Result{
-		Content: string(encoded),
-		Summary: e.Message,
-		IsError: true,
+		Content:  string(encoded),
+		Summary:  e.Message,
+		IsError:  true,
+		Artifact: e.Artifact,
 	}
 }
 

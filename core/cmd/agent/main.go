@@ -353,6 +353,11 @@ func describe(ev *controlv1.Event) (label, detail string) {
 		if done.GetIsError() {
 			status = "error: " + compact(done.GetContent(), 160)
 		}
+		// Naming the artifact is what makes a truncated line something a
+		// person can follow up on rather than a note that output was lost.
+		if stored := done.GetArtifact(); stored != nil {
+			status += fmt.Sprintf(" [%d bytes kept as %s]", stored.GetSize(), stored.GetId())
+		}
 		return "tool.completed", fmt.Sprintf("%s (%dms) %s", done.GetName(), done.GetDurationMs(), status)
 
 	case *controlv1.Event_ApprovalRequested:

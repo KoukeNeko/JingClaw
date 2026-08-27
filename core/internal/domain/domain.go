@@ -201,7 +201,22 @@ type ToolCallCompleted struct {
 	IsError   bool
 	Truncated bool
 
+	// Artifact names the whole of what Content is an excerpt of, when the tool
+	// stored one. A truncated result with nothing here is output that is gone.
+	Artifact *Artifact
+
 	DurationMS int64
+}
+
+// Artifact refers to content in the artifact store.
+//
+// It lives in the event rather than in a table of its own because the event
+// already records which session, which run and which tool produced it. A
+// second place holding the same fact is a second place for it to be wrong.
+type Artifact struct {
+	ID        string
+	Size      int64
+	MediaType string
 }
 
 // ConversationCompacted replaces the history up to ThroughSeq with a summary.

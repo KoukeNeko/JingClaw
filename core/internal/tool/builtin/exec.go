@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
@@ -26,6 +27,10 @@ type ExecCommand struct {
 	Workspace *workspace.Workspace
 
 	Limits Limits
+
+	// Artifacts is where output too large to show is kept. Left nil, a long
+	// build log is simply cut in half and the middle is gone.
+	Artifacts *artifact.Store
 
 	// Env is the environment child processes receive. Left empty, a minimal
 	// one is derived: inheriting the daemon's would hand every command its API
@@ -138,10 +143,11 @@ func (t *ExecCommand) Execute(ctx context.Context, call tool.Call) (tool.Result,
 	runErr := command.Run()
 	elapsed := time.Since(started)
 
-	return t.result(args, combined.Bytes(), runErr, runCtx, elapsed, limits.MaxCommandOutput)
+	return t.result(ctx, args, combined.Bytes(), runErr, runCtx, elapsed, limits.MaxCommandOutput)
 }
 
 func (t *ExecCommand) result(
+	ctx context.Context,
 	args execArgs,
 	rawOutput []byte,
 	runErr error,
@@ -151,6 +157,19 @@ func (t *ExecCommand) result(
 ) (tool.Result, error) {
 	display := commandLine(args)
 	output, truncated := boundOutput(rawOutput, maxOutput)
+
+	// A build log that fails at line 40,000 is the most useful thing in the
+	// session and the least printable, so the whole of it is kept and the
+	// model is told where.
+	//
+	// Stored before the error paths below, because a command that timed out
+	// or exited non-zero is exactly the one whose output somebody wants.
+	var stored *tool.Artifact
+	if truncated {
+		ref, err := archive(ctx, t.Artifacts, rawOutput, "text/plain")
+		stored = ref
+		output += noteArtifact(ref, err)
+	}
 
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		// Timeouts carry the output produced so far: a hung test suite usually
@@ -181,6 +200,7 @@ func (t *ExecCommand) result(
 			Summary:   fmt.Sprintf("%s: exit %d", display, exitErr.ExitCode()),
 			IsError:   true,
 			Truncated: truncated,
+			Artifact:  stored,
 		}, nil
 	}
 
@@ -198,6 +218,7 @@ func (t *ExecCommand) result(
 			display, elapsed.Round(time.Millisecond), body),
 		Summary:       fmt.Sprintf("%s: ok", display),
 		Truncated:     truncated,
+		Artifact:      stored,
 		OriginalBytes: int64(len(rawOutput)),
 	}, nil
 }

@@ -44,13 +44,20 @@ type toolCallRequestedJSON struct {
 }
 
 type toolCallCompletedJSON struct {
-	CallID     string `json:"call_id"`
-	Name       string `json:"name"`
-	Summary    string `json:"summary,omitempty"`
-	Content    string `json:"content"`
-	IsError    bool   `json:"is_error,omitempty"`
-	Truncated  bool   `json:"truncated,omitempty"`
-	DurationMS int64  `json:"duration_ms,omitempty"`
+	CallID     string        `json:"call_id"`
+	Name       string        `json:"name"`
+	Summary    string        `json:"summary,omitempty"`
+	Content    string        `json:"content"`
+	IsError    bool          `json:"is_error,omitempty"`
+	Truncated  bool          `json:"truncated,omitempty"`
+	Artifact   *artifactJSON `json:"artifact,omitempty"`
+	DurationMS int64         `json:"duration_ms,omitempty"`
+}
+
+type artifactJSON struct {
+	ID        string `json:"id"`
+	Size      int64  `json:"size,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
 }
 
 type approvalRequestedJSON struct {
@@ -100,6 +107,20 @@ type externalPrincipal struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
+func encodeArtifact(ref *domain.Artifact) *artifactJSON {
+	if ref == nil {
+		return nil
+	}
+	return &artifactJSON{ID: ref.ID, Size: ref.Size, MediaType: ref.MediaType}
+}
+
+func decodeArtifact(stored *artifactJSON) *domain.Artifact {
+	if stored == nil {
+		return nil
+	}
+	return &domain.Artifact{ID: stored.ID, Size: stored.Size, MediaType: stored.MediaType}
+}
+
 // EncodePayload serializes an event payload for storage.
 func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 	switch p := payload.(type) {
@@ -145,6 +166,7 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			Content:    p.Content,
 			IsError:    p.IsError,
 			Truncated:  p.Truncated,
+			Artifact:   encodeArtifact(p.Artifact),
 			DurationMS: p.DurationMS,
 		})
 
@@ -261,6 +283,7 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			Content:    p.Content,
 			IsError:    p.IsError,
 			Truncated:  p.Truncated,
+			Artifact:   decodeArtifact(p.Artifact),
 			DurationMS: p.DurationMS,
 		}, nil
 

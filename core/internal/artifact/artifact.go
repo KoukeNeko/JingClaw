@@ -42,6 +42,12 @@ var ErrTooLarge = errors.New("artifact: content is larger than the limit")
 // ErrNotFound is returned for an identifier the store does not hold.
 var ErrNotFound = errors.New("artifact: no such artifact")
 
+// ErrBadID is returned for something that is not an identifier at all.
+//
+// It is separate from ErrNotFound because the two mean different things to
+// whoever asked: one is "you mistyped it", the other is "it is gone".
+var ErrBadID = errors.New("artifact: not an artifact identifier")
+
 // Ref identifies stored content and says how much of it there is.
 type Ref struct {
 	// ID is "sha256-<hex>". It is the content's own digest, so two tools
@@ -233,16 +239,16 @@ func (s *Store) ReadRange(id string, offset, limit int64) ([]byte, int64, error)
 func (s *Store) pathFor(id string) (string, error) {
 	name, ok := strings.CutPrefix(id, algorithm+"-")
 	if !ok {
-		return "", fmt.Errorf("artifact: %q is not an artifact identifier", id)
+		return "", fmt.Errorf("%w: %q", ErrBadID, id)
 	}
 
 	// Exactly a sha256 digest in lowercase hex, and nothing else. Anything
 	// that decodes cannot contain a separator or a dot.
 	if len(name) != sha256.Size*2 {
-		return "", fmt.Errorf("artifact: %q is not an artifact identifier", id)
+		return "", fmt.Errorf("%w: %q", ErrBadID, id)
 	}
 	if _, err := hex.DecodeString(name); err != nil {
-		return "", fmt.Errorf("artifact: %q is not an artifact identifier", id)
+		return "", fmt.Errorf("%w: %q", ErrBadID, id)
 	}
 
 	// Two levels of fan-out. A single directory with a hundred thousand files

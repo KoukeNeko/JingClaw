@@ -161,6 +161,17 @@ func sessionToProto(s domain.Session) *controlv1.Session {
 	}
 }
 
+func artifactToProto(ref *domain.Artifact) *controlv1.Artifact {
+	if ref == nil {
+		return nil
+	}
+	return &controlv1.Artifact{
+		Id:        ref.ID,
+		Size:      ref.Size,
+		MediaType: ref.MediaType,
+	}
+}
+
 func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 	out := &controlv1.Event{
 		Id:         string(ev.ID),
@@ -223,6 +234,7 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 				Content:    p.Content,
 				IsError:    p.IsError,
 				Truncated:  p.Truncated,
+				Artifact:   artifactToProto(p.Artifact),
 				DurationMs: p.DurationMS,
 			},
 		}

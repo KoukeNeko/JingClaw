@@ -989,8 +989,24 @@ func (r *Runtime) recordToolResult(
 			Content:    result.Content,
 			IsError:    result.IsError,
 			Truncated:  result.Truncated,
+			Artifact:   artifactOf(result),
 			DurationMS: r.opts.Now().Sub(started).Milliseconds(),
 		})
+}
+
+// artifactOf carries a tool's artifact reference into the log.
+//
+// The reference travels and the bytes do not, which is the whole point: this
+// event is replayed into every subsequent request to the model.
+func artifactOf(result tool.Result) *domain.Artifact {
+	if result.Artifact == nil {
+		return nil
+	}
+	return &domain.Artifact{
+		ID:        result.Artifact.ID,
+		Size:      result.Artifact.Size,
+		MediaType: result.Artifact.MediaType,
+	}
 }
 
 func (r *Runtime) toolDeclarations() []provider.ToolDeclaration {

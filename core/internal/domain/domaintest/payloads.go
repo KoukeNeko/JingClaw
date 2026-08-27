@@ -7,6 +7,8 @@
 package domaintest
 
 import (
+	"strings"
+
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 )
 
@@ -52,12 +54,17 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			ProviderMetadata: `{"thought_signature":"abc"}`,
 		},
 		domain.EventToolCallCompleted: domain.ToolCallCompleted{
-			CallID:     "call_1",
-			Name:       "read_file",
-			Summary:    "read main.go",
-			Content:    "package main",
-			IsError:    true,
-			Truncated:  true,
+			CallID:    "call_1",
+			Name:      "read_file",
+			Summary:   "read main.go",
+			Content:   "package main",
+			IsError:   true,
+			Truncated: true,
+			Artifact: &domain.Artifact{
+				ID:        "sha256-" + strings.Repeat("ab", 32),
+				Size:      120_000,
+				MediaType: "text/plain",
+			},
 			DurationMS: 42,
 		},
 		domain.EventConversationCompacted: domain.ConversationCompacted{

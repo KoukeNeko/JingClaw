@@ -25,6 +25,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 )
 
@@ -85,11 +86,12 @@ func (l Limits) withDefaults() Limits {
 
 // Server is one connected MCP server and the tools it offered.
 type Server struct {
-	name    string
-	session *sdk.ClientSession
-	limits  Limits
-	tools   []tool.Tool
-	logger  *slog.Logger
+	name      string
+	session   *sdk.ClientSession
+	limits    Limits
+	artifacts *artifact.Store
+	tools     []tool.Tool
+	logger    *slog.Logger
 
 	// closeOnce guards against a double Close from shutdown racing a failure
 	// path; the SDK's session is not documented as tolerating one.
@@ -101,7 +103,13 @@ type Server struct {
 // The handshake is given a deadline of its own. A server that never answers
 // initialize would otherwise hold up the daemon indefinitely, and a tool
 // server that cannot start in half a minute is broken rather than slow.
-func Connect(ctx context.Context, cfg ServerConfig, limits Limits, logger *slog.Logger) (*Server, error) {
+func Connect(
+	ctx context.Context,
+	cfg ServerConfig,
+	limits Limits,
+	artifacts *artifact.Store,
+	logger *slog.Logger,
+) (*Server, error) {
 	limits = limits.withDefaults()
 
 	if cfg.Name == "" || cfg.Command == "" {
@@ -124,7 +132,13 @@ func Connect(ctx context.Context, cfg ServerConfig, limits Limits, logger *slog.
 		return nil, fmt.Errorf("mcp: connect to %s: %w", cfg.Name, err)
 	}
 
-	server := &Server{name: cfg.Name, session: session, limits: limits, logger: logger}
+	server := &Server{
+		name:      cfg.Name,
+		session:   session,
+		limits:    limits,
+		artifacts: artifacts,
+		logger:    logger,
+	}
 
 	listed, err := session.ListTools(startCtx, nil)
 	if err != nil {
@@ -233,16 +247,30 @@ func (t *remoteTool) Execute(ctx context.Context, call tool.Call) (tool.Result, 
 		return tool.Result{}, t.transportFailure(callCtx, err)
 	}
 
-	content, truncated := boundText(renderContent(result), t.server.limits.MaxOutput)
+	whole := renderContent(result)
+	content, truncated := boundText(whole, t.server.limits.MaxOutput)
+
+	// A server that answers with more than fits is answering a question
+	// somebody asked; keeping the whole of it and telling the model where is
+	// better than deciding on its behalf that the middle did not matter.
+	var stored *tool.Artifact
+	if truncated {
+		ref, err := t.archive(callCtx, whole)
+		stored = ref
+		content += noteArtifact(ref, err)
+	}
+
 	if strings.TrimSpace(content) == "" {
 		content = "(the server returned no content)"
 	}
 
 	return tool.Result{
-		Content:   content,
-		Summary:   t.summarise(result),
-		IsError:   result.IsError,
-		Truncated: truncated,
+		Content:       content,
+		Summary:       t.summarise(result),
+		IsError:       result.IsError,
+		Truncated:     truncated,
+		Artifact:      stored,
+		OriginalBytes: int64(len(whole)),
 	}, nil
 }
 
@@ -267,6 +295,32 @@ func (t *remoteTool) transportFailure(ctx context.Context, err error) *tool.Erro
 		Message:         fmt.Sprintf("the %s server is not answering: %v", t.server.name, err),
 		SuggestedAction: "This tool is unavailable for the rest of the session; do the work another way.",
 	}
+}
+
+// archive keeps the whole of an answer the model only saw part of.
+func (t *remoteTool) archive(ctx context.Context, content string) (*tool.Artifact, error) {
+	if t.server.artifacts == nil {
+		return nil, nil
+	}
+
+	ref, err := t.server.artifacts.PutBytes(ctx, []byte(content), "text/plain")
+	if err != nil {
+		return nil, err
+	}
+	return &tool.Artifact{ID: ref.ID, Size: ref.Size, MediaType: ref.MediaType}, nil
+}
+
+// noteArtifact tells the model where the rest went. Saying only that bytes
+// were omitted invites it to guess at what they contained.
+func noteArtifact(ref *tool.Artifact, err error) string {
+	if err != nil {
+		return fmt.Sprintf("\n[the rest could not be stored (%v) and is not recoverable]", err)
+	}
+	if ref == nil {
+		return "\n[the rest was not stored and is not recoverable]"
+	}
+	return fmt.Sprintf("\n[the whole answer is %d bytes; read it with read_artifact on %s]",
+		ref.Size, ref.ID)
 }
 
 func (t *remoteTool) summarise(result *sdk.CallToolResult) string {

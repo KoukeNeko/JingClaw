@@ -72,6 +72,15 @@ message ToolCallRequested {
 }
 
 // The observation handed back to the model.
+// Artifact refers to content the daemon holds, which a client fetches with
+// ArtifactService rather than receiving inline. The bytes are deliberately not
+// in the event: the point of storing them is that they do not travel.
+message Artifact {
+  string id = 1;
+  int64 size = 2;
+  string media_type = 3;
+}
+
 message ToolCallCompleted {
   string call_id = 1;
   string name = 2;
@@ -87,6 +96,10 @@ message ToolCallCompleted {
   bool truncated = 6;
 
   int64 duration_ms = 7;
+
+  // The whole of what content is an excerpt of, when the tool stored one. A
+  // truncated result with no artifact is output that is gone.
+  Artifact artifact = 8;
 }
 
 // A run has paused for a human. Every client sees this, so whoever is nearest
