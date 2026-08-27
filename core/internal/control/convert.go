@@ -256,6 +256,17 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 			UsageChanged: &controlv1.UsageChanged{Usage: usageToProto(p.Usage)},
 		}
 
+	case domain.ConversationCompacted:
+		out.Payload = &controlv1.Event_ConversationCompacted{
+			ConversationCompacted: &controlv1.ConversationCompacted{
+				Summary:        p.Summary,
+				ThroughSeq:     uint64(p.ThroughSeq),
+				MessagesFolded: int32(p.MessagesFolded),
+				TokensBefore:   p.TokensBefore,
+				TokensAfter:    p.TokensAfter,
+			},
+		}
+
 	default:
 		// A payload the wire format cannot express must fail loudly. Silently
 		// shipping an event with no payload would corrupt every client's

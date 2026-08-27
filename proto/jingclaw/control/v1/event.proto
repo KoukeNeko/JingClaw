@@ -29,6 +29,7 @@ message Event {
     ToolCallCompleted tool_call_completed = 16;
     ApprovalRequested approval_requested = 17;
     ApprovalResolved approval_resolved = 18;
+    ConversationCompacted conversation_compacted = 19;
   }
 }
 
@@ -132,4 +133,24 @@ message StreamHello {
 // Keeps idle connections alive and lets a client notice a stalled stream.
 message StreamHeartbeat {
   uint64 head_seq = 1;
+}
+
+// ConversationCompacted records that the history up to through_seq has been
+// replaced by a summary for the purpose of talking to the model.
+//
+// Nothing is deleted: the events before through_seq are still in the log and a
+// client may still show them. This says only that the model no longer sees
+// them, which a client should make visible rather than hide.
+message ConversationCompacted {
+  string summary = 1;
+
+  // The last event folded into the summary.
+  uint64 through_seq = 2;
+
+  int32 messages_folded = 3;
+
+  // Estimates, not the provider's count: the decision to compact has to be
+  // made before the request that would report the true figure is sent.
+  int64 tokens_before = 4;
+  int64 tokens_after = 5;
 }

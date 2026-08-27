@@ -40,6 +40,7 @@ const (
 type Config struct {
 	Agent     Agent     `koanf:"agent"`
 	Model     Model     `koanf:"model"`
+	Context   Context   `koanf:"context"`
 	Tools     Tools     `koanf:"tools"`
 	Delivery  Delivery  `koanf:"delivery"`
 	Workspace Workspace `koanf:"workspace"`
@@ -108,6 +109,32 @@ type Retry struct {
 	// Jitter spreads retries so many clients recovering from one outage do not
 	// resend in lockstep.
 	Jitter float64 `koanf:"jitter"`
+}
+
+// Context bounds how much of a session is sent to the model.
+//
+// Replaying the whole history is what lets a session survive a restart, but it
+// is unbounded: a session that goes on long enough stops working, and it stops
+// at the moment somebody is in the middle of something. These settle when the
+// older part is summarised and how much is kept as it was.
+type Context struct {
+	// Window overrides the model's context window. Zero asks the provider,
+	// which is right whenever the provider knows; it is here for a local model
+	// served by something that does not say.
+	Window int64 `koanf:"window"`
+
+	// CompactAt is the fraction of the window at which history is summarised.
+	// It is below one because the size of a request is estimated rather than
+	// counted, and an estimate has to be allowed to be wrong.
+	CompactAt float64 `koanf:"compact_at"`
+
+	// KeepFraction is how much of the window the verbatim tail may occupy once
+	// the older part has been folded away.
+	KeepFraction float64 `koanf:"keep_fraction"`
+
+	// SummaryTokens caps the summary. One that may grow without limit is not a
+	// smaller conversation.
+	SummaryTokens int `koanf:"summary_tokens"`
 }
 
 // Tools bounds what the built-in tools will read, search and run.
@@ -200,6 +227,11 @@ func Defaults() Config {
 				MaxDelay:    30 * time.Second,
 				Jitter:      0.3,
 			},
+		},
+		Context: Context{
+			CompactAt:     0.7,
+			KeepFraction:  0.3,
+			SummaryTokens: 1024,
 		},
 		Tools: Tools{
 			ReadLimit:         64 * 1024,
@@ -468,6 +500,7 @@ func (c Config) rangeProblems() []Problem {
 		{"tools.grep_results", int64(c.Tools.GrepResults), "Zero would return no matches however many there are."},
 		{"tools.max_command_output", int64(c.Tools.MaxCommandOutput), "Zero would discard everything a program printed."},
 		{"delivery.text_flush_bytes", int64(c.Delivery.TextFlushBytes), "Zero would write an event per character."},
+		{"context.summary_tokens", int64(c.Context.SummaryTokens), "A summary of nothing is not a summary."},
 	}
 	for _, setting := range positive {
 		if setting.value <= 0 {
@@ -493,6 +526,36 @@ func (c Config) rangeProblems() []Problem {
 			Fix: "The first wait cannot be longer than the longest wait.",
 		})
 	}
+	if c.Context.Window < 0 {
+		problems = append(problems, Problem{
+			Key: "context.window", Value: fmt.Sprint(c.Context.Window),
+			Why: "is negative",
+			Fix: "Leave it at 0 to use whatever window the provider reports.",
+		})
+	}
+	for _, fraction := range []struct {
+		key   string
+		value float64
+	}{
+		{"context.compact_at", c.Context.CompactAt},
+		{"context.keep_fraction", c.Context.KeepFraction},
+	} {
+		if fraction.value <= 0 || fraction.value >= 1 {
+			problems = append(problems, Problem{
+				Key: fraction.key, Value: fmt.Sprint(fraction.value),
+				Why: "is not a fraction between 0 and 1",
+				Fix: "It is a share of the context window, so 1 or more leaves no room to be wrong.",
+			})
+		}
+	}
+	if c.Context.KeepFraction >= c.Context.CompactAt {
+		problems = append(problems, Problem{
+			Key: "context.keep_fraction", Value: fmt.Sprint(c.Context.KeepFraction),
+			Why: fmt.Sprintf("is not below context.compact_at (%v)", c.Context.CompactAt),
+			Fix: "Compacting has to leave the conversation smaller than the size that triggered it.",
+		})
+	}
+
 	if c.Model.Retry.Jitter < 0 || c.Model.Retry.Jitter > 1 {
 		problems = append(problems, Problem{
 			Key: "model.retry.jitter", Value: fmt.Sprint(c.Model.Retry.Jitter),
@@ -673,6 +736,27 @@ const Example = `# JingClaw configuration.
 # Spreads retries so several clients recovering from one outage do not resend
 # in lockstep. Between 0 and 1.
 # jitter = 0.3
+
+[context]
+# What the model is given of a long session. Replaying everything is what lets
+# a session survive a restart, but a session that goes on long enough stops
+# working; the older part is summarised into the log so that it does not.
+
+# The model's context window in tokens. Zero asks the provider, which knows
+# better than this file does. Set it for a local model served by something that
+# does not report one.
+# window = 0
+
+# The share of the window at which history is summarised. Below one because the
+# size of a request is estimated, not counted.
+# compact_at = 0.7
+
+# The share of the window the recent turns may keep, verbatim, afterwards.
+# Must be below compact_at, or compacting would not make anything smaller.
+# keep_fraction = 0.3
+
+# The ceiling on the summary itself.
+# summary_tokens = 1024
 
 [tools]
 # How much of a file one read returns.

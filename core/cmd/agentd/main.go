@@ -145,7 +145,7 @@ func run() error {
 		return printModels(rootCtx, modelProvider)
 	}
 
-	selectedModel, err := resolveModel(rootCtx, modelProvider, cfg.Model.Model)
+	selected, err := resolveModel(rootCtx, modelProvider, cfg.Model.Model)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func run() error {
 		Store:       store,
 		Hub:         hub,
 		Provider:    modelProvider,
-		Model:       selectedModel,
+		Model:       selected.ID,
 		Tools:       tools,
 		Permissions: permissions,
 		Delivery:    plane.Projector,
@@ -222,6 +222,12 @@ func run() error {
 			TextFlushBytes:     cfg.Delivery.TextFlushBytes,
 			TextFlushInterval:  cfg.Delivery.TextFlushInterval,
 			UsageFlushInterval: cfg.Delivery.UsageFlushInterval,
+		},
+		ContextBudget: runtime.ContextBudget{
+			Window:        contextWindow(cfg, selected),
+			CompactAt:     cfg.Context.CompactAt,
+			KeepFraction:  cfg.Context.KeepFraction,
+			SummaryTokens: cfg.Context.SummaryTokens,
 		},
 		SystemPrompt:  prompt.Render(layers),
 		MaxIterations: cfg.Agent.MaxIterations,
@@ -309,7 +315,8 @@ func run() error {
 	logger.Info("jingclaw daemon listening",
 		"base_url", baseURL,
 		"provider", modelProvider.Name(),
-		"model", selectedModel,
+		"model", selected.ID,
+		"context_window", contextWindow(cfg, selected),
 		"workspace", ws.Root(),
 		"permission_profile", permissions.Profile(),
 		"config_file", configFile,
@@ -318,7 +325,7 @@ func run() error {
 	)
 	// Human-facing line on stdout; the structured log goes to stderr.
 	fmt.Printf("JingClaw daemon\nListening: %s\nConfig:    %s\nProvider:  %s\nModel:     %s\nWorkspace: %s\nDatabase:  %s\nDiscovery: %s\n",
-		baseURL, describeConfigFile(configFile, createdConfig), modelProvider.Name(), selectedModel,
+		baseURL, describeConfigFile(configFile, createdConfig), modelProvider.Name(), selected.ID,
 		ws.Root(), dbPath, discoveryPath)
 
 	serveErr := make(chan error, 1)
@@ -368,6 +375,20 @@ func databasePath(dataDir string) (string, error) {
 // buildProvider constructs the configured provider. Real providers are wrapped
 // in retry here rather than inside each adapter, so backoff policy is one
 // decision instead of one per vendor.
+// contextWindow settles how much room a run has.
+//
+// The provider is asked first because it knows; the setting exists for a local
+// model served by something that does not report one. Zero from both leaves
+// compaction off, which is the honest outcome: summarising against a guessed
+// window would either throw history away early or fail to save the session
+// that needed saving.
+func contextWindow(cfg config.Config, model provider.ModelInfo) int64 {
+	if cfg.Context.Window > 0 {
+		return cfg.Context.Window
+	}
+	return model.ContextWindow
+}
+
 // describeConfigFile says where the settings came from, and whether this run
 // is the one that put the file there.
 func describeConfigFile(path string, created bool) string {
@@ -424,31 +445,41 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 // resolveModel picks the model to run with. An explicit choice is verified
 // against what the provider actually serves, because a typo should fail at
 // startup rather than on the user's first message.
-func resolveModel(ctx context.Context, p provider.Provider, requested string) (string, error) {
+// resolveModel returns the model to use and what the provider says about it.
+//
+// The whole ModelInfo rather than the name, because the context window comes
+// from here: the runtime has to know how much room it has before it can decide
+// when a session needs compacting, and asking the provider is better than
+// keeping a table of window sizes that goes stale.
+func resolveModel(ctx context.Context, p provider.Provider, requested string) (provider.ModelInfo, error) {
 	models, err := p.Models(ctx)
 	if err != nil {
-		return "", fmt.Errorf("list models: %w", err)
+		return provider.ModelInfo{}, fmt.Errorf("list models: %w", err)
 	}
 
 	if requested != "" {
 		for _, m := range models {
 			if m.ID == requested {
-				return requested, nil
+				return m, nil
 			}
 		}
 		if len(models) == 0 {
 			// The provider could not enumerate; trust the operator rather
-			// than refuse to start.
-			return requested, nil
+			// than refuse to start. Nothing is known about the model, so the
+			// window is unknown too and compaction stays off unless the
+			// configuration says otherwise.
+			return provider.ModelInfo{ID: requested}, nil
 		}
-		return "", fmt.Errorf("provider %s does not serve model %q; run --list-models to see the options",
+		return provider.ModelInfo{}, fmt.Errorf(
+			"provider %s does not serve model %q; run --list-models to see the options",
 			p.Name(), requested)
 	}
 
 	if len(models) == 1 {
-		return models[0].ID, nil
+		return models[0], nil
 	}
-	return "", fmt.Errorf("provider %s serves %d models; pick one with --model (see --list-models)",
+	return provider.ModelInfo{}, fmt.Errorf(
+		"provider %s serves %d models; pick one with --model (see --list-models)",
 		p.Name(), len(models))
 }
 

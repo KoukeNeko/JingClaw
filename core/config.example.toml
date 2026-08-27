@@ -63,6 +63,27 @@
 # in lockstep. Between 0 and 1.
 # jitter = 0.3
 
+[context]
+# What the model is given of a long session. Replaying everything is what lets
+# a session survive a restart, but a session that goes on long enough stops
+# working; the older part is summarised into the log so that it does not.
+
+# The model's context window in tokens. Zero asks the provider, which knows
+# better than this file does. Set it for a local model served by something that
+# does not report one.
+# window = 0
+
+# The share of the window at which history is summarised. Below one because the
+# size of a request is estimated, not counted.
+# compact_at = 0.7
+
+# The share of the window the recent turns may keep, verbatim, afterwards.
+# Must be below compact_at, or compacting would not make anything smaller.
+# keep_fraction = 0.3
+
+# The ceiling on the summary itself.
+# summary_tokens = 1024
+
 [tools]
 # How much of a file one read returns.
 # read_limit = 65536

@@ -15,35 +15,119 @@ import (
 // rather than held in memory alongside it. That is what lets a session survive
 // a restart with its history intact, and it means there is exactly one place
 // where "what the model has seen" is defined.
-//
-// This is not yet context engineering: everything is replayed. Compaction, a
-// token budget and retrieval belong on top of this, and will replace the
-// wholesale replay rather than change where history comes from.
 func (r *Runtime) buildConversation(ctx context.Context, sessionID domain.SessionID) ([]provider.Message, error) {
+	bounded, err := r.buildBoundedConversation(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return plainMessages(bounded), nil
+}
+
+// boundedMessage pairs a message with the last event folded into it.
+//
+// Compaction has to name a point in the log, not a point in a message list,
+// because the message list is derived and the log is not. Carrying the
+// sequence alongside each message is what lets a cut chosen by size be
+// recorded as something a later replay can act on.
+type boundedMessage struct {
+	Message provider.Message
+	LastSeq domain.Seq
+}
+
+func plainMessages(bounded []boundedMessage) []provider.Message {
+	messages := make([]provider.Message, 0, len(bounded))
+	for _, item := range bounded {
+		messages = append(messages, item.Message)
+	}
+	return messages
+}
+
+// buildBoundedConversation replays the log, starting from the most recent
+// compaction if there is one.
+//
+// Only the most recent matters: each summary already accounts for everything
+// before it, earlier summaries included. Events older than its ThroughSeq are
+// still in the log and still visible to clients; they are simply no longer
+// part of what the model sees.
+func (r *Runtime) buildBoundedConversation(
+	ctx context.Context,
+	sessionID domain.SessionID,
+) ([]boundedMessage, error) {
 	events, err := r.opts.Store.ListAfter(ctx, sessionID, 0, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	builder := &conversationBuilder{}
+	var (
+		summary    string
+		throughSeq domain.Seq
+	)
 	for _, event := range events {
+		if compacted, ok := event.Payload.(domain.ConversationCompacted); ok {
+			summary, throughSeq = compacted.Summary, compacted.ThroughSeq
+		}
+	}
+
+	builder := &conversationBuilder{}
+	if summary != "" {
+		builder.seed(summary, throughSeq)
+	}
+
+	for _, event := range events {
+		if event.Seq <= throughSeq {
+			continue
+		}
+		if _, ok := event.Payload.(domain.ConversationCompacted); ok {
+			// The record of a compaction is not itself part of the
+			// conversation; its effect was applied above.
+			continue
+		}
 		builder.apply(event)
 	}
 
 	return builder.finish(), nil
 }
 
+// summaryPreamble frames the summary as what it is. A model handed a condensed
+// history with no explanation tends to treat it as something the user just
+// said.
+const summaryPreamble = "Summary of the earlier part of this conversation, " +
+	"which is no longer included in full:\n\n"
+
 // conversationBuilder folds events into messages.
 //
 // Assistant text arrives as several coalesced deltas per message, and tool
 // results arrive interleaved with them, so the builder accumulates until the
 // shape of the turn changes rather than emitting a message per event.
+//
+// Each pending buffer carries the sequence of the last event put into it, so
+// the message it eventually becomes can say where in the log it ends. Taking
+// the sequence at flush time instead would attribute a message to whatever
+// event happened to trigger the flush.
 type conversationBuilder struct {
-	messages []provider.Message
+	messages []boundedMessage
 
 	pendingText      string
 	pendingToolCalls []provider.ContentBlock
 	pendingResults   []provider.ContentBlock
+
+	assistantSeq domain.Seq
+	resultsSeq   domain.Seq
+}
+
+// seed starts the conversation from a summary rather than from the beginning.
+//
+// Its sequence is the one the summary replaces, not the sequence of the event
+// that recorded it, so that a later compaction folding this message reports a
+// point the replay can act on.
+func (b *conversationBuilder) seed(summary string, throughSeq domain.Seq) {
+	b.messages = append(b.messages, boundedMessage{
+		Message: provider.Message{
+			Role:    provider.RoleUser,
+			Content: provider.Text(summaryPreamble + summary),
+		},
+		LastSeq: throughSeq,
+	})
 }
 
 func (b *conversationBuilder) apply(event domain.Event) {
@@ -51,15 +135,19 @@ func (b *conversationBuilder) apply(event domain.Event) {
 	case domain.UserMessageAdded:
 		b.flushAssistant()
 		b.flushResults()
-		b.messages = append(b.messages, provider.Message{
-			Role:    provider.RoleUser,
-			Content: provider.Text(payload.Text),
+		b.messages = append(b.messages, boundedMessage{
+			Message: provider.Message{
+				Role:    provider.RoleUser,
+				Content: provider.Text(payload.Text),
+			},
+			LastSeq: event.Seq,
 		})
 
 	case domain.AssistantTextDelta:
 		// Results already gathered belong before the reply they informed.
 		b.flushResults()
 		b.pendingText += payload.Text
+		b.assistantSeq = event.Seq
 
 	case domain.ToolCallRequested:
 		b.flushResults()
@@ -69,6 +157,7 @@ func (b *conversationBuilder) apply(event domain.Event) {
 			Args:   json.RawMessage(payload.Arguments),
 			Opaque: json.RawMessage(payload.ProviderMetadata),
 		})
+		b.assistantSeq = event.Seq
 
 	case domain.ToolCallCompleted:
 		// The assistant turn that asked for this has to close before its
@@ -80,8 +169,10 @@ func (b *conversationBuilder) apply(event domain.Event) {
 			Content:   payload.Content,
 			IsError:   payload.IsError,
 		})
+		b.resultsSeq = event.Seq
 
 	case domain.AssistantMessageCompleted:
+		b.assistantSeq = event.Seq
 		b.flushAssistant()
 	}
 }
@@ -97,9 +188,12 @@ func (b *conversationBuilder) flushAssistant() {
 	}
 	content = append(content, b.pendingToolCalls...)
 
-	b.messages = append(b.messages, provider.Message{
-		Role:    provider.RoleAssistant,
-		Content: content,
+	b.messages = append(b.messages, boundedMessage{
+		Message: provider.Message{
+			Role:    provider.RoleAssistant,
+			Content: content,
+		},
+		LastSeq: b.assistantSeq,
 	})
 
 	b.pendingText = ""
@@ -111,14 +205,17 @@ func (b *conversationBuilder) flushResults() {
 		return
 	}
 
-	b.messages = append(b.messages, provider.Message{
-		Role:    provider.RoleTool,
-		Content: b.pendingResults,
+	b.messages = append(b.messages, boundedMessage{
+		Message: provider.Message{
+			Role:    provider.RoleTool,
+			Content: b.pendingResults,
+		},
+		LastSeq: b.resultsSeq,
 	})
 	b.pendingResults = nil
 }
 
-func (b *conversationBuilder) finish() []provider.Message {
+func (b *conversationBuilder) finish() []boundedMessage {
 	b.flushAssistant()
 	b.flushResults()
 	return b.messages

@@ -375,6 +375,15 @@ func describe(ev *controlv1.Event) (label, detail string) {
 			usage.GetInputTokens(), usage.GetOutputTokens(),
 			usage.GetCachedInputTokens(), usage.GetReasoningTokens())
 
+	case *controlv1.Event_ConversationCompacted:
+		// Worth showing rather than hiding. Somebody watching a session lose
+		// its memory of the last hour should be told, not left to infer it
+		// from the model suddenly asking what the file was called.
+		compacted := payload.ConversationCompacted
+		return "conversation.compacted", fmt.Sprintf(
+			"folded %d messages, ~%d tokens to ~%d",
+			compacted.GetMessagesFolded(), compacted.GetTokensBefore(), compacted.GetTokensAfter())
+
 	default:
 		return "unknown", ""
 	}

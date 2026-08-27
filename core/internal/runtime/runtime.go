@@ -131,6 +131,12 @@ type Options struct {
 	// Coalescing paces how provider deltas become events.
 	Coalescing Coalescing
 
+	// ContextBudget bounds how much of a session is sent to the model. Left
+	// zero, history is replayed in full and a long session eventually stops
+	// working; see ContextBudget for why that is the default rather than a
+	// guess at the window.
+	ContextBudget ContextBudget
+
 	// MaxIterations bounds the tool loop. A model that keeps calling tools
 	// without converging must stop somewhere, and stopping with a recorded
 	// reason beats burning quota until a human notices.
@@ -399,6 +405,11 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 	}
 
 	declarations := r.toolDeclarations()
+	system := r.systemPrompt()
+
+	// Fixed for the life of the run, and not small: a dozen tool schemas is
+	// real weight, and history must not be allowed to grow into it.
+	overhead := estimateRequestOverhead(system, declarations)
 
 	// The loop is the agent: settle whatever is outstanding, generate, act on
 	// what the model asked for, generate again with what was observed.
@@ -443,6 +454,10 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 			return
 		}
 
+		// Here, and only here: every call the model asked for has a recorded
+		// result, so folding history cannot separate a call from its result.
+		r.compactIfNeeded(ctx, run, overhead)
+
 		messages, err := r.buildConversation(ctx, run.SessionID)
 		if err != nil {
 			r.finishFromError(ctx, run, err)
@@ -451,7 +466,7 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 
 		calls, err := r.generateTurn(ctx, run, provider.Request{
 			Model:    r.opts.Model,
-			System:   r.systemPrompt(),
+			System:   system,
 			Messages: messages,
 			Tools:    declarations,
 		})

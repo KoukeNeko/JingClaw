@@ -231,6 +231,37 @@ That last refusal is not a preference. This API reads files and runs programs;
 binding it somewhere reachable needs a more deliberate mechanism than a config
 line, and there is not one.
 
+## Long sessions
+
+The conversation sent to the model is rebuilt from the event log every turn.
+That is what lets a session survive a restart with its history intact, and it
+is also unbounded: left alone, a session that goes on long enough exceeds the
+model's context window and every turn after that fails.
+
+So when the next request would be too large, the older part of the session is
+summarised and the summary is written to the log as an event:
+
+```
+000214 conversation.compacted folded 38 messages, ~92000 tokens to ~24000
+```
+
+Nothing is deleted. The folded events are still in the log and a client may
+still show them; they are simply no longer part of what the model sees. Because
+the summary is an event, a daemon that restarts picks the session up from it
+rather than replaying the history it replaced, and every attached client learns
+that it happened the same way it learns everything else.
+
+Two things make this safe rather than merely smaller. Compaction runs only at
+the top of the tool loop with nothing outstanding — the one point where every
+call the model made has a recorded result — and the cut never leaves the
+conversation starting with a tool result whose call has been folded away. Both
+are properties the tests assert directly.
+
+The window comes from the provider. It can be set in `[context]` for a local
+model served by something that does not report one; with neither, compaction
+stays off, because summarising against a guessed window would either throw work
+away early or fail to save the session that needed saving.
+
 ## Design rules
 
 These are load-bearing. Breaking one is a design change, not a refactor.

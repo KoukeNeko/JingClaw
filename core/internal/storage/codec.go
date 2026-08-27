@@ -71,6 +71,14 @@ type approvalResolvedJSON struct {
 	DecidedBy  string `json:"decided_by,omitempty"`
 }
 
+type conversationCompactedJSON struct {
+	Summary        string `json:"summary"`
+	ThroughSeq     uint64 `json:"through_seq"`
+	MessagesFolded int    `json:"messages_folded,omitempty"`
+	TokensBefore   int64  `json:"tokens_before,omitempty"`
+	TokensAfter    int64  `json:"tokens_after,omitempty"`
+}
+
 type usageChangedJSON struct {
 	InputTokens       int64 `json:"input_tokens,omitempty"`
 	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"`
@@ -138,6 +146,15 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			IsError:    p.IsError,
 			Truncated:  p.Truncated,
 			DurationMS: p.DurationMS,
+		})
+
+	case domain.ConversationCompacted:
+		return json.Marshal(conversationCompactedJSON{
+			Summary:        p.Summary,
+			ThroughSeq:     uint64(p.ThroughSeq),
+			MessagesFolded: p.MessagesFolded,
+			TokensBefore:   p.TokensBefore,
+			TokensAfter:    p.TokensAfter,
 		})
 
 	case domain.ApprovalRequested:
@@ -245,6 +262,19 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			IsError:    p.IsError,
 			Truncated:  p.Truncated,
 			DurationMS: p.DurationMS,
+		}, nil
+
+	case domain.EventConversationCompacted:
+		var p conversationCompactedJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		return domain.ConversationCompacted{
+			Summary:        p.Summary,
+			ThroughSeq:     domain.Seq(p.ThroughSeq),
+			MessagesFolded: p.MessagesFolded,
+			TokensBefore:   p.TokensBefore,
+			TokensAfter:    p.TokensAfter,
 		}, nil
 
 	case domain.EventApprovalRequested:

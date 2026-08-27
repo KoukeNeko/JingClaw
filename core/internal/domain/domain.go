@@ -123,6 +123,7 @@ const (
 	EventUsageChanged              EventKind = "usage.changed"
 	EventToolCallRequested         EventKind = "tool.requested"
 	EventToolCallCompleted         EventKind = "tool.completed"
+	EventConversationCompacted     EventKind = "conversation.compacted"
 )
 
 // ToolCallID identifies one tool invocation within a run.
@@ -203,10 +204,55 @@ type ToolCallCompleted struct {
 	DurationMS int64
 }
 
+// ConversationCompacted replaces the history up to ThroughSeq with a summary.
+//
+// It is an event rather than in-memory state because the conversation is
+// rebuilt from this log. Holding the summary anywhere else would mean a
+// restarted process replaying the history the summary was meant to replace,
+// which is exactly the situation compaction exists to avoid.
+//
+// Nothing is deleted. The events before ThroughSeq stay in the log and every
+// client can still read them; they are simply no longer sent to the model.
+type ConversationCompacted struct {
+	Summary string
+
+	// ThroughSeq is the last event folded into the summary. Everything after
+	// it is replayed as it was.
+	ThroughSeq Seq
+
+	// MessagesFolded and the estimates are for display: an operator seeing a
+	// reply lose its memory deserves to know it happened and how much went.
+	MessagesFolded int
+	TokensBefore   int64
+	TokensAfter    int64
+}
+
 // UsageChanged reports cumulative usage for the run so far, so cost is visible
 // while a run is in flight rather than only once it ends.
 type UsageChanged struct {
 	Usage Usage
+}
+
+// AllEventKinds is every kind the log can hold.
+//
+// A kind has to be understood in more than one place — persisted by storage,
+// translated by the wire format, rendered by a client — and the failure when
+// one of those is missed is not a compile error. It is a run that works in
+// memory and drops the event on a real database. This list is what the tests
+// in those packages measure their coverage against.
+func AllEventKinds() []EventKind {
+	return []EventKind{
+		EventUserMessageAdded,
+		EventRunStateChanged,
+		EventAssistantTextDelta,
+		EventAssistantMessageCompleted,
+		EventUsageChanged,
+		EventToolCallRequested,
+		EventToolCallCompleted,
+		EventConversationCompacted,
+		EventApprovalRequested,
+		EventApprovalResolved,
+	}
 }
 
 func (UserMessageAdded) isEventPayload()          {}
@@ -216,6 +262,7 @@ func (AssistantMessageCompleted) isEventPayload() {}
 func (UsageChanged) isEventPayload()              {}
 func (ToolCallRequested) isEventPayload()         {}
 func (ToolCallCompleted) isEventPayload()         {}
+func (ConversationCompacted) isEventPayload()     {}
 
 // StopReason says why a generation ended. Providers spell this differently;
 // the runtime needs one vocabulary to decide whether a turn is genuinely
