@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"io"
 	"math"
 	"math/rand/v2"
 	"time"
@@ -58,13 +59,26 @@ func (p RetryPolicy) Delay(attempt int, err error) time.Duration {
 	return time.Duration(backoff)
 }
 
-// Retrying wraps a Provider with retry on the initial request.
+// Retrying wraps a Provider with retry.
 //
-// It deliberately does not retry a stream that has already produced output.
-// Re-running a generation that emitted half an answer would duplicate that
-// text, and once tool calls exist a re-run can decide to do something
-// different from what the first attempt already started. A partially consumed
-// stream that fails is surfaced, not silently replayed.
+// Retrying covers two moments, because providers fail at two different ones. A
+// provider that makes its request inside Generate fails there. A provider that
+// hands back a lazy stream — the Gemini adapter does, and it is the normal
+// shape for a streaming SDK — has not contacted anybody by the time Generate
+// returns, so every failure it has, including the retryable ones, arrives on
+// the first Recv instead.
+//
+// Watching only Generate therefore meant that for such a provider nothing was
+// ever retried: rate limits configured for four attempts got exactly one, and
+// a 429 that named the second it would be free at was reported to the user as
+// a dead run.
+//
+// What does not change is the boundary. A stream that has already produced
+// output is never replayed: re-running a generation that emitted half an
+// answer would duplicate that text, and with tools in play the second attempt
+// can decide to do something different from what the first already started.
+// Before the first event there is nothing to duplicate, which is exactly why
+// that case is safe and the later one is not.
 type Retrying struct {
 	Provider Provider
 	Policy   RetryPolicy
@@ -98,7 +112,16 @@ func (r *Retrying) Generate(ctx context.Context, req Request) (Stream, error) {
 	for attempt := 1; attempt <= attempts; attempt++ {
 		stream, err := r.Provider.Generate(ctx, req)
 		if err == nil {
-			return stream, nil
+			// The attempts already spent are carried into the stream, so a
+			// provider that fails at both moments cannot get more tries than
+			// the policy allows by splitting them across the two.
+			return &retryingStream{
+				parent:  r,
+				request: req,
+				stream:  stream,
+				attempt: attempt,
+				sleep:   sleep,
+			}, nil
 		}
 		lastErr = err
 
@@ -118,6 +141,65 @@ func (r *Retrying) Generate(ctx context.Context, req Request) (Stream, error) {
 
 	return nil, lastErr
 }
+
+// retryingStream resends a request that failed before it said anything.
+type retryingStream struct {
+	parent  *Retrying
+	request Request
+	sleep   func(context.Context, time.Duration) error
+
+	stream  Stream
+	attempt int
+
+	// emitted latches once the caller has been given anything at all. From
+	// that moment the request can never be resent, because the caller is
+	// already holding part of an answer that a second attempt would not
+	// produce again identically.
+	emitted bool
+}
+
+func (s *retryingStream) Recv(ctx context.Context) (Event, error) {
+	attempts := s.parent.Policy.MaxAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	for {
+		event, err := s.stream.Recv(ctx)
+		if err == nil {
+			s.emitted = true
+			return event, nil
+		}
+
+		if s.emitted || errors.Is(err, io.EOF) {
+			return nil, err
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		if !IsRetryable(err) || s.attempt >= attempts {
+			return nil, err
+		}
+
+		if waitErr := s.sleep(ctx, s.parent.Policy.Delay(s.attempt, err)); waitErr != nil {
+			return nil, waitErr
+		}
+
+		// The abandoned stream is closed before another is opened, so a
+		// provider holding a connection per stream does not accumulate one
+		// per attempt.
+		_ = s.stream.Close()
+
+		s.attempt++
+		next, genErr := s.parent.Provider.Generate(ctx, s.request)
+		if genErr != nil {
+			return nil, genErr
+		}
+		s.stream = next
+	}
+}
+
+func (s *retryingStream) Close() error { return s.stream.Close() }
 
 func sleepContext(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
