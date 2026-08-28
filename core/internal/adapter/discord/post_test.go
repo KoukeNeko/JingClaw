@@ -111,13 +111,20 @@ func TestApprovalRendersTheActionAndWhereToDecide(t *testing.T) {
 	}
 }
 
-func TestStatusRendersOnlyMeaningfulStates(t *testing.T) {
+// Every state a reader would act on renders; anything invented does not.
+//
+// "completed" renders now, where once it did not. That is not a change of
+// mind about whether a channel wants told the obvious: these lines rewrite one
+// message rather than accumulating, so the completed one replaces the line
+// that would otherwise sit above the answer still claiming to be working.
+func TestStatusRendersEveryStateAReaderWouldActOn(t *testing.T) {
 	cases := map[string]bool{
 		"running":   true,
+		"working":   true,
+		"completed": true,
 		"failed":    true,
 		"cancelled": true,
 		"queued":    false,
-		"completed": false,
 	}
 
 	for state, wantText := range cases {
@@ -128,6 +135,21 @@ func TestStatusRendersOnlyMeaningfulStates(t *testing.T) {
 		if !wantText && rendered != "" {
 			t.Errorf("%q renders %q; a reader does not need it", state, rendered)
 		}
+	}
+}
+
+// The line says what it is doing, and the thing it is doing is the useful part.
+func TestTheWorkingLineNamesTheTool(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{State: "working", Detail: "read_file notes.txt"})
+
+	if !strings.Contains(rendered, "read_file notes.txt") {
+		t.Errorf("the line does not say what it is doing: %q", rendered)
+	}
+
+	// And a tool call with nothing worth naming still produces a line rather
+	// than silence, because silence is the thing being fixed.
+	if bare := renderStatus(jcgateway.StatusPayload{State: "working"}); bare == "" {
+		t.Error("a tool call with no detail renders nothing")
 	}
 }
 

@@ -407,6 +407,28 @@ So each script starts a real daemon, drives it the way a person would, and
 checks what came out. `verify-artifacts.sh` needs a provider credential —
 only a model calls tools — and skips itself when there is none.
 
+## What it is doing, on Discord
+
+A run that reads four files and waits on a test suite used to say nothing at
+all between "working on it" and the answer, and silence because it is busy
+looks exactly like silence because something broke. It now says what it is
+doing:
+
+```
+江委員  _Working on it — `read_file notes.txt`_
+```
+
+That line is **rewritten in place** rather than added to. A run touching ten
+files leaves one line behind it, not ten, and when the run ends the same line
+becomes `_Done in 12s._` instead of sitting above the answer still claiming to
+be busy.
+
+The lines are throttled to `gateway.working_interval` (two seconds), which is
+about as fast as anybody reads and comfortably inside what Discord accepts as
+edits to one message. Which message is live is held in the adapter's memory
+rather than in the outbox, because it is a presentation detail: losing it
+across a restart costs one extra line in a channel, not a wrong one.
+
 ## Long answers on Discord
 
 A reply that needs eight messages is a channel somebody has to scroll past for

@@ -172,4 +172,5 @@ const contract = `How this environment works:
 - Some actions need a human to approve them, and the run pauses until they do. Others are refused outright. Both are decisions, not malfunctions.
 - Verify your work. After changing code, run the project's tests or build rather than assuming the change is correct.
 - Never state a file's contents or a command's outcome without having observed it.
+- Do the thing in the turn you say you will do it. Ending a turn with "now I will create the file" and no tool call leaves the person waiting for something that is not coming. Either call the tool or say what you decided instead.
 - Answer in the language the person used.`

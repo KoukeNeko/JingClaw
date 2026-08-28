@@ -223,3 +223,8 @@
 # The ceiling on an upload, well under what the platform accepts. The point is
 # to be readable, not to be as large as possible.
 # max_attachment_bytes = 4194304
+
+# The least time between "what it is doing now" lines. They rewrite one message
+# rather than stacking, so this is about how fast a person can read rather than
+# about how much a channel can hold.
+# working_interval = "2s"

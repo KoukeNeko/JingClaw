@@ -21,29 +21,48 @@ import (
 // sent an edit per chunk, which is a rate limit waiting to happen; assembling
 // the finished message here costs a little latency and produces something
 // readable.
+//
+// It does say what the agent is doing, though. Silence while a run reads four
+// files and waits on a test suite is indistinguishable from silence because
+// something broke, and the person watching cannot tell which. Those lines are
+// throttled and meant to be rewritten in place rather than accumulated.
 type Projector struct {
 	Store Store
 
 	NewID func() string
 	Now   func() time.Time
 
-	// pending accumulates assistant text per message until it completes.
+	// WorkingInterval is the least time between "what it is doing now" lines.
+	// Every tool call producing one would exceed what a platform will accept
+	// and bury the channel besides.
+	WorkingInterval time.Duration
+
+	// pending accumulates assistant text per message until it completes, and
+	// lastWorking remembers when each run last said something, so the throttle
+	// is per run rather than global.
 	//
 	// Guarded because runs execute concurrently: two conversations producing
 	// output at the same moment reach this from different goroutines.
-	mu      sync.Mutex
-	pending map[domain.MessageID]*strings.Builder
+	mu          sync.Mutex
+	pending     map[domain.MessageID]*strings.Builder
+	lastWorking map[domain.RunID]time.Time
 }
+
+// defaultWorkingInterval is roughly what a person reads at, and comfortably
+// inside what a platform will accept as edits to one message.
+const defaultWorkingInterval = 2 * time.Second
 
 func NewProjector(store Store, newID func() string, now func() time.Time) *Projector {
 	if now == nil {
 		now = time.Now
 	}
 	return &Projector{
-		Store:   store,
-		NewID:   newID,
-		Now:     now,
-		pending: make(map[domain.MessageID]*strings.Builder),
+		Store:           store,
+		NewID:           newID,
+		Now:             now,
+		WorkingInterval: defaultWorkingInterval,
+		pending:         make(map[domain.MessageID]*strings.Builder),
+		lastWorking:     make(map[domain.RunID]time.Time),
 	}
 }
 
@@ -61,6 +80,10 @@ type ApprovalPayload struct {
 }
 
 // StatusPayload reports a change a reader would notice.
+//
+// A platform is expected to keep one of these visible at a time and rewrite it
+// rather than posting each: they are what the agent is doing now, and the
+// previous answer to that question is of no interest once it changes.
 type StatusPayload struct {
 	State  string `json:"state"`
 	Detail string `json:"detail,omitempty"`
@@ -87,6 +110,18 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 			return nil
 		}
 		return p.enqueue(ctx, run, target, DispatchMessage, MessagePayload{Text: text})
+
+	case domain.ToolCallRequested:
+		// What it is doing, while it is doing it. Throttled, because a run
+		// that reads six files in a second would otherwise send six lines
+		// nobody can read and a rate limit nobody wanted.
+		if !p.shouldSayWorking(run.ID) {
+			return nil
+		}
+		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
+			State:  "working",
+			Detail: describeCall(payload.Name, payload.Arguments),
+		})
 
 	case domain.ApprovalRequested:
 		return p.enqueue(ctx, run, target, DispatchApproval, ApprovalPayload{
@@ -124,10 +159,60 @@ func (p *Projector) observeState(
 			Detail: payload.Reason,
 		})
 
+	case domain.RunCompleted:
+		// The answer says what happened; this replaces the line that was
+		// saying what it was doing, which would otherwise sit above the answer
+		// claiming the agent is still busy.
+		p.forget(run.ID)
+		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
+			State:  "completed",
+			Detail: p.Now().Sub(run.CreatedAt).Round(time.Second).String(),
+		})
+
 	default:
-		// Completion is already evident from the answer that preceded it.
 		return nil
 	}
+}
+
+// shouldSayWorking rate-limits the "what it is doing now" line, per run.
+func (p *Projector) shouldSayWorking(run domain.RunID) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	now := p.Now()
+	if last, ok := p.lastWorking[run]; ok && now.Sub(last) < p.WorkingInterval {
+		return false
+	}
+
+	p.lastWorking[run] = now
+	return true
+}
+
+func (p *Projector) forget(run domain.RunID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.lastWorking, run)
+}
+
+// describeCall says what a tool call is doing in a few words.
+//
+// Best-effort and deliberately shallow: it looks for the argument a person
+// would have named the action by, and settles for the tool's own name when
+// there is not an obvious one. Getting this exactly right for every tool,
+// including ones from servers this code has never seen, is not something a
+// status line is worth.
+func describeCall(name, arguments string) string {
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(arguments), &decoded); err != nil {
+		return name
+	}
+
+	for _, key := range []string{"path", "pattern", "query", "program", "file_path", "url"} {
+		if value, ok := decoded[key].(string); ok && value != "" {
+			return name + " " + value
+		}
+	}
+	return name
 }
 
 func (p *Projector) enqueue(

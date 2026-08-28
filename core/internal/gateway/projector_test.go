@@ -356,3 +356,159 @@ func TestFailureIsAnnounced(t *testing.T) {
 		t.Error("a cancelled run told the channel nothing")
 	}
 }
+
+// The tests below drive the projector directly rather than through a run,
+// because what is under test is when it decides to speak.
+
+func newProjectorFixture(t *testing.T) (*gateway.Projector, *sqlite.Store, *time.Time) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "projector.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	clock := time.Unix(1_700_000_000, 0).UTC()
+
+	var counter atomic.Uint64
+	projector := gateway.NewProjector(store,
+		func() string { return fmt.Sprintf("dsp_%d", counter.Add(1)) },
+		func() time.Time { return clock })
+
+	// A dispatch belongs to a run, and the schema says so. Inventing ids the
+	// database has never seen would test the projector against a store that
+	// does not behave like the real one.
+	run := gatewayRun(clock)
+	if err := store.CreateSession(ctx, domain.Session{
+		ID: run.SessionID, CreatedAt: clock, UpdatedAt: clock,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	return projector, store, &clock
+}
+
+// gatewayRun is a run whose reply is owed to a conversation rather than to
+// whoever is holding a terminal.
+func gatewayRun(startedAt time.Time) domain.Run {
+	conversation := gateway.ConversationRef{
+		Platform:  gateway.PlatformDiscord,
+		AccountID: "main",
+		ChannelID: "channel_1",
+	}
+
+	return domain.Run{
+		ID:              "run_1",
+		SessionID:       "ses_1",
+		CreatedAt:       startedAt,
+		DeliveryTargets: []domain.DeliveryTarget{conversation.DeliveryTarget()},
+	}
+}
+
+func enqueued(t *testing.T, store *sqlite.Store) []gateway.Dispatch {
+	t.Helper()
+
+	dispatches, err := store.DispatchesAfter(context.Background(), "main", 0, 100)
+	if err != nil {
+		t.Fatalf("read the outbox: %v", err)
+	}
+	return dispatches
+}
+
+// Silence while a run reads four files and waits on a test suite is
+// indistinguishable from silence because something broke.
+func TestToolCallsSayWhatIsHappening(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+
+	if err := projector.Observe(context.Background(), gatewayRun(*clock), domain.Event{
+		Kind: domain.EventToolCallRequested,
+		Payload: domain.ToolCallRequested{
+			CallID: "call_1", Name: "read_file", Arguments: `{"path":"notes.txt"}`,
+		},
+	}); err != nil {
+		t.Fatalf("observe: %v", err)
+	}
+
+	dispatches := enqueued(t, store)
+	if len(dispatches) != 1 {
+		t.Fatalf("%d dispatches, want one", len(dispatches))
+	}
+	if dispatches[0].Kind != gateway.DispatchStatus {
+		t.Errorf("kind is %s, want a status line", dispatches[0].Kind)
+	}
+	if !strings.Contains(dispatches[0].Payload, "read_file notes.txt") {
+		t.Errorf("the line does not say what it is doing: %s", dispatches[0].Payload)
+	}
+}
+
+// A run that reads six files in a second must not send six lines: more than a
+// person can read, and more than a platform will take.
+func TestWhatItIsDoingIsThrottled(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+	projector.WorkingInterval = 2 * time.Second
+
+	started := *clock
+	call := func() {
+		t.Helper()
+		if err := projector.Observe(context.Background(), gatewayRun(started), domain.Event{
+			Kind: domain.EventToolCallRequested,
+			Payload: domain.ToolCallRequested{
+				CallID: "call", Name: "read_file", Arguments: `{"path":"a.txt"}`,
+			},
+		}); err != nil {
+			t.Fatalf("observe: %v", err)
+		}
+	}
+
+	call()
+	for range 5 {
+		*clock = clock.Add(100 * time.Millisecond)
+		call()
+	}
+	if got := len(enqueued(t, store)); got != 1 {
+		t.Errorf("six calls in half a second produced %d lines", got)
+	}
+
+	// And it starts speaking again once enough time has passed — otherwise a
+	// long run goes quiet after its first line, which is the whole problem.
+	*clock = clock.Add(3 * time.Second)
+	call()
+	if got := len(enqueued(t, store)); got != 2 {
+		t.Errorf("after the interval it produced %d lines, want 2", got)
+	}
+}
+
+// The line that said what it was doing must not sit above the answer still
+// claiming the agent is busy.
+func TestCompletionReplacesTheWorkingLine(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+
+	started := *clock
+	*clock = clock.Add(12 * time.Second)
+
+	if err := projector.Observe(context.Background(), gatewayRun(started), domain.Event{
+		Kind:    domain.EventRunStateChanged,
+		Payload: domain.RunStateChanged{Status: domain.RunCompleted},
+	}); err != nil {
+		t.Fatalf("observe: %v", err)
+	}
+
+	dispatches := enqueued(t, store)
+	if len(dispatches) != 1 {
+		t.Fatalf("%d dispatches, want one", len(dispatches))
+	}
+	if !strings.Contains(dispatches[0].Payload, "completed") {
+		t.Errorf("payload is %s", dispatches[0].Payload)
+	}
+	// How long it took is the one thing worth saying that the answer does not.
+	if !strings.Contains(dispatches[0].Payload, "12s") {
+		t.Errorf("the line does not say how long it took: %s", dispatches[0].Payload)
+	}
+}

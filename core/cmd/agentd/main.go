@@ -239,6 +239,7 @@ func run() error {
 	// so that cannot be half-configured.
 	plane := gateway.NewPlane(store, nil, permissions,
 		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
+	plane.Projector.WorkingInterval = cfg.Gateway.WorkingInterval
 
 	rt := runtime.New(rootCtx, runtime.Options{
 		Store:       store,

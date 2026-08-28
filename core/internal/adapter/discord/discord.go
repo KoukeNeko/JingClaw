@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -82,13 +83,22 @@ type Adapter struct {
 	// mention comparison fails and the bot silently ignores the channel it was
 	// invited to.
 	selfID atomic.Uint64
+
+	// statusMessages is the "what it is doing now" line currently shown in
+	// each channel, so the next one rewrites it instead of stacking.
+	statusMu       sync.Mutex
+	statusMessages map[snowflake.ID]snowflake.ID
 }
 
 func New(config Config, sink Sink) *Adapter {
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
-	return &Adapter{config: config, sink: sink}
+	return &Adapter{
+		config:         config,
+		sink:           sink,
+		statusMessages: make(map[snowflake.ID]snowflake.ID),
+	}
 }
 
 // Run connects and serves until the context is cancelled.

@@ -46,6 +46,17 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 		return nil, nil
 	}
 
+	// A status line is the answer to "what is it doing now", and the previous
+	// answer to that question is of no interest once it changes. Rewriting the
+	// one already in the channel keeps a run that touches ten files from
+	// leaving ten lines behind it.
+	if dispatch.Kind == jcgateway.DispatchStatus {
+		return a.postStatus(channelID, dispatch, body)
+	}
+
+	// Anything else means the status line has said all it is going to.
+	a.clearStatus(channelID)
+
 	segments := splitForDiscord(body)
 
 	// Past a few messages, an answer stops being something to read in a
@@ -72,6 +83,67 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	}
 
 	return posted, nil
+}
+
+// postStatus keeps one status line per channel and rewrites it.
+//
+// Where it fails, it posts instead: a message somebody deleted, or one from
+// before this process started, must not stop the run being able to say what it
+// is doing.
+func (a *Adapter) postStatus(
+	channelID snowflake.ID,
+	dispatch jcgateway.Dispatch,
+	body string,
+) ([]string, error) {
+	if existing, ok := a.liveStatus(channelID); ok {
+		_, err := a.client.Rest.UpdateMessage(channelID, existing, discord.MessageUpdate{
+			Content:         &body,
+			AllowedMentions: &discord.AllowedMentions{},
+		})
+		if err == nil {
+			// The same id as before, so the outbox keeps pointing at the
+			// message that is actually in the channel.
+			return []string{existing.String()}, nil
+		}
+
+		a.config.Logger.Debug("could not rewrite the status line, posting a new one",
+			"channel_id", channelID.String(), "error", err)
+		a.clearStatus(channelID)
+	}
+
+	message, err := a.client.Rest.CreateMessage(channelID, messageWith(body))
+	if err != nil {
+		return nil, fmt.Errorf("discord: post to %s: %w", channelID, err)
+	}
+
+	a.setStatus(channelID, message.ID)
+	return []string{message.ID.String()}, nil
+}
+
+// The live status message is held in memory rather than in the outbox because
+// it is a presentation detail: losing it across a restart costs one extra line
+// in a channel, not a wrong one, and the log stays the only thing that has to
+// be true.
+func (a *Adapter) liveStatus(channel snowflake.ID) (snowflake.ID, bool) {
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+
+	id, ok := a.statusMessages[channel]
+	return id, ok
+}
+
+func (a *Adapter) setStatus(channel, message snowflake.ID) {
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+
+	a.statusMessages[channel] = message
+}
+
+func (a *Adapter) clearStatus(channel snowflake.ID) {
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+
+	delete(a.statusMessages, channel)
 }
 
 // shouldSendAsFile decides between a wall of messages and one attachment.
@@ -261,6 +333,16 @@ func renderStatus(payload jcgateway.StatusPayload) string {
 	switch payload.State {
 	case "running":
 		return "_Working on it…_"
+	case "working":
+		if payload.Detail == "" {
+			return "_Working on it…_"
+		}
+		return fmt.Sprintf("_Working on it — `%s`_", payload.Detail)
+	case "completed":
+		if payload.Detail == "" {
+			return "_Done._"
+		}
+		return fmt.Sprintf("_Done in %s._", payload.Detail)
 	case "cancelled":
 		return "_Stopped._"
 	case "failed":

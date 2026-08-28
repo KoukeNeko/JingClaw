@@ -255,6 +255,11 @@ type Gateway struct {
 	// would accept: the point is to be readable, not to be as large as
 	// possible.
 	MaxAttachmentBytes int `koanf:"max_attachment_bytes"`
+
+	// WorkingInterval is the least time between "what it is doing now" lines.
+	// A run that reads six files in a second would otherwise send six of them,
+	// which is more than a person can read and more than a platform will take.
+	WorkingInterval time.Duration `koanf:"working_interval"`
 }
 
 type Workspace struct {
@@ -352,6 +357,7 @@ func Defaults() Config {
 			TokenFile:          "discord.token",
 			MaxMessages:        3,
 			MaxAttachmentBytes: 4 << 20,
+			WorkingInterval:    2 * time.Second,
 		},
 	}
 }
@@ -647,6 +653,7 @@ func (c Config) rangeProblems() []Problem {
 		{"artifacts.max_bytes", c.Artifacts.MaxBytes, "Zero would mean nothing can be kept."},
 		{"gateway.max_messages", int64(c.Gateway.MaxMessages), "Zero would send every answer as a file."},
 		{"gateway.max_attachment_bytes", int64(c.Gateway.MaxAttachmentBytes), "Zero would make every attachment empty."},
+		{"gateway.working_interval", int64(c.Gateway.WorkingInterval), "Zero would say what it is doing on every tool call."},
 	}
 	for _, setting := range positive {
 		if setting.value <= 0 {
@@ -1050,4 +1057,9 @@ const Example = `# JingClaw configuration.
 # The ceiling on an upload, well under what the platform accepts. The point is
 # to be readable, not to be as large as possible.
 # max_attachment_bytes = 4194304
+
+# The least time between "what it is doing now" lines. They rewrite one message
+# rather than stacking, so this is about how fast a person can read rather than
+# about how much a channel can hold.
+# working_interval = "2s"
 `
