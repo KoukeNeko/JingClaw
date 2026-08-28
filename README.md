@@ -84,6 +84,37 @@ configuration rather than guessed from the address, since a proxy makes the
 address say nothing, and an unknown name is refused rather than silently
 becoming the one that knows none of this.
 
+### A channel as a console
+
+"Discord" is not one trust level. A channel with fourteen people in it and one
+only you can see are different rooms, and the platform's own permissions are
+what separate them. Binding a private channel with `--profile console` says so:
+
+```bash
+agent bindings add --channel <id> --guild <id> --workspace ws \
+  --user <your-user-id> --profile console
+```
+
+A console channel reads and searches the workspace, fetches pages, and reads
+what the agent remembers. Changes to files and to memory still stop and ask —
+and you can answer there: `pending` lists what is waiting, `approve <id>` and
+`deny <id>` decide it. Those few words are the whole command set, matched on
+the entire message, so an ordinary sentence still reaches the agent.
+
+It cannot run programs. That is the line, and it is where it is because of what
+a channel permission can and cannot do. It settles who is in the room, which is
+what makes reading and writing reasonable there. It cannot settle whether an
+account still belongs to its owner, and a stolen one holds the request and the
+approval both. So running programs stays where somebody has to be at the
+machine, which is also the only place that can tell.
+
+The channel is told all of this the first time it is used, and again on `help`.
+A boundary that lives only in a configuration file on a machine nobody in the
+room is sitting at is one everybody will assume the shape of instead.
+
+A console decides only for its own conversation. A run started at the terminal
+is still answered at the terminal.
+
 ### Reading the web
 
 Off by default; `[web] enabled = true` turns it on. `web_read` fetches a page

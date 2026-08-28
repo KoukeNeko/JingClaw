@@ -485,9 +485,18 @@ func renderApproval(payload jcgateway.ApprovalPayload) string {
 		}
 	}
 
-	// Approving from a chat message is deliberately not offered. A request and
-	// its approval arriving from the same account is one unbroken chain, and
-	// whoever holds that account holds both halves.
+	if payload.DecidableHere {
+		// A console channel. Who can read and type here is settled by the
+		// platform's own permissions, and the person reading this is the one
+		// who owns it.
+		fmt.Fprintf(&out, "\nReply `approve %s` or `deny %s`.",
+			payload.ApprovalID, payload.ApprovalID)
+		return out.String()
+	}
+
+	// Everywhere else, deliberately not offered. A request and its approval
+	// arriving from the same account in a room other people can type in is
+	// one unbroken chain, and whoever holds that account holds both halves.
 	fmt.Fprintf(&out, "\nApprove it from a JingClaw client:\n```\nagent approve %s\n```", payload.ApprovalID)
 
 	return out.String()

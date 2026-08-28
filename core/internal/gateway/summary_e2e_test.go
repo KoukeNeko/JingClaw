@@ -83,8 +83,15 @@ func newSummaryHarness(t *testing.T, turns [][]provider.Event) *harness {
 		t.Fatalf("open workspace: %v", err)
 	}
 
+	// The same tools a deployment has, so a test that expects a permission
+	// decision gets one rather than a tool that was never registered.
+	observed := builtin.NewObserver()
 	registry := tool.NewRegistry()
-	registry.MustRegister(&builtin.ReadFile{Workspace: ws, Observer: builtin.NewObserver()})
+	registry.MustRegister(
+		&builtin.ReadFile{Workspace: ws, Observer: observed},
+		builtin.NewWriteFile(ws, observed, builtin.NewFileLocks()),
+		&builtin.ExecCommand{Workspace: ws},
+	)
 
 	var counter atomic.Uint64
 	next := func(prefix string) runtime.IDGenerator {
@@ -116,11 +123,13 @@ func newSummaryHarness(t *testing.T, turns [][]provider.Event) *harness {
 
 	return &harness{
 		ingress: &gateway.Ingress{
-			Store:   store,
-			Runtime: rt,
-			Binder:  permissions,
-			Now:     func() time.Time { return time.Unix(0, 0).UTC() },
-			Logger:  slog.New(slog.DiscardHandler),
+			Store:         store,
+			Runtime:       rt,
+			Binder:        permissions,
+			Console:       rt,
+			NewDispatchID: func() string { return fmt.Sprintf("dsp_%d", counter.Add(1)) },
+			Now:           func() time.Time { return time.Unix(0, 0).UTC() },
+			Logger:        slog.New(slog.DiscardHandler),
 		},
 		store:   store,
 		runtime: rt,

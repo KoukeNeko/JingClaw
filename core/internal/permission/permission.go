@@ -137,6 +137,41 @@ func GatewayProfile() Profile {
 	}
 }
 
+// ConsoleProfile is for a private channel an operator controls, used as a
+// remote console rather than as a place the public can talk to the agent.
+//
+// It exists because "Discord" is not one trust level. A channel with fourteen
+// people in it and a channel only the operator can see are different rooms,
+// and the platform's own permissions are what separate them. Treating both as
+// the gateway plane means the operator's private channel is as restricted as a
+// public one, which is what pushes people towards making the public one less
+// restricted instead.
+//
+// It sits between the other two. Reading, writing and remembering are all
+// available, and an approval can be given in the channel, because the person
+// reading it is the one who owns it.
+//
+// Execution is not, and that is the line. Everything a channel permission can
+// protect, it protects: other people cannot see the room, cannot type in it,
+// cannot act. What it cannot protect against is the account itself being
+// taken, and at that point request and approval both belong to whoever took
+// it. Running programs therefore stays where somebody has to be at the
+// machine — which is also the only place that can prove they are.
+func ConsoleProfile() Profile {
+	return Profile{
+		Name: "console",
+		Defaults: map[tool.Level]Decision{
+			tool.LevelInternal:       Allow,
+			tool.LevelWorkspaceRead:  Allow,
+			tool.LevelNetworkRead:    Allow,
+			tool.LevelWorkspaceWrite: Ask,
+			tool.LevelRemember:       Ask,
+			tool.LevelExecute:        Deny,
+			tool.LevelHighImpact:     Deny,
+		},
+	}
+}
+
 // ProfileByName resolves a configured profile name.
 //
 // An unknown name is an error rather than a fallback: quietly substituting the
@@ -148,6 +183,8 @@ func ProfileByName(name string) (Profile, bool) {
 		return LocalProfile(), true
 	case "gateway":
 		return GatewayProfile(), true
+	case "console":
+		return ConsoleProfile(), true
 	default:
 		return Profile{}, false
 	}
@@ -179,11 +216,12 @@ func New(profile Profile) *Engine {
 		granted:        make(map[domain.SessionID]map[string]bool),
 	}
 
-	// The gateway profile is always available, so a session opened from a
-	// channel cannot silently fall back to the local one.
-	gateway := GatewayProfile()
-	if _, ok := engine.profiles[gateway.Name]; !ok {
-		engine.profiles[gateway.Name] = gateway
+	// The channel profiles are always available, so a session opened from one
+	// cannot silently fall back to the local one.
+	for _, profile := range []Profile{GatewayProfile(), ConsoleProfile()} {
+		if _, ok := engine.profiles[profile.Name]; !ok {
+			engine.profiles[profile.Name] = profile
+		}
 	}
 	return engine
 }

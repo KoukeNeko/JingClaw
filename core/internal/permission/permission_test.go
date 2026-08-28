@@ -56,11 +56,78 @@ func TestEveryProfileRulesOnEveryLevel(t *testing.T) {
 		tool.LevelHighImpact,
 	}
 
-	for _, profile := range []permission.Profile{permission.LocalProfile(), permission.GatewayProfile()} {
+	for _, profile := range []permission.Profile{
+		permission.LocalProfile(), permission.GatewayProfile(), permission.ConsoleProfile(),
+	} {
 		for _, level := range levels {
 			if _, ok := profile.Defaults[level]; !ok {
 				t.Errorf("the %s profile has no rule for %s tools", profile.Name, level)
 			}
 		}
+	}
+}
+
+// A console channel is a third trust level, not a relabelled gateway. It may
+// read, write and remember; it may not run programs.
+//
+// The line is where it is because of what a channel permission can and cannot
+// protect. It settles who is in the room, which makes reading and writing
+// reasonable there. It cannot settle whether an account still belongs to its
+// owner, and a stolen one holds the request and the approval both — so running
+// programs stays where somebody has to be present.
+func TestAConsoleChannelSitsBetweenTheOtherTwo(t *testing.T) {
+	local := permission.LocalProfile().Defaults
+	console := permission.ConsoleProfile().Defaults
+	channel := permission.GatewayProfile().Defaults
+
+	// Wider than an ordinary channel: a private room does not stop to ask
+	// before reading a page.
+	if console[tool.LevelNetworkRead] != permission.Allow {
+		t.Errorf("a console asks before reading the web: %s", console[tool.LevelNetworkRead])
+	}
+	if channel[tool.LevelNetworkRead] != permission.Ask {
+		t.Errorf("an ordinary channel no longer asks before reading the web")
+	}
+
+	// Narrower than the machine: this is the whole point.
+	if console[tool.LevelExecute] != permission.Deny {
+		t.Errorf("a console can run programs, which needs somebody at the machine: %s",
+			console[tool.LevelExecute])
+	}
+	if local[tool.LevelExecute] != permission.Ask {
+		t.Errorf("the local profile no longer asks before running programs")
+	}
+
+	// Changes still stop, and a person in the channel can answer.
+	for _, level := range []tool.Level{tool.LevelWorkspaceWrite, tool.LevelRemember} {
+		if console[level] != permission.Ask {
+			t.Errorf("a console does not stop for %s: %s", level, console[level])
+		}
+	}
+	if console[tool.LevelHighImpact] != permission.Deny {
+		t.Errorf("a console permits high-impact work: %s", console[tool.LevelHighImpact])
+	}
+}
+
+// Naming it must actually select it. A binding that asks for a profile the
+// engine has never heard of is refused rather than quietly served the
+// permissive one.
+func TestTheConsoleProfileResolvesByName(t *testing.T) {
+	profile, ok := permission.ProfileByName("console")
+	if !ok {
+		t.Fatal("a binding naming the console profile cannot resolve it")
+	}
+	if profile.Name != "console" {
+		t.Errorf("resolved to %q", profile.Name)
+	}
+
+	// Available on an engine built for local sessions, so a channel bound to
+	// it cannot fall back to the machine's own permissions.
+	engine := permission.New(permission.LocalProfile())
+	if err := engine.UseProfile("ses_1", "console"); err != nil {
+		t.Fatalf("a session could not be bound to the console profile: %v", err)
+	}
+	if err := engine.UseProfile("ses_2", "consoel"); err == nil {
+		t.Error("a misspelled profile was accepted")
 	}
 }

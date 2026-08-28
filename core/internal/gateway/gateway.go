@@ -313,11 +313,17 @@ type Plane struct {
 }
 
 // NewPlane wires the gateway.
+//
+// console may be nil, in which case a binding naming the console profile still
+// runs under it but cannot decide approvals from the channel. That is a
+// deployment choice rather than a mistake: a console channel that can only
+// look is a useful thing to have.
 func NewPlane(
 	store Store,
 	rt Runtime,
 	binder ProfileBinder,
 	artifacts ArtifactStore,
+	console ConsoleRuntime,
 	newID func() string,
 	now func() time.Time,
 	logger *slog.Logger,
@@ -328,12 +334,14 @@ func NewPlane(
 
 	return &Plane{
 		Ingress: &Ingress{
-			Store:     store,
-			Runtime:   rt,
-			Binder:    binder,
-			Artifacts: artifacts,
-			Now:       now,
-			Logger:    logger,
+			Store:         store,
+			Runtime:       rt,
+			Binder:        binder,
+			Artifacts:     artifacts,
+			Console:       console,
+			NewDispatchID: newID,
+			Now:           now,
+			Logger:        logger,
 		},
 		Projector: NewProjector(store, newID, now),
 	}

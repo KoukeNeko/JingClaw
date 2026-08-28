@@ -276,7 +276,7 @@ func run() error {
 	// Both halves of the gateway at once: accepting messages without routing
 	// replies back would answer into the void, and the two are built together
 	// so that cannot be half-configured.
-	plane := gateway.NewPlane(store, nil, permissions, artifacts,
+	plane := gateway.NewPlane(store, nil, permissions, artifacts, nil,
 		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
 	plane.Projector.WorkingInterval = cfg.Gateway.WorkingInterval
 	plane.Projector.StreamInterval = cfg.Gateway.StreamInterval
@@ -361,6 +361,12 @@ func run() error {
 	// The runtime does not exist until after the options are built, so the
 	// ingress is completed here rather than taking a half-built runtime.
 	plane.Ingress.Runtime = rt
+
+	// The console's extra reach is attached alongside, and only here. A
+	// channel bound to the console profile can decide the approvals raised by
+	// its own conversations; every other binding sees the narrow interface
+	// and cannot decide anything.
+	plane.Ingress.Console = rt
 
 	api := http.NewServeMux()
 	api.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub, artifacts)))

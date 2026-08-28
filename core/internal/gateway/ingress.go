@@ -51,6 +51,16 @@ type Ingress struct {
 	Binder    ProfileBinder
 	Artifacts ArtifactStore
 
+	// Console is the extra reach a console binding has. Left nil, a binding
+	// naming the console profile still runs under it, but the commands that
+	// decide approvals answer that they are unavailable rather than silently
+	// doing nothing.
+	Console ConsoleRuntime
+
+	// NewDispatchID names a message this program sends on its own behalf,
+	// rather than one produced by a run.
+	NewDispatchID func() string
+
 	NewSessionTitle func(InboundMessage) string
 	Now             func() time.Time
 	Logger          *slog.Logger
@@ -104,6 +114,27 @@ func (i *Ingress) Accept(ctx context.Context, message InboundMessage) (Accepted,
 	session, err := i.sessionFor(ctx, message, binding)
 	if err != nil {
 		return Accepted{}, err
+	}
+
+	// A console channel can be told things rather than asked them. A command
+	// is answered here and never becomes a turn: the agent reading its own
+	// console as something somebody said to it is how an instruction to this
+	// program turns into a prompt for the model.
+	if binding.PermissionProfile == ConsoleProfileName {
+		if command, ok := parseConsoleCommand(message.Text); ok {
+			// Claimed like any other message, so a platform redelivering
+			// after a reconnect cannot decide the same thing twice.
+			fresh, claimErr := i.Store.ClaimInbound(ctx,
+				message.IdempotencyKey, message.Conversation.AccountID, session, "", i.now())
+			if claimErr != nil {
+				return Accepted{}, claimErr
+			}
+			if !fresh {
+				return Accepted{SessionID: session, Duplicate: true}, nil
+			}
+			return Accepted{SessionID: session},
+				i.handleConsole(ctx, message, binding, session, command)
+		}
 	}
 
 	// The claim is taken before the run starts. A platform redelivering after
@@ -177,6 +208,18 @@ func (i *Ingress) sessionFor(ctx context.Context, message InboundMessage, bindin
 		}
 	}
 
+	// Said where the rule applies, the first time somebody uses the channel.
+	// A boundary that lives only in a configuration file is one everybody in
+	// the room will assume the shape of instead.
+	if binding.PermissionProfile == ConsoleProfileName {
+		if err := i.say(ctx, message, session, consoleMOTD(binding)); err != nil {
+			// Not fatal: failing to post an explanation is no reason to
+			// refuse the work it was explaining.
+			i.log().Warn("could not post the console notice",
+				"binding_id", binding.ID, "error", err)
+		}
+	}
+
 	if err := i.Store.LinkConversation(ctx, key, session, binding.ID, i.now()); err != nil {
 		if errors.Is(err, ErrAlreadyProcessed) {
 			// Another message for the same thread won the race. Its session is
@@ -191,6 +234,14 @@ func (i *Ingress) sessionFor(ctx context.Context, message InboundMessage, bindin
 	}
 
 	return session, nil
+}
+
+// log is the ingress logger, or a silent one when none was given.
+func (i *Ingress) log() *slog.Logger {
+	if i.Logger != nil {
+		return i.Logger
+	}
+	return slog.New(slog.DiscardHandler)
 }
 
 func (i *Ingress) title(message InboundMessage) string {

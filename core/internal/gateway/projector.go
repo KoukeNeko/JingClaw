@@ -105,6 +105,15 @@ type ApprovalPayload struct {
 	ToolName   string   `json:"tool_name"`
 	Summary    string   `json:"summary"`
 	Effects    []string `json:"effects,omitempty"`
+
+	// DecidableHere says this conversation may answer its own approval,
+	// which is true of a console channel and not of an ordinary one.
+	//
+	// Carried rather than worked out by whatever renders the message: which
+	// channels are consoles is a fact about the deployment, and a renderer
+	// that guessed would eventually invite somebody to type a command that
+	// does nothing.
+	DecidableHere bool `json:"decidable_here,omitempty"`
 }
 
 // StatusPayload reports a change a reader would notice.
@@ -191,10 +200,11 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 
 	case domain.ApprovalRequested:
 		return p.enqueue(ctx, run, target, DispatchApproval, ApprovalPayload{
-			ApprovalID: string(payload.ApprovalID),
-			ToolName:   payload.ToolName,
-			Summary:    payload.Summary,
-			Effects:    payload.Effects,
+			ApprovalID:    string(payload.ApprovalID),
+			ToolName:      payload.ToolName,
+			Summary:       payload.Summary,
+			Effects:       payload.Effects,
+			DecidableHere: p.isConsole(ctx, target),
 		})
 
 	case domain.RunStateChanged:
@@ -269,6 +279,20 @@ func (p *Projector) shouldSayWorking(run domain.RunID) bool {
 
 	p.lastWorking[run] = now
 	return true
+}
+
+// isConsole reports whether this conversation may answer its own approvals.
+//
+// Best effort: a lookup that fails leaves the message telling somebody to go
+// to the machine, which is always true and never misleading. The opposite
+// mistake — inviting a reply that will not work — is the one worth avoiding.
+func (p *Projector) isConsole(ctx context.Context, target ConversationRef) bool {
+	binding, err := p.Store.Binding(ctx,
+		target.Platform, target.AccountID, target.TenantID, target.ChannelID)
+	if err != nil {
+		return false
+	}
+	return binding.PermissionProfile == ConsoleProfileName
 }
 
 // record returns a run's accumulator, creating it if this is the first thing

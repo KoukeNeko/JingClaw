@@ -124,7 +124,7 @@ func newBindCommand() *cobra.Command {
 	cmd.Flags().StringVar(&guild, "guild", "", "server (guild) id; empty for direct messages")
 	cmd.Flags().StringVar(&channel, "channel", "", "channel id")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "workspace this channel may reach")
-	cmd.Flags().StringVar(&profile, "profile", "gateway", "permission profile for runs from here")
+	cmd.Flags().StringVar(&profile, "profile", "gateway", "permission profile for runs from here: gateway or console")
 	cmd.Flags().StringSliceVar(&users, "user", nil, "platform user id allowed to trigger work")
 	cmd.Flags().StringSliceVar(&roles, "role", nil, "platform role id allowed to trigger work")
 
