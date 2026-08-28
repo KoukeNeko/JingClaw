@@ -257,7 +257,15 @@ func renderTranscript(messages []boundedMessage, maxBytes int) string {
 	var transcript strings.Builder
 
 	for _, item := range messages {
-		fmt.Fprintf(&transcript, "\n[%s]\n", item.Message.Role)
+		// Where it came from, not just who said it. A summary is written by
+		// the model and comes back looking like the model's own words, so
+		// anything that arrived from outside has to carry that label into the
+		// summary or it is laundered by being condensed.
+		if item.Trust == domain.TrustUntrusted {
+			fmt.Fprintf(&transcript, "\n[%s — from outside this machine]\n", item.Message.Role)
+		} else {
+			fmt.Fprintf(&transcript, "\n[%s]\n", item.Message.Role)
+		}
 		for _, block := range item.Message.Content {
 			switch content := block.(type) {
 			case provider.TextBlock:
@@ -271,6 +279,14 @@ func renderTranscript(messages []boundedMessage, maxBytes int) string {
 					outcome = "failed"
 				}
 				fmt.Fprintf(&transcript, "%s of %s: %s\n", outcome, content.Name, content.Content)
+
+			case provider.ImageBlock:
+				// Named rather than dropped. A summary that silently loses a
+				// picture leaves the model unable to tell that a conversation
+				// it is continuing ever had one, and the answer to "what did I
+				// send you earlier" becomes "nothing".
+				fmt.Fprintf(&transcript, "[a %s image was here; say what it showed if it mattered]\n",
+					content.MediaType)
 			}
 		}
 	}

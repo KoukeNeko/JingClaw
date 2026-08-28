@@ -33,6 +33,13 @@ func (r *Runtime) buildConversation(ctx context.Context, sessionID domain.Sessio
 type boundedMessage struct {
 	Message provider.Message
 	LastSeq domain.Seq
+
+	// Trust is where the content came from, carried alongside the message so
+	// that condensing a conversation cannot quietly promote it. A summary is
+	// written by the model and reads like the model's own words; without this
+	// the label on untrusted material is lost exactly when it is hardest to
+	// notice.
+	Trust domain.TrustLevel
 }
 
 func plainMessages(bounded []boundedMessage) []provider.Message {
@@ -154,6 +161,7 @@ func (b *conversationBuilder) apply(event domain.Event) {
 				Content: b.userContent(payload),
 			},
 			LastSeq: event.Seq,
+			Trust:   payload.Trust,
 		})
 
 	case domain.AssistantTextDelta:
