@@ -43,6 +43,7 @@ type Config struct {
 	Context   Context   `koanf:"context"`
 	Tools     Tools     `koanf:"tools"`
 	Artifacts Artifacts `koanf:"artifacts"`
+	Memory    Memory    `koanf:"memory"`
 	MCP       MCP       `koanf:"mcp"`
 	Delivery  Delivery  `koanf:"delivery"`
 	Workspace Workspace `koanf:"workspace"`
@@ -180,6 +181,19 @@ type Artifacts struct {
 	// MaxBytes bounds one artifact. Something larger is a file that belongs in
 	// the workspace, not output that was captured.
 	MaxBytes int64 `koanf:"max_bytes"`
+}
+
+// Memory is what the agent carries between sessions.
+//
+// It is off by default. What is written here is read by every later session,
+// by an agent that no longer knows where it came from, so turning it on is a
+// decision somebody should make rather than one they inherit.
+type Memory struct {
+	Enabled bool `koanf:"enabled"`
+
+	// MaxInstructionBytes bounds the standing directions put in front of the
+	// model on every turn. Everything here is context the work does not get.
+	MaxInstructionBytes int `koanf:"max_instruction_bytes"`
 }
 
 // MCP is the tool servers this agent runs alongside itself.
@@ -335,6 +349,10 @@ func Defaults() Config {
 		},
 		Artifacts: Artifacts{
 			MaxBytes: 64 << 20,
+		},
+		Memory: Memory{
+			Enabled:             false,
+			MaxInstructionBytes: 2000,
 		},
 		MCP: MCP{
 			StartTimeout: 30 * time.Second,
@@ -686,6 +704,14 @@ func (c Config) rangeProblems() []Problem {
 			Fix: "The first wait cannot be longer than the longest wait.",
 		})
 	}
+	if c.Memory.Enabled && c.Memory.MaxInstructionBytes <= 0 {
+		problems = append(problems, Problem{
+			Key: "memory.max_instruction_bytes", Value: fmt.Sprint(c.Memory.MaxInstructionBytes),
+			Why: "must be greater than zero when memory is on",
+			Fix: "It bounds the standing directions put in front of the model every turn.",
+		})
+	}
+
 	if c.Context.Window < 0 {
 		problems = append(problems, Problem{
 			Key: "context.window", Value: fmt.Sprint(c.Context.Window),
@@ -966,6 +992,22 @@ const Example = `# JingClaw configuration.
 # The ceiling on one artifact. Larger than this is a file that belongs in the
 # workspace rather than output that was captured.
 # max_bytes = 67108864
+
+[memory]
+# What the agent carries between sessions.
+#
+# Off by default. What is written here is read by every later session, by an
+# agent that no longer knows where it came from, so turning it on is a decision
+# somebody should make rather than one they inherit.
+#
+# Nothing is ever written unattended: remember stops for a person in every
+# profile, and what arrived from outside this machine stays marked as such and
+# is never put in front of the model on its own.
+# enabled = false
+
+# The ceiling on the standing directions injected every turn. Everything here
+# is context the work does not get.
+# max_instruction_bytes = 2000
 
 [mcp]
 # Tool servers speaking the Model Context Protocol, run as child processes.

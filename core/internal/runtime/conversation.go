@@ -230,6 +230,10 @@ type pendingCall struct {
 	CallID    domain.ToolCallID
 	Name      string
 	Arguments []byte
+
+	// Seq is where the request sits in the log, so a tool that records
+	// anything can point back at what caused it.
+	Seq domain.Seq
 }
 
 // outstandingCalls finds tool calls with no recorded result.
@@ -262,6 +266,7 @@ func (r *Runtime) outstandingCalls(ctx context.Context, run domain.Run) ([]pendi
 				CallID:    payload.CallID,
 				Name:      payload.Name,
 				Arguments: []byte(payload.Arguments),
+				Seq:       event.Seq,
 			})
 		case domain.ToolCallCompleted:
 			completed[payload.CallID] = true

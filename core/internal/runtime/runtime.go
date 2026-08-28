@@ -120,6 +120,16 @@ type Options struct {
 	// SystemPrompt is prepended to every request.
 	SystemPrompt string
 
+	// SystemPromptFor contributes text that depends on the run, appended after
+	// SystemPrompt once when the run starts.
+	//
+	// Appended rather than mixed in, so the part that never changes stays a
+	// stable prefix — which is what prompt caching needs. It is per run and
+	// not per process because what belongs here can differ by who is asking:
+	// a turn from a chat account and one typed at this machine are not owed
+	// the same recollections.
+	SystemPromptFor func(ctx context.Context, run domain.Run) string
+
 	// Delivery is told about events on runs whose output belongs somewhere
 	// other than a control-plane client.
 	//
@@ -405,7 +415,7 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 	}
 
 	declarations := r.toolDeclarations()
-	system := r.systemPrompt()
+	system := r.systemPrompt(ctx, run)
 
 	// Fixed for the life of the run, and not small: a dozen tool schemas is
 	// real weight, and history must not be allowed to grow into it.
@@ -905,7 +915,17 @@ func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingC
 			return false, err
 		}
 
-		call := tool.Call{ID: string(pending.CallID), Name: pending.Name, Arguments: pending.Arguments}
+		call := tool.Call{
+			ID:        string(pending.CallID),
+			Name:      pending.Name,
+			Arguments: pending.Arguments,
+			Context: tool.CallContext{
+				SessionID: string(run.SessionID),
+				RunID:     string(run.ID),
+				Origin:    run.Origin,
+				Seq:       pending.Seq,
+			},
+		}
 
 		result, park, err := r.settleCall(ctx, run, call)
 		if err != nil {
@@ -1026,11 +1046,19 @@ func (r *Runtime) toolDeclarations() []provider.ToolDeclaration {
 	return declarations
 }
 
-func (r *Runtime) systemPrompt() []provider.ContentBlock {
-	if r.opts.SystemPrompt == "" {
+func (r *Runtime) systemPrompt(ctx context.Context, run domain.Run) []provider.ContentBlock {
+	prompt := r.opts.SystemPrompt
+
+	if r.opts.SystemPromptFor != nil {
+		if extra := r.opts.SystemPromptFor(ctx, run); extra != "" {
+			prompt = strings.TrimRight(prompt, "\n") + "\n\n" + extra
+		}
+	}
+
+	if prompt == "" {
 		return nil
 	}
-	return provider.Text(r.opts.SystemPrompt)
+	return provider.Text(prompt)
 }
 
 // isNilOption reports whether an option was left unset, covering both a nil

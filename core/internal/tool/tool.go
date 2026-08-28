@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 )
 
 // Level is the base risk of a tool, before its arguments are considered.
@@ -126,6 +128,45 @@ type Call struct {
 
 	// Arguments as the model produced them, before validation.
 	Arguments json.RawMessage
+
+	// Context is what the runtime knows about the turn this came from.
+	//
+	// Most tools ignore it: a file read is a file read whoever asked. It is
+	// here for the ones where the answer depends on who is asking, which today
+	// means memory — what one person told the agent is not recalled for
+	// another, and that boundary has to be enforced where the reading happens.
+	Context CallContext
+}
+
+// CallContext is who and what a call belongs to.
+type CallContext struct {
+	SessionID string
+	RunID     string
+
+	// Origin says whether the turn came from a control client on this machine
+	// or through a gateway from somebody else's platform.
+	Origin domain.RunOrigin
+
+	// Seq is where in the session's log this call sits, so anything a tool
+	// records can point back at what caused it.
+	Seq domain.Seq
+}
+
+// PrincipalKey identifies whoever is asking, as a scope for anything kept per
+// person.
+//
+// A gateway principal and the operator of this machine are different people,
+// and the key says which so that nothing collapses them together by accident.
+func (c CallContext) PrincipalKey() string {
+	if c.Origin.Principal != nil {
+		return c.Origin.Principal.Platform + ":" + c.Origin.Principal.PrincipalID
+	}
+	return "local:" + c.Origin.ClientID
+}
+
+// FromGateway reports whether this turn arrived from outside.
+func (c CallContext) FromGateway() bool {
+	return c.Origin.Kind == domain.OriginGateway
 }
 
 // Result is what goes back to the model.

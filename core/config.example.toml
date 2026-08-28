@@ -125,6 +125,22 @@
 # workspace rather than output that was captured.
 # max_bytes = 67108864
 
+[memory]
+# What the agent carries between sessions.
+#
+# Off by default. What is written here is read by every later session, by an
+# agent that no longer knows where it came from, so turning it on is a decision
+# somebody should make rather than one they inherit.
+#
+# Nothing is ever written unattended: remember stops for a person in every
+# profile, and what arrived from outside this machine stays marked as such and
+# is never put in front of the model on its own.
+# enabled = false
+
+# The ceiling on the standing directions injected every turn. Everything here
+# is context the work does not get.
+# max_instruction_bytes = 2000
+
 [mcp]
 # Tool servers speaking the Model Context Protocol, run as child processes.
 #

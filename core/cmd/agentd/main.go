@@ -28,6 +28,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
@@ -42,6 +43,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/sqlite"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool/builtin"
+	memorytool "github.com/KoukeNeko/JingClaw/core/internal/tool/memory"
 	"github.com/KoukeNeko/JingClaw/core/internal/webui"
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
@@ -217,6 +219,21 @@ func run() error {
 		return err
 	}
 
+	// Memory is registered before the prompt is assembled, because what the
+	// agent has been told to remember is part of what it can do.
+	memoryOptions := memorytool.Options{
+		Store:        store,
+		WorkspaceRef: ws.Root(),
+		NewID:        func() string { return id.WithPrefix("mem") },
+		Now:          time.Now,
+	}
+	if cfg.Memory.Enabled {
+		tools.MustRegister(
+			&memorytool.Remember{Options: memoryOptions},
+			&memorytool.Recall{Options: memoryOptions},
+		)
+	}
+
 	profile, ok := permission.ProfileByName(cfg.Agent.PermissionProfile)
 	if !ok {
 		return fmt.Errorf("unknown permission profile %q", cfg.Agent.PermissionProfile)
@@ -261,15 +278,16 @@ func run() error {
 			KeepFraction:  cfg.Context.KeepFraction,
 			SummaryTokens: cfg.Context.SummaryTokens,
 		},
-		SystemPrompt:  prompt.Render(layers),
-		MaxIterations: cfg.Agent.MaxIterations,
-		NewSessionID:  func() string { return id.WithPrefix("ses") },
-		NewRunID:      func() string { return id.WithPrefix("run") },
-		NewMessageID:  func() string { return id.WithPrefix("msg") },
-		NewEventID:    func() string { return id.WithPrefix("evt") },
-		NewApprovalID: func() string { return id.WithPrefix("apr") },
-		Now:           time.Now,
-		Logger:        logger,
+		SystemPrompt:    prompt.Render(layers),
+		SystemPromptFor: standingDirections(cfg, memoryOptions, logger),
+		MaxIterations:   cfg.Agent.MaxIterations,
+		NewSessionID:    func() string { return id.WithPrefix("ses") },
+		NewRunID:        func() string { return id.WithPrefix("run") },
+		NewMessageID:    func() string { return id.WithPrefix("msg") },
+		NewEventID:      func() string { return id.WithPrefix("evt") },
+		NewApprovalID:   func() string { return id.WithPrefix("apr") },
+		Now:             time.Now,
+		Logger:          logger,
 	})
 
 	// Runs that were live when this process last stopped have nobody driving
@@ -463,6 +481,34 @@ func databasePath(dataDir string) (string, error) {
 // buildProvider constructs the configured provider. Real providers are wrapped
 // in retry here rather than inside each adapter, so backoff policy is one
 // decision instead of one per vendor.
+// standingDirections puts what the agent was told to remember in front of it.
+//
+// Per run rather than per process, because a turn from a chat account and one
+// typed at this machine are not owed the same recollections. Nil when memory
+// is off, so the prompt is exactly what it was before the feature existed.
+func standingDirections(
+	cfg config.Config,
+	options memorytool.Options,
+	logger *slog.Logger,
+) func(context.Context, domain.Run) string {
+	if !cfg.Memory.Enabled {
+		return nil
+	}
+
+	return func(ctx context.Context, run domain.Run) string {
+		directions, err := memorytool.Instructions(ctx, options.Store, options, run,
+			cfg.Memory.MaxInstructionBytes)
+		if err != nil {
+			// A run that cannot read memory is still a run. Failing it would
+			// make an unavailable database into a broken agent.
+			logger.Warn("could not read standing directions",
+				"run_id", string(run.ID), "error", err)
+			return ""
+		}
+		return directions
+	}
+}
+
 // artifactDir settles where stored output lives.
 //
 // Beside the database by default, because that is where this daemon's other
