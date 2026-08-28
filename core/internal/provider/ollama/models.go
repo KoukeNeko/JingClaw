@@ -42,14 +42,28 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 			},
 		}
 
-		// What the weights allow, which is the weaker claim.
-		if trained, capabilities, ok := p.describeModel(ctx, id); ok {
-			info.TrainedContext = trained
-			info.ContextWindow = trained
+		// The listing often carries what the weights allow and what the model
+		// can do, in which case there is nothing to ask.
+		if tag.Details.ContextLength > 0 {
+			info.TrainedContext = tag.Details.ContextLength
+			info.ContextWindow = tag.Details.ContextLength
 			info.ContextSource = provider.ContextTrained
-			info.Capabilities.Tools = capabilities["tools"]
-			info.Capabilities.Vision = capabilities["vision"]
-			info.Capabilities.StructuredOutput = capabilities["completion"]
+		}
+		applyCapabilities(&info, tag.Capabilities)
+
+		// Only when it did not. A request per model is worth avoiding on a
+		// daemon serving a dozen of them.
+		if info.TrainedContext == 0 || len(tag.Capabilities) == 0 {
+			if trained, capabilities, ok := p.describeModel(ctx, id); ok {
+				if trained > 0 && info.TrainedContext == 0 {
+					info.TrainedContext = trained
+					info.ContextWindow = trained
+					info.ContextSource = provider.ContextTrained
+				}
+				if len(tag.Capabilities) == 0 {
+					applyCapabilities(&info, capabilities)
+				}
+			}
 		}
 
 		// What the server actually gave it, which outranks the above because
@@ -63,6 +77,33 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 	}
 
 	return models, nil
+}
+
+// applyCapabilities accepts either shape the daemon reports them in.
+func applyCapabilities[T []string | map[string]bool](info *provider.ModelInfo, capabilities T) {
+	has := func(name string) bool {
+		switch value := any(capabilities).(type) {
+		case []string:
+			for _, capability := range value {
+				if capability == name {
+					return true
+				}
+			}
+		case map[string]bool:
+			return value[name]
+		}
+		return false
+	}
+
+	if has("tools") {
+		info.Capabilities.Tools = true
+	}
+	if has("vision") {
+		info.Capabilities.Vision = true
+	}
+	if has("completion") {
+		info.Capabilities.StructuredOutput = true
+	}
 }
 
 // loadedContexts reports the context length of every model currently resident.

@@ -300,6 +300,13 @@ type stream struct {
 	model   string
 	pending []provider.Event
 	done    bool
+
+	// calledTools remembers that this turn asked for something, because the
+	// chunk saying the turn is over does not. A real daemon sends the calls
+	// in one line and the completion in a later, empty one, and a reason
+	// derived from the last chunk alone records a turn that used tools as one
+	// that simply finished.
+	calledTools bool
 }
 
 func newStream(body io.ReadCloser, model string) *stream {
@@ -350,7 +357,10 @@ func (s *stream) Recv(ctx context.Context) (provider.Event, error) {
 			return nil, classify(http.StatusOK, line, s.model)
 		}
 
-		s.pending = append(s.pending, eventsFrom(chunk)...)
+		if len(chunk.Message.ToolCalls) > 0 {
+			s.calledTools = true
+		}
+		s.pending = append(s.pending, s.eventsFrom(chunk)...)
 	}
 }
 
@@ -380,7 +390,7 @@ func (s *stream) readLine() ([]byte, error) {
 	}
 }
 
-func eventsFrom(chunk chatChunk) []provider.Event {
+func (s *stream) eventsFrom(chunk chatChunk) []provider.Event {
 	var events []provider.Event
 
 	if chunk.Message.Thinking != "" {
@@ -391,9 +401,11 @@ func eventsFrom(chunk chatChunk) []provider.Event {
 	}
 
 	for _, call := range chunk.Message.ToolCalls {
-		// No id is sent. The runtime assigns one, which is what pairs the
-		// eventual result with this request.
+		// The id is used when the server sent one and left empty otherwise,
+		// in which case the runtime mints the one that pairs the eventual
+		// result with this request.
 		events = append(events, provider.ToolCallRequested{
+			ID:   call.ID,
 			Name: call.Function.Name,
 			Args: call.Function.Arguments,
 		})
@@ -411,15 +423,18 @@ func eventsFrom(chunk chatChunk) []provider.Event {
 	}
 
 	events = append(events, provider.Completed{
-		StopReason: stopReasonFor(chunk),
+		StopReason: s.stopReason(chunk),
 		RawReason:  chunk.DoneReason,
 	})
 	return events
 }
 
-// stopReasonFor maps a done_reason, keeping the original either way.
-func stopReasonFor(chunk chatChunk) domain.StopReason {
-	if len(chunk.Message.ToolCalls) > 0 {
+// stopReason maps a done_reason, keeping the original either way.
+func (s *stream) stopReason(chunk chatChunk) domain.StopReason {
+	// Asked about the whole turn rather than the final chunk. The daemon
+	// reports "stop" for a turn that asked for a tool, and the chunk carrying
+	// the call is not the chunk carrying the completion.
+	if s.calledTools || len(chunk.Message.ToolCalls) > 0 {
 		return domain.StopToolUse
 	}
 

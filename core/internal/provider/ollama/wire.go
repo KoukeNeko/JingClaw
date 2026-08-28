@@ -60,11 +60,19 @@ type wireMessage struct {
 }
 
 type wireToolCall struct {
+	// ID is sent by current daemons and was not by older ones. Used when
+	// present rather than replaced: the runtime can mint an id, but the
+	// server's own is the one it will recognise if it ever needs it back.
+	ID string `json:"id,omitempty"`
+
 	Function wireToolCallFunction `json:"function"`
 }
 
 type wireToolCallFunction struct {
 	Name string `json:"name"`
+
+	// Index orders calls within one turn.
+	Index int `json:"index,omitempty"`
 
 	// Arguments arrive as a JSON object, not as a string holding one. Most
 	// APIs send the string; assuming this is one produces a call whose
@@ -116,11 +124,25 @@ type tagModel struct {
 	Size       int64        `json:"size"`
 	Details    modelDetails `json:"details"`
 	ModifiedAt time.Time    `json:"modified_at"`
+
+	// Capabilities is carried here as well as by /api/show, so a catalogue
+	// can often be built without asking about each model separately.
+	Capabilities []string `json:"capabilities"`
+
+	// RemoteHost is set for a model the daemon proxies to the hosted service
+	// rather than serving itself.
+	RemoteHost string `json:"remote_host"`
 }
 
 type modelDetails struct {
 	Family        string `json:"family"`
 	ParameterSize string `json:"parameter_size"`
+
+	// ContextLength is what the weights allow, and it is here in the listing
+	// rather than only in /api/show. Reading it saves a request per model,
+	// and means a daemon that will not describe a model individually still
+	// yields a usable window.
+	ContextLength int64 `json:"context_length"`
 }
 
 // psResponse is GET /api/ps: what is loaded right now.

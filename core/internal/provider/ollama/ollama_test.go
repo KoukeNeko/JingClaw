@@ -136,6 +136,58 @@ func TestThinkingDoesNotBecomeTheAnswer(t *testing.T) {
 	}
 }
 
+// The shape a real daemon actually sends, which a hand-written stand-in got
+// wrong: the tool call is in one line, and the line saying the turn is over is
+// a later, empty one that reports "stop". A reason derived from that last line
+// alone records a turn that used tools as one that simply finished.
+func TestATurnThatUsedToolsSaysSoEvenWhenTheLastLineDoesNot(t *testing.T) {
+	p := serve(t, ndjson(t,
+		`{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_kpo73sbh",`+
+			`"function":{"index":0,"name":"read_file","arguments":{"path":"notes.md"}}}]},"done":false}`,
+		`{"message":{"role":"assistant","content":""},"done":false}`,
+		`{"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop",`+
+			`"prompt_eval_count":65,"eval_count":17}`,
+	))
+
+	stream, err := p.Generate(context.Background(), provider.Request{Model: "qwen3"})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	events, err := drain(t, stream)
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	var call *provider.ToolCallRequested
+	var completed *provider.Completed
+	for _, event := range events {
+		switch e := event.(type) {
+		case provider.ToolCallRequested:
+			call = &e
+		case provider.Completed:
+			completed = &e
+		}
+	}
+
+	if call == nil {
+		t.Fatal("no tool call")
+	}
+	// The daemon does send an id, and its own is the one it would recognise.
+	if call.ID != "call_kpo73sbh" {
+		t.Errorf("the server's tool call id was discarded: %q", call.ID)
+	}
+	if completed == nil || completed.StopReason != domain.StopToolUse {
+		t.Errorf("stop reason is %+v, want tool_use", completed)
+	}
+	// The original is kept, so the log does not claim the server said
+	// something it did not.
+	if completed.RawReason != "stop" {
+		t.Errorf("raw reason is %q, want what the server actually said", completed.RawReason)
+	}
+}
+
 // Arguments arrive as a JSON object, not as a string holding one. Treating
 // this like every other API produces a call whose arguments are a quoted
 // brace.

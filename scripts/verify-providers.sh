@@ -34,6 +34,11 @@ cat > "$WORK/server.py" <<'PY'
 
 Both report a model loaded with far less context than its weights allow, which
 is the situation these adapters exist to notice.
+
+The shapes here are copied from what a real daemon sends rather than from the
+documentation, because the two differ: the listing carries the context length
+and the capabilities, which the documentation describes as living only in
+/api/show.
 """
 import http.server, json, socketserver, sys, threading, time
 
@@ -52,7 +57,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/tags":
             self._send({"models": [{"model": "qwen3:8b", "name": "qwen3:8b",
-                                    "details": {"family": "qwen3", "parameter_size": "8.2B"}}]})
+                                    "details": {"family": "qwen3", "parameter_size": "8.2B",
+                                                "context_length": TRAINED},
+                                    "capabilities": ["completion", "tools"]}]})
         elif self.path == "/api/ps":
             self._send({"models": [{"model": "qwen3:8b", "context_length": LOADED}]})
         elif self.path.endswith("/models"):
