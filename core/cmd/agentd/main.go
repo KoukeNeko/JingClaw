@@ -44,6 +44,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool/builtin"
 	memorytool "github.com/KoukeNeko/JingClaw/core/internal/tool/memory"
+	"github.com/KoukeNeko/JingClaw/core/internal/web"
 	"github.com/KoukeNeko/JingClaw/core/internal/webui"
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
@@ -232,6 +233,21 @@ func run() error {
 			&memorytool.Remember{Options: memoryOptions},
 			&memorytool.Recall{Options: memoryOptions},
 		)
+	}
+
+	// Reading the web is registered last among the built-ins, and only when an
+	// operator asked for it. A failure to resolve the interpreter is reported
+	// now rather than the first time the model asks for a page: an agent that
+	// advertises a tool it cannot run wastes a turn discovering that.
+	if fetcher, err := webFetcher(cfg); err != nil {
+		return err
+	} else if fetcher != nil {
+		tools.MustRegister(&builtin.WebRead{
+			Fetcher:       fetcher,
+			Artifacts:     artifacts,
+			MaxCharacters: cfg.Web.MaxCharacters,
+		})
+		logger.Info("web reading is on", "backend", fetcher.Describe())
 	}
 
 	profile, ok := permission.ProfileByName(cfg.Agent.PermissionProfile)
@@ -531,6 +547,31 @@ func artifactDir(cfg config.Config, dbPath string) string {
 // is one definition of what the names mean, in the package that owns them.
 // An unknown name was already refused by validation; execute is the floor
 // anyway, so falling back to it cannot make anything more permissive.
+// webFetcher builds the page fetcher an operator configured, or nil when they
+// did not ask for one.
+func webFetcher(cfg config.Config) (web.Fetcher, error) {
+	if !cfg.Web.Enabled || cfg.Web.Backend == "none" {
+		return nil, nil
+	}
+
+	switch cfg.Web.Backend {
+	case "browser":
+		python, err := web.PythonPath(cfg.Web.Python)
+		if err != nil {
+			return nil, fmt.Errorf("web.backend is \"browser\": %w", err)
+		}
+		return &web.BrowserFetcher{
+			Python:   python,
+			Timeout:  cfg.Web.Timeout,
+			MaxLinks: cfg.Web.MaxLinks,
+		}, nil
+	default:
+		// Validation has already refused anything else; reaching here means
+		// the two lists disagree, which is worth saying out loud.
+		return nil, fmt.Errorf("web.backend %q has no implementation", cfg.Web.Backend)
+	}
+}
+
 func mcpServers(cfg config.Config) []mcp.ServerConfig {
 	servers := make([]mcp.ServerConfig, 0, len(cfg.MCP.Servers))
 

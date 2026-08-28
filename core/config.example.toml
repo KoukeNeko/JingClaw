@@ -146,6 +146,46 @@
 # is context the work does not get.
 # max_instruction_bytes = 2000
 
+[web]
+# Whether the agent may read web pages.
+#
+# Off by default. Turning it on lets the agent pull in text written by people
+# who are not the operator, which the model reads alongside its own findings.
+# What comes back is labelled as somebody else's and is never treated as an
+# instruction, but the exposure is real and somebody should choose it.
+#
+# Reading only. There is no clicking, typing, signing in or submitting: that is
+# a different power and it is not in this tool.
+#
+# Local sessions fetch unattended. Sessions arriving from a chat platform stop
+# for the operator, because there the address is chosen by somebody else.
+# enabled = false
+
+# How a page is fetched.
+#
+# "browser" drives a real browser. It is slower than an HTTP request and it
+# reaches the growing number of sites that answer anything else with a
+# challenge page — which an agent otherwise reads as though it were the
+# article. It needs Python and the cloakbrowser package on this machine.
+#
+# "none" disables fetching while leaving this section configured.
+# backend = "browser"
+
+# The interpreter the browser backend runs. Empty finds python3 on PATH.
+# python = ""
+
+# How long one page gets. A page still rendering at the deadline returns
+# whatever it has, which beats returning nothing.
+# timeout = "45s"
+
+# How much of a page's text reaches the model. The whole text is stored either
+# way and can be read back with read_artifact.
+# max_characters = 40000
+
+# How many of a page's links to list, so a next page can be named rather than
+# guessed. A navigation page has thousands and none are worth the context.
+# max_links = 50
+
 [mcp]
 # Tool servers speaking the Model Context Protocol, run as child processes.
 #

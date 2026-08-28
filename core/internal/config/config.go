@@ -44,6 +44,7 @@ type Config struct {
 	Tools     Tools     `koanf:"tools"`
 	Artifacts Artifacts `koanf:"artifacts"`
 	Memory    Memory    `koanf:"memory"`
+	Web       Web       `koanf:"web"`
 	MCP       MCP       `koanf:"mcp"`
 	Delivery  Delivery  `koanf:"delivery"`
 	Workspace Workspace `koanf:"workspace"`
@@ -199,6 +200,39 @@ type Memory struct {
 	// MaxInstructionBytes bounds the standing directions put in front of the
 	// model on every turn. Everything here is context the work does not get.
 	MaxInstructionBytes int `koanf:"max_instruction_bytes"`
+}
+
+// Web is whether and how the agent may read pages.
+//
+// Off by default. Turning it on gives an agent that reads its own workspace
+// the ability to also read text somebody else wrote, which is a different
+// thing to have running unattended, and an operator should have to decide it.
+type Web struct {
+	Enabled bool `koanf:"enabled"`
+
+	// Backend is how a page is fetched.
+	//
+	// "browser" drives a real browser, which is slower and reaches sites that
+	// answer anything else with a challenge page. It needs Python and the
+	// cloakbrowser package on this machine. "none" disables fetching while
+	// leaving the rest of the section configured.
+	Backend string `koanf:"backend"`
+
+	// Python is the interpreter the browser backend runs. Empty finds python3
+	// on PATH.
+	Python string `koanf:"python"`
+
+	// Timeout bounds one fetch. A page that has not rendered by then returns
+	// what it has rather than nothing.
+	Timeout time.Duration `koanf:"timeout"`
+
+	// MaxCharacters bounds what one page puts in front of the model. The whole
+	// text is kept as an artifact regardless.
+	MaxCharacters int `koanf:"max_characters"`
+
+	// MaxLinks bounds the link list. A navigation page can have thousands, and
+	// none of them are worth the context.
+	MaxLinks int `koanf:"max_links"`
 }
 
 // MCP is the tool servers this agent runs alongside itself.
@@ -359,6 +393,13 @@ func Defaults() Config {
 		Memory: Memory{
 			Enabled:             false,
 			MaxInstructionBytes: 2000,
+		},
+		Web: Web{
+			Enabled:       false,
+			Backend:       "browser",
+			Timeout:       45 * time.Second,
+			MaxCharacters: 40000,
+			MaxLinks:      50,
 		},
 		MCP: MCP{
 			StartTimeout: 30 * time.Second,
@@ -719,6 +760,39 @@ func (c Config) rangeProblems() []Problem {
 		})
 	}
 
+	if c.Web.Enabled {
+		switch c.Web.Backend {
+		case "browser", "none":
+		default:
+			problems = append(problems, Problem{
+				Key: "web.backend", Value: quote(c.Web.Backend),
+				Why: "is not a backend this knows",
+				Fix: `Use "browser" to drive a real browser, or "none" to disable fetching.`,
+			})
+		}
+		if c.Web.Timeout <= 0 {
+			problems = append(problems, Problem{
+				Key: "web.timeout", Value: c.Web.Timeout.String(),
+				Why: "must be greater than zero",
+				Fix: "A page that has not rendered by then returns what it has.",
+			})
+		}
+		if c.Web.MaxCharacters <= 0 {
+			problems = append(problems, Problem{
+				Key: "web.max_characters", Value: fmt.Sprint(c.Web.MaxCharacters),
+				Why: "must be greater than zero",
+				Fix: "It bounds how much of a page reaches the model; the whole text is kept as an artifact regardless.",
+			})
+		}
+		if c.Web.MaxLinks < 0 {
+			problems = append(problems, Problem{
+				Key: "web.max_links", Value: fmt.Sprint(c.Web.MaxLinks),
+				Why: "is negative",
+				Fix: "Use 0 to list no links at all.",
+			})
+		}
+	}
+
 	if c.Context.Window < 0 {
 		problems = append(problems, Problem{
 			Key: "context.window", Value: fmt.Sprint(c.Context.Window),
@@ -1020,6 +1094,46 @@ const Example = `# JingClaw configuration.
 # The ceiling on the standing directions injected every turn. Everything here
 # is context the work does not get.
 # max_instruction_bytes = 2000
+
+[web]
+# Whether the agent may read web pages.
+#
+# Off by default. Turning it on lets the agent pull in text written by people
+# who are not the operator, which the model reads alongside its own findings.
+# What comes back is labelled as somebody else's and is never treated as an
+# instruction, but the exposure is real and somebody should choose it.
+#
+# Reading only. There is no clicking, typing, signing in or submitting: that is
+# a different power and it is not in this tool.
+#
+# Local sessions fetch unattended. Sessions arriving from a chat platform stop
+# for the operator, because there the address is chosen by somebody else.
+# enabled = false
+
+# How a page is fetched.
+#
+# "browser" drives a real browser. It is slower than an HTTP request and it
+# reaches the growing number of sites that answer anything else with a
+# challenge page — which an agent otherwise reads as though it were the
+# article. It needs Python and the cloakbrowser package on this machine.
+#
+# "none" disables fetching while leaving this section configured.
+# backend = "browser"
+
+# The interpreter the browser backend runs. Empty finds python3 on PATH.
+# python = ""
+
+# How long one page gets. A page still rendering at the deadline returns
+# whatever it has, which beats returning nothing.
+# timeout = "45s"
+
+# How much of a page's text reaches the model. The whole text is stored either
+# way and can be read back with read_artifact.
+# max_characters = 40000
+
+# How many of a page's links to list, so a next page can be named rather than
+# guessed. A navigation page has thousands and none are worth the context.
+# max_links = 50
 
 [mcp]
 # Tool servers speaking the Model Context Protocol, run as child processes.
