@@ -451,3 +451,111 @@ func TestOllamaSettingsAreChecked(t *testing.T) {
 		t.Fatalf("the ollama defaults do not validate: %v", err)
 	}
 }
+
+// Which list a channel is in decides its powers, so there is no profile to
+// misspell and none to set to the one meant for somebody at the machine.
+func TestADeclaredChannelIsChecked(t *testing.T) {
+	valid := config.Channel{
+		ChannelIDs: []string{"111111111111111111"},
+		TenantID:   "guild_1",
+		Users:      []string{"user_1"},
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*config.Channel)
+		mention string
+	}{
+		{
+			name:    "no channels",
+			mutate:  func(c *config.Channel) { c.ChannelIDs = nil },
+			mention: "channel_ids",
+		},
+		{
+			name:    "an empty id among them",
+			mutate:  func(c *config.Channel) { c.ChannelIDs = []string{"111", ""} },
+			mention: "channel_ids",
+		},
+		{
+			// Silently permitting nobody is a channel that looks configured
+			// and answers no one.
+			name: "nobody allowed",
+			mutate: func(c *config.Channel) {
+				c.Users = nil
+				c.Roles = nil
+			},
+			mention: "users",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			channel := valid
+			test.mutate(&channel)
+
+			cfg := config.Defaults()
+			cfg.Gateway.Channels = []config.Channel{channel}
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			if !strings.Contains(err.Error(), test.mention) {
+				t.Errorf("the error does not say which setting is wrong: %v", err)
+			}
+		})
+	}
+
+	// Several channels in one entry, and both lists at once.
+	cfg := config.Defaults()
+	cfg.Gateway.Channels = []config.Channel{{
+		ChannelIDs: []string{"111", "222"}, Users: []string{"user_1"},
+	}}
+	cfg.Gateway.Consoles = []config.Channel{{
+		ChannelIDs: []string{"333"}, Users: []string{"user_1"},
+	}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a usable configuration was refused: %v", err)
+	}
+}
+
+// A channel in both lists would have whichever powers the checking order gave
+// it, which is not something a file should be able to express.
+func TestAChannelCannotBeInBothLists(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Gateway.Channels = []config.Channel{{
+		ChannelIDs: []string{"111"}, Users: []string{"user_1"},
+	}}
+	cfg.Gateway.Consoles = []config.Channel{{
+		ChannelIDs: []string{"111"}, Users: []string{"user_1"},
+	}}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("a channel declared as both an ordinary room and a console was accepted")
+	}
+	if !strings.Contains(err.Error(), "gateway.channels[0]") {
+		t.Errorf("the error does not say where it was first declared: %v", err)
+	}
+}
+
+// Which entry is wrong, not just that one is. A file with four of them and an
+// error naming none is an error somebody has to bisect.
+func TestAChannelProblemSaysWhichEntry(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Gateway.Channels = []config.Channel{
+		{ChannelIDs: []string{"a"}, Users: []string{"user_1"}},
+		{ChannelIDs: []string{"b"}, Users: []string{"user_1"}},
+	}
+	cfg.Gateway.Consoles = []config.Channel{
+		{ChannelIDs: nil, Users: []string{"user_1"}},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("accepted")
+	}
+	if !strings.Contains(err.Error(), "gateway.consoles[0]") {
+		t.Errorf("the error does not say which entry: %v", err)
+	}
+}

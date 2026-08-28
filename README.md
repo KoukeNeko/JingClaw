@@ -88,7 +88,25 @@ becoming the one that knows none of this.
 
 "Discord" is not one trust level. A channel with fourteen people in it and one
 only you can see are different rooms, and the platform's own permissions are
-what separate them. Binding a private channel with `--profile console` says so:
+what separate them. Declare a private channel as a console in the config file:
+
+```toml
+[[gateway.channels]]
+channel_id = "111111111111111111"
+tenant_id  = "222222222222222222"
+workspace_id = "default"
+profile = "console"
+users = ["333333333333333333"]
+```
+
+Channels are applied when the daemon starts, so a deployment is described in
+the file rather than in commands somebody has to remember running. Declaring
+one that already exists updates it. Removing one does *not* unbind it — a
+daemon started once with an incomplete file would otherwise take away the thing
+that decides who can reach the agent — and the startup log names any bound
+channel the file does not, so nothing drifts unseen.
+
+The same thing from the command line, when that is easier:
 
 ```bash
 agent bindings add --channel <id> --guild <id> --workspace ws \

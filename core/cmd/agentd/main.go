@@ -360,6 +360,12 @@ func run() error {
 
 	// The runtime does not exist until after the options are built, so the
 	// ingress is completed here rather than taking a half-built runtime.
+	// The channels the file declares are put into effect before anything can
+	// arrive through one.
+	if err := applyChannels(rootCtx, store, cfg, logger); err != nil {
+		return err
+	}
+
 	plane.Ingress.Runtime = rt
 
 	// The console's extra reach is attached alongside, and only here. A

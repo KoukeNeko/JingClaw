@@ -170,6 +170,54 @@ type Retry struct {
 	Budget time.Duration `koanf:"budget"`
 }
 
+// problems reports what is wrong with one entry.
+//
+// seen carries channel ids already claimed, so the same room appearing in both
+// lists is caught. Silently letting one win would give a channel powers the
+// file appears to deny it, and which of the two won would depend on the order
+// they are checked in.
+func (c Channel) problems(where string, seen map[string]string) []Problem {
+	var problems []Problem
+
+	if len(c.ChannelIDs) == 0 {
+		problems = append(problems, Problem{
+			Key: where + ".channel_ids", Value: "[]",
+			Why: "is empty, so this names no channel",
+			Fix: `Give the platform's own ids, e.g. channel_ids = ["111111111111111111"].`,
+		})
+	}
+
+	for _, id := range c.ChannelIDs {
+		if strings.TrimSpace(id) == "" {
+			problems = append(problems, Problem{
+				Key: where + ".channel_ids", Value: `""`,
+				Why: "contains an empty id",
+				Fix: "Remove it, or give the channel's id.",
+			})
+			continue
+		}
+		if first, duplicate := seen[id]; duplicate {
+			problems = append(problems, Problem{
+				Key: where + ".channel_ids", Value: quote(id),
+				Why: "is already declared in " + first,
+				Fix: "A channel belongs to one list. Decide which, and remove the other.",
+			})
+			continue
+		}
+		seen[id] = where
+	}
+
+	if len(c.Users) == 0 && len(c.Roles) == 0 {
+		problems = append(problems, Problem{
+			Key: where + ".users", Value: "[]",
+			Why: "is empty, and so is roles, which permits nobody",
+			Fix: "List the accounts or roles that may trigger work here.",
+		})
+	}
+
+	return problems
+}
+
 // Context bounds how much of a session is sent to the model.
 //
 // Replaying the whole history is what lets a session survive a restart, but it
@@ -373,6 +421,52 @@ type Gateway struct {
 	// still being written. An answer finished inside one interval never
 	// streams: it arrives whole, which is what it should do.
 	StreamInterval time.Duration `koanf:"stream_interval"`
+
+	// Channels are rooms other people can type in. Reading runs unattended;
+	// changes, memory and web pages stop and ask; programs are refused.
+	//
+	// Applied when the daemon starts, so a deployment is described in the file
+	// rather than in commands somebody has to remember running. Declaring a
+	// channel that already exists updates it.
+	//
+	// Removing one from the file does not unbind it. A daemon started once
+	// with an incomplete file would otherwise take channels away, and a
+	// binding decides who may reach the agent; losing that by accident is
+	// worse than leaving one behind. The startup log names any binding the
+	// file does not, so drift is visible.
+	Channels []Channel `koanf:"channels"`
+
+	// Consoles are private channels an operator controls, which may answer
+	// their own approvals.
+	//
+	// A separate list rather than a setting inside one, so that what a channel
+	// may do is decided by which list it is in. A field naming the profile can
+	// be misspelled, and can be given the profile meant for somebody at the
+	// machine; a list cannot.
+	//
+	// Neither list can run programs. That needs somebody present.
+	Consoles []Channel `koanf:"consoles"`
+}
+
+// Channel is a set of conversations sharing one set of rules.
+type Channel struct {
+	// ChannelIDs are the channels themselves. Several may share an entry:
+	// rooms with the same workspace and the same people usually differ only
+	// by id, and repeating everything else for each is how the two drift
+	// apart.
+	ChannelIDs []string `koanf:"channel_ids"`
+
+	// TenantID is the guild or workspace they live in, where the platform has
+	// such a thing.
+	TenantID string `koanf:"tenant_id"`
+
+	// WorkspaceID names the workspace runs from here use.
+	WorkspaceID string `koanf:"workspace_id"`
+
+	// Users and Roles are who may trigger work. Both empty means nobody: a
+	// channel that answers anyone who finds it is not a default worth having.
+	Users []string `koanf:"users"`
+	Roles []string `koanf:"roles"`
 }
 
 type Workspace struct {
@@ -746,6 +840,20 @@ func (c Config) choiceProblems() []Problem {
 		}
 	}
 
+	seen := map[string]string{}
+	for _, list := range []struct {
+		name     string
+		channels []Channel
+	}{
+		{"gateway.channels", c.Gateway.Channels},
+		{"gateway.consoles", c.Gateway.Consoles},
+	} {
+		for index, channel := range list.channels {
+			where := fmt.Sprintf("%s[%d]", list.name, index)
+			problems = append(problems, channel.problems(where, seen)...)
+		}
+	}
+
 	if !platformNames[c.Gateway.Platform] {
 		problems = append(problems, Problem{
 			Key: "gateway.platform", Value: quote(c.Gateway.Platform),
@@ -955,7 +1063,8 @@ var (
 		"fake": true, "gemini": true, "ollama": true, "openai_compat": true,
 	}
 	platformNames = map[string]bool{"discord": true}
-	thinkLevels   = map[string]bool{
+
+	thinkLevels = map[string]bool{
 		"": true, "off": true, "on": true,
 		"low": true, "medium": true, "high": true, "max": true,
 	}
@@ -1352,6 +1461,51 @@ const Example = `# JingClaw configuration.
 # How many of a page's links to list, so a next page can be named rather than
 # guessed. A navigation page has thousands and none are worth the context.
 # max_links = 50
+
+# The channels this agent answers in.
+#
+# Declared here so a deployment is described in the file rather than in
+# commands somebody has to remember running. Applied when the daemon starts;
+# declaring a channel that already exists updates it.
+#
+# Removing one from this file does not unbind it. A daemon started once with an
+# incomplete file would otherwise take channels away, and a binding decides who
+# can reach the agent. The startup log names any bound channel this file does
+# not, so nothing drifts unseen; "agent bindings remove" is how one goes.
+#
+# There are two lists, and which one a channel is in is what decides its
+# powers. Neither can run programs: channel permissions settle who is in the
+# room, which is what makes the rest reasonable, but they cannot settle whether
+# an account still belongs to its owner — and a stolen one holds the request
+# and the approval both. So that stays where somebody has to be at the machine.
+
+# Rooms other people can type in. Reading runs unattended; changes, memory and
+# web pages stop and ask; programs are refused.
+#
+# [[gateway.channels]]
+# Several channels may share an entry when they share their rules. Repeating
+# everything else for each is how two of them drift apart.
+# channel_ids = ["111111111111111111"]
+# tenant_id = "222222222222222222"
+# workspace_id = "default"
+#
+# Who may trigger work. Both empty permits nobody, which is the default a
+# channel should have rather than answering anyone who finds it.
+# users = ["333333333333333333"]
+# roles = []
+
+# Private channels you control, used as a remote console.
+#
+# The same as above, and additionally: fetching a page runs unattended, and an
+# approval can be answered in the channel by replying "approve <id>" or
+# "deny <id>". The channel is told what it is the first time it is used.
+#
+# [[gateway.consoles]]
+# channel_ids = ["111111111111111112"]
+# tenant_id = "222222222222222222"
+# workspace_id = "default"
+# users = ["333333333333333333"]
+# roles = []
 
 [mcp]
 # Tool servers speaking the Model Context Protocol, run as child processes.
