@@ -512,3 +512,119 @@ func TestCompletionReplacesTheWorkingLine(t *testing.T) {
 		t.Errorf("the line does not say how long it took: %s", dispatches[0].Payload)
 	}
 }
+
+// deltas feeds an answer to the projector one chunk at a time, advancing the
+// clock between them.
+func deltas(t *testing.T, projector *gateway.Projector, clock *time.Time,
+	run domain.Run, chunks []string, apart time.Duration,
+) {
+	t.Helper()
+
+	for _, chunk := range chunks {
+		if err := projector.Observe(context.Background(), run, domain.Event{
+			Kind:    domain.EventAssistantTextDelta,
+			Payload: domain.AssistantTextDelta{MessageID: "msg_1", Text: chunk},
+		}); err != nil {
+			t.Fatalf("observe a delta: %v", err)
+		}
+		*clock = clock.Add(apart)
+	}
+
+	if err := projector.Observe(context.Background(), run, domain.Event{
+		Kind:    domain.EventAssistantMessageCompleted,
+		Payload: domain.AssistantMessageCompleted{MessageID: "msg_1"},
+	}); err != nil {
+		t.Fatalf("observe completion: %v", err)
+	}
+}
+
+func payloadOf(t *testing.T, dispatch gateway.Dispatch) gateway.MessagePayload {
+	t.Helper()
+
+	var payload gateway.MessagePayload
+	if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	return payload
+}
+
+// An answer finished inside one interval arrives whole. Streaming it would
+// mean posting a paragraph and rewriting it a moment later, which is worse
+// than waiting.
+func TestAShortAnswerIsNotStreamed(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+	projector.StreamInterval = 2 * time.Second
+
+	deltas(t, projector, clock, gatewayRun(*clock),
+		[]string{"All ", "three ", "tests ", "pass."}, 100*time.Millisecond)
+
+	dispatches := enqueued(t, store)
+	if len(dispatches) != 1 {
+		t.Fatalf("%d dispatches for a short answer, want one", len(dispatches))
+	}
+
+	payload := payloadOf(t, dispatches[0])
+	if !payload.Final {
+		t.Error("the only dispatch is not marked final")
+	}
+	if payload.Text != "All three tests pass." {
+		t.Errorf("text is %q", payload.Text)
+	}
+}
+
+// A long answer appears as it is written. Waiting for the whole thing means a
+// channel watches nothing happen for as long as the model takes.
+func TestALongAnswerIsStreamedAsItGrows(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+	projector.StreamInterval = time.Second
+
+	deltas(t, projector, clock, gatewayRun(*clock),
+		[]string{"one ", "two ", "three ", "four ", "five"}, 2*time.Second)
+
+	dispatches := enqueued(t, store)
+	if len(dispatches) < 3 {
+		t.Fatalf("%d dispatches; an answer written over ten seconds should show progress",
+			len(dispatches))
+	}
+
+	// Every version names the same answer, so a platform can keep rewriting
+	// one message rather than posting each.
+	var previous string
+	for index, dispatch := range dispatches {
+		payload := payloadOf(t, dispatch)
+
+		if payload.MessageID != "msg_1" {
+			t.Errorf("dispatch %d does not name the answer it belongs to", index)
+		}
+		if len(payload.Text) < len(previous) {
+			t.Errorf("dispatch %d went backwards: %q after %q", index, payload.Text, previous)
+		}
+		previous = payload.Text
+
+		if final := index == len(dispatches)-1; payload.Final != final {
+			t.Errorf("dispatch %d has final=%v, want %v", index, payload.Final, final)
+		}
+	}
+
+	if previous != "one two three four five" {
+		t.Errorf("the last version is %q, not the whole answer", previous)
+	}
+}
+
+// The first delta only starts the clock. Emitting on it would post three
+// characters and then rewrite them.
+func TestTheFirstDeltaDoesNotPostAnything(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+	projector.StreamInterval = time.Second
+
+	if err := projector.Observe(context.Background(), gatewayRun(*clock), domain.Event{
+		Kind:    domain.EventAssistantTextDelta,
+		Payload: domain.AssistantTextDelta{MessageID: "msg_1", Text: "I"},
+	}); err != nil {
+		t.Fatalf("observe: %v", err)
+	}
+
+	if got := len(enqueued(t, store)); got != 0 {
+		t.Errorf("the first delta produced %d dispatches", got)
+	}
+}

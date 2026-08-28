@@ -94,6 +94,11 @@ type Adapter struct {
 	// the last one.
 	statusMu       sync.Mutex
 	statusMessages map[domain.RunID]snowflake.ID
+
+	// answerMessages is the message each answer is growing in, so a version
+	// with more of it extends what is already there rather than posting the
+	// same paragraph again.
+	answerMessages map[string]snowflake.ID
 }
 
 func New(config Config, sink Sink) *Adapter {
@@ -104,6 +109,7 @@ func New(config Config, sink Sink) *Adapter {
 		config:         config,
 		sink:           sink,
 		statusMessages: make(map[domain.RunID]snowflake.ID),
+		answerMessages: make(map[string]snowflake.ID),
 	}
 }
 

@@ -454,3 +454,94 @@ func TestAnAnswerDoesNotReleaseTheStatusLine(t *testing.T) {
 		t.Error("the line survived being released")
 	}
 }
+
+// A version of an answer that is still being written extends the message it is
+// growing in; the last one settles it.
+func TestAPartialAnswerIsRecognised(t *testing.T) {
+	partial := jcgateway.Dispatch{
+		Kind:    jcgateway.DispatchMessage,
+		Payload: `{"text":"so far","message_id":"msg_1"}`,
+	}
+	answer, streaming := answerInProgress(partial)
+	if !streaming || answer != "msg_1" {
+		t.Errorf("a partial answer was not recognised: %q %v", answer, streaming)
+	}
+
+	final := jcgateway.Dispatch{
+		Kind:    jcgateway.DispatchMessage,
+		Payload: `{"text":"the whole thing","message_id":"msg_1","final":true}`,
+	}
+	if _, streaming := answerInProgress(final); streaming {
+		t.Error("the final answer was treated as one still being written")
+	}
+	if got := answerOf(final); got != "msg_1" {
+		t.Errorf("the final answer names %q", got)
+	}
+
+	// A status line is not an answer, however often it is rewritten.
+	status := jcgateway.Dispatch{
+		Kind:    jcgateway.DispatchStatus,
+		Payload: `{"state":"working"}`,
+	}
+	if _, streaming := answerInProgress(status); streaming {
+		t.Error("a status line was treated as an answer being written")
+	}
+
+	// And an answer from before streaming existed still has to post.
+	old := jcgateway.Dispatch{Kind: jcgateway.DispatchMessage, Payload: `{"text":"hello"}`}
+	if _, streaming := answerInProgress(old); streaming {
+		t.Error("an answer with no id was treated as one being written")
+	}
+}
+
+// While it is being written, an answer occupies one message. Deciding between
+// several messages and a file belongs to the final version, when the whole
+// thing is known.
+func TestAPartialAnswerStaysInOneMessage(t *testing.T) {
+	short := "still writing"
+	shown, cut := boundToOneMessage(short)
+	if shown != short || cut {
+		t.Errorf("a short partial was altered: %q %v", shown, cut)
+	}
+
+	long := strings.Repeat("a sentence of a plausible length. ", 200)
+	shown, cut = boundToOneMessage(long)
+
+	if !cut {
+		t.Fatal("a partial past one message was not cut")
+	}
+	if len(shown) > maxMessageLength {
+		t.Errorf("the shown part is %d bytes, over Discord's %d", len(shown), maxMessageLength)
+	}
+	if !strings.HasSuffix(shown, ellipsis) {
+		t.Error("the shown part does not say there is more coming")
+	}
+}
+
+// Two answers being written at once must not share a message.
+func TestEachAnswerGrowsInItsOwnMessage(t *testing.T) {
+	adapter := New(Config{AccountID: "main", Logger: slog.New(slog.DiscardHandler)}, nil)
+
+	adapter.setAnswer("msg_1", 111)
+	adapter.setAnswer("msg_2", 222)
+
+	if id, _ := adapter.liveAnswer("msg_1"); id != 111 {
+		t.Errorf("msg_1 is growing in %v", id)
+	}
+	if id, _ := adapter.liveAnswer("msg_2"); id != 222 {
+		t.Errorf("msg_2 is growing in %v", id)
+	}
+
+	adapter.clearAnswer("msg_1")
+	if _, ok := adapter.liveAnswer("msg_1"); ok {
+		t.Error("a finished answer kept its message")
+	}
+	if _, ok := adapter.liveAnswer("msg_2"); !ok {
+		t.Error("finishing one answer released another")
+	}
+
+	// An answer with no id never had a message of its own.
+	if _, ok := adapter.liveAnswer(""); ok {
+		t.Error("an empty id found a message")
+	}
+}

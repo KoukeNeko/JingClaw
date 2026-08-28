@@ -240,6 +240,7 @@ func run() error {
 	plane := gateway.NewPlane(store, nil, permissions,
 		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
 	plane.Projector.WorkingInterval = cfg.Gateway.WorkingInterval
+	plane.Projector.StreamInterval = cfg.Gateway.StreamInterval
 
 	rt := runtime.New(rootCtx, runtime.Options{
 		Store:       store,

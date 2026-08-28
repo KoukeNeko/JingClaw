@@ -55,6 +55,12 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 		return a.postStatus(channelID, dispatch, body)
 	}
 
+	// An answer still being written is one message that keeps growing. Posting
+	// each version would be the same paragraph five times.
+	if answer, streaming := answerInProgress(dispatch); streaming {
+		return a.postPartialAnswer(channelID, answer, body)
+	}
+
 	segments := splitForDiscord(body)
 
 	// Past a few messages, an answer stops being something to read in a
@@ -65,11 +71,105 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	// by construction, and turning one into an attachment would hide the thing
 	// somebody has to act on.
 	if shouldSendAsFile(dispatch.Kind, len(segments), a.maxMessages()) {
-		return a.postAsFile(channelID, dispatch, body)
+		return a.finishAsFile(channelID, dispatch, body)
 	}
 
+	return a.finishAsMessages(channelID, dispatch, segments)
+}
+
+// answerInProgress reports the answer a dispatch is a version of, when it is
+// not the last one.
+func answerInProgress(dispatch jcgateway.Dispatch) (string, bool) {
+	if dispatch.Kind != jcgateway.DispatchMessage {
+		return "", false
+	}
+
+	var payload jcgateway.MessagePayload
+	if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+		return "", false
+	}
+	return payload.MessageID, payload.MessageID != "" && !payload.Final
+}
+
+// answerOf reports which answer a finished dispatch completes, if any.
+func answerOf(dispatch jcgateway.Dispatch) string {
+	var payload jcgateway.MessagePayload
+	if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+		return ""
+	}
+	return payload.MessageID
+}
+
+// postPartialAnswer keeps one message growing while the model writes.
+//
+// Only ever one, and only as much of it as a single message holds. An answer
+// that outgrows that stops being rewritten and waits for the final version,
+// which is where the decision between several messages and a file belongs.
+func (a *Adapter) postPartialAnswer(
+	channelID snowflake.ID,
+	answer string,
+	body string,
+) ([]string, error) {
+	shown, cut := boundToOneMessage(body)
+
+	if existing, ok := a.liveAnswer(answer); ok {
+		if cut {
+			// Already at the limit; there is nothing new to show until the
+			// answer is whole.
+			return []string{existing.String()}, nil
+		}
+
+		_, err := a.client.Rest.UpdateMessage(channelID, existing, discord.MessageUpdate{
+			Content:         &shown,
+			AllowedMentions: &discord.AllowedMentions{},
+		})
+		if err == nil {
+			return []string{existing.String()}, nil
+		}
+
+		a.config.Logger.Debug("could not extend the answer, posting a new message",
+			"message_id", answer, "error", err)
+		a.clearAnswer(answer)
+	}
+
+	message, err := a.client.Rest.CreateMessage(channelID, messageWith(shown))
+	if err != nil {
+		return nil, fmt.Errorf("discord: post to %s: %w", channelID, err)
+	}
+
+	a.setAnswer(answer, message.ID)
+	return []string{message.ID.String()}, nil
+}
+
+// finishAsMessages posts the finished answer, extending the message it has
+// been growing in if there is one.
+func (a *Adapter) finishAsMessages(
+	channelID snowflake.ID,
+	dispatch jcgateway.Dispatch,
+	segments []string,
+) ([]string, error) {
 	var posted []string
-	for _, segment := range segments {
+
+	answer := answerOf(dispatch)
+	defer a.clearAnswer(answer)
+
+	for index, segment := range segments {
+		if index == 0 {
+			if existing, ok := a.liveAnswer(answer); ok {
+				_, err := a.client.Rest.UpdateMessage(channelID, existing, discord.MessageUpdate{
+					Content:         &segments[0],
+					AllowedMentions: &discord.AllowedMentions{},
+				})
+				if err == nil {
+					posted = append(posted, existing.String())
+					continue
+				}
+				a.config.Logger.Debug("could not finish the answer in place",
+					"message_id", answer, "error", err)
+				a.clearAnswer(answer)
+			}
+		}
+
 		message, err := a.client.Rest.CreateMessage(channelID, messageWith(segment))
 		if err != nil {
 			// Whatever was already posted is reported, so a caller retrying
@@ -81,6 +181,16 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	}
 
 	return posted, nil
+}
+
+// boundToOneMessage keeps a partial answer inside a single message.
+func boundToOneMessage(body string) (string, bool) {
+	if len(body) <= softMessageLength {
+		return body, false
+	}
+
+	cut := breakPoint(body, softMessageLength-len(ellipsis))
+	return body[:cut] + ellipsis, true
 }
 
 // postStatus keeps one status line per channel and rewrites it.
@@ -181,7 +291,7 @@ func shouldSendAsFile(kind jcgateway.DispatchKind, segments, maxMessages int) bo
 //
 // The lead line carries the opening of the answer, because a bare "see
 // attached" tells a person nothing about whether they need to open it.
-func (a *Adapter) postAsFile(
+func (a *Adapter) finishAsFile(
 	channelID snowflake.ID,
 	dispatch jcgateway.Dispatch,
 	body string,
@@ -194,12 +304,44 @@ func (a *Adapter) postAsFile(
 	create.Files = []*discord.File{discord.NewFile(
 		attachmentName(dispatch), "the whole answer", strings.NewReader(content))}
 
+	// An answer that grew past what one message holds may already have a
+	// message of its own. It is released rather than edited: a file cannot be
+	// added to a message that was posted without one, and the lead belongs
+	// with the file.
+	a.clearAnswer(answerOf(dispatch))
+
 	message, err := a.client.Rest.CreateMessage(channelID, create)
 	if err != nil {
 		return nil, fmt.Errorf("discord: post a file to %s: %w", channelID, err)
 	}
 
 	return []string{message.ID.String()}, nil
+}
+
+func (a *Adapter) liveAnswer(answer string) (snowflake.ID, bool) {
+	if answer == "" {
+		return 0, false
+	}
+
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+
+	id, ok := a.answerMessages[answer]
+	return id, ok
+}
+
+func (a *Adapter) setAnswer(answer string, message snowflake.ID) {
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+
+	a.answerMessages[answer] = message
+}
+
+func (a *Adapter) clearAnswer(answer string) {
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+
+	delete(a.answerMessages, answer)
 }
 
 // messageWith builds a post that cannot notify a room.

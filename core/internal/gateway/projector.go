@@ -37,20 +37,32 @@ type Projector struct {
 	// and bury the channel besides.
 	WorkingInterval time.Duration
 
+	// StreamInterval is the least time between versions of an answer that is
+	// still being written. Every delta producing one would be a rate limit
+	// rather than a feature.
+	StreamInterval time.Duration
+
 	// pending accumulates assistant text per message until it completes, and
 	// lastWorking remembers when each run last said something, so the throttle
 	// is per run rather than global.
 	//
 	// Guarded because runs execute concurrently: two conversations producing
 	// output at the same moment reach this from different goroutines.
-	mu          sync.Mutex
-	pending     map[domain.MessageID]*strings.Builder
-	lastWorking map[domain.RunID]time.Time
+	mu           sync.Mutex
+	pending      map[domain.MessageID]*strings.Builder
+	lastWorking  map[domain.RunID]time.Time
+	lastStreamed map[domain.MessageID]time.Time
 }
 
 // defaultWorkingInterval is roughly what a person reads at, and comfortably
 // inside what a platform will accept as edits to one message.
-const defaultWorkingInterval = 2 * time.Second
+const (
+	defaultWorkingInterval = 2 * time.Second
+
+	// defaultStreamInterval is fast enough to read as writing and slow enough
+	// that one answer does not spend a channel's whole edit allowance.
+	defaultStreamInterval = 1500 * time.Millisecond
+)
 
 func NewProjector(store Store, newID func() string, now func() time.Time) *Projector {
 	if now == nil {
@@ -61,14 +73,25 @@ func NewProjector(store Store, newID func() string, now func() time.Time) *Proje
 		NewID:           newID,
 		Now:             now,
 		WorkingInterval: defaultWorkingInterval,
+		StreamInterval:  defaultStreamInterval,
 		pending:         make(map[domain.MessageID]*strings.Builder),
 		lastWorking:     make(map[domain.RunID]time.Time),
+		lastStreamed:    make(map[domain.MessageID]time.Time),
 	}
 }
 
 // MessagePayload is what a gateway posts for agent output.
 type MessagePayload struct {
 	Text string `json:"text"`
+
+	// MessageID names the answer this is a version of. A platform that can
+	// rewrite what it posted uses it to keep one message growing rather than
+	// posting the answer again every time there is more of it.
+	MessageID string `json:"message_id,omitempty"`
+
+	// Final says this is the whole answer. Anything before it is as much as
+	// had been said at the time, and a platform may show it or ignore it.
+	Final bool `json:"final,omitempty"`
 }
 
 // ApprovalPayload asks a conversation to decide about a tool call.
@@ -98,10 +121,21 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 
 	switch payload := event.Payload.(type) {
 	case domain.AssistantTextDelta:
-		// Held until the message completes. A channel wants the reply, not
-		// the reply being typed.
+		// Sent as it grows, on a cadence. Waiting for the whole answer means a
+		// channel watches nothing happen for as long as the model takes to
+		// write, which is the difference between an agent that feels alive and
+		// one that feels stuck.
+		//
+		// The first one is a whole interval in, so a short answer never
+		// streams: it simply arrives, which is what it should do.
 		p.accumulate(payload.MessageID, payload.Text)
-		return nil
+		if !p.shouldStream(payload.MessageID) {
+			return nil
+		}
+		return p.enqueue(ctx, run, target, DispatchMessage, MessagePayload{
+			Text:      p.peek(payload.MessageID),
+			MessageID: string(payload.MessageID),
+		})
 
 	case domain.AssistantMessageCompleted:
 		text := p.take(payload.MessageID)
@@ -109,7 +143,11 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 			// A turn that only asked for tools has nothing to say yet.
 			return nil
 		}
-		return p.enqueue(ctx, run, target, DispatchMessage, MessagePayload{Text: text})
+		return p.enqueue(ctx, run, target, DispatchMessage, MessagePayload{
+			Text:      text,
+			MessageID: string(payload.MessageID),
+			Final:     true,
+		})
 
 	case domain.ToolCallRequested:
 		// What it is doing, while it is doing it. Throttled, because a run
@@ -252,6 +290,17 @@ func (p *Projector) accumulate(id domain.MessageID, text string) {
 	builder.WriteString(text)
 }
 
+func (p *Projector) peek(id domain.MessageID) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	builder, ok := p.pending[id]
+	if !ok {
+		return ""
+	}
+	return builder.String()
+}
+
 func (p *Projector) take(id domain.MessageID) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -261,7 +310,36 @@ func (p *Projector) take(id domain.MessageID) string {
 		return ""
 	}
 	delete(p.pending, id)
+	delete(p.lastStreamed, id)
 	return builder.String()
+}
+
+// shouldStream rate-limits versions of an answer that is still being written.
+//
+// The first delta only starts the clock. An answer finished inside one
+// interval is never streamed, which is right: it arrives whole instead of
+// appearing and then being rewritten a moment later.
+func (p *Projector) shouldStream(id domain.MessageID) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	interval := p.StreamInterval
+	if interval <= 0 {
+		interval = defaultStreamInterval
+	}
+
+	now := p.Now()
+	last, started := p.lastStreamed[id]
+	if !started {
+		p.lastStreamed[id] = now
+		return false
+	}
+	if now.Sub(last) < interval {
+		return false
+	}
+
+	p.lastStreamed[id] = now
+	return true
 }
 
 // externalTarget returns the first non-local delivery target for a run.

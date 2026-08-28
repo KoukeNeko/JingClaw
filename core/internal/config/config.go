@@ -260,6 +260,11 @@ type Gateway struct {
 	// A run that reads six files in a second would otherwise send six of them,
 	// which is more than a person can read and more than a platform will take.
 	WorkingInterval time.Duration `koanf:"working_interval"`
+
+	// StreamInterval is the least time between versions of an answer that is
+	// still being written. An answer finished inside one interval never
+	// streams: it arrives whole, which is what it should do.
+	StreamInterval time.Duration `koanf:"stream_interval"`
 }
 
 type Workspace struct {
@@ -358,6 +363,7 @@ func Defaults() Config {
 			MaxMessages:        3,
 			MaxAttachmentBytes: 4 << 20,
 			WorkingInterval:    2 * time.Second,
+			StreamInterval:     1500 * time.Millisecond,
 		},
 	}
 }
@@ -654,6 +660,7 @@ func (c Config) rangeProblems() []Problem {
 		{"gateway.max_messages", int64(c.Gateway.MaxMessages), "Zero would send every answer as a file."},
 		{"gateway.max_attachment_bytes", int64(c.Gateway.MaxAttachmentBytes), "Zero would make every attachment empty."},
 		{"gateway.working_interval", int64(c.Gateway.WorkingInterval), "Zero would say what it is doing on every tool call."},
+		{"gateway.stream_interval", int64(c.Gateway.StreamInterval), "Zero would send a version of the answer per chunk."},
 	}
 	for _, setting := range positive {
 		if setting.value <= 0 {
@@ -1062,4 +1069,9 @@ const Example = `# JingClaw configuration.
 # rather than stacking, so this is about how fast a person can read rather than
 # about how much a channel can hold.
 # working_interval = "2s"
+
+# The least time between versions of an answer that is still being written.
+# An answer finished inside one interval never streams: it arrives whole,
+# which is what it should do.
+# stream_interval = "1.5s"
 `

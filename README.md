@@ -445,6 +445,22 @@ edits to one message. Which message is live is held in the adapter's memory
 rather than in the outbox, because it is a presentation detail: losing it
 across a restart costs one extra line in a channel, not a wrong one.
 
+## Answers as they are written
+
+A model writing for twenty seconds used to be twenty seconds of nothing
+followed by a wall of text. The answer now grows in one message: the projector
+sends what has been said so far on a cadence, each version naming the answer it
+belongs to, and the adapter rewrites the message rather than posting the same
+paragraph again.
+
+The first delta only starts the clock, so an answer finished inside one
+`gateway.stream_interval` (1.5 seconds) never streams — it arrives whole, which
+is what it should do rather than appearing and being rewritten a moment later.
+
+While it is being written an answer occupies exactly one message, cut at
+Discord's limit with an ellipsis. Deciding between several messages and a file
+belongs to the final version, when the whole thing is known.
+
 ## Long answers on Discord
 
 A reply that needs eight messages is a channel somebody has to scroll past for

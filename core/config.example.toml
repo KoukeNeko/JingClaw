@@ -228,3 +228,8 @@
 # rather than stacking, so this is about how fast a person can read rather than
 # about how much a channel can hold.
 # working_interval = "2s"
+
+# The least time between versions of an answer that is still being written.
+# An answer finished inside one interval never streams: it arrives whole,
+# which is what it should do.
+# stream_interval = "1.5s"
