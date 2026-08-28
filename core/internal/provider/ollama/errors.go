@@ -83,9 +83,13 @@ func kindFor(status int, message string) provider.ErrorKind {
 // "cannot allocate" — and a list of exact sentences is a list that is already
 // out of date. Any mention of memory or VRAM in an inference server's error is
 // about not having enough of it.
+//
+// A busy slot is deliberately not here. That is a queue which drains, and
+// calling it exhaustion would tell somebody to give up on something that
+// resolves by itself.
 func mentionsMemory(lowered string) bool {
 	for _, word := range []string{
-		"memory", "vram", "oom", "cannot allocate", "no available slot",
+		"memory", "vram", "oom", "cannot allocate",
 	} {
 		if strings.Contains(lowered, word) {
 			return true
