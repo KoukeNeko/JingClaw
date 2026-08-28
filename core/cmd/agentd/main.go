@@ -606,6 +606,8 @@ func mcpServers(cfg config.Config) []mcp.ServerConfig {
 			Name:    configured.Name,
 			Command: configured.Command,
 			Args:    configured.Args,
+			URL:     configured.URL,
+			Headers: configured.Headers,
 			Env:     configured.Env,
 			PassEnv: configured.PassEnv,
 			Level:   level,

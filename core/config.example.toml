@@ -170,8 +170,16 @@ backend = "browser"
 # [[mcp.servers]]
 # Prefixes this server's tools, so installing one cannot shadow a built-in.
 # name = "fs"
+
+# Either a command run as a child of this daemon, or a Streamable HTTP url
+# reaching one already running. Never both.
+#
+# A url server is not started, stopped or killed by this daemon, and every
+# tool call is a network hop to that address.
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+# url = "http://localhost:9000/mcp"
+# headers = { Authorization = "Bearer ..." }
 
 # The child gets nothing from this daemon's environment except what is named
 # here. The daemon holds the provider credentials.

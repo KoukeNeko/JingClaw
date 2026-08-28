@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -363,8 +364,19 @@ type MCPServer struct {
 	// workspace boundary.
 	Name string `koanf:"name"`
 
+	// Command runs the server as a child of this daemon. URL reaches one that
+	// is already running, over HTTP. Exactly one of them.
 	Command string   `koanf:"command"`
 	Args    []string `koanf:"args"`
+
+	// URL is a Streamable HTTP endpoint. A server reached this way is not
+	// started, stopped or killed by this daemon, and every tool call is a
+	// network hop to an address named here.
+	URL string `koanf:"url"`
+
+	// Headers are sent with every request to a URL server, which is where an
+	// authorization header goes.
+	Headers map[string]string `koanf:"headers"`
 
 	// Env are literal values for the child, and PassEnv names variables
 	// forwarded from the daemon's own environment. Nothing else is inherited:
@@ -865,6 +877,39 @@ func (c Config) choiceProblems() []Problem {
 		}
 	}
 
+	for index, server := range c.MCP.Servers {
+		where := fmt.Sprintf("mcp.servers[%d]", index)
+
+		hasCommand := strings.TrimSpace(server.Command) != ""
+		hasURL := strings.TrimSpace(server.URL) != ""
+
+		switch {
+		case hasCommand && hasURL:
+			problems = append(problems, Problem{
+				Key: where, Value: quote(server.Name),
+				Why: "names both a command and a url",
+				Fix: "A server is either started here or reached over HTTP. Remove one.",
+			})
+		case !hasCommand && !hasURL:
+			problems = append(problems, Problem{
+				Key: where, Value: quote(server.Name),
+				Why: "names neither a command nor a url",
+				Fix: "Give a command to run, or a url to connect to.",
+			})
+		}
+
+		if hasURL {
+			if parsed, err := url.Parse(server.URL); err != nil ||
+				(parsed.Scheme != "http" && parsed.Scheme != "https") {
+				problems = append(problems, Problem{
+					Key: where + ".url", Value: quote(server.URL),
+					Why: "is not an http or https address",
+					Fix: "Give the endpoint the server listens on.",
+				})
+			}
+		}
+	}
+
 	if !platformNames[c.Gateway.Platform] {
 		problems = append(problems, Problem{
 			Key: "gateway.platform", Value: quote(c.Gateway.Platform),
@@ -1360,8 +1405,16 @@ backend = "browser"
 # [[mcp.servers]]
 # Prefixes this server's tools, so installing one cannot shadow a built-in.
 # name = "fs"
+
+# Either a command run as a child of this daemon, or a Streamable HTTP url
+# reaching one already running. Never both.
+#
+# A url server is not started, stopped or killed by this daemon, and every
+# tool call is a network hop to that address.
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+# url = "http://localhost:9000/mcp"
+# headers = { Authorization = "Bearer ..." }
 
 # The child gets nothing from this daemon's environment except what is named
 # here. The daemon holds the provider credentials.

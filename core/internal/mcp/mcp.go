@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
@@ -47,8 +48,25 @@ type ServerConfig struct {
 	// Name distinguishes this server's tools from every other source of tools.
 	Name string
 
+	// Command runs the server as a child of this daemon, speaking over its
+	// standard streams. URL reaches one that is already running, over HTTP.
+	// Exactly one of them is given.
 	Command string
 	Args    []string
+
+	// URL is a Streamable HTTP endpoint. A server reached this way is
+	// somebody else's process on somebody else's schedule: it is not started,
+	// not stopped, and not killed when this daemon exits.
+	//
+	// It is also a network hop, which the child-process kind is not. What
+	// arrives is the same untrusted tool output either way, but the reach is
+	// wider: an address here is a place this machine will connect to whenever
+	// the agent uses a tool.
+	URL string
+
+	// Headers are sent with every request to a URL server, which is where an
+	// authorization header goes.
+	Headers map[string]string
 
 	// Env are literal values for the child's environment, and PassEnv names
 	// variables forwarded from the daemon's own.
@@ -62,6 +80,68 @@ type ServerConfig struct {
 	// Level is what this server's tools count as when the policy engine looks
 	// at them. It comes from configuration rather than from the server.
 	Level tool.Level
+}
+
+// transportFor decides how to reach a server, and refuses anything ambiguous.
+//
+// One of the two, never both. A configuration naming a command and a URL is
+// one where somebody meant something specific and this cannot tell which, and
+// guessing would silently start a process or open a connection nobody asked
+// for.
+func transportFor(cfg ServerConfig) (sdk.Transport, error) {
+	if cfg.Name == "" {
+		return nil, fmt.Errorf("mcp: a server needs a name")
+	}
+
+	hasCommand := cfg.Command != ""
+	hasURL := cfg.URL != ""
+
+	switch {
+	case hasCommand && hasURL:
+		return nil, fmt.Errorf("mcp: %s names both a command and a url; it can only be one", cfg.Name)
+	case !hasCommand && !hasURL:
+		return nil, fmt.Errorf("mcp: %s names neither a command nor a url", cfg.Name)
+	}
+
+	if hasURL {
+		return &sdk.StreamableClientTransport{
+			Endpoint:   cfg.URL,
+			HTTPClient: &http.Client{Transport: headerTransport(cfg.Headers)},
+		}, nil
+	}
+
+	command := exec.Command(cfg.Command, cfg.Args...)
+	command.Env = environment(cfg)
+	// Servers log to stderr by convention; letting it through is how an
+	// operator finds out why one is misbehaving.
+	command.Stderr = os.Stderr
+
+	return &sdk.CommandTransport{Command: command}, nil
+}
+
+// headerTransport adds the configured headers to every request.
+//
+// A round tripper rather than headers set once, because the SDK owns the
+// requests it makes and there is nowhere else to put them.
+func headerTransport(headers map[string]string) http.RoundTripper {
+	if len(headers) == 0 {
+		return http.DefaultTransport
+	}
+	return &withHeaders{headers: headers, base: http.DefaultTransport}
+}
+
+type withHeaders struct {
+	headers map[string]string
+	base    http.RoundTripper
+}
+
+func (t *withHeaders) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Cloned, because a RoundTripper must not modify the request it is given.
+	clone := req.Clone(req.Context())
+	for name, value := range t.headers {
+		clone.Header.Set(name, value)
+	}
+	return t.base.RoundTrip(clone)
 }
 
 // Limits bound what running a server may cost.
@@ -112,22 +192,17 @@ func Connect(
 ) (*Server, error) {
 	limits = limits.withDefaults()
 
-	if cfg.Name == "" || cfg.Command == "" {
-		return nil, fmt.Errorf("mcp: a server needs a name and a command")
+	transport, err := transportFor(cfg)
+	if err != nil {
+		return nil, err
 	}
-
-	command := exec.Command(cfg.Command, cfg.Args...)
-	command.Env = environment(cfg)
-	// Servers log to stderr by convention; letting it through is how an
-	// operator finds out why one is misbehaving.
-	command.Stderr = os.Stderr
 
 	startCtx, cancel := context.WithTimeout(ctx, limits.StartTimeout)
 	defer cancel()
 
 	client := sdk.NewClient(&sdk.Implementation{Name: clientName, Version: clientVersion}, nil)
 
-	session, err := client.Connect(startCtx, &sdk.CommandTransport{Command: command}, nil)
+	session, err := client.Connect(startCtx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("mcp: connect to %s: %w", cfg.Name, err)
 	}
