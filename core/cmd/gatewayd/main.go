@@ -97,9 +97,11 @@ func run() error {
 	}
 
 	adapter := discord.New(discord.Config{
-		Token:     botToken.Reveal(),
-		AccountID: cfg.Gateway.AccountID,
-		Logger:    logger,
+		Token:              botToken.Reveal(),
+		AccountID:          cfg.Gateway.AccountID,
+		MaxMessages:        cfg.Gateway.MaxMessages,
+		MaxAttachmentBytes: cfg.Gateway.MaxAttachmentBytes,
+		Logger:             logger,
 	}, relay)
 	relay.poster = adapter
 

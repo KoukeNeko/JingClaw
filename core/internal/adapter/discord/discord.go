@@ -52,6 +52,18 @@ type Config struct {
 	// not Discord's.
 	AccountID string
 
+	// MaxMessages is how many messages one answer may become before it is
+	// posted as a file instead. Zero uses the default.
+	//
+	// A long answer split into eight messages is a channel somebody has to
+	// scroll past for the rest of the day. As a file it is one line they can
+	// open if they want it.
+	MaxMessages int
+
+	// MaxAttachmentBytes bounds what is uploaded. Zero uses the default, which
+	// is well under what Discord accepts.
+	MaxAttachmentBytes int
+
 	Logger *slog.Logger
 }
 

@@ -245,6 +245,16 @@ type Gateway struct {
 
 	TokenEnv  []string `koanf:"token_env"`
 	TokenFile string   `koanf:"token_file"`
+
+	// MaxMessages is how many messages one answer may become before it is sent
+	// as a file instead. An answer split into eight is a channel somebody has
+	// to scroll past for the rest of the day.
+	MaxMessages int `koanf:"max_messages"`
+
+	// MaxAttachmentBytes bounds what is uploaded, well under what the platform
+	// would accept: the point is to be readable, not to be as large as
+	// possible.
+	MaxAttachmentBytes int `koanf:"max_attachment_bytes"`
 }
 
 type Workspace struct {
@@ -336,10 +346,12 @@ func Defaults() Config {
 			PairingTTL: 10 * time.Minute,
 		},
 		Gateway: Gateway{
-			Platform:  "discord",
-			AccountID: "main",
-			TokenEnv:  []string{"DISCORD_BOT_TOKEN"},
-			TokenFile: "discord.token",
+			Platform:           "discord",
+			AccountID:          "main",
+			TokenEnv:           []string{"DISCORD_BOT_TOKEN"},
+			TokenFile:          "discord.token",
+			MaxMessages:        3,
+			MaxAttachmentBytes: 4 << 20,
 		},
 	}
 }
@@ -633,6 +645,8 @@ func (c Config) rangeProblems() []Problem {
 		{"context.summary_tokens", int64(c.Context.SummaryTokens), "A summary of nothing is not a summary."},
 		{"mcp.max_output", int64(c.MCP.MaxOutput), "Zero would discard whatever a tool server answered."},
 		{"artifacts.max_bytes", c.Artifacts.MaxBytes, "Zero would mean nothing can be kept."},
+		{"gateway.max_messages", int64(c.Gateway.MaxMessages), "Zero would send every answer as a file."},
+		{"gateway.max_attachment_bytes", int64(c.Gateway.MaxAttachmentBytes), "Zero would make every attachment empty."},
 	}
 	for _, setting := range positive {
 		if setting.value <= 0 {
@@ -1027,4 +1041,13 @@ const Example = `# JingClaw configuration.
 # 600 and the value never reaches a log.
 # token_env = ["DISCORD_BOT_TOKEN"]
 # token_file = "discord.token"
+
+# How many messages one answer may become before it goes as a file instead. An
+# answer split into eight messages is a channel somebody has to scroll past for
+# the rest of the day; as a file it is one line they can open.
+# max_messages = 3
+
+# The ceiling on an upload, well under what the platform accepts. The point is
+# to be readable, not to be as large as possible.
+# max_attachment_bytes = 4194304
 `

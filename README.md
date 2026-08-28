@@ -407,6 +407,28 @@ So each script starts a real daemon, drives it the way a person would, and
 checks what came out. `verify-artifacts.sh` needs a provider credential —
 only a model calls tools — and skips itself when there is none.
 
+## Long answers on Discord
+
+A reply that needs eight messages is a channel somebody has to scroll past for
+the rest of the day. Past `gateway.max_messages` (three by default) the answer
+goes as a `.txt` attachment instead, with its opening in the message so a
+reader can tell whether it is worth opening:
+
+```
+Here is what I found. The suite fails in three places, all in the
+vowel counting…
+
+the whole answer is attached (18.4 KB)
+```
+
+Only the agent's own answers. An approval is the thing somebody has to act on
+and a status line is short by construction; hiding either behind a download
+would be worse than a long channel.
+
+No link is ever generated for it. A `http://127.0.0.1:PORT/…` address means
+nothing to anybody reading Discord, and the artifact store is not something
+this daemon publishes.
+
 ## Design rules
 
 These are load-bearing. Breaking one is a design change, not a refactor.

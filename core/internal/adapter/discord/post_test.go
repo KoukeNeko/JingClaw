@@ -208,3 +208,110 @@ func tail(text string, n int) string {
 	}
 	return text[len(text)-n:]
 }
+
+// An answer split into eight messages is a channel somebody has to scroll past
+// for the rest of the day. Past a few, it becomes a file.
+func TestALongAnswerBecomesAFile(t *testing.T) {
+	short := strings.Repeat("a sentence of a plausible length. ", 40)
+	long := strings.Repeat("a sentence of a plausible length. ", 400)
+
+	if segments := splitForDiscord(short); len(segments) > defaultMaxMessages {
+		t.Fatalf("the short answer already needs %d messages; the test proves nothing",
+			len(segments))
+	}
+	if segments := splitForDiscord(long); len(segments) <= defaultMaxMessages {
+		t.Fatalf("the long answer only needs %d messages; the test proves nothing",
+			len(segments))
+	}
+}
+
+// A bare "see attached" tells a person nothing about whether they need to open
+// it, so the message carries the opening of the answer.
+func TestTheLeadCarriesTheOpeningOfTheAnswer(t *testing.T) {
+	body := "Here is what I found.\n\n" + strings.Repeat("detail. ", 2000)
+
+	lead := opening(body, leadLength)
+
+	if !strings.HasPrefix(lead, "Here is what I found.") {
+		t.Errorf("the lead does not start with the answer: %q", lead)
+	}
+	if len(lead) > leadLength+len(ellipsis) {
+		t.Errorf("the lead is %d bytes, past the %d it may take", len(lead), leadLength)
+	}
+	if !strings.HasSuffix(lead, ellipsis) {
+		t.Error("the lead does not say it is only the beginning")
+	}
+}
+
+func TestAShortAnswerIsItsOwnLead(t *testing.T) {
+	const body = "All three tests pass."
+
+	if lead := opening(body, leadLength); lead != body {
+		t.Errorf("a short answer was cut: %q", lead)
+	}
+}
+
+// Several files in one channel have to be tellable apart, and the name has to
+// be something Discord will show rather than only offer as a download.
+func TestTheFileIsNamedForItsRun(t *testing.T) {
+	name := attachmentName(jcgateway.Dispatch{RunID: "run_01M123M5TY6TVHY0HKX5VCTSSP"})
+
+	if !strings.HasSuffix(name, ".txt") {
+		t.Errorf("name is %q; .txt is what Discord will preview", name)
+	}
+	if !strings.Contains(name, "vctssp") {
+		t.Errorf("name is %q and does not identify the run", name)
+	}
+
+	// A run with no id still has to produce a usable filename.
+	if bare := attachmentName(jcgateway.Dispatch{}); !strings.HasSuffix(bare, ".txt") {
+		t.Errorf("a dispatch with no run id produced %q", bare)
+	}
+}
+
+// An upload past what the platform takes fails the whole delivery, so it is
+// bounded here — and the reader is told, rather than quietly given a file that
+// stops mid-sentence.
+func TestAnOversizedAnswerIsBoundedAndSaysSo(t *testing.T) {
+	body := strings.Repeat("x", 100)
+
+	content, truncated := boundAttachment(body, 40)
+	if len(content) != 40 || !truncated {
+		t.Fatalf("bounding produced %d bytes, truncated=%v", len(content), truncated)
+	}
+	if described := describeFile(len(content), truncated); !strings.Contains(described, "too long") {
+		t.Errorf("the reader is not told it is partial: %q", described)
+	}
+
+	whole, truncated := boundAttachment(body, 1000)
+	if len(whole) != 100 || truncated {
+		t.Errorf("an answer that fits was cut: %d bytes, truncated=%v", len(whole), truncated)
+	}
+	if described := describeFile(len(whole), truncated); strings.Contains(described, "too long") {
+		t.Errorf("a whole answer was described as partial: %q", described)
+	}
+}
+
+// An approval is the thing somebody has to act on and a status line is short
+// by construction. Turning either into a file would hide it behind a download.
+func TestOnlyAnswersBecomeFiles(t *testing.T) {
+	const overLimit = defaultMaxMessages + 1
+
+	if !shouldSendAsFile(jcgateway.DispatchMessage, overLimit, defaultMaxMessages) {
+		t.Error("a long answer was not sent as a file")
+	}
+	for _, kind := range []jcgateway.DispatchKind{
+		jcgateway.DispatchApproval,
+		jcgateway.DispatchStatus,
+	} {
+		if shouldSendAsFile(kind, overLimit, defaultMaxMessages) {
+			t.Errorf("a %s was hidden behind a download", kind)
+		}
+	}
+
+	// And an answer that fits stays in the channel, where it can be read
+	// without opening anything.
+	if shouldSendAsFile(jcgateway.DispatchMessage, defaultMaxMessages, defaultMaxMessages) {
+		t.Error("an answer that fits was sent as a file")
+	}
+}

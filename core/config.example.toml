@@ -214,3 +214,12 @@
 # 600 and the value never reaches a log.
 # token_env = ["DISCORD_BOT_TOKEN"]
 # token_file = "discord.token"
+
+# How many messages one answer may become before it goes as a file instead. An
+# answer split into eight messages is a channel somebody has to scroll past for
+# the rest of the day; as a file it is one line they can open.
+# max_messages = 3
+
+# The ceiling on an upload, well under what the platform accepts. The point is
+# to be readable, not to be as large as possible.
+# max_attachment_bytes = 4194304

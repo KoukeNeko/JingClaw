@@ -12,6 +12,22 @@ import (
 	jcgateway "github.com/KoukeNeko/JingClaw/core/internal/gateway"
 )
 
+const (
+	// defaultMaxMessages is where an answer stops being something to read in a
+	// channel. Three is about as much as anybody scrolls past willingly.
+	defaultMaxMessages = 3
+
+	// defaultMaxAttachmentBytes is well under what Discord accepts, because
+	// the point is to be readable rather than to be the largest possible file.
+	defaultMaxAttachmentBytes = 4 << 20
+
+	// leadLength is how much of the answer goes in the message itself. Enough
+	// to tell whether the file is worth opening.
+	leadLength = 700
+
+	ellipsis = "…"
+)
+
 // Post delivers one dispatch and returns the ids Discord gave the messages.
 //
 // The ids are returned rather than discarded because the outbox records them:
@@ -30,17 +46,22 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 		return nil, nil
 	}
 
-	var posted []string
-	for _, segment := range splitForDiscord(body) {
-		create := discord.MessageCreate{
-			Content: segment,
-			// Model output is not a licence to notify a room. Without this a
-			// reply quoting "@everyone" from a file would ring everybody's
-			// phone.
-			AllowedMentions: &discord.AllowedMentions{},
-		}
+	segments := splitForDiscord(body)
 
-		message, err := a.client.Rest.CreateMessage(channelID, create)
+	// Past a few messages, an answer stops being something to read in a
+	// channel and starts being something to scroll past for the rest of the
+	// day. A file is one line somebody can open if they want it.
+	//
+	// Only for the agent's own answers: an approval or a status line is short
+	// by construction, and turning one into an attachment would hide the thing
+	// somebody has to act on.
+	if shouldSendAsFile(dispatch.Kind, len(segments), a.maxMessages()) {
+		return a.postAsFile(channelID, dispatch, body)
+	}
+
+	var posted []string
+	for _, segment := range segments {
+		message, err := a.client.Rest.CreateMessage(channelID, messageWith(segment))
 		if err != nil {
 			// Whatever was already posted is reported, so a caller retrying
 			// knows the delivery was partial rather than assuming none of it
@@ -51,6 +72,125 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	}
 
 	return posted, nil
+}
+
+// shouldSendAsFile decides between a wall of messages and one attachment.
+//
+// Only the agent's own answers are eligible. An approval is the thing somebody
+// has to act on and a status line is short by construction; turning either
+// into a file would hide it behind a download.
+func shouldSendAsFile(kind jcgateway.DispatchKind, segments, maxMessages int) bool {
+	return kind == jcgateway.DispatchMessage && segments > maxMessages
+}
+
+// postAsFile hands over a long answer as an attachment.
+//
+// The lead line carries the opening of the answer, because a bare "see
+// attached" tells a person nothing about whether they need to open it.
+func (a *Adapter) postAsFile(
+	channelID snowflake.ID,
+	dispatch jcgateway.Dispatch,
+	body string,
+) ([]string, error) {
+	content, truncated := boundAttachment(body, a.maxAttachmentBytes())
+
+	lead := fmt.Sprintf("%s\n\n_%s_", opening(body, leadLength), describeFile(len(content), truncated))
+
+	create := messageWith(lead)
+	create.Files = []*discord.File{discord.NewFile(
+		attachmentName(dispatch), "the whole answer", strings.NewReader(content))}
+
+	message, err := a.client.Rest.CreateMessage(channelID, create)
+	if err != nil {
+		return nil, fmt.Errorf("discord: post a file to %s: %w", channelID, err)
+	}
+
+	return []string{message.ID.String()}, nil
+}
+
+// messageWith builds a post that cannot notify a room.
+//
+// Model output is not a licence to ring everybody's phone: without this, a
+// reply quoting "@everyone" out of a file it just read would do exactly that.
+func messageWith(content string) discord.MessageCreate {
+	return discord.MessageCreate{
+		Content:         content,
+		AllowedMentions: &discord.AllowedMentions{},
+	}
+}
+
+func (a *Adapter) maxMessages() int {
+	if a.config.MaxMessages > 0 {
+		return a.config.MaxMessages
+	}
+	return defaultMaxMessages
+}
+
+func (a *Adapter) maxAttachmentBytes() int {
+	if a.config.MaxAttachmentBytes > 0 {
+		return a.config.MaxAttachmentBytes
+	}
+	return defaultMaxAttachmentBytes
+}
+
+// attachmentName ties the file to the run it came from, so several in a
+// channel can be told apart.
+func attachmentName(dispatch jcgateway.Dispatch) string {
+	suffix := string(dispatch.RunID)
+	if index := strings.LastIndex(suffix, "_"); index >= 0 {
+		suffix = suffix[index+1:]
+	}
+	if len(suffix) > 8 {
+		suffix = suffix[len(suffix)-8:]
+	}
+	if suffix == "" {
+		suffix = "answer"
+	}
+
+	// .txt rather than .md: Discord previews one and offers the other as a
+	// download, and being able to read it without downloading is the point.
+	return "jingclaw-" + strings.ToLower(suffix) + ".txt"
+}
+
+// opening is the first part of an answer, cut at a line so the lead does not
+// end mid-word.
+func opening(body string, limit int) string {
+	if len(body) <= limit {
+		return body
+	}
+
+	window := body[:limit]
+	if index := strings.LastIndex(window, "\n"); index > limit/2 {
+		window = window[:index]
+	}
+	return strings.TrimRight(window, " \n") + ellipsis
+}
+
+func describeFile(size int, truncated bool) string {
+	if truncated {
+		return fmt.Sprintf("the answer was too long to send whole; the first %s is attached",
+			formatBytes(size))
+	}
+	return fmt.Sprintf("the whole answer is attached (%s)", formatBytes(size))
+}
+
+// boundAttachment keeps an upload inside what the platform will take.
+func boundAttachment(body string, limit int) (string, bool) {
+	if len(body) <= limit {
+		return body, false
+	}
+	return body[:limit], true
+}
+
+func formatBytes(size int) string {
+	switch {
+	case size < 1024:
+		return fmt.Sprintf("%d bytes", size)
+	case size < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(size)/1024)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(size)/(1024*1024))
+	}
 }
 
 // targetChannel picks where to post: a thread when there is one, otherwise the
