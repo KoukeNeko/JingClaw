@@ -216,6 +216,10 @@ func (a *Adapter) onMessage(event *events.MessageCreate) {
 		// makes something a request.
 		return
 	}
+	if err := a.addReaction(message.ChannelID, message.ID, "👀"); err != nil {
+		a.config.Logger.Warn("could not acknowledge received message",
+			"message_id", message.ID.String(), "error", err)
+	}
 
 	// A short, independent deadline: the handler must not wait on the agent,
 	// and this call only hands the work over. Fetching files happens inside
@@ -234,6 +238,10 @@ func (a *Adapter) onMessage(event *events.MessageCreate) {
 			"error", err,
 		)
 	}
+}
+
+func (a *Adapter) addReaction(channelID, messageID snowflake.ID, emoji string) error {
+	return a.client.Rest.AddReaction(channelID, messageID, emoji)
 }
 
 // triggerFor decides whether a message was addressed to the agent.

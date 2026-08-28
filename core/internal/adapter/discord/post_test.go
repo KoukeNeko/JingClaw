@@ -124,7 +124,7 @@ func TestApprovalRendersTheActionAndWhereToDecide(t *testing.T) {
 func TestStatusRendersEveryStateAReaderWouldActOn(t *testing.T) {
 	cases := map[string]bool{
 		"running":   true,
-		"working":   true,
+		"working":   false,
 		"completed": true,
 		"failed":    true,
 		"cancelled": true,
@@ -142,18 +142,57 @@ func TestStatusRendersEveryStateAReaderWouldActOn(t *testing.T) {
 	}
 }
 
+func TestRunningStatusIsProviderAcknowledgement(t *testing.T) {
+	if rendered := renderStatus(jcgateway.StatusPayload{State: "running"}); rendered != "👀" {
+		t.Fatalf("running status = %q, want eyes acknowledgement", rendered)
+	}
+}
+
 // The line says what it is doing, and the thing it is doing is the useful part.
 func TestTheWorkingLineNamesTheTool(t *testing.T) {
 	rendered := renderStatus(jcgateway.StatusPayload{State: "working", Detail: "read_file notes.txt"})
 
-	if !strings.Contains(rendered, "read_file notes.txt") {
-		t.Errorf("the line does not say what it is doing: %q", rendered)
+	if rendered != "" {
+		t.Errorf("the working status was not removed: %q", rendered)
 	}
+}
 
-	// And a tool call with nothing worth naming still produces a line rather
-	// than silence, because silence is the thing being fixed.
-	if bare := renderStatus(jcgateway.StatusPayload{State: "working"}); bare == "" {
-		t.Error("a tool call with no detail renders nothing")
+func TestStatusReactionsFollowRunLifecycle(t *testing.T) {
+	for state, want := range map[string]string{
+		"running":          "",
+		"working":          "",
+		"network_started":  "🌍",
+		"provider_started": "🧠",
+		"completed":        "✅",
+		"failed":           "✅",
+		"cancelled":        "✅",
+	} {
+		got, remove := reactionForStatus(state)
+		if got != want || remove {
+			t.Errorf("reactionForStatus(%q) = %q, want %q", state, got, want)
+		}
+	}
+	if _, remove := reactionForStatus("network_finished"); !remove {
+		t.Error("network_finished did not request removing the earth reaction")
+	}
+}
+
+func TestCompletedStatusKeepsItsTextSummary(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State:      "completed",
+		DurationMS: 23900,
+		Summary: &jcgateway.RunSummary{
+			Provider:     "ollama",
+			Model:        "gemma4:31b-cloud",
+			InputTokens:  32800,
+			OutputTokens: 306,
+			Tools:        []jcgateway.ToolUse{{Name: "web_read", Calls: 2}},
+		},
+	})
+
+	want := "-# • web_read ×2\n-# ⏱ 23.9s · ↑32.8K ↓306 (33.1K) · 13 tok/s · ollama/gemma4:31b-cloud"
+	if rendered != want {
+		t.Fatalf("completed status = %q, want %q", rendered, want)
 	}
 }
 
@@ -179,6 +218,26 @@ func TestMessagePayloadRoundTrips(t *testing.T) {
 	}
 	if rendered != "測試訊息" {
 		t.Errorf("got %q", rendered)
+	}
+}
+
+func TestMessagePayloadNormalizesLatexSymbolsForDiscord(t *testing.T) {
+	rendered, err := renderDispatch(jcgateway.Dispatch{
+		Kind:    jcgateway.DispatchMessage,
+		Payload: `{"text":"A \\rightarrow B and C \\leftrightarrow D"}`,
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if rendered != "A → B and C ↔ D" {
+		t.Errorf("got %q, want normalized symbols", rendered)
+	}
+}
+
+func TestMessagePayloadRemovesUnsupportedLatexFormatting(t *testing.T) {
+	rendered := normalizeDiscordText(`$\color{red}{\text{上漲 356.23 點}}$，\rightarrow 目標`)
+	if rendered != "上漲 356.23 點，→ 目標" {
+		t.Errorf("got %q, want readable Discord text", rendered)
 	}
 }
 
@@ -623,7 +682,7 @@ func TestCompletedStatusUsesCompactUsageLine(t *testing.T) {
 		},
 	})
 
-	want := "-# • read_file ×2\n⏱ 36.6s · ↑15.1K ↓648 (15.7K) · 18 tok/s · google-ai-studio/gemma-4-31b-it"
+	want := "-# • read_file ×2\n-# ⏱ 36.6s · ↑15.1K ↓648 (15.7K) · 18 tok/s · google-ai-studio/gemma-4-31b-it"
 	if rendered != want {
 		t.Fatalf("completed status = %q, want %q", rendered, want)
 	}
@@ -689,7 +748,7 @@ func TestAFailedRunStillAccountsForItself(t *testing.T) {
 func TestNoSummaryAddsNothing(t *testing.T) {
 	rendered := renderStatus(jcgateway.StatusPayload{State: "completed", Detail: "3s"})
 
-	if rendered != "⏱ 3s" {
+	if rendered != "-# ⏱ 3s" {
 		t.Errorf("an empty summary added something:\n%q", rendered)
 	}
 }

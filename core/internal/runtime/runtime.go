@@ -426,11 +426,6 @@ func (r *Runtime) SendTurnTo(
 }
 
 func (r *Runtime) execute(ctx context.Context, run domain.Run) {
-	if err := r.transition(ctx, run, domain.RunRunning, ""); err != nil {
-		r.finish(context.WithoutCancel(ctx), run, domain.RunFailed, err.Error())
-		return
-	}
-
 	maxIterations := r.opts.MaxIterations
 	if maxIterations <= 0 {
 		maxIterations = defaultMaxIterations
@@ -498,6 +493,13 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 		if err != nil {
 			r.finishFromError(ctx, run, err)
 			return
+		}
+
+		if turns == 0 {
+			if err := r.transition(ctx, run, domain.RunRunning, ""); err != nil {
+				r.finish(context.WithoutCancel(ctx), run, domain.RunFailed, err.Error())
+				return
+			}
 		}
 
 		calls, err := r.generateTurn(ctx, run, provider.Request{

@@ -90,6 +90,11 @@ type ConversationRef struct {
 	ChannelID string
 	ThreadID  string
 
+	// SourceMessageID identifies the platform message that started the run.
+	// It is presentation metadata for acknowledgements and is not part of the
+	// conversation key.
+	SourceMessageID string
+
 	// RootMessageID identifies a conversation on a platform that has no
 	// threads and where a reply chain is the unit instead — email, say.
 	//

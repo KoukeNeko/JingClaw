@@ -209,8 +209,8 @@ func TestRunStartIsAnnounced(t *testing.T) {
 	if err := json.Unmarshal([]byte(status.Payload), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload.State != "running" {
-		t.Errorf("first status is %q, want running", payload.State)
+	if payload.State != "provider_started" {
+		t.Errorf("first status is %q, want provider_started", payload.State)
 	}
 }
 

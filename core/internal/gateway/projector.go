@@ -212,6 +212,9 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 
 	case domain.ToolCallRequested:
 		p.record(run.ID).requested(payload)
+		if payload.Name == "web_read" {
+			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "network_started"})
+		}
 
 		// What it is doing, while it is doing it. Throttled, because a run
 		// that reads six files in a second would otherwise send six lines
@@ -226,6 +229,9 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 
 	case domain.ToolCallCompleted:
 		p.record(run.ID).completed(payload, event.Seq)
+		if payload.Name == "web_read" {
+			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "network_finished"})
+		}
 
 		// A finished call is not news to a room full of people, and it is
 		// exactly what the operator of a private one wants: what ran, how long
@@ -284,7 +290,7 @@ func (p *Projector) observeState(
 
 		// Long tasks are the ones where silence is worst: a channel that hears
 		// nothing for a minute cannot tell working from broken.
-		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "running"})
+		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "provider_started"})
 
 	case domain.RunFailed, domain.RunCancelled:
 		// A run that ends badly must say so. Ending in silence looks exactly

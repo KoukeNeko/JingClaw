@@ -164,7 +164,10 @@ func (i *Ingress) Accept(ctx context.Context, message InboundMessage) (Accepted,
 	// recorded as the origin, not the operator running the daemon.
 	origin := message.Principal.Origin()
 
-	// The reply belongs in the conversation the request came from.
+	// The reply belongs in the conversation the request came from. Keep the
+	// source message ID in the target so a gateway can acknowledge it when the
+	// provider call actually begins.
+	message.Conversation.SourceMessageID = message.PlatformMessageID
 	targets := []domain.DeliveryTarget{message.Conversation.DeliveryTarget()}
 
 	stored, err := i.storeAttachments(ctx, message)

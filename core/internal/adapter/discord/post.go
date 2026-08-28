@@ -44,6 +44,9 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	if err != nil {
 		return nil, err
 	}
+	if dispatch.Kind == jcgateway.DispatchStatus {
+		return a.postReactionStatus(channelID, dispatch, body)
+	}
 	if strings.TrimSpace(body) == "" {
 		return nil, nil
 	}
@@ -52,10 +55,6 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	// answer to that question is of no interest once it changes. Rewriting the
 	// one this run already put in the channel keeps a run that touches ten
 	// files from leaving ten lines behind it.
-	if dispatch.Kind == jcgateway.DispatchStatus {
-		return a.postStatus(channelID, dispatch, body)
-	}
-
 	// A log line accumulates rather than replacing what came before it, which
 	// is the whole difference between it and a status line.
 	if dispatch.Kind == jcgateway.DispatchLog {
@@ -88,6 +87,65 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	}
 
 	return a.finishAsMessages(channelID, dispatch, segments)
+}
+
+func (a *Adapter) postReactionStatus(
+	channelID snowflake.ID,
+	dispatch jcgateway.Dispatch,
+	body string,
+) ([]string, error) {
+	var payload jcgateway.StatusPayload
+	if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+		return nil, fmt.Errorf("discord: decode reaction status: %w", err)
+	}
+
+	emoji, remove := reactionForStatus(payload.State)
+	if emoji == "" && !remove {
+		return nil, nil
+	}
+	conversation := dispatch.Target
+	if conversation.SourceMessageID == "" {
+		return nil, nil
+	}
+	messageID, err := snowflake.Parse(conversation.SourceMessageID)
+	if err != nil {
+		return nil, fmt.Errorf("discord: unusable source message in dispatch %s: %w", dispatch.ID, err)
+	}
+	if remove {
+		if err := a.client.Rest.RemoveOwnReaction(channelID, messageID, "🌍"); err != nil {
+			a.config.Logger.Warn("could not remove network status reaction",
+				"run_id", string(dispatch.RunID), "message_id", conversation.SourceMessageID,
+				"emoji", "🌍", "error", err)
+		}
+	} else if err := a.client.Rest.AddReaction(channelID, messageID, emoji); err != nil {
+		a.config.Logger.Warn("could not add status reaction",
+			"run_id", string(dispatch.RunID), "message_id", conversation.SourceMessageID,
+			"emoji", emoji, "error", err)
+	}
+	if !isFinalStatus(dispatch.Payload) || strings.TrimSpace(body) == "" {
+		return nil, nil
+	}
+
+	message, err := a.client.Rest.CreateMessage(channelID, messageWith(body))
+	if err != nil {
+		return nil, fmt.Errorf("discord: post final status to %s: %w", channelID, err)
+	}
+	return []string{message.ID.String()}, nil
+}
+
+func reactionForStatus(state string) (string, bool) {
+	switch state {
+	case "network_started":
+		return "🌍", false
+	case "network_finished":
+		return "", true
+	case "provider_started":
+		return "🧠", false
+	case "completed", "failed", "cancelled":
+		return "✅", false
+	default:
+		return "", false
+	}
 }
 
 // answerInProgress reports the answer a dispatch is a version of, when it is
@@ -216,10 +274,16 @@ func (a *Adapter) postStatus(
 	dispatch jcgateway.Dispatch,
 	body string,
 ) ([]string, error) {
-	// A run that has ended will not say anything else, so its line is released
-	// here rather than being left for the next run to edit by accident.
+	if isProviderStartedStatus(dispatch.Payload) {
+		message, err := a.client.Rest.CreateMessage(channelID, messageWith(body))
+		if err != nil {
+			return nil, fmt.Errorf("discord: post provider status to %s: %w", channelID, err)
+		}
+		return []string{message.ID.String()}, nil
+	}
+
 	if isFinalStatus(dispatch.Payload) {
-		defer a.clearStatus(dispatch.RunID)
+		return a.postFinalStatus(channelID, dispatch, body)
 	}
 
 	if existing, ok := a.liveStatus(dispatch.RunID); ok {
@@ -244,6 +308,37 @@ func (a *Adapter) postStatus(
 	}
 
 	a.setStatus(dispatch.RunID, message.ID)
+	return []string{message.ID.String()}, nil
+}
+
+func isProviderStartedStatus(payload string) bool {
+	var status jcgateway.StatusPayload
+	if err := json.Unmarshal([]byte(payload), &status); err != nil {
+		return false
+	}
+	return status.State == "running"
+}
+
+// postFinalStatus puts the completed status after the answer it describes.
+// The working status was posted first, so editing it in place would leave the
+// final status above the answer forever.
+func (a *Adapter) postFinalStatus(
+	channelID snowflake.ID,
+	dispatch jcgateway.Dispatch,
+	body string,
+) ([]string, error) {
+	message, err := a.client.Rest.CreateMessage(channelID, messageWith(body))
+	if err != nil {
+		return nil, fmt.Errorf("discord: post final status to %s: %w", channelID, err)
+	}
+
+	if existing, ok := a.liveStatus(dispatch.RunID); ok {
+		if err := a.client.Rest.DeleteMessage(channelID, existing); err != nil {
+			a.config.Logger.Warn("could not remove the previous status line",
+				"run_id", string(dispatch.RunID), "message_id", existing.String(), "error", err)
+		}
+	}
+	a.clearStatus(dispatch.RunID)
 	return []string{message.ID.String()}, nil
 }
 
@@ -500,7 +595,7 @@ func renderDispatch(dispatch jcgateway.Dispatch) (string, error) {
 		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
 			return "", fmt.Errorf("discord: decode message payload: %w", err)
 		}
-		return payload.Text, nil
+		return normalizeDiscordText(payload.Text), nil
 
 	case jcgateway.DispatchApproval:
 		var payload jcgateway.ApprovalPayload
@@ -526,6 +621,82 @@ func renderDispatch(dispatch jcgateway.Dispatch) (string, error) {
 	default:
 		return "", fmt.Errorf("discord: unknown dispatch kind %q", dispatch.Kind)
 	}
+}
+
+func normalizeDiscordText(text string) string {
+	text = strings.NewReplacer(
+		"$", "",
+		`\(`, "", `\)`, "",
+		`\[`, "", `\]`, "",
+		`\%`, "%", `\_`, "_", `\#`, "#",
+	).Replace(text)
+	text = unwrapLatexCommand(text, "color", 2)
+	for _, command := range []string{"text", "mathbf", "mathrm", "textbf", "textit", "underline", "boxed"} {
+		text = unwrapLatexCommand(text, command, 1)
+	}
+
+	replacements := []string{
+		`\rightarrow`, "→",
+		`\leftarrow`, "←",
+		`\leftrightarrow`, "↔",
+		`\Rightarrow`, "⇒",
+		`\Leftarrow`, "⇐",
+		`\Leftrightarrow`, "⇔",
+		`\to`, "→",
+		`\times`, "×",
+		`\neq`, "≠",
+		`\leq`, "≤",
+		`\geq`, "≥",
+	}
+	return strings.NewReplacer(replacements...).Replace(text)
+}
+
+func unwrapLatexCommand(text, command string, groupsToKeep int) string {
+	prefix := "\\" + command
+	for {
+		start := strings.Index(text, prefix)
+		if start < 0 || start+len(prefix) >= len(text) || text[start+len(prefix)] != '{' {
+			return text
+		}
+
+		cursor := start + len(prefix)
+		groups := make([]string, 0, groupsToKeep)
+		end := cursor
+		valid := true
+		for groupIndex := 0; groupIndex < groupsToKeep; groupIndex++ {
+			if end >= len(text) || text[end] != '{' {
+				valid = false
+				break
+			}
+			group, groupEnd, ok := latexGroup(text, end)
+			if !ok {
+				valid = false
+				break
+			}
+			groups = append(groups, group)
+			end = groupEnd
+		}
+		if !valid {
+			return text
+		}
+		text = text[:start] + groups[groupsToKeep-1] + text[end:]
+	}
+}
+
+func latexGroup(text string, start int) (string, int, bool) {
+	depth := 0
+	for index := start; index < len(text); index++ {
+		switch text[index] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return text[start+1 : index], index + 1, true
+			}
+		}
+	}
+	return "", 0, false
 }
 
 // renderApproval spells out what is being asked for.
@@ -566,12 +737,9 @@ func renderApproval(payload jcgateway.ApprovalPayload) string {
 func renderStatus(payload jcgateway.StatusPayload) string {
 	switch payload.State {
 	case "running":
-		return "_Working on it…_"
+		return "👀"
 	case "working":
-		if payload.Detail == "" {
-			return "_Working on it…_"
-		}
-		return fmt.Sprintf("_Working on it — `%s`_", payload.Detail)
+		return ""
 	case "completed":
 		return renderCompletionStatus(payload)
 	case "cancelled":
@@ -590,9 +758,9 @@ func renderStatus(payload jcgateway.StatusPayload) string {
 func renderCompletionStatus(payload jcgateway.StatusPayload) string {
 	if payload.Summary == nil {
 		if payload.Detail == "" {
-			return "_Done._"
+			return "-# _Done._"
 		}
-		return "⏱ " + payload.Detail
+		return "-# ⏱ " + payload.Detail
 	}
 
 	parts := []string{}
@@ -610,9 +778,9 @@ func renderCompletionStatus(payload jcgateway.StatusPayload) string {
 	}
 	status := strings.Join(parts, " · ")
 	if tools := renderToolList(payload.Summary.Tools); tools != "" {
-		return tools + "\n" + status
+		return tools + "\n-# " + status
 	}
-	return status
+	return "-# " + status
 }
 
 func completionDuration(payload jcgateway.StatusPayload) string {
