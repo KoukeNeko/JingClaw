@@ -127,6 +127,24 @@ func (s *Server) ListRuns(
 	return connect.NewResponse(&controlv1.ListRunsResponse{Runs: converted}), nil
 }
 
+// GetSessionView answers what a session looks like now.
+func (s *Server) GetSessionView(
+	ctx context.Context,
+	req *connect.Request[controlv1.GetSessionViewRequest],
+) (*connect.Response[controlv1.GetSessionViewResponse], error) {
+	sessionID := domain.SessionID(req.Msg.GetSessionId())
+	if sessionID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("session_id is required"))
+	}
+
+	view, err := s.rt.SessionViewOf(ctx, sessionID, int(req.Msg.GetMaxMessages()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	return connect.NewResponse(sessionViewToProto(view)), nil
+}
+
 func (s *Server) SendTurn(
 	ctx context.Context,
 	req *connect.Request[controlv1.SendTurnRequest],

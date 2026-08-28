@@ -99,8 +99,8 @@ func run() error {
 	adapter := discord.New(discord.Config{
 		Token:              botToken.Reveal(),
 		AccountID:          cfg.Gateway.AccountID,
-		MaxMessages:        cfg.Gateway.MaxMessages,
-		MaxAttachmentBytes: cfg.Gateway.MaxAttachmentBytes,
+		MaxMessages:        cfg.Gateway.Discord.MaxMessages,
+		MaxAttachmentBytes: cfg.Gateway.Discord.MaxAttachmentBytes,
 		Logger:             logger,
 	}, relay)
 	relay.poster = adapter
@@ -265,13 +265,13 @@ func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient,
 }
 
 func loadBotToken(cfg config.Config) (secret.Value, error) {
-	files, err := secret.DefaultFiles(cfg.Gateway.TokenFile)
+	files, err := secret.DefaultFiles(cfg.Gateway.Discord.TokenFile)
 	if err != nil {
 		return secret.Value{}, err
 	}
 
 	token, err := secret.Load(secret.LoadOptions{
-		EnvVars: cfg.Gateway.TokenEnv,
+		EnvVars: cfg.Gateway.Discord.TokenEnv,
 		Files:   files,
 	})
 	if err != nil {
@@ -280,7 +280,7 @@ func loadBotToken(cfg config.Config) (secret.Value, error) {
 	if !token.IsSet() {
 		return secret.Value{}, fmt.Errorf(
 			"no bot token: set %s, or write it with mode 600 to one of: %v",
-			strings.Join(cfg.Gateway.TokenEnv, " or "), files)
+			strings.Join(cfg.Gateway.Discord.TokenEnv, " or "), files)
 	}
 
 	return token, nil

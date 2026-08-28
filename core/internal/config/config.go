@@ -399,28 +399,11 @@ type Gateway struct {
 	// delivery queue can be scoped to it.
 	AccountID string `koanf:"account_id"`
 
-	TokenEnv  []string `koanf:"token_env"`
-	TokenFile string   `koanf:"token_file"`
-
-	// MaxMessages is how many messages one answer may become before it is sent
-	// as a file instead. An answer split into eight is a channel somebody has
-	// to scroll past for the rest of the day.
-	MaxMessages int `koanf:"max_messages"`
-
-	// MaxAttachmentBytes bounds what is uploaded, well under what the platform
-	// would accept: the point is to be readable, not to be as large as
-	// possible.
-	MaxAttachmentBytes int `koanf:"max_attachment_bytes"`
-
-	// WorkingInterval is the least time between "what it is doing now" lines.
-	// A run that reads six files in a second would otherwise send six of them,
-	// which is more than a person can read and more than a platform will take.
-	WorkingInterval time.Duration `koanf:"working_interval"`
-
-	// StreamInterval is the least time between versions of an answer that is
-	// still being written. An answer finished inside one interval never
-	// streams: it arrives whole, which is what it should do.
-	StreamInterval time.Duration `koanf:"stream_interval"`
+	// Discord is how that platform behaves. Its own section because these are
+	// facts about Discord — its upload ceiling, its rate limits, where its
+	// token lives — and a second platform would bring its own rather than
+	// competing for these names.
+	Discord Discord `koanf:"discord"`
 
 	// Channels are rooms other people can type in. Reading runs unattended;
 	// changes, memory and web pages stop and ask; programs are refused.
@@ -446,6 +429,32 @@ type Gateway struct {
 	//
 	// Neither list can run programs. That needs somebody present.
 	Consoles []Channel `koanf:"consoles"`
+}
+
+// Discord is what the Discord adapter needs.
+type Discord struct {
+	TokenEnv  []string `koanf:"token_env"`
+	TokenFile string   `koanf:"token_file"`
+
+	// MaxMessages is how many messages one answer may become before it is sent
+	// as a file instead. An answer split into eight is a channel somebody has
+	// to scroll past for the rest of the day.
+	MaxMessages int `koanf:"max_messages"`
+
+	// MaxAttachmentBytes bounds what is uploaded, well under what the platform
+	// would accept: the point is to be readable, not to be as large as
+	// possible.
+	MaxAttachmentBytes int `koanf:"max_attachment_bytes"`
+
+	// WorkingInterval is the least time between "what it is doing now" lines.
+	// A run that reads six files in a second would otherwise send six of them,
+	// which is more than a person can read and more than a platform will take.
+	WorkingInterval time.Duration `koanf:"working_interval"`
+
+	// StreamInterval is the least time between versions of an answer that is
+	// still being written. An answer finished inside one interval never
+	// streams: it arrives whole, which is what it should do.
+	StreamInterval time.Duration `koanf:"stream_interval"`
 }
 
 // Channel is a set of conversations sharing one set of rules.
@@ -577,14 +586,16 @@ func Defaults() Config {
 			PairingTTL: 10 * time.Minute,
 		},
 		Gateway: Gateway{
-			Platform:           "discord",
-			AccountID:          "main",
-			TokenEnv:           []string{"DISCORD_BOT_TOKEN"},
-			TokenFile:          "discord.token",
-			MaxMessages:        3,
-			MaxAttachmentBytes: 4 << 20,
-			WorkingInterval:    2 * time.Second,
-			StreamInterval:     1500 * time.Millisecond,
+			Platform:  "discord",
+			AccountID: "main",
+			Discord: Discord{
+				TokenEnv:           []string{"DISCORD_BOT_TOKEN"},
+				TokenFile:          "discord.token",
+				MaxMessages:        3,
+				MaxAttachmentBytes: 4 << 20,
+				WorkingInterval:    2 * time.Second,
+				StreamInterval:     1500 * time.Millisecond,
+			},
 		},
 	}
 }
@@ -939,10 +950,10 @@ func (c Config) rangeProblems() []Problem {
 		{"mcp.max_output", int64(c.MCP.MaxOutput), "Zero would discard whatever a tool server answered."},
 		{"artifacts.max_bytes", c.Artifacts.MaxBytes, "Zero would mean nothing can be kept."},
 		{"artifacts.max_image_bytes", c.Artifacts.MaxImageBytes, "Zero would mean no image is ever shown to the model."},
-		{"gateway.max_messages", int64(c.Gateway.MaxMessages), "Zero would send every answer as a file."},
-		{"gateway.max_attachment_bytes", int64(c.Gateway.MaxAttachmentBytes), "Zero would make every attachment empty."},
-		{"gateway.working_interval", int64(c.Gateway.WorkingInterval), "Zero would say what it is doing on every tool call."},
-		{"gateway.stream_interval", int64(c.Gateway.StreamInterval), "Zero would send a version of the answer per chunk."},
+		{"gateway.max_messages", int64(c.Gateway.Discord.MaxMessages), "Zero would send every answer as a file."},
+		{"gateway.max_attachment_bytes", int64(c.Gateway.Discord.MaxAttachmentBytes), "Zero would make every attachment empty."},
+		{"gateway.working_interval", int64(c.Gateway.Discord.WorkingInterval), "Zero would say what it is doing on every tool call."},
+		{"gateway.stream_interval", int64(c.Gateway.Discord.StreamInterval), "Zero would send a version of the answer per chunk."},
 	}
 	for _, setting := range positive {
 		if setting.value <= 0 {

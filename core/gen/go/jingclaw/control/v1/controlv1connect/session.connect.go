@@ -63,6 +63,9 @@ const (
 	SessionServiceListSessionsProcedure = "/jingclaw.control.v1.SessionService/ListSessions"
 	// SessionServiceListRunsProcedure is the fully-qualified name of the SessionService's ListRuns RPC.
 	SessionServiceListRunsProcedure = "/jingclaw.control.v1.SessionService/ListRuns"
+	// SessionServiceGetSessionViewProcedure is the fully-qualified name of the SessionService's
+	// GetSessionView RPC.
+	SessionServiceGetSessionViewProcedure = "/jingclaw.control.v1.SessionService/GetSessionView"
 	// SessionServiceSendTurnProcedure is the fully-qualified name of the SessionService's SendTurn RPC.
 	SessionServiceSendTurnProcedure = "/jingclaw.control.v1.SessionService/SendTurn"
 	// SessionServiceSubscribeEventsProcedure is the fully-qualified name of the SessionService's
@@ -335,6 +338,15 @@ type SessionServiceClient interface {
 	// on without having been there.
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	ListRuns(context.Context, *connect.Request[v1.ListRunsRequest]) (*connect.Response[v1.ListRunsResponse], error)
+	// GetSessionView is the state of a session now, without replaying it.
+	//
+	// A client attaching to a long session would otherwise read every event
+	// from the beginning to work out what is on the screen — which is correct
+	// and gets slower every turn, until opening a conversation somebody has
+	// been using for a week is a visible wait. This gives the answer directly,
+	// and a sequence number to subscribe from so nothing between the two is
+	// missed.
+	GetSessionView(context.Context, *connect.Request[v1.GetSessionViewRequest]) (*connect.Response[v1.GetSessionViewResponse], error)
 	SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error)
 	SubscribeEvents(context.Context, *connect.Request[v1.SubscribeEventsRequest]) (*connect.ServerStreamForClient[v1.SubscribeEventsResponse], error)
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
@@ -369,6 +381,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			httpClient,
 			baseURL+SessionServiceListRunsProcedure,
 			connect.WithSchema(sessionServiceMethods.ByName("ListRuns")),
+			connect.WithClientOptions(opts...),
+		),
+		getSessionView: connect.NewClient[v1.GetSessionViewRequest, v1.GetSessionViewResponse](
+			httpClient,
+			baseURL+SessionServiceGetSessionViewProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("GetSessionView")),
 			connect.WithClientOptions(opts...),
 		),
 		sendTurn: connect.NewClient[v1.SendTurnRequest, v1.SendTurnResponse](
@@ -409,6 +427,7 @@ type sessionServiceClient struct {
 	createSession   *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
 	listSessions    *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
 	listRuns        *connect.Client[v1.ListRunsRequest, v1.ListRunsResponse]
+	getSessionView  *connect.Client[v1.GetSessionViewRequest, v1.GetSessionViewResponse]
 	sendTurn        *connect.Client[v1.SendTurnRequest, v1.SendTurnResponse]
 	subscribeEvents *connect.Client[v1.SubscribeEventsRequest, v1.SubscribeEventsResponse]
 	interruptRun    *connect.Client[v1.InterruptRunRequest, v1.InterruptRunResponse]
@@ -429,6 +448,11 @@ func (c *sessionServiceClient) ListSessions(ctx context.Context, req *connect.Re
 // ListRuns calls jingclaw.control.v1.SessionService.ListRuns.
 func (c *sessionServiceClient) ListRuns(ctx context.Context, req *connect.Request[v1.ListRunsRequest]) (*connect.Response[v1.ListRunsResponse], error) {
 	return c.listRuns.CallUnary(ctx, req)
+}
+
+// GetSessionView calls jingclaw.control.v1.SessionService.GetSessionView.
+func (c *sessionServiceClient) GetSessionView(ctx context.Context, req *connect.Request[v1.GetSessionViewRequest]) (*connect.Response[v1.GetSessionViewResponse], error) {
+	return c.getSessionView.CallUnary(ctx, req)
 }
 
 // SendTurn calls jingclaw.control.v1.SessionService.SendTurn.
@@ -466,6 +490,15 @@ type SessionServiceHandler interface {
 	// on without having been there.
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	ListRuns(context.Context, *connect.Request[v1.ListRunsRequest]) (*connect.Response[v1.ListRunsResponse], error)
+	// GetSessionView is the state of a session now, without replaying it.
+	//
+	// A client attaching to a long session would otherwise read every event
+	// from the beginning to work out what is on the screen — which is correct
+	// and gets slower every turn, until opening a conversation somebody has
+	// been using for a week is a visible wait. This gives the answer directly,
+	// and a sequence number to subscribe from so nothing between the two is
+	// missed.
+	GetSessionView(context.Context, *connect.Request[v1.GetSessionViewRequest]) (*connect.Response[v1.GetSessionViewResponse], error)
 	SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error)
 	SubscribeEvents(context.Context, *connect.Request[v1.SubscribeEventsRequest], *connect.ServerStream[v1.SubscribeEventsResponse]) error
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
@@ -496,6 +529,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		SessionServiceListRunsProcedure,
 		svc.ListRuns,
 		connect.WithSchema(sessionServiceMethods.ByName("ListRuns")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceGetSessionViewHandler := connect.NewUnaryHandler(
+		SessionServiceGetSessionViewProcedure,
+		svc.GetSessionView,
+		connect.WithSchema(sessionServiceMethods.ByName("GetSessionView")),
 		connect.WithHandlerOptions(opts...),
 	)
 	sessionServiceSendTurnHandler := connect.NewUnaryHandler(
@@ -536,6 +575,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceListSessionsHandler.ServeHTTP(w, r)
 		case SessionServiceListRunsProcedure:
 			sessionServiceListRunsHandler.ServeHTTP(w, r)
+		case SessionServiceGetSessionViewProcedure:
+			sessionServiceGetSessionViewHandler.ServeHTTP(w, r)
 		case SessionServiceSendTurnProcedure:
 			sessionServiceSendTurnHandler.ServeHTTP(w, r)
 		case SessionServiceSubscribeEventsProcedure:
@@ -565,6 +606,10 @@ func (UnimplementedSessionServiceHandler) ListSessions(context.Context, *connect
 
 func (UnimplementedSessionServiceHandler) ListRuns(context.Context, *connect.Request[v1.ListRunsRequest]) (*connect.Response[v1.ListRunsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.ListRuns is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) GetSessionView(context.Context, *connect.Request[v1.GetSessionViewRequest]) (*connect.Response[v1.GetSessionViewResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.GetSessionView is not implemented"))
 }
 
 func (UnimplementedSessionServiceHandler) SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error) {

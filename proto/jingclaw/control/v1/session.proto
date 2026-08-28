@@ -329,11 +329,87 @@ service SessionService {
   // on without having been there.
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+
+  // GetSessionView is the state of a session now, without replaying it.
+  //
+  // A client attaching to a long session would otherwise read every event
+  // from the beginning to work out what is on the screen — which is correct
+  // and gets slower every turn, until opening a conversation somebody has
+  // been using for a week is a visible wait. This gives the answer directly,
+  // and a sequence number to subscribe from so nothing between the two is
+  // missed.
+  rpc GetSessionView(GetSessionViewRequest) returns (GetSessionViewResponse);
   rpc SendTurn(SendTurnRequest) returns (SendTurnResponse);
   rpc SubscribeEvents(SubscribeEventsRequest) returns (stream SubscribeEventsResponse);
   rpc InterruptRun(InterruptRunRequest) returns (InterruptRunResponse);
   rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
   rpc DecideApproval(DecideApprovalRequest) returns (DecideApprovalResponse);
+}
+
+message GetSessionViewRequest {
+  RequestMeta meta = 1;
+  string session_id = 2;
+
+  // How many of the most recent messages to return. Zero takes the server's
+  // own bound. A conversation is read from its end.
+  int32 max_messages = 3;
+}
+
+message GetSessionViewResponse {
+  Session session = 1;
+
+  // Messages, oldest first, ending with the most recent.
+  repeated ViewMessage messages = 2;
+
+  // Approvals still waiting on somebody. A client that showed the
+  // conversation without these would show a session that appears finished and
+  // is actually blocked.
+  repeated Approval pending_approvals = 3;
+
+  // The run in flight, if there is one.
+  Run active_run = 4;
+
+  // HeadSeq is the last event this view accounts for. Subscribing after it
+  // continues exactly where the view stops.
+  uint64 head_seq = 5;
+
+  // Truncated says older messages exist than the ones returned.
+  bool truncated = 6;
+}
+
+// ViewMessage is one turn as a client would draw it.
+//
+// Assembled by the server because assembling it is the part that costs: a
+// message is a user turn, a stream of deltas, and the tool calls between them,
+// and every client doing that reconstruction separately is the same bug
+// written several times.
+message ViewMessage {
+  string id = 1;
+  MessageRole role = 2;
+  string text = 3;
+
+  google.protobuf.Timestamp at = 4;
+
+  // Tools this turn asked for, in order.
+  repeated ViewToolCall tool_calls = 5;
+
+  // Seq of the last event that contributed to this message.
+  uint64 seq = 6;
+}
+
+message ViewToolCall {
+  string call_id = 1;
+  string name = 2;
+  string summary = 3;
+
+  bool completed = 4;
+  bool is_error = 5;
+}
+
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  MESSAGE_ROLE_USER = 1;
+  MESSAGE_ROLE_ASSISTANT = 2;
 }
 
 message ListSessionsRequest {

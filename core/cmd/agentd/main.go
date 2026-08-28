@@ -278,8 +278,8 @@ func run() error {
 	// so that cannot be half-configured.
 	plane := gateway.NewPlane(store, nil, permissions, artifacts, nil,
 		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
-	plane.Projector.WorkingInterval = cfg.Gateway.WorkingInterval
-	plane.Projector.StreamInterval = cfg.Gateway.StreamInterval
+	plane.Projector.WorkingInterval = cfg.Gateway.Discord.WorkingInterval
+	plane.Projector.StreamInterval = cfg.Gateway.Discord.StreamInterval
 
 	rt := runtime.New(rootCtx, runtime.Options{
 		Store:       store,

@@ -398,6 +398,18 @@ type RunDirections struct {
 	Text string
 }
 
+// MessageRole says who said something, for a client drawing a conversation.
+//
+// Separate from the provider package's own role, which describes what a model
+// is sent. This one describes what a person sees, and the two diverge: a tool
+// result is a role to a provider and part of an assistant turn to a reader.
+type MessageRole string
+
+const (
+	RoleUser      MessageRole = "user"
+	RoleAssistant MessageRole = "assistant"
+)
+
 // UsageChanged reports cumulative usage for the run so far, so cost is visible
 // while a run is in flight rather than only once it ends.
 type UsageChanged struct {

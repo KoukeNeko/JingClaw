@@ -1,12 +1,15 @@
 package control
 
 import (
+	"time"
+
 	"fmt"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
+	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
 )
 
 // This file is the only place where domain types and wire types meet. Keeping
@@ -330,4 +333,63 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 	}
 
 	return out, nil
+}
+
+// sessionViewToProto renders a session view for the wire.
+func sessionViewToProto(view runtime.SessionView) *controlv1.GetSessionViewResponse {
+	out := &controlv1.GetSessionViewResponse{
+		Session:   sessionToProto(view.Session),
+		HeadSeq:   uint64(view.HeadSeq),
+		Truncated: view.Truncated,
+	}
+
+	out.Messages = make([]*controlv1.ViewMessage, 0, len(view.Messages))
+	for _, message := range view.Messages {
+		out.Messages = append(out.Messages, viewMessageToProto(message))
+	}
+
+	out.PendingApprovals = make([]*controlv1.Approval, 0, len(view.Pending))
+	for _, approval := range view.Pending {
+		out.PendingApprovals = append(out.PendingApprovals, approvalToProto(approval))
+	}
+
+	if view.ActiveRun != nil {
+		out.ActiveRun = runToProto(*view.ActiveRun)
+	}
+
+	return out
+}
+
+func viewMessageToProto(message runtime.ViewMessage) *controlv1.ViewMessage {
+	out := &controlv1.ViewMessage{
+		Id:   string(message.ID),
+		Role: messageRoleToProto(message.Role),
+		Text: message.Text,
+		At:   timestamppb.New(time.Unix(0, message.At)),
+		Seq:  uint64(message.Seq),
+	}
+
+	out.ToolCalls = make([]*controlv1.ViewToolCall, 0, len(message.ToolCalls))
+	for _, call := range message.ToolCalls {
+		out.ToolCalls = append(out.ToolCalls, &controlv1.ViewToolCall{
+			CallId:    string(call.CallID),
+			Name:      call.Name,
+			Summary:   call.Summary,
+			Completed: call.Completed,
+			IsError:   call.IsError,
+		})
+	}
+
+	return out
+}
+
+func messageRoleToProto(role domain.MessageRole) controlv1.MessageRole {
+	switch role {
+	case domain.RoleUser:
+		return controlv1.MessageRole_MESSAGE_ROLE_USER
+	case domain.RoleAssistant:
+		return controlv1.MessageRole_MESSAGE_ROLE_ASSISTANT
+	default:
+		return controlv1.MessageRole_MESSAGE_ROLE_UNSPECIFIED
+	}
 }
