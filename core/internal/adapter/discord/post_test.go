@@ -582,26 +582,21 @@ func TestAFileWithNoLabelIsGuessedFromItsName(t *testing.T) {
 // The summary sits under an answer somebody is reading, so it has to say the
 // three things they would ask and stop.
 func TestSummaryReportsToolsSourcesAndCost(t *testing.T) {
-	rendered := renderStatus(jcgateway.StatusPayload{
-		State:  "completed",
-		Detail: "12s",
-		Summary: &jcgateway.RunSummary{
-			Tools: []jcgateway.ToolUse{
-				{Name: "web_read", Calls: 2},
-				{Name: "read_file", Calls: 3, Failed: 1},
-			},
-			Sources: []jcgateway.Source{
-				{Kind: "web", Ref: "https://example.com/docs", Retained: true},
-				{Kind: "file", Ref: "notes.md", Retained: true},
-			},
-			InputTokens:       4231,
-			CachedInputTokens: 3000,
-			OutputTokens:      380,
+	rendered := renderSummary(&jcgateway.RunSummary{
+		Tools: []jcgateway.ToolUse{
+			{Name: "web_read", Calls: 2},
+			{Name: "read_file", Calls: 3, Failed: 1},
 		},
+		Sources: []jcgateway.Source{
+			{Kind: "web", Ref: "https://example.com/docs", Retained: true},
+			{Kind: "file", Ref: "notes.md", Retained: true},
+		},
+		InputTokens:       4231,
+		CachedInputTokens: 3000,
+		OutputTokens:      380,
 	})
 
 	for _, want := range []string{
-		"Done in 12s",
 		"web_read ×2",
 		"read_file ×3 (1 failed)",
 		"https://example.com/docs",
@@ -615,18 +610,34 @@ func TestSummaryReportsToolsSourcesAndCost(t *testing.T) {
 	}
 }
 
+func TestCompletedStatusUsesCompactUsageLine(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State:      "completed",
+		DurationMS: 36600,
+		Summary: &jcgateway.RunSummary{
+			Provider:     "google-ai-studio",
+			Model:        "gemma-4-31b-it",
+			InputTokens:  15100,
+			OutputTokens: 648,
+			Tools:        []jcgateway.ToolUse{{Name: "read_file", Calls: 2}},
+		},
+	})
+
+	want := "-# • read_file ×2\n⏱ 36.6s · ↑15.1K ↓648 (15.7K) · 18 tok/s · google-ai-studio/gemma-4-31b-it"
+	if rendered != want {
+		t.Fatalf("completed status = %q, want %q", rendered, want)
+	}
+}
+
 // The claim the summary must never make. Nothing here can observe a model
 // declining to rely on something it was shown; material folded into a summary
 // may well have shaped the answer through that summary. Calling it unused
 // would be inventing a causal fact out of a structural one.
 func TestSummaryNeverClaimsASourceWentUnused(t *testing.T) {
-	rendered := renderStatus(jcgateway.StatusPayload{
-		State: "completed",
-		Summary: &jcgateway.RunSummary{
-			Sources: []jcgateway.Source{
-				{Kind: "web", Ref: "https://example.com/kept", Retained: true},
-				{Kind: "web", Ref: "https://example.com/folded", Retained: false},
-			},
+	rendered := renderSummary(&jcgateway.RunSummary{
+		Sources: []jcgateway.Source{
+			{Kind: "web", Ref: "https://example.com/kept", Retained: true},
+			{Kind: "web", Ref: "https://example.com/folded", Retained: false},
 		},
 	})
 
@@ -678,7 +689,7 @@ func TestAFailedRunStillAccountsForItself(t *testing.T) {
 func TestNoSummaryAddsNothing(t *testing.T) {
 	rendered := renderStatus(jcgateway.StatusPayload{State: "completed", Detail: "3s"})
 
-	if rendered != "_Done in 3s._" {
+	if rendered != "⏱ 3s" {
 		t.Errorf("an empty summary added something:\n%q", rendered)
 	}
 }
@@ -699,18 +710,14 @@ func TestSummaryStaysPostable(t *testing.T) {
 		})
 	}
 
-	rendered := renderStatus(jcgateway.StatusPayload{
-		State:   "completed",
-		Detail:  "2m30s",
-		Summary: &jcgateway.RunSummary{Sources: sources, InputTokens: 90000, OutputTokens: 1200},
-	})
+	rendered := renderSummary(&jcgateway.RunSummary{Sources: sources, InputTokens: 90000, OutputTokens: 1200})
 
 	if len(rendered) > maxMessageLength {
 		t.Fatalf("the status line is %d characters, over Discord's %d limit",
 			len(rendered), maxMessageLength)
 	}
 	// Bounded, not silent: the reader still learns what the run cost.
-	for _, want := range []string{"Done in 2m30s", "90.0k in / 1200 out"} {
+	for _, want := range []string{"90.0k in / 1200 out"} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("bounding the summary lost %q:\n%s", want, rendered)
 		}
@@ -719,13 +726,10 @@ func TestSummaryStaysPostable(t *testing.T) {
 
 // One absurd address must not crowd out the others when the list does fit.
 func TestALongAddressIsShortenedNotDropped(t *testing.T) {
-	rendered := renderStatus(jcgateway.StatusPayload{
-		State: "completed",
-		Summary: &jcgateway.RunSummary{Sources: []jcgateway.Source{
-			{Kind: "web", Ref: "https://example.com/" + strings.Repeat("x", 400), Retained: true},
-			{Kind: "file", Ref: "notes.md", Retained: true},
-		}},
-	})
+	rendered := renderSummary(&jcgateway.RunSummary{Sources: []jcgateway.Source{
+		{Kind: "web", Ref: "https://example.com/" + strings.Repeat("x", 400), Retained: true},
+		{Kind: "file", Ref: "notes.md", Retained: true},
+	}})
 
 	if !strings.Contains(rendered, "https://example.com/xxx") {
 		t.Errorf("the long address was dropped entirely:\n%s", rendered)
@@ -749,11 +753,7 @@ func TestAnEnormousToolListIsStillPostable(t *testing.T) {
 		})
 	}
 
-	rendered := renderStatus(jcgateway.StatusPayload{
-		State:   "completed",
-		Detail:  "9s",
-		Summary: &jcgateway.RunSummary{Tools: tools, InputTokens: 500, OutputTokens: 10},
-	})
+	rendered := renderSummary(&jcgateway.RunSummary{Tools: tools, InputTokens: 500, OutputTokens: 10})
 
 	if len(rendered) > maxMessageLength {
 		t.Fatalf("the status line is %d characters, over Discord's %d limit",
@@ -879,11 +879,10 @@ func TestTheSummarySaysWhoAnswered(t *testing.T) {
 		},
 	})
 
-	if !strings.Contains(rendered, "ollama") || !strings.Contains(rendered, "gemma4:31b-cloud") {
+	if !strings.Contains(rendered, "ollama/gemma4:31b-cloud") {
 		t.Errorf("the summary does not say who answered:\n%s", rendered)
 	}
-	// And how long the tools took, which is usually where the time went.
-	if !strings.Contains(rendered, "40ms") {
-		t.Errorf("the summary does not say how long tools took:\n%s", rendered)
+	if !strings.Contains(rendered, "-# • read_file ×2") {
+		t.Errorf("the completion status does not list its tools:\n%s", rendered)
 	}
 }

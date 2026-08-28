@@ -573,11 +573,7 @@ func renderStatus(payload jcgateway.StatusPayload) string {
 		}
 		return fmt.Sprintf("_Working on it — `%s`_", payload.Detail)
 	case "completed":
-		headline := "_Done._"
-		if payload.Detail != "" {
-			headline = fmt.Sprintf("_Done in %s._", payload.Detail)
-		}
-		return headline + renderSummary(payload.Summary)
+		return renderCompletionStatus(payload)
 	case "cancelled":
 		return "_Stopped._" + renderSummary(payload.Summary)
 	case "failed":
@@ -589,6 +585,84 @@ func renderStatus(payload jcgateway.StatusPayload) string {
 	default:
 		return ""
 	}
+}
+
+func renderCompletionStatus(payload jcgateway.StatusPayload) string {
+	if payload.Summary == nil {
+		if payload.Detail == "" {
+			return "_Done._"
+		}
+		return "⏱ " + payload.Detail
+	}
+
+	parts := []string{}
+	if duration := completionDuration(payload); duration != "" {
+		parts = append(parts, "⏱ "+duration)
+	}
+	if usage := renderUsage(payload.Summary, payload.DurationMS); usage != "" {
+		parts = append(parts, usage)
+	}
+	if model := renderModelPath(payload.Summary); model != "" {
+		parts = append(parts, model)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	status := strings.Join(parts, " · ")
+	if tools := renderToolList(payload.Summary.Tools); tools != "" {
+		return tools + "\n" + status
+	}
+	return status
+}
+
+func completionDuration(payload jcgateway.StatusPayload) string {
+	if payload.DurationMS > 0 {
+		return formatDuration(payload.DurationMS)
+	}
+	return payload.Detail
+}
+
+func renderUsage(summary *jcgateway.RunSummary, durationMS int64) string {
+	if summary.InputTokens == 0 && summary.OutputTokens == 0 {
+		return ""
+	}
+
+	totalTokens := summary.InputTokens + summary.OutputTokens
+	usage := fmt.Sprintf("↑%s ↓%s (%s)",
+		formatStatusTokens(summary.InputTokens),
+		formatStatusTokens(summary.OutputTokens),
+		formatStatusTokens(totalTokens))
+	if durationMS > 0 && summary.OutputTokens > 0 {
+		rate := float64(summary.OutputTokens) * 1000 / float64(durationMS)
+		usage += fmt.Sprintf(" · %.0f tok/s", rate)
+	}
+	return usage
+}
+
+func renderModelPath(summary *jcgateway.RunSummary) string {
+	if summary.Provider == "" {
+		return summary.Model
+	}
+	if summary.Model == "" {
+		return summary.Provider
+	}
+	return summary.Provider + "/" + summary.Model
+}
+
+func renderToolList(tools []jcgateway.ToolUse) string {
+	if len(tools) == 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, len(tools))
+	for _, use := range tools {
+		part := use.Name
+		if use.Calls > 1 {
+			part = fmt.Sprintf("%s ×%d", use.Name, use.Calls)
+		}
+		lines = append(lines, "-# • "+part)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderLog is one thing that happened, for a console channel.
@@ -735,6 +809,13 @@ func renderModel(summary *jcgateway.RunSummary) string {
 	default:
 		return summary.Provider + " · " + summary.Model
 	}
+}
+
+func formatStatusTokens(count int64) string {
+	if count < 10000 {
+		return fmt.Sprintf("%d", count)
+	}
+	return fmt.Sprintf("%.1fK", float64(count)/1000)
 }
 
 func renderTools(tools []jcgateway.ToolUse) string {

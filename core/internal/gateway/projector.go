@@ -163,8 +163,9 @@ type ApprovalPayload struct {
 // rather than posting each: they are what the agent is doing now, and the
 // previous answer to that question is of no interest once it changes.
 type StatusPayload struct {
-	State  string `json:"state"`
-	Detail string `json:"detail,omitempty"`
+	State      string `json:"state"`
+	Detail     string `json:"detail,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
 
 	// Summary accounts for a run that has ended: what it reached for, what it
 	// drew on, and what it cost. Absent while a run is still going, because
@@ -319,10 +320,12 @@ func (p *Projector) observeState(
 		// claiming the agent is still busy.
 		p.forget(run.ID)
 		summary := p.close(run.ID)
+		duration := p.Now().Sub(run.CreatedAt)
 		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
-			State:   "completed",
-			Detail:  p.Now().Sub(run.CreatedAt).Round(time.Second).String(),
-			Summary: summary,
+			State:      "completed",
+			Detail:     duration.Round(100 * time.Millisecond).String(),
+			DurationMS: duration.Milliseconds(),
+			Summary:    summary,
 		})
 
 	default:
