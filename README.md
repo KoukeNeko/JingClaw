@@ -75,6 +75,12 @@ carries its provenance, and the order of belief is: the operator, then a server
 reporting what it has loaded, then a catalogue, then the model's own maximum —
 and nothing at all if none of them said.
 
+Ollama also serves an OpenAI-compatible endpoint at `/v1`, which is the
+quickest way to try `openai_compat` against a real implementation. Note what
+it costs: that listing says nothing about context length, so the window comes
+back unknown and compaction stays off unless `[context] window` is set. The
+native adapter reads the real figure. That difference is the argument for it.
+
 `openai_compat` needs a `profile`, because the claim is about a request shape
 rather than about behaviour. Servers making it disagree on whether usage is
 reported, which of two fields carries reasoning, and what a status code means:
