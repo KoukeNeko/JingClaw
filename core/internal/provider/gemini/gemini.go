@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -165,10 +166,14 @@ func (p *Provider) classify(err error, model string) error {
 		}
 	}
 
+	// Read before the switch, because what the structured part says decides
+	// what a 429 actually is.
+	quota := readQuotaDetail(apiErr)
+
 	kind := provider.KindUnknown
 	switch apiErr.Code {
 	case http.StatusTooManyRequests:
-		kind = provider.KindRateLimited
+		kind = classifyExhaustion(quota)
 	case http.StatusUnauthorized, http.StatusForbidden:
 		kind = provider.KindAuth
 	case http.StatusNotFound:
@@ -196,6 +201,7 @@ func (p *Provider) classify(err error, model string) error {
 		model:      model,
 		statusCode: apiErr.Code,
 		message:    apiErr.Message,
+		retryAfter: quota.RetryDelay,
 		cause:      err,
 	}
 }
@@ -213,6 +219,7 @@ type providerError struct {
 	model      string
 	statusCode int
 	message    string
+	retryAfter *time.Duration
 	cause      error
 }
 
@@ -240,6 +247,7 @@ func (e *providerError) As(target any) bool {
 		Model:      e.model,
 		StatusCode: e.statusCode,
 		Message:    e.message,
+		RetryAfter: e.retryAfter,
 	}
 	return true
 }

@@ -17,6 +17,18 @@ const (
 	// out.
 	KindRateLimited ErrorKind = "rate_limited"
 
+	// KindQuotaExhausted: an allowance is used up for a period measured in
+	// days, or billing has stopped the account. It arrives over the same HTTP
+	// status as a short rate limit and is the opposite situation: no amount of
+	// backing off reaches the other side of it, and retrying only burns the
+	// operator's remaining allowance against a wall.
+	//
+	// Telling the two apart is the whole reason this exists. An agent that
+	// treats every 429 as "wait and try again" spends a day retrying a daily
+	// quota; one that treats every 429 as fatal gives up twenty seconds before
+	// it would have worked.
+	KindQuotaExhausted ErrorKind = "quota_exhausted"
+
 	// KindOverloaded: the provider is temporarily out of capacity. Retryable,
 	// but not the caller's fault and not fixed by sending less.
 	KindOverloaded ErrorKind = "overloaded"
@@ -50,6 +62,21 @@ const (
 func (k ErrorKind) Retryable() bool {
 	switch k {
 	case KindRateLimited, KindOverloaded, KindTransient:
+		return true
+	default:
+		return false
+	}
+}
+
+// NeedsOperator reports whether a failure will keep happening until a person
+// changes something — a key, a plan, a quota — rather than until time passes.
+//
+// It is not the same question as Retryable, and the difference is what a
+// reader is told: "try again shortly" is misleading advice for a run that
+// failed because the account is out of allowance.
+func (k ErrorKind) NeedsOperator() bool {
+	switch k {
+	case KindQuotaExhausted, KindAuth, KindNotFound:
 		return true
 	default:
 		return false

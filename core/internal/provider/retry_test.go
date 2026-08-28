@@ -217,6 +217,23 @@ func (p *alwaysRateLimited) Generate(context.Context, provider.Request) (provide
 	}
 }
 
+// An allowance measured in days is not a wait. Retrying against it burns what
+// is left of the operator's quota to be told the same thing each time.
+func TestAnExhaustedQuotaIsNotRetried(t *testing.T) {
+	if provider.KindQuotaExhausted.Retryable() {
+		t.Error("an exhausted quota is treated as worth waiting out")
+	}
+	if !provider.KindQuotaExhausted.NeedsOperator() {
+		t.Error("an exhausted quota does not ask for a person")
+	}
+	if !provider.KindRateLimited.Retryable() {
+		t.Error("a short rate limit is no longer retried")
+	}
+	if provider.KindRateLimited.NeedsOperator() {
+		t.Error("a short rate limit asks for a person, when waiting is enough")
+	}
+}
+
 func TestBackoffGrowsAndIsBounded(t *testing.T) {
 	policy := provider.RetryPolicy{BaseDelay: time.Second, MaxDelay: 10 * time.Second}
 	transient := provider.NewError(provider.KindTransient, "p", "m", "", nil)
