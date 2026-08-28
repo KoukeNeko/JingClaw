@@ -126,6 +126,19 @@ and you can answer there: `pending` lists what is waiting, `approve <id>` and
 Those few words are the whole command set, matched on the entire message, so an
 ordinary sentence still reaches the agent.
 
+A console is also a log. Every finished tool call appears there with what it
+did, how long it took and whether it worked — as subtext, so twenty of them do
+not bury the reply. An ordinary channel gets none of that: it is a conversation,
+not a terminal.
+
+The same asymmetry applies to failures. A run that dies gets a plain sentence in
+a room other people read, because a provider's own words carry the account's
+quota and limits. A console gets the real reason, since hiding it from the one
+person who can fix it protects nobody.
+
+Every run ends with what it cost: which provider and model answered, the tools
+it used and how long each took, the sources it drew on, and the tokens.
+
 Artifacts are pulled, never pushed. A run that produces a large result says it
 exists and stops there; the bytes cross into a channel when a person names the
 one they want. Attaching everything a run produced would put whole build logs

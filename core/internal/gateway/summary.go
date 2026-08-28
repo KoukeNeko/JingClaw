@@ -16,6 +16,14 @@ import (
 // difference as used against unused would be inventing a causal fact out of a
 // structural one.
 type RunSummary struct {
+	// Provider and Model are who answered. Worth saying because it changes:
+	// a deployment moved from a hosted model to a local one gets different
+	// answers for reasons that have nothing to do with the prompt, and a
+	// summary that omits this leaves somebody comparing two runs with no way
+	// to tell they were not the same agent.
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+
 	Tools   []ToolUse `json:"tools,omitempty"`
 	Sources []Source  `json:"sources,omitempty"`
 
@@ -42,6 +50,19 @@ type ToolUse struct {
 	// Failed counts the calls that returned an error. A run that read six
 	// files and failed on four did something different from one that read six.
 	Failed int `json:"failed,omitempty"`
+
+	// Milliseconds is the time spent inside this tool across the run.
+	//
+	// Reported because it is usually where the time went. A run that took two
+	// minutes and spent one of them in a single command is a different story
+	// from one that spent two minutes waiting on the model, and a summary
+	// giving only tokens cannot tell them apart.
+	Milliseconds int64 `json:"milliseconds,omitempty"`
+
+	// SlowestMS is the longest single call, which is what somebody looking
+	// for the cause actually wants: six quick reads and one slow one average
+	// into something that describes neither.
+	SlowestMS int64 `json:"slowest_ms,omitempty"`
 }
 
 // Source is something a run brought in from outside its own reasoning.
@@ -138,6 +159,10 @@ func (r *runRecord) completed(payload domain.ToolCallCompleted, seq domain.Seq) 
 	if payload.IsError {
 		use.Failed++
 	}
+	use.Milliseconds += payload.DurationMS
+	if payload.DurationMS > use.SlowestMS {
+		use.SlowestMS = payload.DurationMS
+	}
 
 	call, waiting := r.pending[payload.CallID]
 	delete(r.pending, payload.CallID)
@@ -155,8 +180,10 @@ func (r *runRecord) completed(payload domain.ToolCallCompleted, seq domain.Seq) 
 }
 
 // summarise renders what was accumulated.
-func (r *runRecord) summarise() RunSummary {
+func (r *runRecord) summarise(provider, model string) RunSummary {
 	summary := RunSummary{
+		Provider:          provider,
+		Model:             model,
 		InputTokens:       r.usage.InputTokens,
 		CachedInputTokens: r.usage.CachedInputTokens,
 		OutputTokens:      r.usage.OutputTokens,
@@ -166,12 +193,17 @@ func (r *runRecord) summarise() RunSummary {
 	for _, use := range r.tools {
 		summary.Tools = append(summary.Tools, *use)
 	}
-	// Most-used first, then by name, so the same run always reads the same way.
+	// Slowest first, then most-used, then by name. Somebody reading this is
+	// usually asking where the time went, and the answer should be at the top.
 	sort.Slice(summary.Tools, func(i, j int) bool {
-		if summary.Tools[i].Calls != summary.Tools[j].Calls {
-			return summary.Tools[i].Calls > summary.Tools[j].Calls
+		left, right := summary.Tools[i], summary.Tools[j]
+		if left.Milliseconds != right.Milliseconds {
+			return left.Milliseconds > right.Milliseconds
 		}
-		return summary.Tools[i].Name < summary.Tools[j].Name
+		if left.Calls != right.Calls {
+			return left.Calls > right.Calls
+		}
+		return left.Name < right.Name
 	})
 
 	for _, source := range r.sources {

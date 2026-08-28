@@ -323,3 +323,122 @@ func TestAnOrdinaryChannelCannotAskForArtifacts(t *testing.T) {
 		t.Error("the words were treated as a command in an ordinary channel")
 	}
 }
+
+// A console is a log; an ordinary channel is a conversation. The same run
+// produces different amounts of detail depending on who is reading.
+func TestOnlyAConsoleGetsTheLog(t *testing.T) {
+	arguments, err := json.Marshal(map[string]any{"path": "notes.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	turns := [][]provider.Event{
+		{
+			provider.ToolCallRequested{ID: "call_1", Name: "read_file", Args: arguments},
+			provider.Completed{StopReason: domain.StopToolUse},
+		},
+		{
+			provider.TextDelta{Text: "Read it."},
+			provider.Completed{StopReason: domain.StopEndTurn},
+		},
+	}
+
+	for _, profile := range []string{"console", "gateway"} {
+		t.Run(profile, func(t *testing.T) {
+			h := newSummaryHarness(t, turns)
+			h.bind(t, profile, "user_1")
+
+			accepted, err := h.ingress.Accept(context.Background(),
+				message("m1", "read notes.md", discordPrincipal("user_1")))
+			if err != nil {
+				t.Fatalf("accept: %v", err)
+			}
+			if err := h.runtime.Wait(context.Background(), accepted.RunID); err != nil {
+				t.Fatalf("wait: %v", err)
+			}
+
+			var logs []gateway.LogPayload
+			for _, dispatch := range h.dispatches(t) {
+				if dispatch.Kind != gateway.DispatchLog {
+					continue
+				}
+				var payload gateway.LogPayload
+				if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				logs = append(logs, payload)
+			}
+
+			if profile == "gateway" {
+				if len(logs) != 0 {
+					t.Errorf("a room other people can type in was sent %d log lines", len(logs))
+				}
+				return
+			}
+
+			if len(logs) == 0 {
+				t.Fatal("a console was sent no log")
+			}
+			if logs[0].Tool != "read_file" {
+				t.Errorf("the log names %q", logs[0].Tool)
+			}
+		})
+	}
+}
+
+// The redaction protects a room other people read. Where the only reader is
+// the operator, hiding the reason from them is not protecting anybody.
+func TestAConsoleIsToldWhyARunFailed(t *testing.T) {
+	upstream := "provider gemini: rate_limited: quota exceeded for metric x, limit 16000"
+
+	for _, profile := range []string{"console", "gateway"} {
+		t.Run(profile, func(t *testing.T) {
+			h := newSummaryHarness(t, nil) // no turns: the model errors at once
+			h.bind(t, profile, "user_1")
+
+			accepted, err := h.ingress.Accept(context.Background(),
+				message("m1", "do something", discordPrincipal("user_1")))
+			if err != nil {
+				t.Fatalf("accept: %v", err)
+			}
+			_ = h.runtime.Wait(context.Background(), accepted.RunID)
+
+			var detail string
+			for _, dispatch := range h.dispatches(t) {
+				if dispatch.Kind != gateway.DispatchStatus {
+					continue
+				}
+				var payload gateway.StatusPayload
+				if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+					continue
+				}
+				if payload.State == "failed" {
+					detail = payload.Detail
+				}
+			}
+
+			if detail == "" {
+				t.Fatal("the channel was not told the run failed")
+			}
+
+			if profile == "gateway" {
+				// Still a sentence, still nothing about the account.
+				if strings.Contains(strings.ToLower(detail), "quota") {
+					t.Errorf("a public channel was told about the operator's account: %q", detail)
+				}
+				return
+			}
+			// A console gets the reason, which is what makes it fixable.
+			if detail == explainFailureFor(t) {
+				t.Errorf("a console was given the redacted sentence: %q", detail)
+			}
+		})
+	}
+	_ = upstream
+}
+
+// explainFailureFor is the sentence a public channel would get, for comparison.
+func explainFailureFor(t *testing.T) string {
+	t.Helper()
+	return "something went wrong at the model"
+}

@@ -36,6 +36,14 @@ const (
 	// DispatchStatus reports a run beginning or ending, so a channel is not
 	// left wondering whether anything is happening.
 	DispatchStatus DispatchKind = "status"
+
+	// DispatchLog is one thing that happened, for a console channel.
+	//
+	// Distinct from a status line because it accumulates rather than being
+	// rewritten: a status answers "what now", and a log answers "what
+	// happened", and a channel showing one as the other loses whichever it
+	// overwrote.
+	DispatchLog DispatchKind = "log"
 )
 
 // Dispatch is one thing to deliver to a platform.

@@ -818,3 +818,72 @@ func TestAnOrdinaryMessageCarriesNoFile(t *testing.T) {
 		t.Error("a file with no content was posted")
 	}
 }
+
+// A console channel is a log. What ran, how long it took, whether it worked.
+func TestALogLineSaysWhatRanAndHowLongItTook(t *testing.T) {
+	rendered := renderLog(jcgateway.LogPayload{
+		Tool:       "exec_command",
+		Summary:    "go test ./...: ok",
+		DurationMS: 1800,
+		Artifact:   "sha256-abc123",
+	})
+
+	for _, want := range []string{"exec_command", "1.8s", "go test", "sha256-abc123"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("the log line does not mention %q:\n%s", want, rendered)
+		}
+	}
+	// Subtext, because a log is context for the answer rather than the answer.
+	if !strings.HasPrefix(rendered, "-# ") {
+		t.Errorf("a log line is shown at the same weight as the reply:\n%s", rendered)
+	}
+}
+
+func TestAFailedCallIsMarkedAsOne(t *testing.T) {
+	rendered := renderLog(jcgateway.LogPayload{
+		Tool: "web_read", Summary: "404", DurationMS: 90, IsError: true,
+	})
+	if !strings.Contains(rendered, "✗") {
+		t.Errorf("a failure is not distinguishable from a success:\n%s", rendered)
+	}
+}
+
+// Durations span milliseconds to minutes, and one format cannot carry that
+// range without losing the fast ones or padding the slow ones.
+func TestDurationsAreReadableAtEveryScale(t *testing.T) {
+	for ms, want := range map[int64]string{
+		5:       "5ms",
+		999:     "999ms",
+		1500:    "1.5s",
+		59_000:  "59.0s",
+		61_000:  "1m01s",
+		600_000: "10m00s",
+	} {
+		if got := formatDuration(ms); got != want {
+			t.Errorf("formatDuration(%d) = %q, want %q", ms, got, want)
+		}
+	}
+}
+
+// Which model answered, because that changes and the answers change with it.
+func TestTheSummarySaysWhoAnswered(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State:  "completed",
+		Detail: "12s",
+		Summary: &jcgateway.RunSummary{
+			Provider:     "ollama",
+			Model:        "gemma4:31b-cloud",
+			Tools:        []jcgateway.ToolUse{{Name: "read_file", Calls: 2, Milliseconds: 40}},
+			InputTokens:  100,
+			OutputTokens: 20,
+		},
+	})
+
+	if !strings.Contains(rendered, "ollama") || !strings.Contains(rendered, "gemma4:31b-cloud") {
+		t.Errorf("the summary does not say who answered:\n%s", rendered)
+	}
+	// And how long the tools took, which is usually where the time went.
+	if !strings.Contains(rendered, "40ms") {
+		t.Errorf("the summary does not say how long tools took:\n%s", rendered)
+	}
+}

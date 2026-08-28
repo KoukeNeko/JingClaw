@@ -56,6 +56,12 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 		return a.postStatus(channelID, dispatch, body)
 	}
 
+	// A log line accumulates rather than replacing what came before it, which
+	// is the whole difference between it and a status line.
+	if dispatch.Kind == jcgateway.DispatchLog {
+		return a.finishAsMessages(channelID, dispatch, []string{body})
+	}
+
 	// Something asked for by name, handed over as a file rather than pasted
 	// into the channel.
 	if file, carried := attachedFile(dispatch); carried {
@@ -503,6 +509,13 @@ func renderDispatch(dispatch jcgateway.Dispatch) (string, error) {
 		}
 		return renderApproval(payload), nil
 
+	case jcgateway.DispatchLog:
+		var payload jcgateway.LogPayload
+		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+			return "", fmt.Errorf("discord: decode log payload: %w", err)
+		}
+		return renderLog(payload), nil
+
 	case jcgateway.DispatchStatus:
 		var payload jcgateway.StatusPayload
 		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
@@ -578,6 +591,39 @@ func renderStatus(payload jcgateway.StatusPayload) string {
 	}
 }
 
+// renderLog is one thing that happened, for a console channel.
+//
+// Subtext, because a log is context for the answer rather than the answer. A
+// channel that shows twenty of these at the same weight as the reply has
+// buried the reply.
+func renderLog(payload jcgateway.LogPayload) string {
+	var out strings.Builder
+
+	mark := "·"
+	if payload.IsError {
+		mark = "✗"
+	}
+	fmt.Fprintf(&out, "-# %s `%s`", mark, payload.Tool)
+
+	if payload.DurationMS > 0 {
+		fmt.Fprintf(&out, " %s", formatDuration(payload.DurationMS))
+	}
+	if summary := strings.Join(strings.Fields(payload.Summary), " "); summary != "" {
+		const maxSummary = 160
+		if len(summary) > maxSummary {
+			summary = summary[:maxSummary] + "…"
+		}
+		fmt.Fprintf(&out, " — %s", summary)
+	}
+	if payload.Artifact != "" {
+		// Named so it can be asked for, which is the only way it reaches the
+		// channel.
+		fmt.Fprintf(&out, "\n-#   stored as `%s`", payload.Artifact)
+	}
+
+	return out.String()
+}
+
 // renderSummary accounts for a run that has ended.
 //
 // It is deliberately not a table. This sits under an answer somebody is
@@ -627,6 +673,9 @@ const maxSummaryLength = maxMessageLength - 200
 
 func summaryLines(summary *jcgateway.RunSummary, listSources bool) []string {
 	var lines []string
+	if who := renderModel(summary); who != "" {
+		lines = append(lines, who)
+	}
 	if tools := renderTools(summary.Tools); tools != "" {
 		lines = append(lines, tools)
 	}
@@ -673,6 +722,21 @@ func countSources(summary *jcgateway.RunSummary) string {
 		total, folded)
 }
 
+// renderModel says who answered, because that changes and the answers change
+// with it.
+func renderModel(summary *jcgateway.RunSummary) string {
+	switch {
+	case summary.Provider == "" && summary.Model == "":
+		return ""
+	case summary.Model == "":
+		return summary.Provider
+	case summary.Provider == "":
+		return summary.Model
+	default:
+		return summary.Provider + " · " + summary.Model
+	}
+}
+
 func renderTools(tools []jcgateway.ToolUse) string {
 	if len(tools) == 0 {
 		return ""
@@ -683,6 +747,9 @@ func renderTools(tools []jcgateway.ToolUse) string {
 		part := use.Name
 		if use.Calls > 1 {
 			part = fmt.Sprintf("%s ×%d", use.Name, use.Calls)
+		}
+		if use.Milliseconds > 0 {
+			part += " " + formatDuration(use.Milliseconds)
 		}
 		if use.Failed > 0 {
 			part += fmt.Sprintf(" (%d failed)", use.Failed)
@@ -733,6 +800,24 @@ func shortenRef(ref string) string {
 		return ref
 	}
 	return string(runes[:maxRefLength]) + "…"
+}
+
+// formatDuration keeps a figure readable at the scale it happens to be.
+//
+// A tool call is anything from a millisecond to minutes, and one format cannot
+// carry that range without either losing the fast ones or padding the slow
+// ones with digits nobody reads.
+func formatDuration(milliseconds int64) string {
+	switch {
+	case milliseconds < 1000:
+		return fmt.Sprintf("%dms", milliseconds)
+	case milliseconds < 60_000:
+		return fmt.Sprintf("%.1fs", float64(milliseconds)/1000)
+	default:
+		minutes := milliseconds / 60_000
+		seconds := (milliseconds % 60_000) / 1000
+		return fmt.Sprintf("%dm%02ds", minutes, seconds)
+	}
 }
 
 func renderCost(summary *jcgateway.RunSummary) string {

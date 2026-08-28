@@ -42,6 +42,12 @@ type Projector struct {
 	// rather than a feature.
 	StreamInterval time.Duration
 
+	// Provider and Model are what this daemon answers with, reported in a
+	// run's summary. Daemon-wide rather than per run, because that is what
+	// they are: one daemon serves one model.
+	Provider string
+	Model    string
+
 	// pending accumulates assistant text per message until it completes, and
 	// lastWorking remembers when each run last said something, so the throttle
 	// is per run rather than global.
@@ -116,6 +122,22 @@ type MessageFile struct {
 	Content []byte `json:"content"`
 
 	MediaType string `json:"media_type,omitempty"`
+}
+
+// LogPayload is one thing that happened, for a channel that wants the detail.
+//
+// Only sent to a console. A platform is expected to show these as they arrive
+// and leave them, unlike a status line, which is the answer to "what is it
+// doing now" and is rewritten when that changes.
+type LogPayload struct {
+	Tool    string `json:"tool"`
+	Summary string `json:"summary,omitempty"`
+
+	DurationMS int64 `json:"duration_ms,omitempty"`
+	IsError    bool  `json:"is_error,omitempty"`
+
+	// Artifact names stored output, so somebody can ask for it by name.
+	Artifact string `json:"artifact,omitempty"`
 }
 
 // ApprovalPayload asks a conversation to decide about a tool call.
@@ -202,10 +224,22 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		})
 
 	case domain.ToolCallCompleted:
-		// Nothing is said now: a finished tool call is not news to a channel.
-		// It is recorded so the run can account for itself when it ends.
 		p.record(run.ID).completed(payload, event.Seq)
-		return nil
+
+		// A finished call is not news to a room full of people, and it is
+		// exactly what the operator of a private one wants: what ran, how long
+		// it took, and whether it worked. A console is a log; an ordinary
+		// channel is a conversation.
+		if !p.isConsole(ctx, target) {
+			return nil
+		}
+		return p.enqueue(ctx, run, target, DispatchLog, LogPayload{
+			Tool:       payload.Name,
+			Summary:    payload.Summary,
+			DurationMS: payload.DurationMS,
+			IsError:    payload.IsError,
+			Artifact:   artifactID(payload.Artifact),
+		})
 
 	case domain.UsageChanged:
 		p.record(run.ID).usage = payload.Usage
@@ -263,9 +297,19 @@ func (p *Projector) observeState(
 		// account's limits in front of everybody in a room. The log keeps the
 		// whole of it; a stranger gets a sentence.
 		summary := p.close(run.ID)
+
+		// A console gets what actually happened. The redaction exists because
+		// a provider's own words land in a room other people read; where the
+		// only reader is the operator, hiding the reason from them is not
+		// protecting anybody, it is making their own failure harder to fix.
+		detail := explainFailure(payload.FailureKind)
+		if p.isConsole(ctx, target) && payload.Reason != "" {
+			detail = payload.Reason
+		}
+
 		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
 			State:   string(payload.Status),
-			Detail:  explainFailure(payload.FailureKind),
+			Detail:  detail,
 			Summary: summary,
 		})
 
@@ -298,6 +342,13 @@ func (p *Projector) shouldSayWorking(run domain.RunID) bool {
 
 	p.lastWorking[run] = now
 	return true
+}
+
+func artifactID(ref *domain.Artifact) string {
+	if ref == nil {
+		return ""
+	}
+	return ref.ID
 }
 
 // isConsole reports whether this conversation may answer its own approvals.
@@ -343,7 +394,7 @@ func (p *Projector) close(run domain.RunID) *RunSummary {
 	}
 	delete(p.records, run)
 
-	summary := existing.summarise()
+	summary := existing.summarise(p.Provider, p.Model)
 	return &summary
 }
 

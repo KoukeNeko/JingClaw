@@ -33,7 +33,7 @@ func TestCountsToolCallsAndFailures(t *testing.T) {
 	requested(record, "3", "grep", `{"query":"x"}`)
 	completed(record, "3", "grep", 12, false)
 
-	summary := record.summarise()
+	summary := record.summarise("ollama", "test-model")
 
 	if len(summary.Tools) != 2 {
 		t.Fatalf("tools: %+v", summary.Tools)
@@ -55,7 +55,7 @@ func TestAFailedCallIsNotASource(t *testing.T) {
 	requested(record, "1", "web_read", `{"url":"https://example.com/gone"}`)
 	completed(record, "1", "web_read", 10, true)
 
-	if sources := record.summarise().Sources; len(sources) != 0 {
+	if sources := record.summarise("ollama", "test-model").Sources; len(sources) != 0 {
 		t.Errorf("a failed fetch was listed as a source: %+v", sources)
 	}
 }
@@ -68,7 +68,7 @@ func TestTheSamePageReadTwiceIsOneSource(t *testing.T) {
 	requested(record, "2", "web_read", `{"url":"https://example.com/"}`)
 	completed(record, "2", "web_read", 11, false)
 
-	summary := record.summarise()
+	summary := record.summarise("ollama", "test-model")
 	if len(summary.Sources) != 1 {
 		t.Errorf("the same page counted twice: %+v", summary.Sources)
 	}
@@ -93,7 +93,7 @@ func TestOnlyContentBearingToolsProduceSources(t *testing.T) {
 		completed(record, id, call.name, domain.Seq(10+i), false)
 	}
 
-	if sources := record.summarise().Sources; len(sources) != 0 {
+	if sources := record.summarise("ollama", "test-model").Sources; len(sources) != 0 {
 		t.Errorf("a search or a memory was counted as a source: %+v", sources)
 	}
 }
@@ -110,7 +110,7 @@ func TestCompactionMarksEarlierSourcesAsNoLongerThemselves(t *testing.T) {
 
 	record.compactedThrough = 20
 
-	summary := record.summarise()
+	summary := record.summarise("ollama", "test-model")
 	byRef := map[string]bool{}
 	for _, source := range summary.Sources {
 		byRef[source.Ref] = source.Retained
@@ -137,7 +137,7 @@ func TestALongListIsBoundedAndSaysHowMuchIsMissing(t *testing.T) {
 		completed(record, id, "read_file", domain.Seq(10+i), false)
 	}
 
-	summary := record.summarise()
+	summary := record.summarise("ollama", "test-model")
 	if len(summary.Sources) != maxListedSources {
 		t.Errorf("listed %d sources, want %d", len(summary.Sources), maxListedSources)
 	}
@@ -149,13 +149,13 @@ func TestALongListIsBoundedAndSaysHowMuchIsMissing(t *testing.T) {
 // A run resumed after a restart never saw its own beginning. Saying so is the
 // difference between an incomplete account and a wrong one.
 func TestARunNotSeenFromTheStartSaysItIsPartial(t *testing.T) {
-	if !newRunRecord().summarise().Partial {
+	if !newRunRecord().summarise("ollama", "test-model").Partial {
 		t.Error("a run whose start was never observed does not report itself partial")
 	}
 
 	seen := newRunRecord()
 	seen.seen = true
-	if seen.summarise().Partial {
+	if seen.summarise("ollama", "test-model").Partial {
 		t.Error("a run observed from its start reports itself partial")
 	}
 }
@@ -167,7 +167,7 @@ func TestUsageIsTakenAsCumulative(t *testing.T) {
 	record.usage = domain.Usage{InputTokens: 100, OutputTokens: 20}
 	record.usage = domain.Usage{InputTokens: 4200, CachedInputTokens: 3000, OutputTokens: 380}
 
-	summary := record.summarise()
+	summary := record.summarise("ollama", "test-model")
 	if summary.InputTokens != 4200 || summary.OutputTokens != 380 {
 		t.Errorf("usage is %+v", summary)
 	}
@@ -240,5 +240,43 @@ func TestEveryFailureKindProducesSomethingSafe(t *testing.T) {
 		if strings.TrimSpace(said) == "" {
 			t.Errorf("%q produced nothing to say", kind)
 		}
+	}
+}
+
+// Where the time went is usually the question, and a summary giving only
+// tokens cannot answer it: two minutes spent inside one command reads exactly
+// like two minutes waiting on the model.
+func TestToolTimeIsAccountedFor(t *testing.T) {
+	record := newRunRecord()
+
+	for id, spent := range map[string]int64{"1": 200, "2": 1800} {
+		requested(record, id, "exec_command", `{"program":"go"}`)
+		record.completed(domain.ToolCallCompleted{
+			CallID: domain.ToolCallID(id), Name: "exec_command", DurationMS: spent,
+		}, 10)
+	}
+	requested(record, "3", "read_file", `{"path":"a.go"}`)
+	record.completed(domain.ToolCallCompleted{
+		CallID: "3", Name: "read_file", DurationMS: 5,
+	}, 11)
+
+	summary := record.summarise("ollama", "gemma4:31b-cloud")
+
+	// Slowest first, because somebody reading this is asking where the time
+	// went and the answer belongs at the top.
+	if summary.Tools[0].Name != "exec_command" {
+		t.Errorf("the slowest tool is not first: %+v", summary.Tools)
+	}
+	if summary.Tools[0].Milliseconds != 2000 {
+		t.Errorf("total time is %dms, want 2000", summary.Tools[0].Milliseconds)
+	}
+	// The longest single call, not the average: six quick reads and one slow
+	// one average into something that describes neither.
+	if summary.Tools[0].SlowestMS != 1800 {
+		t.Errorf("slowest call is %dms, want 1800", summary.Tools[0].SlowestMS)
+	}
+
+	if summary.Provider != "ollama" || summary.Model != "gemma4:31b-cloud" {
+		t.Errorf("who answered is not recorded: %+v", summary)
 	}
 }

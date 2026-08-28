@@ -291,6 +291,8 @@ func run() error {
 	// so that cannot be half-configured.
 	plane := gateway.NewPlane(store, nil, permissions, artifacts, nil,
 		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
+	plane.Projector.Provider = modelProvider.Name()
+	plane.Projector.Model = selected.ID
 	plane.Projector.WorkingInterval = cfg.Gateway.Discord.WorkingInterval
 	plane.Projector.StreamInterval = cfg.Gateway.Discord.StreamInterval
 
