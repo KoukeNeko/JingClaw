@@ -138,6 +138,19 @@ func run() error {
 		return err
 	}
 
+	if where, temporary := isTemporary(dbPath); temporary {
+		// Said once, loudly, because the failure is silent and total: the
+		// database holds every conversation, every approval and everything
+		// the agent has been told to remember, and a directory the system
+		// clears takes all of it without an error anywhere.
+		logger.Warn("the database is somewhere the system clears",
+			"database", dbPath,
+			"under", where,
+			"holds", "sessions, approvals and memories",
+			"fix", "set server.data_dir to somewhere that survives a reboot",
+		)
+	}
+
 	store, err := sqlite.Open(rootCtx, dbPath)
 	if err != nil {
 		return err
@@ -553,6 +566,42 @@ func standingDirections(
 // Beside the database by default, because that is where this daemon's other
 // durable state already is and splitting the two across directories makes a
 // backup something an operator can half do.
+// isTemporary reports whether a path is somewhere the system empties.
+//
+// Not a guess about intent: a daemon pointed at a scratch directory during an
+// experiment is a reasonable thing, and this does not refuse it. It says so,
+// because the alternative is finding out when the conversations are gone.
+func isTemporary(path string) (string, bool) {
+	resolved, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	// Symlinks matter here: /tmp is a link to /private/tmp on macOS, and a
+	// path spelled either way is the same doomed directory.
+	if evaluated, err := filepath.EvalSymlinks(filepath.Dir(resolved)); err == nil {
+		resolved = filepath.Join(evaluated, filepath.Base(resolved))
+	}
+
+	roots := []string{"/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/dev/shm"}
+	if fromEnv := os.Getenv("TMPDIR"); fromEnv != "" {
+		if cleaned, err := filepath.EvalSymlinks(fromEnv); err == nil {
+			roots = append(roots, cleaned)
+		}
+		roots = append(roots, fromEnv)
+	}
+
+	for _, root := range roots {
+		cleaned := filepath.Clean(root)
+		if cleaned == "/" || cleaned == "." {
+			continue
+		}
+		if resolved == cleaned || strings.HasPrefix(resolved, cleaned+string(filepath.Separator)) {
+			return cleaned, true
+		}
+	}
+	return "", false
+}
+
 func artifactDir(cfg config.Config, dbPath string) string {
 	if cfg.Artifacts.Dir != "" {
 		return cfg.Artifacts.Dir
