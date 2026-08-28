@@ -22,6 +22,11 @@ type Store struct {
 	runs      map[domain.RunID]domain.Run
 	events    map[domain.SessionID][]domain.Event
 	approvals map[domain.ApprovalID]domain.Approval
+
+	// memoryOrder preserves insertion order, so a listing is stable when two
+	// memories share a timestamp — which they do constantly in tests.
+	memories    map[domain.MemoryID]domain.Memory
+	memoryOrder []domain.MemoryID
 }
 
 var _ storage.Store = (*Store)(nil)
@@ -32,6 +37,7 @@ func New() *Store {
 		runs:      make(map[domain.RunID]domain.Run),
 		events:    make(map[domain.SessionID][]domain.Event),
 		approvals: make(map[domain.ApprovalID]domain.Approval),
+		memories:  make(map[domain.MemoryID]domain.Memory),
 	}
 }
 

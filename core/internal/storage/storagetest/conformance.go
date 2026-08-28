@@ -43,6 +43,13 @@ func Run(t *testing.T, newStore Factory) {
 		"EventsForMissingSession":     testEventsForMissingSession,
 		"SessionsHaveIndependentSeqs": testSessionsHaveIndependentSeqs,
 		"ConcurrentAppendsAreDense":   testConcurrentAppendsAreDense,
+		"MemoryRoundTrip":             testMemoryRoundTrip,
+		"MemoryScopesAreSeparate":     testMemoryScopesAreSeparate,
+		"MemoryCorrectionSupersedes":  testMemoryCorrectionSupersedes,
+		"MemorySearchFindsByWord":     testMemorySearchFindsByWord,
+		"MemorySearchRespectsScope":   testMemorySearchRespectsScope,
+		"MemoryForgetActuallyRemoves": testMemoryForgetActuallyRemoves,
+		"MemoryProvenanceSurvives":    testMemoryProvenanceSurvives,
 	}
 
 	for name, fn := range tests {
@@ -550,5 +557,312 @@ func testConcurrentAppendsAreDense(t *testing.T, newStore Factory) {
 	}
 	if len(events) != appends {
 		t.Fatalf("stored %d events, want %d", len(events), appends)
+	}
+}
+
+// --- memory -----------------------------------------------------------------
+//
+// Memory is the one store whose contents reach a model in a later session, so
+// what it returns is a security property rather than a convenience.
+
+func newMemory(id, text string, scope domain.MemoryScope, ref string) domain.Memory {
+	return domain.Memory{
+		ID:       domain.MemoryID(id),
+		Scope:    scope,
+		ScopeRef: ref,
+		Kind:     domain.MemoryFact,
+		Text:     text,
+		Trust:    domain.TrustUser,
+		Origin: domain.RunOrigin{
+			Kind:     domain.OriginLocalClient,
+			ClientID: "jingclaw-cli",
+		},
+		SourceSession: "ses_1",
+		SourceSeq:     7,
+		ApprovedBy:    "operator",
+		CreatedAt:     fixedTime(),
+	}
+}
+
+func remember(t *testing.T, store storage.Store, memory domain.Memory, supersedes domain.MemoryID) {
+	t.Helper()
+
+	if err := store.Remember(context.Background(), memory, supersedes); err != nil {
+		t.Fatalf("remember %s: %v", memory.ID, err)
+	}
+}
+
+func testMemoryRoundTrip(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	written := newMemory("mem_1", "the deploy script needs sudo",
+		domain.ScopeWorkspace, "/srv/app")
+	remember(t, store, written, "")
+
+	found, err := store.Memory(ctx, "mem_1")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if found.Text != written.Text || found.Scope != written.Scope {
+		t.Errorf("read back %+v", found)
+	}
+	if !found.IsCurrent() {
+		t.Error("a memory just written is not current")
+	}
+
+	if _, err := store.Memory(ctx, "mem_absent"); !errors.Is(err, storage.ErrMemoryNotFound) {
+		t.Errorf("a missing memory gave %v", err)
+	}
+}
+
+// A Discord account and the operator of this machine are different people.
+// Returning one's memories for the other is the whole failure this scoping
+// exists to prevent.
+func testMemoryScopesAreSeparate(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	remember(t, store, newMemory("mem_1", "prefers table-driven tests",
+		domain.ScopePrincipal, "discord:user_1"), "")
+	remember(t, store, newMemory("mem_2", "the operator's own note",
+		domain.ScopePrincipal, "local:operator"), "")
+	remember(t, store, newMemory("mem_3", "the project uses buf",
+		domain.ScopeWorkspace, "/srv/app"), "")
+
+	found, err := store.Memories(ctx, storage.MemoryQuery{
+		Scopes: []storage.MemoryScopeRef{
+			{Scope: domain.ScopePrincipal, Ref: "discord:user_1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+
+	if len(found) != 1 || found[0].ID != "mem_1" {
+		t.Fatalf("a principal's query returned %d memories: %+v", len(found), found)
+	}
+
+	// Asking for two scopes gets both and nothing else.
+	both, err := store.Memories(ctx, storage.MemoryQuery{
+		Scopes: []storage.MemoryScopeRef{
+			{Scope: domain.ScopeWorkspace, Ref: "/srv/app"},
+			{Scope: domain.ScopePrincipal, Ref: "local:operator"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("list two scopes: %v", err)
+	}
+	if len(both) != 2 {
+		t.Errorf("two scopes returned %d memories: %+v", len(both), both)
+	}
+	for _, candidate := range both {
+		if candidate.ID == "mem_1" {
+			t.Error("another principal's memory came back")
+		}
+	}
+}
+
+// A correction replaces rather than duplicates, and what was believed before
+// is still answerable.
+func testMemoryCorrectionSupersedes(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	remember(t, store, newMemory("mem_1", "the API is at api.example.com",
+		domain.ScopeWorkspace, "/srv/app"), "")
+
+	corrected := newMemory("mem_2", "the API is at api.example.net",
+		domain.ScopeWorkspace, "/srv/app")
+	corrected.CreatedAt = fixedTime().Add(time.Hour)
+	remember(t, store, corrected, "mem_1")
+
+	current, err := store.Memories(ctx, storage.MemoryQuery{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(current) != 1 || current[0].ID != "mem_2" {
+		t.Fatalf("what is believed now is %+v", current)
+	}
+
+	// The old one is still there, marked, and points at what replaced it.
+	old, err := store.Memory(ctx, "mem_1")
+	if err != nil {
+		t.Fatalf("read the superseded memory: %v", err)
+	}
+	if old.IsCurrent() {
+		t.Error("the corrected memory is still believed")
+	}
+	if old.SupersededBy != "mem_2" {
+		t.Errorf("the old memory points at %q", old.SupersededBy)
+	}
+
+	// And it comes back when somebody asks what changed.
+	all, err := store.Memories(ctx, storage.MemoryQuery{IncludeInvalidated: true})
+	if err != nil {
+		t.Fatalf("list with history: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("the history has %d entries", len(all))
+	}
+
+	// Correcting something already corrected is a mistake, not a quiet no-op.
+	again := newMemory("mem_3", "third guess", domain.ScopeWorkspace, "/srv/app")
+	if err := store.Remember(ctx, again, "mem_1"); err == nil {
+		t.Error("superseding an already superseded memory was accepted")
+	}
+}
+
+func testMemorySearchFindsByWord(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	remember(t, store, newMemory("mem_1", "the deploy script needs sudo",
+		domain.ScopeWorkspace, "/srv/app"), "")
+	remember(t, store, newMemory("mem_2", "tests run with go test -race",
+		domain.ScopeWorkspace, "/srv/app"), "")
+
+	found, err := store.SearchMemories(ctx, "deploy", storage.MemoryQuery{})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(found) != 1 || found[0].ID != "mem_1" {
+		t.Fatalf("searching for deploy returned %+v", found)
+	}
+
+	// Nothing matching is empty rather than everything.
+	none, err := store.SearchMemories(ctx, "kubernetes", storage.MemoryQuery{})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("a word nobody wrote returned %d memories", len(none))
+	}
+}
+
+// Search must not be a way around the scope filter. The text reaching it comes
+// from a model, and a query language is a way to ask for other people's rows.
+func testMemorySearchRespectsScope(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	remember(t, store, newMemory("mem_1", "the operator's private note about deploys",
+		domain.ScopePrincipal, "local:operator"), "")
+
+	mine := storage.MemoryQuery{
+		Scopes: []storage.MemoryScopeRef{
+			{Scope: domain.ScopePrincipal, Ref: "discord:user_1"},
+		},
+	}
+
+	for _, attempt := range []string{
+		"deploys",
+		`deploys OR scope_ref:"local:operator"`,
+		`" OR "`,
+		"*",
+	} {
+		found, err := store.SearchMemories(ctx, attempt, mine)
+		if err != nil {
+			// Refusing is fine. Returning somebody else's memory is not.
+			continue
+		}
+		if len(found) != 0 {
+			t.Errorf("%q reached %d memories outside its scope", attempt, len(found))
+		}
+	}
+}
+
+// A person who asks the agent to forget something and gets "that stopped being
+// true" has not been answered.
+func testMemoryForgetActuallyRemoves(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	remember(t, store, newMemory("mem_1", "something regrettable",
+		domain.ScopeWorkspace, "/srv/app"), "")
+
+	corrected := newMemory("mem_2", "something better", domain.ScopeWorkspace, "/srv/app")
+	corrected.CreatedAt = fixedTime().Add(time.Hour)
+	remember(t, store, corrected, "mem_1")
+
+	if err := store.Forget(ctx, "mem_1"); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+
+	if _, err := store.Memory(ctx, "mem_1"); !errors.Is(err, storage.ErrMemoryNotFound) {
+		t.Errorf("a forgotten memory is still there: %v", err)
+	}
+
+	// Not through the history either.
+	all, err := store.Memories(ctx, storage.MemoryQuery{IncludeInvalidated: true})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, candidate := range all {
+		if candidate.ID == "mem_1" {
+			t.Error("a forgotten memory is still in the history")
+		}
+		if candidate.SupersededBy == "mem_1" {
+			t.Error("a memory still points at the one that was forgotten")
+		}
+	}
+
+	// Nor through search, which would be the quiet way for it to survive.
+	found, err := store.SearchMemories(ctx, "regrettable", storage.MemoryQuery{
+		IncludeInvalidated: true,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(found) != 0 {
+		t.Errorf("a forgotten memory is still searchable: %+v", found)
+	}
+
+	if err := store.Forget(ctx, "mem_absent"); !errors.Is(err, storage.ErrMemoryNotFound) {
+		t.Errorf("forgetting nothing gave %v", err)
+	}
+}
+
+// Provenance is the difference between a claim and a claim you can check, and
+// it is what stops untrusted text becoming a trusted fact by being summarised.
+func testMemoryProvenanceSurvives(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	fromDiscord := newMemory("mem_1", "the user said they prefer Go",
+		domain.ScopePrincipal, "discord:user_1")
+	fromDiscord.Trust = domain.TrustUntrusted
+	fromDiscord.Origin = domain.RunOrigin{
+		Kind: domain.OriginGateway,
+		Principal: &domain.ExternalPrincipal{
+			Platform:    "discord",
+			PrincipalID: "user_1",
+		},
+	}
+	fromDiscord.SourceSession = "ses_42"
+	fromDiscord.SourceSeq = 118
+	fromDiscord.ApprovedBy = "operator"
+	remember(t, store, fromDiscord, "")
+
+	found, err := store.Memory(ctx, "mem_1")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+
+	if found.Trust != domain.TrustUntrusted {
+		t.Errorf("trust came back as %q", found.Trust)
+	}
+	if found.Origin.Kind != domain.OriginGateway {
+		t.Errorf("origin came back as %q", found.Origin.Kind)
+	}
+	if found.Origin.Principal == nil || found.Origin.Principal.PrincipalID != "user_1" {
+		t.Errorf("the principal was lost: %+v", found.Origin.Principal)
+	}
+	if found.SourceSession != "ses_42" || found.SourceSeq != 118 {
+		t.Errorf("the memory cannot say where it came from: %s/%d",
+			found.SourceSession, found.SourceSeq)
+	}
+	if found.ApprovedBy != "operator" {
+		t.Errorf("who approved it came back as %q", found.ApprovedBy)
 	}
 }

@@ -26,6 +26,7 @@ var (
 	ErrDuplicateRun     = errors.New("storage: run already exists")
 
 	ErrApprovalNotFound = errors.New("storage: approval not found")
+	ErrMemoryNotFound   = errors.New("storage: memory not found")
 
 	// ErrApprovalDecided guards the race where two clients answer the same
 	// prompt: the second answer must not run the tool again.
@@ -90,9 +91,60 @@ type EventStore interface {
 }
 
 // Store is the full persistence surface the runtime depends on.
+// MemoryStore keeps what the agent has been told to remember across sessions.
+//
+// Writes are append-only and corrections invalidate rather than overwrite, so
+// the store can always answer both "what is believed now" and "what was
+// believed then". Forget is the exception, and exists because a person asking
+// the agent to forget something has to be answered by it actually being gone.
+type MemoryStore interface {
+	// Remember stores a memory. When supersedes names an existing one, both
+	// happen together: a correction that half applied would leave the agent
+	// believing two contradictory things.
+	Remember(ctx context.Context, memory domain.Memory, supersedes domain.MemoryID) error
+
+	// Memories returns what is believed, newest first.
+	Memories(ctx context.Context, query MemoryQuery) ([]domain.Memory, error)
+
+	// SearchMemories is Memories with a full-text filter.
+	SearchMemories(ctx context.Context, text string, query MemoryQuery) ([]domain.Memory, error)
+
+	// Memory returns one by id.
+	Memory(ctx context.Context, id domain.MemoryID) (domain.Memory, error)
+
+	// Forget removes a memory for good, index and all.
+	Forget(ctx context.Context, id domain.MemoryID) error
+}
+
+// MemoryQuery narrows what comes back.
+//
+// Scopes is a list because one caller legitimately wants several: a local run
+// reads what the project knows and what its operator said. It is never
+// implicit, though — a query that forgot to say whose memories it wanted would
+// otherwise return everybody's.
+type MemoryQuery struct {
+	Scopes []MemoryScopeRef
+
+	// Kind empty means either.
+	Kind domain.MemoryKind
+
+	// IncludeInvalidated returns superseded memories too, which is for showing
+	// a person what changed rather than for telling a model anything.
+	IncludeInvalidated bool
+
+	Limit int
+}
+
+// MemoryScopeRef is one scope and the thing it belongs to.
+type MemoryScopeRef struct {
+	Scope domain.MemoryScope
+	Ref   string
+}
+
 type Store interface {
 	SessionStore
 	RunStore
 	ApprovalStore
 	EventStore
+	MemoryStore
 }

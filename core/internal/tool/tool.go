@@ -30,6 +30,14 @@ const (
 	// LevelWorkspaceWrite modifies the workspace.
 	LevelWorkspaceWrite
 
+	// LevelRemember writes something the agent will believe in later sessions.
+	//
+	// Its own level rather than a workspace write, because the reach is
+	// different in kind: a bad edit is recoverable from the workspace's own
+	// history, and a bad memory is read into every future conversation by an
+	// agent that has forgotten where it came from. Both profiles stop for it.
+	LevelRemember
+
 	// LevelExecute runs programs or reaches the network.
 	LevelExecute
 
@@ -46,6 +54,8 @@ func (l Level) String() string {
 		return "workspace_read"
 	case LevelWorkspaceWrite:
 		return "workspace_write"
+	case LevelRemember:
+		return "remember"
 	case LevelExecute:
 		return "execute"
 	case LevelHighImpact:
@@ -61,7 +71,8 @@ func (l Level) String() string {
 // a log prints are the same word.
 func LevelByName(name string) (Level, bool) {
 	for _, level := range []Level{
-		LevelInternal, LevelWorkspaceRead, LevelWorkspaceWrite, LevelExecute, LevelHighImpact,
+		LevelInternal, LevelWorkspaceRead, LevelWorkspaceWrite,
+		LevelRemember, LevelExecute, LevelHighImpact,
 	} {
 		if level.String() == name {
 			return level, true

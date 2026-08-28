@@ -626,7 +626,7 @@ func (c Config) serverProblems() []Problem {
 			problems = append(problems, Problem{
 				Key: where + ".level", Value: quote(server.Level),
 				Why: "is not a level that exists",
-				Fix: "Use internal, workspace_read, workspace_write, execute or high_impact.",
+				Fix: "Use internal, workspace_read, workspace_write, remember, execute or high_impact.",
 			})
 		}
 	}
@@ -735,6 +735,7 @@ var (
 		"internal":        true,
 		"workspace_read":  true,
 		"workspace_write": true,
+		"remember":        true,
 		"execute":         true,
 		"high_impact":     true,
 	}

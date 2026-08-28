@@ -112,6 +112,76 @@ type Run struct {
 	FinishedAt      *time.Time
 }
 
+// MemoryID identifies one thing the agent has been told to remember.
+type MemoryID string
+
+// MemoryScope says who a memory belongs to.
+//
+// These are the two boundaries that turned out to be real. A channel is not
+// one — that is a session. A machine is not one — that is the daemon.
+type MemoryScope string
+
+const (
+	// ScopeWorkspace is a fact about the project: its conventions, how it is
+	// built, what its scripts need.
+	ScopeWorkspace MemoryScope = "workspace"
+
+	// ScopePrincipal is what one person said. A Discord account and the
+	// operator of this machine are different people, and what one of them said
+	// is not recalled for the other.
+	ScopePrincipal MemoryScope = "principal"
+)
+
+// MemoryKind decides how a memory reaches the model.
+type MemoryKind string
+
+const (
+	// MemoryInstruction is standing direction, put in front of the model on
+	// every turn. It is bounded, because everything here is context that the
+	// work does not get.
+	MemoryInstruction MemoryKind = "instruction"
+
+	// MemoryFact is looked up when it is wanted. Most memories are these:
+	// something worth having is not the same as something worth carrying.
+	MemoryFact MemoryKind = "fact"
+)
+
+// Memory is one thing the agent has been told to remember across sessions.
+//
+// Provenance is not optional. A memory whose origin has been lost is a claim
+// nobody can check, and the way untrusted text becomes a trusted fact is by
+// passing through a summary that dropped where it came from.
+type Memory struct {
+	ID       MemoryID
+	Scope    MemoryScope
+	ScopeRef string
+	Kind     MemoryKind
+	Text     string
+
+	// Trust is the least trusted thing that contributed to this memory, not
+	// the trust of whoever approved it. It only ever travels downwards.
+	Trust TrustLevel
+
+	Origin        RunOrigin
+	SourceSession SessionID
+	SourceSeq     Seq
+
+	// ApprovedBy is who let this in. Every memory has one: nothing is written
+	// without a person, which is the whole design.
+	ApprovedBy string
+
+	CreatedAt time.Time
+
+	// InvalidatedAt and SupersededBy record a fact that stopped being true.
+	// It is not deleted: "what is true now" and "what was true then" are
+	// different questions and both have answers.
+	InvalidatedAt *time.Time
+	SupersededBy  MemoryID
+}
+
+// IsCurrent reports whether a memory is still believed.
+func (m Memory) IsCurrent() bool { return m.InvalidatedAt == nil }
+
 // EventKind discriminates Event.Payload.
 type EventKind string
 
