@@ -372,3 +372,128 @@ func TestAFailedSummaryLosesNothing(t *testing.T) {
 		t.Error("history went missing even though nothing was compacted")
 	}
 }
+
+// A run resumed later must be given the prompt it started with.
+//
+// Standing directions come from memory, and memory changes. Recomputing them
+// on a resume — possibly in another process, hours after the approval — would
+// mean the same run was given two different prompts and neither the log nor
+// anybody reading it could say which.
+func TestARunKeepsTheDirectionsItStartedWith(t *testing.T) {
+	store := memory.New()
+	model := &compactingProvider{reply: "ok"}
+
+	directions := "- the first answer"
+	rt := newDirectedHarness(t, store, model, func() string { return directions })
+
+	session, err := rt.CreateSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	runTurn(t, rt, session.ID, "hello")
+
+	first := model.turnRequests()
+	if len(first) == 0 {
+		t.Fatal("nothing was sent")
+	}
+	if !strings.Contains(systemOf(first[0]), "the first answer") {
+		t.Fatalf("the directions never reached the prompt: %q", systemOf(first[0]))
+	}
+
+	// Memory changes, and a new run gets the new answer.
+	directions = "- the second answer"
+	runTurn(t, rt, session.ID, "again")
+
+	sent := model.turnRequests()
+	if !strings.Contains(systemOf(sent[len(sent)-1]), "the second answer") {
+		t.Error("a later run did not pick up the changed directions")
+	}
+
+	// But replaying the first run reads what it was actually given, rather
+	// than assembling it again.
+	events, err := store.ListAfter(context.Background(), session.ID, 0, 0)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+
+	recorded := 0
+	for _, event := range events {
+		if payload, ok := event.Payload.(domain.RunDirections); ok {
+			recorded++
+			if payload.Text == "" {
+				t.Error("a run recorded empty directions")
+			}
+		}
+	}
+	if recorded != 2 {
+		t.Errorf("%d runs recorded their directions, want 2", recorded)
+	}
+}
+
+// With nothing to say, nothing is recorded: an event per run carrying an empty
+// string is noise in the one place that has to stay readable.
+func TestARunWithNoDirectionsRecordsNothing(t *testing.T) {
+	store := memory.New()
+	model := &compactingProvider{reply: "ok"}
+	rt := newDirectedHarness(t, store, model, func() string { return "" })
+
+	session, err := rt.CreateSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	runTurn(t, rt, session.ID, "hello")
+
+	events, err := store.ListAfter(context.Background(), session.ID, 0, 0)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	for _, event := range events {
+		if _, ok := event.Payload.(domain.RunDirections); ok {
+			t.Error("a run with nothing to say recorded directions anyway")
+		}
+	}
+}
+
+func systemOf(req provider.Request) string {
+	var text strings.Builder
+	for _, block := range req.System {
+		if content, ok := block.(provider.TextBlock); ok {
+			text.WriteString(content.Text)
+		}
+	}
+	return text.String()
+}
+
+func newDirectedHarness(
+	t *testing.T,
+	store *memory.Store,
+	model *compactingProvider,
+	directions func() string,
+) *runtime.Runtime {
+	t.Helper()
+
+	var counter atomic.Uint64
+	next := func(prefix string) runtime.IDGenerator {
+		return func() string { return fmt.Sprintf("%s_%d", prefix, counter.Add(1)) }
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	return runtime.New(ctx, runtime.Options{
+		Store:           store,
+		Hub:             event.NewHub(),
+		Provider:        model,
+		Model:           "directed",
+		SystemPrompt:    "you are an agent",
+		SystemPromptFor: func(context.Context, domain.Run) string { return directions() },
+		MaxIterations:   5,
+		NewSessionID:    next("ses"),
+		NewRunID:        next("run"),
+		NewMessageID:    next("msg"),
+		NewEventID:      next("evt"),
+		NewApprovalID:   next("apr"),
+		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
+		Logger:          slog.New(slog.DiscardHandler),
+	})
+}

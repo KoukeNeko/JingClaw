@@ -86,6 +86,10 @@ type conversationCompactedJSON struct {
 	TokensAfter    int64  `json:"tokens_after,omitempty"`
 }
 
+type runDirectionsJSON struct {
+	Text string `json:"text"`
+}
+
 type usageChangedJSON struct {
 	InputTokens       int64 `json:"input_tokens,omitempty"`
 	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"`
@@ -178,6 +182,9 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			TokensBefore:   p.TokensBefore,
 			TokensAfter:    p.TokensAfter,
 		})
+
+	case domain.RunDirections:
+		return json.Marshal(runDirectionsJSON{Text: p.Text})
 
 	case domain.ApprovalRequested:
 		return json.Marshal(approvalRequestedJSON{
@@ -299,6 +306,13 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			TokensBefore:   p.TokensBefore,
 			TokensAfter:    p.TokensAfter,
 		}, nil
+
+	case domain.EventRunDirections:
+		var p runDirectionsJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		return domain.RunDirections{Text: p.Text}, nil
 
 	case domain.EventApprovalRequested:
 		var p approvalRequestedJSON

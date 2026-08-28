@@ -287,6 +287,11 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 			UsageChanged: &controlv1.UsageChanged{Usage: usageToProto(p.Usage)},
 		}
 
+	case domain.RunDirections:
+		out.Payload = &controlv1.Event_RunDirections{
+			RunDirections: &controlv1.RunDirections{Text: p.Text},
+		}
+
 	case domain.ConversationCompacted:
 		out.Payload = &controlv1.Event_ConversationCompacted{
 			ConversationCompacted: &controlv1.ConversationCompacted{

@@ -45,6 +45,7 @@ type Event struct {
 	//	*Event_ApprovalRequested
 	//	*Event_ApprovalResolved
 	//	*Event_ConversationCompacted
+	//	*Event_RunDirections
 	Payload       isEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -212,6 +213,15 @@ func (x *Event) GetConversationCompacted() *ConversationCompacted {
 	return nil
 }
 
+func (x *Event) GetRunDirections() *RunDirections {
+	if x != nil {
+		if x, ok := x.Payload.(*Event_RunDirections); ok {
+			return x.RunDirections
+		}
+	}
+	return nil
+}
+
 type isEvent_Payload interface {
 	isEvent_Payload()
 }
@@ -256,6 +266,10 @@ type Event_ConversationCompacted struct {
 	ConversationCompacted *ConversationCompacted `protobuf:"bytes,19,opt,name=conversation_compacted,json=conversationCompacted,proto3,oneof"`
 }
 
+type Event_RunDirections struct {
+	RunDirections *RunDirections `protobuf:"bytes,20,opt,name=run_directions,json=runDirections,proto3,oneof"`
+}
+
 func (*Event_UserMessageAdded) isEvent_Payload() {}
 
 func (*Event_RunStateChanged) isEvent_Payload() {}
@@ -275,6 +289,8 @@ func (*Event_ApprovalRequested) isEvent_Payload() {}
 func (*Event_ApprovalResolved) isEvent_Payload() {}
 
 func (*Event_ConversationCompacted) isEvent_Payload() {}
+
+func (*Event_RunDirections) isEvent_Payload() {}
 
 type UserMessageAdded struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1132,11 +1148,62 @@ func (x *ConversationCompacted) GetTokensAfter() int64 {
 	return 0
 }
 
+// RunDirections is the part of the system prompt assembled for this run rather
+// than fixed when the daemon started.
+//
+// It is in the log because it has to be. Standing directions come from memory,
+// and memory changes; recomputing them when a run resumes after an approval
+// would mean the same run was given two different prompts and nothing could
+// say which. Everything else the model sees is already derivable from here.
+type RunDirections struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunDirections) Reset() {
+	*x = RunDirections{}
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunDirections) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunDirections) ProtoMessage() {}
+
+func (x *RunDirections) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunDirections.ProtoReflect.Descriptor instead.
+func (*RunDirections) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RunDirections) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
 var File_jingclaw_control_v1_event_proto protoreflect.FileDescriptor
 
 const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\n" +
-	"\x1fjingclaw/control/v1/event.proto\x12\x13jingclaw.control.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a jingclaw/control/v1/common.proto\"\xb3\b\n" +
+	"\x1fjingclaw/control/v1/event.proto\x12\x13jingclaw.control.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a jingclaw/control/v1/common.proto\"\x80\t\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1155,7 +1222,8 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\x13tool_call_completed\x18\x10 \x01(\v2&.jingclaw.control.v1.ToolCallCompletedH\x00R\x11toolCallCompleted\x12W\n" +
 	"\x12approval_requested\x18\x11 \x01(\v2&.jingclaw.control.v1.ApprovalRequestedH\x00R\x11approvalRequested\x12T\n" +
 	"\x11approval_resolved\x18\x12 \x01(\v2%.jingclaw.control.v1.ApprovalResolvedH\x00R\x10approvalResolved\x12c\n" +
-	"\x16conversation_compacted\x18\x13 \x01(\v2*.jingclaw.control.v1.ConversationCompactedH\x00R\x15conversationCompactedB\t\n" +
+	"\x16conversation_compacted\x18\x13 \x01(\v2*.jingclaw.control.v1.ConversationCompactedH\x00R\x15conversationCompacted\x12K\n" +
+	"\x0erun_directions\x18\x14 \x01(\v2\".jingclaw.control.v1.RunDirectionsH\x00R\rrunDirectionsB\t\n" +
 	"\apayload\"\xb4\x01\n" +
 	"\x10UserMessageAdded\x12\x1d\n" +
 	"\n" +
@@ -1223,7 +1291,9 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"throughSeq\x12'\n" +
 	"\x0fmessages_folded\x18\x03 \x01(\x05R\x0emessagesFolded\x12#\n" +
 	"\rtokens_before\x18\x04 \x01(\x03R\ftokensBefore\x12!\n" +
-	"\ftokens_after\x18\x05 \x01(\x03R\vtokensAfterB\xdc\x01\n" +
+	"\ftokens_after\x18\x05 \x01(\x03R\vtokensAfter\"#\n" +
+	"\rRunDirections\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04textB\xdc\x01\n" +
 	"\x17com.jingclaw.control.v1B\n" +
 	"EventProtoP\x01ZGgithub.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1;controlv1\xa2\x02\x03JCX\xaa\x02\x13Jingclaw.Control.V1\xca\x02\x13Jingclaw\\Control\\V1\xe2\x02\x1fJingclaw\\Control\\V1\\GPBMetadata\xea\x02\x15Jingclaw::Control::V1b\x06proto3"
 
@@ -1239,7 +1309,7 @@ func file_jingclaw_control_v1_event_proto_rawDescGZIP() []byte {
 	return file_jingclaw_control_v1_event_proto_rawDescData
 }
 
-var file_jingclaw_control_v1_event_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_jingclaw_control_v1_event_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_jingclaw_control_v1_event_proto_goTypes = []any{
 	(*Event)(nil),                     // 0: jingclaw.control.v1.Event
 	(*UserMessageAdded)(nil),          // 1: jingclaw.control.v1.UserMessageAdded
@@ -1255,17 +1325,18 @@ var file_jingclaw_control_v1_event_proto_goTypes = []any{
 	(*StreamHello)(nil),               // 11: jingclaw.control.v1.StreamHello
 	(*StreamHeartbeat)(nil),           // 12: jingclaw.control.v1.StreamHeartbeat
 	(*ConversationCompacted)(nil),     // 13: jingclaw.control.v1.ConversationCompacted
-	(*timestamppb.Timestamp)(nil),     // 14: google.protobuf.Timestamp
-	(TrustLevel)(0),                   // 15: jingclaw.control.v1.TrustLevel
-	(*RunOrigin)(nil),                 // 16: jingclaw.control.v1.RunOrigin
-	(RunStatus)(0),                    // 17: jingclaw.control.v1.RunStatus
-	(StopReason)(0),                   // 18: jingclaw.control.v1.StopReason
-	(ApprovalStatus)(0),               // 19: jingclaw.control.v1.ApprovalStatus
-	(RememberScope)(0),                // 20: jingclaw.control.v1.RememberScope
-	(*Usage)(nil),                     // 21: jingclaw.control.v1.Usage
+	(*RunDirections)(nil),             // 14: jingclaw.control.v1.RunDirections
+	(*timestamppb.Timestamp)(nil),     // 15: google.protobuf.Timestamp
+	(TrustLevel)(0),                   // 16: jingclaw.control.v1.TrustLevel
+	(*RunOrigin)(nil),                 // 17: jingclaw.control.v1.RunOrigin
+	(RunStatus)(0),                    // 18: jingclaw.control.v1.RunStatus
+	(StopReason)(0),                   // 19: jingclaw.control.v1.StopReason
+	(ApprovalStatus)(0),               // 20: jingclaw.control.v1.ApprovalStatus
+	(RememberScope)(0),                // 21: jingclaw.control.v1.RememberScope
+	(*Usage)(nil),                     // 22: jingclaw.control.v1.Usage
 }
 var file_jingclaw_control_v1_event_proto_depIdxs = []int32{
-	14, // 0: jingclaw.control.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
+	15, // 0: jingclaw.control.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
 	1,  // 1: jingclaw.control.v1.Event.user_message_added:type_name -> jingclaw.control.v1.UserMessageAdded
 	2,  // 2: jingclaw.control.v1.Event.run_state_changed:type_name -> jingclaw.control.v1.RunStateChanged
 	3,  // 3: jingclaw.control.v1.Event.assistant_text_delta:type_name -> jingclaw.control.v1.AssistantTextDelta
@@ -1276,19 +1347,20 @@ var file_jingclaw_control_v1_event_proto_depIdxs = []int32{
 	8,  // 8: jingclaw.control.v1.Event.approval_requested:type_name -> jingclaw.control.v1.ApprovalRequested
 	9,  // 9: jingclaw.control.v1.Event.approval_resolved:type_name -> jingclaw.control.v1.ApprovalResolved
 	13, // 10: jingclaw.control.v1.Event.conversation_compacted:type_name -> jingclaw.control.v1.ConversationCompacted
-	15, // 11: jingclaw.control.v1.UserMessageAdded.trust:type_name -> jingclaw.control.v1.TrustLevel
-	16, // 12: jingclaw.control.v1.UserMessageAdded.origin:type_name -> jingclaw.control.v1.RunOrigin
-	17, // 13: jingclaw.control.v1.RunStateChanged.status:type_name -> jingclaw.control.v1.RunStatus
-	18, // 14: jingclaw.control.v1.AssistantMessageCompleted.stop_reason:type_name -> jingclaw.control.v1.StopReason
-	6,  // 15: jingclaw.control.v1.ToolCallCompleted.artifact:type_name -> jingclaw.control.v1.Artifact
-	19, // 16: jingclaw.control.v1.ApprovalResolved.status:type_name -> jingclaw.control.v1.ApprovalStatus
-	20, // 17: jingclaw.control.v1.ApprovalResolved.scope:type_name -> jingclaw.control.v1.RememberScope
-	21, // 18: jingclaw.control.v1.UsageChanged.usage:type_name -> jingclaw.control.v1.Usage
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	14, // 11: jingclaw.control.v1.Event.run_directions:type_name -> jingclaw.control.v1.RunDirections
+	16, // 12: jingclaw.control.v1.UserMessageAdded.trust:type_name -> jingclaw.control.v1.TrustLevel
+	17, // 13: jingclaw.control.v1.UserMessageAdded.origin:type_name -> jingclaw.control.v1.RunOrigin
+	18, // 14: jingclaw.control.v1.RunStateChanged.status:type_name -> jingclaw.control.v1.RunStatus
+	19, // 15: jingclaw.control.v1.AssistantMessageCompleted.stop_reason:type_name -> jingclaw.control.v1.StopReason
+	6,  // 16: jingclaw.control.v1.ToolCallCompleted.artifact:type_name -> jingclaw.control.v1.Artifact
+	20, // 17: jingclaw.control.v1.ApprovalResolved.status:type_name -> jingclaw.control.v1.ApprovalStatus
+	21, // 18: jingclaw.control.v1.ApprovalResolved.scope:type_name -> jingclaw.control.v1.RememberScope
+	22, // 19: jingclaw.control.v1.UsageChanged.usage:type_name -> jingclaw.control.v1.Usage
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_event_proto_init() }
@@ -1308,6 +1380,7 @@ func file_jingclaw_control_v1_event_proto_init() {
 		(*Event_ApprovalRequested)(nil),
 		(*Event_ApprovalResolved)(nil),
 		(*Event_ConversationCompacted)(nil),
+		(*Event_RunDirections)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1315,7 +1388,7 @@ func file_jingclaw_control_v1_event_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jingclaw_control_v1_event_proto_rawDesc), len(file_jingclaw_control_v1_event_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

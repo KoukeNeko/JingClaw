@@ -415,7 +415,11 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 	}
 
 	declarations := r.toolDeclarations()
-	system := r.systemPrompt(ctx, run)
+	system, err := r.systemPrompt(ctx, run)
+	if err != nil {
+		r.finishFromError(ctx, run, err)
+		return
+	}
 
 	// Fixed for the life of the run, and not small: a dozen tool schemas is
 	// real weight, and history must not be allowed to grow into it.
@@ -1046,19 +1050,61 @@ func (r *Runtime) toolDeclarations() []provider.ToolDeclaration {
 	return declarations
 }
 
-func (r *Runtime) systemPrompt(ctx context.Context, run domain.Run) []provider.ContentBlock {
+func (r *Runtime) systemPrompt(ctx context.Context, run domain.Run) ([]provider.ContentBlock, error) {
 	prompt := r.opts.SystemPrompt
 
-	if r.opts.SystemPromptFor != nil {
-		if extra := r.opts.SystemPromptFor(ctx, run); extra != "" {
-			prompt = strings.TrimRight(prompt, "\n") + "\n\n" + extra
-		}
+	extra, err := r.directionsFor(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if extra != "" {
+		prompt = strings.TrimRight(prompt, "\n") + "\n\n" + extra
 	}
 
 	if prompt == "" {
-		return nil
+		return nil, nil
 	}
-	return provider.Text(prompt)
+	return provider.Text(prompt), nil
+}
+
+// directionsFor is the run-dependent part of the prompt, assembled once and
+// then read back from the log.
+//
+// Assembled once because it comes from memory, and memory changes. A run that
+// resumes after an approval — possibly in another process, hours later — must
+// be given the same prompt it started with, or the log stops being enough to
+// say what the model was told.
+func (r *Runtime) directionsFor(ctx context.Context, run domain.Run) (string, error) {
+	events, err := r.opts.Store.ListAfter(ctx, run.SessionID, 0, 0)
+	if err != nil {
+		return "", err
+	}
+
+	for _, event := range events {
+		if event.RunID != run.ID {
+			continue
+		}
+		if recorded, ok := event.Payload.(domain.RunDirections); ok {
+			return recorded.Text, nil
+		}
+	}
+
+	if r.opts.SystemPromptFor == nil {
+		return "", nil
+	}
+
+	directions := r.opts.SystemPromptFor(ctx, run)
+	if directions == "" {
+		// Nothing to say, and nothing worth an event. A later resume assembles
+		// nothing again, which is the same answer.
+		return "", nil
+	}
+
+	if err := r.append(ctx, run.SessionID, run.ID,
+		domain.EventRunDirections, domain.RunDirections{Text: directions}); err != nil {
+		return "", err
+	}
+	return directions, nil
 }
 
 // isNilOption reports whether an option was left unset, covering both a nil

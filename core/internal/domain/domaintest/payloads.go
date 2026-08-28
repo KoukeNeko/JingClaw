@@ -74,6 +74,10 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			TokensBefore:   120_000,
 			TokensAfter:    30_000,
 		},
+		domain.EventRunDirections: domain.RunDirections{
+			Text: "Standing directions you were given in earlier sessions:\n\n" +
+				"- prefer table-driven tests",
+		},
 		domain.EventApprovalRequested: domain.ApprovalRequested{
 			ApprovalID: "apr_1",
 			CallID:     "call_2",

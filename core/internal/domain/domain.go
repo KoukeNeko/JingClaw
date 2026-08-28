@@ -194,6 +194,7 @@ const (
 	EventToolCallRequested         EventKind = "tool.requested"
 	EventToolCallCompleted         EventKind = "tool.completed"
 	EventConversationCompacted     EventKind = "conversation.compacted"
+	EventRunDirections             EventKind = "run.directions"
 )
 
 // ToolCallID identifies one tool invocation within a run.
@@ -312,6 +313,21 @@ type ConversationCompacted struct {
 	TokensAfter    int64
 }
 
+// RunDirections records the part of the system prompt that was assembled for
+// this run rather than fixed at startup.
+//
+// It is an event because it has to be, not because it is interesting. Standing
+// directions come from memory, and memory changes; recomputing them when a run
+// resumes after an approval — possibly in a different process, hours later —
+// would mean the same run was given two different prompts and neither the log
+// nor anybody reading it could say which.
+//
+// Everything else the model sees is already derivable from this log. This was
+// the one thing that was not.
+type RunDirections struct {
+	Text string
+}
+
 // UsageChanged reports cumulative usage for the run so far, so cost is visible
 // while a run is in flight rather than only once it ends.
 type UsageChanged struct {
@@ -335,6 +351,7 @@ func AllEventKinds() []EventKind {
 		EventToolCallRequested,
 		EventToolCallCompleted,
 		EventConversationCompacted,
+		EventRunDirections,
 		EventApprovalRequested,
 		EventApprovalResolved,
 	}
@@ -348,6 +365,7 @@ func (UsageChanged) isEventPayload()              {}
 func (ToolCallRequested) isEventPayload()         {}
 func (ToolCallCompleted) isEventPayload()         {}
 func (ConversationCompacted) isEventPayload()     {}
+func (RunDirections) isEventPayload()             {}
 
 // StopReason says why a generation ended. Providers spell this differently;
 // the runtime needs one vocabulary to decide whether a turn is genuinely

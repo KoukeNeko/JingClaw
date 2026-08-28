@@ -30,6 +30,7 @@ message Event {
     ApprovalRequested approval_requested = 17;
     ApprovalResolved approval_resolved = 18;
     ConversationCompacted conversation_compacted = 19;
+    RunDirections run_directions = 20;
   }
 }
 
@@ -166,4 +167,15 @@ message ConversationCompacted {
   // made before the request that would report the true figure is sent.
   int64 tokens_before = 4;
   int64 tokens_after = 5;
+}
+
+// RunDirections is the part of the system prompt assembled for this run rather
+// than fixed when the daemon started.
+//
+// It is in the log because it has to be. Standing directions come from memory,
+// and memory changes; recomputing them when a run resumes after an approval
+// would mean the same run was given two different prompts and nothing could
+// say which. Everything else the model sees is already derivable from here.
+message RunDirections {
+  string text = 1;
 }
