@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
@@ -27,9 +28,10 @@ import (
 // asserted rather than assumed.
 
 type harness struct {
-	ingress *gateway.Ingress
-	store   *sqlite.Store
-	runtime *runtime.Runtime
+	ingress   *gateway.Ingress
+	store     *sqlite.Store
+	runtime   *runtime.Runtime
+	artifacts *artifact.Store
 }
 
 func newHarness(t *testing.T, chunkDelay time.Duration) *harness {
@@ -86,17 +88,23 @@ func newHarness(t *testing.T, chunkDelay time.Duration) *harness {
 		Logger:        slog.New(slog.DiscardHandler),
 	})
 
+	artifacts, err := artifact.Open(filepath.Join(t.TempDir(), "artifacts"), 64<<20)
+	if err != nil {
+		t.Fatalf("open artifacts: %v", err)
+	}
+
 	ingress := &gateway.Ingress{
 		Store:         store,
 		Runtime:       rt,
 		Binder:        permissions,
+		Artifacts:     artifacts,
 		Console:       rt,
 		NewDispatchID: func() string { return fmt.Sprintf("dsp_%d", counter.Add(1)) },
 		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
 		Logger:        slog.New(slog.DiscardHandler),
 	}
 
-	return &harness{ingress: ingress, store: store, runtime: rt}
+	return &harness{ingress: ingress, store: store, runtime: rt, artifacts: artifacts}
 }
 
 func (h *harness) bind(t *testing.T, profile string, allowed ...string) {

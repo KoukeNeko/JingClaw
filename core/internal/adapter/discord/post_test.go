@@ -763,3 +763,58 @@ func TestAnEnormousToolListIsStillPostable(t *testing.T) {
 		t.Errorf("the summary was cut without saying so:\n%s", rendered)
 	}
 }
+
+// A dispatch carrying a file is posted as one, rather than having its bytes
+// pasted into the channel as text.
+func TestADispatchCarryingAFileIsRecognised(t *testing.T) {
+	payload, err := json.Marshal(jcgateway.MessagePayload{
+		Final: true,
+		File: &jcgateway.MessageFile{
+			Name:      "abc123.txt",
+			Content:   []byte("the whole build log"),
+			MediaType: "text/plain",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	file, carried := attachedFile(jcgateway.Dispatch{
+		Kind:    jcgateway.DispatchMessage,
+		Payload: string(payload),
+	})
+	if !carried {
+		t.Fatal("a dispatch carrying a file was not recognised")
+	}
+	if string(file.Content) != "the whole build log" {
+		t.Errorf("the content is %q", file.Content)
+	}
+}
+
+// An ordinary answer is not mistaken for one.
+func TestAnOrdinaryMessageCarriesNoFile(t *testing.T) {
+	payload, err := json.Marshal(jcgateway.MessagePayload{Text: "hello", Final: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, carried := attachedFile(jcgateway.Dispatch{
+		Kind:    jcgateway.DispatchMessage,
+		Payload: string(payload),
+	}); carried {
+		t.Error("an ordinary answer was treated as a file")
+	}
+
+	// An empty file is not a file either: posting an attachment with no bytes
+	// would be a message that says nothing and cannot be opened.
+	empty, err := json.Marshal(jcgateway.MessagePayload{File: &jcgateway.MessageFile{Name: "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, carried := attachedFile(jcgateway.Dispatch{
+		Kind:    jcgateway.DispatchMessage,
+		Payload: string(empty),
+	}); carried {
+		t.Error("a file with no content was posted")
+	}
+}

@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,6 +54,12 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	// files from leaving ten lines behind it.
 	if dispatch.Kind == jcgateway.DispatchStatus {
 		return a.postStatus(channelID, dispatch, body)
+	}
+
+	// Something asked for by name, handed over as a file rather than pasted
+	// into the channel.
+	if file, carried := attachedFile(dispatch); carried {
+		return a.postFile(channelID, file)
 	}
 
 	// An answer still being written is one message that keeps growing. Posting
@@ -291,6 +298,47 @@ func shouldSendAsFile(kind jcgateway.DispatchKind, segments, maxMessages int) bo
 //
 // The lead line carries the opening of the answer, because a bare "see
 // attached" tells a person nothing about whether they need to open it.
+// attachedFile reports a file the dispatch carries, if it carries one.
+func attachedFile(dispatch jcgateway.Dispatch) (jcgateway.MessageFile, bool) {
+	if dispatch.Kind != jcgateway.DispatchMessage {
+		return jcgateway.MessageFile{}, false
+	}
+
+	var payload jcgateway.MessagePayload
+	if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+		return jcgateway.MessageFile{}, false
+	}
+	if payload.File == nil || len(payload.File.Content) == 0 {
+		return jcgateway.MessageFile{}, false
+	}
+	return *payload.File, true
+}
+
+// postFile uploads what somebody asked for.
+func (a *Adapter) postFile(channelID snowflake.ID, file jcgateway.MessageFile) ([]string, error) {
+	content := file.Content
+	truncated := false
+	if limit := a.maxAttachmentBytes(); len(content) > limit {
+		content = content[:limit]
+		truncated = true
+	}
+
+	name := file.Name
+	if name == "" {
+		name = "artifact.txt"
+	}
+
+	lead := fmt.Sprintf("_%s_", describeFile(len(content), truncated))
+	create := messageWith(lead)
+	create.Files = []*discord.File{discord.NewFile(name, "", bytes.NewReader(content))}
+
+	message, err := a.client.Rest.CreateMessage(channelID, create)
+	if err != nil {
+		return nil, fmt.Errorf("discord: post a file to %s: %w", channelID, err)
+	}
+	return []string{message.ID.String()}, nil
+}
+
 func (a *Adapter) finishAsFile(
 	channelID snowflake.ID,
 	dispatch jcgateway.Dispatch,

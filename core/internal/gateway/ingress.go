@@ -45,6 +45,17 @@ type ArtifactStore interface {
 	PutBytes(ctx context.Context, content []byte, mediaType string) (artifact.Ref, error)
 }
 
+// ArtifactReader is the other direction, for handing something back.
+//
+// A separate interface an ArtifactStore may also satisfy, so that storing what
+// arrives and reading what was stored are separate capabilities. An ingress
+// that only receives does not acquire the ability to hand things out by
+// having somewhere to put them.
+type ArtifactReader interface {
+	Stat(id string) (artifact.Ref, error)
+	ReadRange(id string, offset, limit int64) ([]byte, int64, error)
+}
+
 type Ingress struct {
 	Store     Store
 	Runtime   Runtime

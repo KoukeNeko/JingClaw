@@ -97,6 +97,25 @@ type MessagePayload struct {
 	// Final says this is the whole answer. Anything before it is as much as
 	// had been said at the time, and a platform may show it or ignore it.
 	Final bool `json:"final,omitempty"`
+
+	// File is content to post as an attachment rather than as text.
+	//
+	// Only ever set for something somebody asked for by name. Nothing is
+	// pushed: a run that stores a large result says so, and the bytes cross
+	// into a channel when a person asks for them and not before.
+	File *MessageFile `json:"file,omitempty"`
+}
+
+// MessageFile is an attachment to post.
+type MessageFile struct {
+	Name string `json:"name"`
+
+	// Content is the bytes, base64 in JSON. Bounded well below what a
+	// platform accepts, because this travels through the dispatch queue and a
+	// queue is a poor place to keep megabytes.
+	Content []byte `json:"content"`
+
+	MediaType string `json:"media_type,omitempty"`
 }
 
 // ApprovalPayload asks a conversation to decide about a tool call.

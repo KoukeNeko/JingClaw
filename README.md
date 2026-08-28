@@ -122,8 +122,14 @@ agent bindings add --channel <id> --guild <id> --workspace ws \
 A console channel reads and searches the workspace, fetches pages, and reads
 what the agent remembers. Changes to files and to memory still stop and ask —
 and you can answer there: `pending` lists what is waiting, `approve <id>` and
-`deny <id>` decide it. Those few words are the whole command set, matched on
-the entire message, so an ordinary sentence still reaches the agent.
+`deny <id>` decide it, and `artifact <id>` hands over something a run stored.
+Those few words are the whole command set, matched on the entire message, so an
+ordinary sentence still reaches the agent.
+
+Artifacts are pulled, never pushed. A run that produces a large result says it
+exists and stops there; the bytes cross into a channel when a person names the
+one they want. Attaching everything a run produced would put whole build logs
+and fetched pages into a room on the agent's initiative.
 
 It cannot run programs. That is the line, and it is where it is because of what
 a channel permission can and cannot do. It settles who is in the room, which is

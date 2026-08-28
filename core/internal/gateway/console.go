@@ -63,6 +63,8 @@ func parseConsoleCommand(text string) (consoleCommand, bool) {
 		return consoleCommand{verb: "deny", arg: arg}, arg != ""
 	case "pending", "approvals":
 		return consoleCommand{verb: "pending"}, arg == ""
+	case "artifact", "file":
+		return consoleCommand{verb: "artifact", arg: arg}, arg != ""
 	case "help", "motd":
 		return consoleCommand{verb: "help"}, arg == ""
 	}
@@ -82,6 +84,12 @@ func (i *Ingress) handleConsole(
 ) error {
 	if command.verb == "help" {
 		return i.say(ctx, message, session, consoleMOTD(binding))
+	}
+
+	// Handing something over needs the artifact store, not the approval
+	// machinery, so it is answered before the check for the latter.
+	if command.verb == "artifact" {
+		return i.sendArtifact(ctx, message, session, command.arg)
 	}
 
 	if i.Console == nil {
@@ -166,6 +174,113 @@ func renderPending(waiting []domain.Approval) string {
 	return out.String()
 }
 
+// MaxConsoleFileBytes bounds what a console will hand over in one go.
+//
+// Well under what a platform accepts, because this travels through the
+// dispatch queue and a queue is a poor place to keep megabytes.
+const MaxConsoleFileBytes = 2 << 20
+
+// sendArtifact hands over something a run stored, because somebody asked for
+// it by name.
+//
+// Pull rather than push. A run that produces a large result tells the channel
+// it exists and stops there; the bytes cross only when a person names the one
+// they want. Attaching everything a run produced would put whole build logs
+// and fetched pages into a room on the agent's initiative.
+func (i *Ingress) sendArtifact(
+	ctx context.Context,
+	message InboundMessage,
+	session domain.SessionID,
+	id string,
+) error {
+	if i.Artifacts == nil {
+		return i.say(ctx, message, session, "This daemon keeps no artifacts.")
+	}
+
+	reader, ok := i.Artifacts.(ArtifactReader)
+	if !ok {
+		return i.say(ctx, message, session, "This daemon cannot read artifacts back.")
+	}
+
+	ref, err := reader.Stat(id)
+	if err != nil {
+		return i.say(ctx, message, session, fmt.Sprintf(
+			"There is nothing stored as %s.", id))
+	}
+	if ref.Size > MaxConsoleFileBytes {
+		return i.say(ctx, message, session, fmt.Sprintf(
+			"%s is %d bytes, over the %d this will hand over. Read it on the machine.",
+			id, ref.Size, MaxConsoleFileBytes))
+	}
+
+	content, _, err := reader.ReadRange(id, 0, MaxConsoleFileBytes)
+	if err != nil {
+		return i.say(ctx, message, session, fmt.Sprintf("%s could not be read: %v", id, err))
+	}
+
+	return i.attach(ctx, message, session, MessageFile{
+		Name:      artifactFilename(id, ref.MediaType),
+		Content:   content,
+		MediaType: ref.MediaType,
+	})
+}
+
+// artifactFilename gives the attachment a name somebody can open.
+//
+// The digest is unreadable but unique, and the extension is what decides
+// whether a platform shows the contents or offers a download.
+func artifactFilename(id, mediaType string) string {
+	name := strings.TrimPrefix(id, "sha256-")
+	if len(name) > 12 {
+		name = name[:12]
+	}
+	return name + extensionFor(mediaType)
+}
+
+func extensionFor(mediaType string) string {
+	switch {
+	case strings.HasPrefix(mediaType, "image/png"):
+		return ".png"
+	case strings.HasPrefix(mediaType, "image/jpeg"):
+		return ".jpg"
+	case strings.HasPrefix(mediaType, "image/webp"):
+		return ".webp"
+	case strings.HasPrefix(mediaType, "application/json"):
+		return ".json"
+	default:
+		return ".txt"
+	}
+}
+
+// attach queues a file for the conversation.
+func (i *Ingress) attach(
+	ctx context.Context,
+	message InboundMessage,
+	session domain.SessionID,
+	file MessageFile,
+) error {
+	if i.NewDispatchID == nil {
+		return errors.New("gateway: this ingress cannot post on its own behalf")
+	}
+
+	encoded, err := json.Marshal(MessagePayload{Final: true, File: &file})
+	if err != nil {
+		return err
+	}
+
+	ref := message.Conversation
+	_, err = i.Store.EnqueueDispatch(ctx, Dispatch{
+		ID:        i.NewDispatchID(),
+		AccountID: ref.AccountID,
+		SessionID: session,
+		Target:    ref,
+		Kind:      DispatchMessage,
+		Payload:   string(encoded),
+		CreatedAt: i.now(),
+	})
+	return err
+}
+
 // say queues a message from this program, as opposed to from the agent.
 //
 // It carries no session or run, because it belongs to neither: it is this
@@ -213,7 +328,8 @@ func consoleMOTD(binding Binding) string {
 	out.WriteString("**This channel is a console.**\n")
 	out.WriteString("It can read and search the workspace, fetch web pages, and read what I remember.\n")
 	out.WriteString("Changes to files and to memory stop and ask, and you can answer here: ")
-	out.WriteString("`pending` lists what is waiting, `approve <id>` and `deny <id>` decide it.\n\n")
+	out.WriteString("`pending` lists what is waiting, `approve <id>` and `deny <id>` decide it.\n")
+	out.WriteString("`artifact <id>` hands over something a run stored.\n\n")
 
 	out.WriteString("**It cannot run programs.** That needs somebody at the machine.\n")
 	out.WriteString("Channel permissions decide who can see and type here, which is what makes the rest of ")

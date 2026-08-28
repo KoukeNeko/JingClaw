@@ -242,3 +242,84 @@ func TestAConsoleCannotRunPrograms(t *testing.T) {
 		}
 	}
 }
+
+// Handed over because somebody asked for it by name, and not before. A run
+// that produces a large result says it exists; the bytes cross into a channel
+// only when a person names the one they want.
+func TestAnArtifactIsHandedOverWhenAskedForByName(t *testing.T) {
+	h := newHarness(t, 0)
+	h.bind(t, "console", "user_1")
+
+	stored, err := h.artifacts.PutBytes(context.Background(),
+		[]byte("the whole build log"), "text/plain")
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	if _, err := h.ingress.Accept(context.Background(),
+		message("m1", "hello", discordPrincipal("user_1"))); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if _, err := h.ingress.Accept(context.Background(),
+		message("m2", "artifact "+stored.ID, discordPrincipal("user_1"))); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	var file *gateway.MessageFile
+	for _, dispatch := range h.dispatches(t) {
+		var payload gateway.MessagePayload
+		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+			continue
+		}
+		if payload.File != nil {
+			file = payload.File
+		}
+	}
+
+	if file == nil {
+		t.Fatalf("nothing was handed over: %v", posted(t, h))
+	}
+	if string(file.Content) != "the whole build log" {
+		t.Errorf("the content is %q", file.Content)
+	}
+	// A name somebody can open, rather than a digest.
+	if !strings.HasSuffix(file.Name, ".txt") {
+		t.Errorf("the attachment is named %q", file.Name)
+	}
+}
+
+// Asking for something that is not there is answered plainly rather than
+// failing, because the usual cause is a mistyped id.
+func TestAskingForSomethingThatIsNotStoredIsSaidPlainly(t *testing.T) {
+	h := newHarness(t, 0)
+	h.bind(t, "console", "user_1")
+
+	if _, err := h.ingress.Accept(context.Background(),
+		message("m1", "hello", discordPrincipal("user_1"))); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if _, err := h.ingress.Accept(context.Background(),
+		message("m2", "artifact sha256-nothing", discordPrincipal("user_1"))); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	if !said(posted(t, h), "nothing stored") {
+		t.Errorf("the channel was not told: %v", posted(t, h))
+	}
+}
+
+// An ordinary channel cannot ask. The command set belongs to a console, and
+// the same words elsewhere are a message for the agent.
+func TestAnOrdinaryChannelCannotAskForArtifacts(t *testing.T) {
+	h := newHarness(t, 0)
+	h.bind(t, "gateway", "user_1")
+
+	accepted, err := h.ingress.Accept(context.Background(),
+		message("m1", "artifact sha256-anything", discordPrincipal("user_1")))
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if accepted.RunID == "" {
+		t.Error("the words were treated as a command in an ordinary channel")
+	}
+}
