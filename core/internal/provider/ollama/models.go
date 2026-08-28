@@ -76,7 +76,35 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 		models = append(models, info)
 	}
 
+	p.remember(models)
 	return models, nil
+}
+
+// remember caches what each model can do.
+//
+// Generate has to decide whether asking for thinking is safe, and it is given
+// only a model name. The daemon lists the catalogue at startup, so by the time
+// anybody generates anything this is populated; a model it has never heard of
+// is treated as unable to think, which fails towards not sending something the
+// server would reject.
+func (p *Provider) remember(models []provider.ModelInfo) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.thinkers == nil {
+		p.thinkers = make(map[string]bool, len(models))
+	}
+	for _, model := range models {
+		p.thinkers[model.ID] = model.Capabilities.Thinking
+	}
+}
+
+// canThink reports whether a model was listed as able to report its
+// working-out.
+func (p *Provider) canThink(model string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.thinkers[model]
 }
 
 // applyCapabilities accepts either shape the daemon reports them in.
@@ -103,6 +131,9 @@ func applyCapabilities[T []string | map[string]bool](info *provider.ModelInfo, c
 	}
 	if has("completion") {
 		info.Capabilities.StructuredOutput = true
+	}
+	if has("thinking") {
+		info.Capabilities.Thinking = true
 	}
 }
 

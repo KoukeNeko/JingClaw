@@ -357,3 +357,89 @@ func TestLocalFailuresAreClassifiedByWhatTheySay(t *testing.T) {
 		})
 	}
 }
+
+// Asking a model that cannot think is an error rather than something ignored,
+// so what is asked for follows what the model said it can do.
+func TestThinkingFollowsWhatTheModelSaidItCanDo(t *testing.T) {
+	var sent []map[string]any
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tags":
+			_, _ = io.WriteString(w, `{"models":[
+				{"model":"thinker","name":"thinker","capabilities":["completion","thinking"],
+				 "details":{"context_length":8192}},
+				{"model":"plain","name":"plain","capabilities":["completion"],
+				 "details":{"context_length":8192}}]}`)
+		case "/api/ps":
+			_, _ = io.WriteString(w, `{"models":[]}`)
+		case "/api/chat":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			sent = append(sent, body)
+			_, _ = io.WriteString(w, `{"message":{"content":"ok"},"done":true,"done_reason":"stop"}`+"\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}
+
+	ask := func(t *testing.T, think, model string) map[string]any {
+		t.Helper()
+		sent = nil
+
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+
+		p, err := ollama.New(ollama.Config{BaseURL: server.URL, Think: think})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The daemon lists the catalogue at startup, which is what teaches the
+		// adapter which models think.
+		if _, err := p.Models(context.Background()); err != nil {
+			t.Fatalf("models: %v", err)
+		}
+		stream, err := p.Generate(context.Background(), provider.Request{Model: model})
+		if err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+		_, _ = drain(t, stream)
+		_ = stream.Close()
+
+		if len(sent) != 1 {
+			t.Fatalf("sent %d requests", len(sent))
+		}
+		return sent[0]
+	}
+
+	t.Run("a model that thinks is asked to", func(t *testing.T) {
+		if got := ask(t, "", "thinker")["think"]; got != true {
+			t.Errorf("think is %#v, want true", got)
+		}
+	})
+
+	t.Run("a model that does not is not asked", func(t *testing.T) {
+		if _, present := ask(t, "", "plain")["think"]; present {
+			t.Error("a model that cannot think was asked to, which is an error rather than a no-op")
+		}
+	})
+
+	t.Run("a depth is passed through", func(t *testing.T) {
+		if got := ask(t, "high", "thinker")["think"]; got != "high" {
+			t.Errorf("think is %#v, want \"high\"", got)
+		}
+	})
+
+	t.Run("off is explicit rather than absent", func(t *testing.T) {
+		// A server whose default is to think needs to be told no, and an
+		// absent field would leave it thinking.
+		if got := ask(t, "off", "thinker")["think"]; got != false {
+			t.Errorf("think is %#v, want false", got)
+		}
+	})
+
+	t.Run("on overrides what the model claimed", func(t *testing.T) {
+		if got := ask(t, "on", "plain")["think"]; got != true {
+			t.Errorf("think is %#v, want true", got)
+		}
+	})
+}

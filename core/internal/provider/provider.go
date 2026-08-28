@@ -99,6 +99,12 @@ type Capabilities struct {
 	StructuredOutput bool
 	Vision           bool
 	PromptCaching    bool
+
+	// Thinking says the model can report its working-out separately from its
+	// answer. Asked about rather than assumed: on a server where thinking has
+	// to be requested, requesting it from a model that cannot is an error
+	// rather than something quietly ignored.
+	Thinking bool
 }
 
 // Request is the canonical model request.

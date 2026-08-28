@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
@@ -42,9 +43,18 @@ type Config struct {
 	// machine can be a small fraction of what the model supports.
 	NumCtx int
 
-	// Think asks for the model's reasoning separately. Sending it to a model
-	// that does not think is an error, so it is off unless asked for.
-	Think bool
+	// Think asks for the model's reasoning separately.
+	//
+	//	""        follow the model: ask when it says it can think
+	//	"off"     never ask
+	//	"on"      always ask, at the server's own default depth
+	//	"low", "medium", "high", "max"
+	//	          always ask, at that depth
+	//
+	// Following the model is the useful default because asking a model that
+	// cannot think is an error rather than something ignored, so a fixed
+	// "always" breaks the moment somebody points this at a different model.
+	Think string
 
 	HTTPClient *http.Client
 }
@@ -55,6 +65,12 @@ type Provider struct {
 	apiKey  string
 	config  Config
 	client  *http.Client
+
+	// thinkers records which models said they can report their working-out,
+	// learned from the catalogue and consulted when a request has to decide
+	// whether asking for it is safe.
+	mu       sync.RWMutex
+	thinkers map[string]bool
 }
 
 // New builds a provider. The address is validated now rather than on the first
@@ -114,6 +130,29 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request) (provider
 	return newStream(response.Body, req.Model), nil
 }
 
+// thinkFor decides what to ask for, or nothing at all.
+//
+// Nothing is sent rather than false, because the two differ on a server whose
+// default is to think: an explicit false turns it off, and an absent field
+// leaves whatever the model does.
+func (p *Provider) thinkFor(model string) any {
+	switch strings.ToLower(strings.TrimSpace(p.config.Think)) {
+	case "off", "false", "no":
+		return false
+	case "on", "true", "yes":
+		return true
+	case "low", "medium", "high", "max":
+		return strings.ToLower(strings.TrimSpace(p.config.Think))
+	default:
+		// Follow the model. A model that never said it can think is not asked
+		// to, because being asked is an error rather than a no-op.
+		if p.canThink(model) {
+			return true
+		}
+		return nil
+	}
+}
+
 func (p *Provider) buildRequest(req provider.Request) (chatRequest, error) {
 	messages, err := p.messages(req)
 	if err != nil {
@@ -126,8 +165,8 @@ func (p *Provider) buildRequest(req provider.Request) (chatRequest, error) {
 		Stream:    true,
 		KeepAlive: p.config.KeepAlive,
 	}
-	if p.config.Think {
-		out.Think = true
+	if think := p.thinkFor(req.Model); think != nil {
+		out.Think = think
 	}
 
 	options := map[string]any{}

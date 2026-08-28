@@ -125,10 +125,13 @@ type Ollama struct {
 	// then planned against that.
 	NumCtx int `koanf:"num_ctx"`
 
-	// Think asks a model to report its reasoning separately. Sending it to a
-	// model that does not think is an error rather than a no-op, so it is off
-	// unless somebody asks.
-	Think bool `koanf:"think"`
+	// Think asks a model to report its reasoning separately from its answer.
+	//
+	// Empty follows the model: asked for when it reports being able to, and
+	// not otherwise, because asking a model that cannot think is an error
+	// rather than something ignored. "off" never asks, "on" always does, and
+	// "low", "medium", "high" or "max" ask at a depth.
+	Think string `koanf:"think"`
 }
 
 // OpenAICompat configures an endpoint that speaks the OpenAI chat protocol.
@@ -450,7 +453,7 @@ func Defaults() Config {
 			MaxImageBytes: 8 << 20,
 		},
 		Memory: Memory{
-			Enabled:             false,
+			Enabled:             true,
 			MaxInstructionBytes: 2000,
 		},
 		Web: Web{
@@ -702,6 +705,13 @@ func (c Config) choiceProblems() []Problem {
 	// impossible to keep several options in.
 	switch c.Model.Provider {
 	case "ollama":
+		if !thinkLevels[strings.ToLower(strings.TrimSpace(c.Model.Ollama.Think))] {
+			problems = append(problems, Problem{
+				Key: "model.ollama.think", Value: quote(c.Model.Ollama.Think),
+				Why: "is not a thinking setting",
+				Fix: `Leave it empty to follow the model, or use "off", "on", "low", "medium", "high" or "max".`,
+			})
+		}
 		if c.Model.Ollama.NumCtx < 0 {
 			problems = append(problems, Problem{
 				Key: "model.ollama.num_ctx", Value: fmt.Sprint(c.Model.Ollama.NumCtx),
@@ -945,7 +955,11 @@ var (
 		"fake": true, "gemini": true, "ollama": true, "openai_compat": true,
 	}
 	platformNames = map[string]bool{"discord": true}
-	toolLevels    = map[string]bool{
+	thinkLevels   = map[string]bool{
+		"": true, "off": true, "on": true,
+		"low": true, "medium": true, "high": true, "max": true,
+	}
+	toolLevels = map[string]bool{
 		"internal":        true,
 		"workspace_read":  true,
 		"workspace_write": true,
@@ -1176,10 +1190,18 @@ const Example = `# JingClaw configuration.
 
 # Ask the model to report its reasoning separately from its answer.
 #
-# Off by default, because sending it to a model that does not think is an
-# error rather than something ignored. Reasoning is kept out of the answer
-# either way; this decides whether it is asked for at all.
-# think = false
+#   ""                            follow the model: ask when it says it can
+#   "off"                         never ask
+#   "on"                          always ask, at the server's own depth
+#   "low" "medium" "high" "max"   always ask, at that depth
+#
+# Empty is the useful setting. Asking a model that cannot think is an error
+# rather than something ignored, so anything fixed breaks the moment this
+# points at a different model.
+#
+# Reasoning is kept out of the answer whichever way this is set. It is a
+# separate kind of event and nothing forwards it to a chat channel.
+# think = ""
 
 [model.openai_compat]
 # Any endpoint that speaks the OpenAI chat protocol: vLLM, LM Studio,
@@ -1276,14 +1298,16 @@ const Example = `# JingClaw configuration.
 [memory]
 # What the agent carries between sessions.
 #
-# Off by default. What is written here is read by every later session, by an
-# agent that no longer knows where it came from, so turning it on is a decision
-# somebody should make rather than one they inherit.
+# On. What makes that safe is not this setting but the one thing that has not
+# changed: nothing is ever written unattended. Writing a memory stops for a
+# person in every profile, so turning this on grants the agent the ability to
+# recall and to ask, never to decide by itself what it will believe later.
 #
-# Nothing is ever written unattended: remember stops for a person in every
-# profile, and what arrived from outside this machine stays marked as such and
-# is never put in front of the model on its own.
-# enabled = false
+# What arrived from outside this machine stays marked as such and is never put
+# in front of the model as a standing instruction.
+#
+# Set it to false to run with no memory at all.
+# enabled = true
 
 # The ceiling on the standing directions injected every turn. Everything here
 # is context the work does not get.

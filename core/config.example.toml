@@ -120,10 +120,18 @@
 
 # Ask the model to report its reasoning separately from its answer.
 #
-# Off by default, because sending it to a model that does not think is an
-# error rather than something ignored. Reasoning is kept out of the answer
-# either way; this decides whether it is asked for at all.
-# think = false
+#   ""                            follow the model: ask when it says it can
+#   "off"                         never ask
+#   "on"                          always ask, at the server's own depth
+#   "low" "medium" "high" "max"   always ask, at that depth
+#
+# Empty is the useful setting. Asking a model that cannot think is an error
+# rather than something ignored, so anything fixed breaks the moment this
+# points at a different model.
+#
+# Reasoning is kept out of the answer whichever way this is set. It is a
+# separate kind of event and nothing forwards it to a chat channel.
+# think = ""
 
 [model.openai_compat]
 # Any endpoint that speaks the OpenAI chat protocol: vLLM, LM Studio,
@@ -220,14 +228,16 @@
 [memory]
 # What the agent carries between sessions.
 #
-# Off by default. What is written here is read by every later session, by an
-# agent that no longer knows where it came from, so turning it on is a decision
-# somebody should make rather than one they inherit.
+# On. What makes that safe is not this setting but the one thing that has not
+# changed: nothing is ever written unattended. Writing a memory stops for a
+# person in every profile, so turning this on grants the agent the ability to
+# recall and to ask, never to decide by itself what it will believe later.
 #
-# Nothing is ever written unattended: remember stops for a person in every
-# profile, and what arrived from outside this machine stays marked as such and
-# is never put in front of the model on its own.
-# enabled = false
+# What arrived from outside this machine stays marked as such and is never put
+# in front of the model as a standing instruction.
+#
+# Set it to false to run with no memory at all.
+# enabled = true
 
 # The ceiling on the standing directions injected every turn. Everything here
 # is context the work does not get.

@@ -41,6 +41,13 @@ func realProvider(t *testing.T) (*ollama.Provider, string) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
+
+	// The daemon lists the catalogue at startup, and that is what teaches the
+	// adapter which models can think. Skipping it here would test a shape the
+	// daemon never runs in.
+	if _, err := p.Models(context.Background()); err != nil {
+		t.Fatalf("models: %v", err)
+	}
 	return p, model
 }
 
@@ -118,6 +125,14 @@ func TestRealGeneration(t *testing.T) {
 	}
 	if usage.InputTokens == 0 {
 		t.Error("no usage was reported")
+	}
+	// This model reports being able to think, so it should have been asked,
+	// and what it thought must not have reached the answer.
+	if reasoning.Len() == 0 {
+		t.Error("a model that can think was not asked to")
+	}
+	if strings.Contains(text.String(), reasoning.String()) {
+		t.Error("the working-out was repeated inside the answer")
 	}
 }
 
