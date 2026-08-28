@@ -2,6 +2,7 @@ package discord
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -394,5 +395,62 @@ func TestConversationsAreSeparatedByWhereTheyAre(t *testing.T) {
 	otherGuild.TenantID = "guild_2"
 	if base.Key() == otherGuild.Key() {
 		t.Error("two servers share one history")
+	}
+}
+
+// The status line belongs to its run, not to the channel.
+//
+// Keyed by channel, a new run edited the line the previous one left behind —
+// which by then was sitting at the bottom of the previous answer, so asking a
+// fresh question rewrote the tail of the last one.
+func TestTheStatusLineBelongsToItsRun(t *testing.T) {
+	adapter := New(Config{AccountID: "main", Logger: slog.New(slog.DiscardHandler)}, nil)
+
+	adapter.setStatus("run_1", 111)
+
+	if _, ok := adapter.liveStatus("run_2"); ok {
+		t.Error("a new run inherited the previous run's message")
+	}
+
+	found, ok := adapter.liveStatus("run_1")
+	if !ok || found != 111 {
+		t.Errorf("the run lost its own line: %v %v", found, ok)
+	}
+}
+
+// A run that has ended will not say anything else, so its line is released —
+// otherwise the map grows for the life of the process and, worse, the id stays
+// available to be edited by mistake.
+func TestAFinishedRunReleasesItsLine(t *testing.T) {
+	for payload, final := range map[string]bool{
+		`{"state":"completed","detail":"12s"}`: true,
+		`{"state":"failed","detail":"boom"}`:   true,
+		`{"state":"cancelled"}`:                true,
+		`{"state":"running"}`:                  false,
+		`{"state":"working","detail":"grep"}`:  false,
+		`not json`:                             true,
+	} {
+		if got := isFinalStatus(payload); got != final {
+			t.Errorf("%s treated as final=%v, want %v", payload, got, final)
+		}
+	}
+}
+
+// The answer does not release the line. It used to, which is why "Done in 12s"
+// arrived as a second message below the answer instead of rewriting the line
+// above it.
+func TestAnAnswerDoesNotReleaseTheStatusLine(t *testing.T) {
+	adapter := New(Config{AccountID: "main", Logger: slog.New(slog.DiscardHandler)}, nil)
+	adapter.setStatus("run_1", 111)
+
+	// Whatever Post does with a message dispatch, the run's line has to still
+	// be there for the completion that follows it.
+	if _, ok := adapter.liveStatus("run_1"); !ok {
+		t.Fatal("the line was released before the run finished")
+	}
+
+	adapter.clearStatus("run_1")
+	if _, ok := adapter.liveStatus("run_1"); ok {
+		t.Error("the line survived being released")
 	}
 }

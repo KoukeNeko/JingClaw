@@ -27,6 +27,7 @@ import (
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/snowflake/v2"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	jcgateway "github.com/KoukeNeko/JingClaw/core/internal/gateway"
 )
 
@@ -84,10 +85,15 @@ type Adapter struct {
 	// invited to.
 	selfID atomic.Uint64
 
-	// statusMessages is the "what it is doing now" line currently shown in
-	// each channel, so the next one rewrites it instead of stacking.
+	// statusMessages is the "what it is doing now" line each run is showing,
+	// so the next line rewrites it instead of stacking.
+	//
+	// Keyed by run and not by channel. Keyed by channel, a new run edited the
+	// line the previous run left behind — which by then was sitting at the
+	// bottom of the previous answer, so a fresh question rewrote the tail of
+	// the last one.
 	statusMu       sync.Mutex
-	statusMessages map[snowflake.ID]snowflake.ID
+	statusMessages map[domain.RunID]snowflake.ID
 }
 
 func New(config Config, sink Sink) *Adapter {
@@ -97,7 +103,7 @@ func New(config Config, sink Sink) *Adapter {
 	return &Adapter{
 		config:         config,
 		sink:           sink,
-		statusMessages: make(map[snowflake.ID]snowflake.ID),
+		statusMessages: make(map[domain.RunID]snowflake.ID),
 	}
 }
 

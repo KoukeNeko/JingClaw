@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/snowflake/v2"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	jcgateway "github.com/KoukeNeko/JingClaw/core/internal/gateway"
 )
 
@@ -48,14 +49,11 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 
 	// A status line is the answer to "what is it doing now", and the previous
 	// answer to that question is of no interest once it changes. Rewriting the
-	// one already in the channel keeps a run that touches ten files from
-	// leaving ten lines behind it.
+	// one this run already put in the channel keeps a run that touches ten
+	// files from leaving ten lines behind it.
 	if dispatch.Kind == jcgateway.DispatchStatus {
 		return a.postStatus(channelID, dispatch, body)
 	}
-
-	// Anything else means the status line has said all it is going to.
-	a.clearStatus(channelID)
 
 	segments := splitForDiscord(body)
 
@@ -95,7 +93,13 @@ func (a *Adapter) postStatus(
 	dispatch jcgateway.Dispatch,
 	body string,
 ) ([]string, error) {
-	if existing, ok := a.liveStatus(channelID); ok {
+	// A run that has ended will not say anything else, so its line is released
+	// here rather than being left for the next run to edit by accident.
+	if isFinalStatus(dispatch.Payload) {
+		defer a.clearStatus(dispatch.RunID)
+	}
+
+	if existing, ok := a.liveStatus(dispatch.RunID); ok {
 		_, err := a.client.Rest.UpdateMessage(channelID, existing, discord.MessageUpdate{
 			Content:         &body,
 			AllowedMentions: &discord.AllowedMentions{},
@@ -107,8 +111,8 @@ func (a *Adapter) postStatus(
 		}
 
 		a.config.Logger.Debug("could not rewrite the status line, posting a new one",
-			"channel_id", channelID.String(), "error", err)
-		a.clearStatus(channelID)
+			"run_id", string(dispatch.RunID), "error", err)
+		a.clearStatus(dispatch.RunID)
 	}
 
 	message, err := a.client.Rest.CreateMessage(channelID, messageWith(body))
@@ -116,34 +120,52 @@ func (a *Adapter) postStatus(
 		return nil, fmt.Errorf("discord: post to %s: %w", channelID, err)
 	}
 
-	a.setStatus(channelID, message.ID)
+	a.setStatus(dispatch.RunID, message.ID)
 	return []string{message.ID.String()}, nil
+}
+
+// isFinalStatus reports whether a run has said the last thing it will say.
+func isFinalStatus(payload string) bool {
+	var status jcgateway.StatusPayload
+	if err := json.Unmarshal([]byte(payload), &status); err != nil {
+		// Unreadable, so treated as final: releasing a line that had more to
+		// say costs one extra message, and holding one that did not costs the
+		// next run editing it.
+		return true
+	}
+
+	switch status.State {
+	case "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 // The live status message is held in memory rather than in the outbox because
 // it is a presentation detail: losing it across a restart costs one extra line
 // in a channel, not a wrong one, and the log stays the only thing that has to
 // be true.
-func (a *Adapter) liveStatus(channel snowflake.ID) (snowflake.ID, bool) {
+func (a *Adapter) liveStatus(run domain.RunID) (snowflake.ID, bool) {
 	a.statusMu.Lock()
 	defer a.statusMu.Unlock()
 
-	id, ok := a.statusMessages[channel]
+	id, ok := a.statusMessages[run]
 	return id, ok
 }
 
-func (a *Adapter) setStatus(channel, message snowflake.ID) {
+func (a *Adapter) setStatus(run domain.RunID, message snowflake.ID) {
 	a.statusMu.Lock()
 	defer a.statusMu.Unlock()
 
-	a.statusMessages[channel] = message
+	a.statusMessages[run] = message
 }
 
-func (a *Adapter) clearStatus(channel snowflake.ID) {
+func (a *Adapter) clearStatus(run domain.RunID) {
 	a.statusMu.Lock()
 	defer a.statusMu.Unlock()
 
-	delete(a.statusMessages, channel)
+	delete(a.statusMessages, run)
 }
 
 // shouldSendAsFile decides between a wall of messages and one attachment.

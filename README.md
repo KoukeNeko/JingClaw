@@ -432,8 +432,12 @@ doing:
 
 That line is **rewritten in place** rather than added to. A run touching ten
 files leaves one line behind it, not ten, and when the run ends the same line
-becomes `_Done in 12s._` instead of sitting above the answer still claiming to
-be busy.
+becomes `_Done in 12s._` instead of still claiming to be busy.
+
+It belongs to its run. Keyed by channel — which it was, briefly — a new run
+edited the line the previous one left behind, and since that line had ended up
+at the bottom of the previous answer, asking a fresh question rewrote the tail
+of the last one.
 
 The lines are throttled to `gateway.working_interval` (two seconds), which is
 about as fast as anybody reads and comfortably inside what Discord accepts as
