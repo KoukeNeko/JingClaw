@@ -53,6 +53,37 @@ read and that has not changed since. `exec_command` takes a program and an
 argument list — there is no shell — and a cancelled command takes its whole
 process group with it.
 
+### Models
+
+| `[model] provider` | What it talks to |
+|---|---|
+| `gemini` | Google's API |
+| `ollama` | a local Ollama daemon, or Ollama Cloud |
+| `openai_compat` | vLLM, LM Studio, llama.cpp, OpenRouter, Groq, Together |
+| `fake` | nothing; a deterministic stand-in for offline work |
+
+Ollama is reached through its own API rather than its OpenAI-compatible one,
+because the things a runtime has to know are only in the former: how much
+context the server actually gave a model, whether it is loaded at all, and its
+thinking as a field rather than mixed into the answer.
+
+That first one decides whether long sessions work. A model trained for 128k is
+routinely loaded with 4k, because that is what fit in the memory on hand, and
+planning against the larger figure means every request is refused while
+compaction waits for a threshold it will never reach. So a context window
+carries its provenance, and the order of belief is: the operator, then a server
+reporting what it has loaded, then a catalogue, then the model's own maximum —
+and nothing at all if none of them said.
+
+`openai_compat` needs a `profile`, because the claim is about a request shape
+rather than about behaviour. Servers making it disagree on whether usage is
+reported, which of two fields carries reasoning, and what a status code means:
+one answers `403` for a prompt longer than the context, which read the ordinary
+way is a permissions failure nobody can fix. The profile is named in
+configuration rather than guessed from the address, since a proxy makes the
+address say nothing, and an unknown name is refused rather than silently
+becoming the one that knows none of this.
+
 ### Reading the web
 
 Off by default; `[web] enabled = true` turns it on. `web_read` fetches a page

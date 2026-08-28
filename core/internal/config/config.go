@@ -25,6 +25,8 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/structs"
 	"github.com/knadh/koanf/v2"
+
+	"github.com/KoukeNeko/JingClaw/core/internal/provider/openaicompat"
 )
 
 const (
@@ -98,6 +100,50 @@ type Model struct {
 	FakeDelay time.Duration `koanf:"fake_delay"`
 
 	Retry Retry `koanf:"retry"`
+
+	Ollama       Ollama       `koanf:"ollama"`
+	OpenAICompat OpenAICompat `koanf:"openai_compat"`
+}
+
+// Ollama configures a local Ollama daemon or the hosted service.
+//
+// One section for both: they are the same API at different addresses, and the
+// hosted one wants a credential.
+type Ollama struct {
+	// BaseURL defaults to a daemon on this machine. Point it at
+	// https://ollama.com for the hosted service.
+	BaseURL string `koanf:"base_url"`
+
+	// KeepAlive is how long a model stays in memory after a request. Empty
+	// leaves the server's own default, which is the right choice on a machine
+	// doing other work.
+	KeepAlive string `koanf:"keep_alive"`
+
+	// NumCtx asks for a model to be loaded with this much context. Ollama
+	// otherwise sizes it against free memory, which on a busy machine can be
+	// a small fraction of what the model supports — and the whole session is
+	// then planned against that.
+	NumCtx int `koanf:"num_ctx"`
+
+	// Think asks a model to report its reasoning separately. Sending it to a
+	// model that does not think is an error rather than a no-op, so it is off
+	// unless somebody asks.
+	Think bool `koanf:"think"`
+}
+
+// OpenAICompat configures an endpoint that speaks the OpenAI chat protocol.
+type OpenAICompat struct {
+	// BaseURL is the root the chat path hangs off, usually ending in /v1.
+	BaseURL string `koanf:"base_url"`
+
+	// Profile names what this server does differently from the protocol it
+	// claims. Named rather than guessed from the address, because a proxy
+	// makes the address say nothing about what is behind it.
+	Profile string `koanf:"profile"`
+
+	// Name identifies this endpoint in logs, so two of them can be told apart
+	// when one is failing.
+	Name string `koanf:"name"`
 }
 
 // Retry governs resending a failed request.
@@ -113,6 +159,12 @@ type Retry struct {
 	// Jitter spreads retries so many clients recovering from one outage do not
 	// resend in lockstep.
 	Jitter float64 `koanf:"jitter"`
+
+	// Budget bounds the total time spent waiting across all attempts for one
+	// request. A server may ask for longer than the person watching a channel
+	// is willing to sit through, and the honest answer then is to stop and say
+	// when it would be free rather than to retry early and fail again.
+	Budget time.Duration `koanf:"budget"`
 }
 
 // Context bounds how much of a session is sent to the model.
@@ -368,6 +420,13 @@ func Defaults() Config {
 				BaseDelay:   500 * time.Millisecond,
 				MaxDelay:    30 * time.Second,
 				Jitter:      0.3,
+				Budget:      90 * time.Second,
+			},
+			Ollama: Ollama{
+				BaseURL: "http://localhost:11434",
+			},
+			OpenAICompat: OpenAICompat{
+				Profile: "generic",
 			},
 		},
 		Context: Context{
@@ -635,9 +694,48 @@ func (c Config) choiceProblems() []Problem {
 		problems = append(problems, Problem{
 			Key: "model.provider", Value: quote(c.Model.Provider),
 			Why: "is not a provider that exists",
-			Fix: `Use "gemini", or "fake" for the offline provider.`,
+			Fix: `Use "gemini", "ollama", "openai_compat", or "fake" for the offline provider.`,
 		})
 	}
+	// Each provider is checked only when it is the one selected. Refusing a
+	// half-filled section for a provider nobody chose would make the file
+	// impossible to keep several options in.
+	switch c.Model.Provider {
+	case "ollama":
+		if c.Model.Ollama.NumCtx < 0 {
+			problems = append(problems, Problem{
+				Key: "model.ollama.num_ctx", Value: fmt.Sprint(c.Model.Ollama.NumCtx),
+				Why: "is negative",
+				Fix: "Leave it at 0 to let the server size the context itself.",
+			})
+		}
+		if c.Model.Ollama.KeepAlive != "" {
+			if _, err := time.ParseDuration(c.Model.Ollama.KeepAlive); err != nil {
+				problems = append(problems, Problem{
+					Key: "model.ollama.keep_alive", Value: quote(c.Model.Ollama.KeepAlive),
+					Why: "is not a duration",
+					Fix: `Write it as "30m" or "1h". Leave it empty for the server's own default.`,
+				})
+			}
+		}
+
+	case "openai_compat":
+		if strings.TrimSpace(c.Model.OpenAICompat.BaseURL) == "" {
+			problems = append(problems, Problem{
+				Key: "model.openai_compat.base_url", Value: `""`,
+				Why: "is empty, and there is no default endpoint to fall back to",
+				Fix: `Give the address the chat path hangs off, e.g. "http://localhost:8000/v1".`,
+			})
+		}
+		if _, ok := openaicompat.ProfileByName(c.Model.OpenAICompat.Profile); !ok {
+			problems = append(problems, Problem{
+				Key: "model.openai_compat.profile", Value: quote(c.Model.OpenAICompat.Profile),
+				Why: "is not a profile that exists",
+				Fix: "Known profiles: " + strings.Join(openaicompat.ProfileNames(), ", ") + ".",
+			})
+		}
+	}
+
 	if !platformNames[c.Gateway.Platform] {
 		problems = append(problems, Problem{
 			Key: "gateway.platform", Value: quote(c.Gateway.Platform),
@@ -823,6 +921,13 @@ func (c Config) rangeProblems() []Problem {
 		})
 	}
 
+	if c.Model.Retry.Budget < 0 {
+		problems = append(problems, Problem{
+			Key: "model.retry.budget", Value: quote(c.Model.Retry.Budget.String()),
+			Why: "is negative",
+			Fix: "Use 0 to bound retries by attempts alone.",
+		})
+	}
 	if c.Model.Retry.Jitter < 0 || c.Model.Retry.Jitter > 1 {
 		problems = append(problems, Problem{
 			Key: "model.retry.jitter", Value: fmt.Sprint(c.Model.Retry.Jitter),
@@ -836,7 +941,9 @@ func (c Config) rangeProblems() []Problem {
 
 var (
 	profileNames  = map[string]bool{"local": true, "gateway": true}
-	providerNames = map[string]bool{"fake": true, "gemini": true}
+	providerNames = map[string]bool{
+		"fake": true, "gemini": true, "ollama": true, "openai_compat": true,
+	}
 	platformNames = map[string]bool{"discord": true}
 	toolLevels    = map[string]bool{
 		"internal":        true,
@@ -1011,6 +1118,73 @@ const Example = `# JingClaw configuration.
 # Spreads retries so several clients recovering from one outage do not resend
 # in lockstep. Between 0 and 1.
 # jitter = 0.3
+
+# The most time one request may spend waiting across all its attempts.
+#
+# A server that is rate limiting may ask to be left alone for longer than the
+# person watching is willing to wait. Its figure is honoured exactly rather
+# than shortened — asking again early only earns the same refusal — so this is
+# what decides when to stop instead and say when it would have been free.
+#
+# 0 bounds retries by the attempt count alone.
+# budget = "1m30s"
+
+[model.ollama]
+# A local Ollama daemon, or the hosted service.
+#
+# One section for both: they are the same API at different addresses. For the
+# hosted service set base_url to "https://ollama.com" and supply a credential
+# the same way as for any other provider. A local daemon needs none.
+#
+# This uses Ollama's own API rather than its OpenAI-compatible one, because
+# that is where the things a runtime needs live: how much context the server
+# actually gave a model, whether it is loaded, and its thinking as a field
+# rather than mixed into the answer.
+# base_url = "http://localhost:11434"
+
+# How long a model stays in memory after a request. Empty leaves the server's
+# own default, which is the right choice on a machine doing other work.
+# Written as a duration: "30m", "1h", or "0" to unload immediately.
+# keep_alive = ""
+
+# Ask for the model to be loaded with this much context.
+#
+# Worth setting. Ollama otherwise sizes the context against free memory, and
+# on a busy machine a model trained for 128k is commonly loaded with 4k — and
+# the whole session is then planned against that smaller figure.
+# num_ctx = 0
+
+# Ask the model to report its reasoning separately from its answer.
+#
+# Off by default, because sending it to a model that does not think is an
+# error rather than something ignored. Reasoning is kept out of the answer
+# either way; this decides whether it is asked for at all.
+# think = false
+
+[model.openai_compat]
+# Any endpoint that speaks the OpenAI chat protocol: vLLM, LM Studio,
+# llama.cpp's server, OpenRouter, Groq, Together.
+#
+# The address the chat path hangs off, usually ending in /v1. There is no
+# default: an endpoint nobody named is not one to guess at.
+# base_url = ""
+
+# What this particular server does differently from the protocol it claims.
+#
+# "OpenAI-compatible" describes a request shape, not behaviour: servers
+# disagree about whether usage is reported, which field carries reasoning, and
+# what a status code means — one answers 403 for a prompt that is too long,
+# which otherwise reads as a permissions failure nobody can fix.
+#
+# Named here rather than guessed from the address, because a proxy in front of
+# a server makes the address say nothing about what is behind it.
+#
+# Known: generic, vllm, lmstudio, llamacpp, openrouter, groq, together.
+# profile = "generic"
+
+# What to call this endpoint in logs, so two of them can be told apart when
+# one is failing. Empty uses the profile name.
+# name = ""
 
 [context]
 # What the model is given of a long session. Replaying everything is what lets

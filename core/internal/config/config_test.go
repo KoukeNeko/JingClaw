@@ -373,3 +373,81 @@ func TestReportIgnoresOtherErrors(t *testing.T) {
 		t.Errorf("Report wrote something for an unrelated error: %s", out.String())
 	}
 }
+
+// Each provider's settings are checked only when it is the one selected. A
+// file that keeps several options ready, with one of them half filled in, is
+// an ordinary way to work.
+func TestOnlyTheChosenProviderIsValidated(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Model.Provider = "gemini"
+	cfg.Model.OpenAICompat.BaseURL = "" // meaningless here, and not an error
+	cfg.Model.OpenAICompat.Profile = "nonsense"
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a section for a provider nobody chose was rejected: %v", err)
+	}
+}
+
+// Selected, and then it must hold up. An endpoint with no address has no
+// default to fall back to.
+func TestAnOpenAICompatibleEndpointNeedsAnAddressAndAKnownProfile(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*config.Config)
+		mention string
+	}{
+		{
+			name:    "no address",
+			mutate:  func(c *config.Config) { c.Model.OpenAICompat.BaseURL = "" },
+			mention: "base_url",
+		},
+		{
+			// A typo must not silently become the profile that knows nothing
+			// about how this server reports being out of credit.
+			name: "a misspelled profile",
+			mutate: func(c *config.Config) {
+				c.Model.OpenAICompat.BaseURL = "http://localhost:8000/v1"
+				c.Model.OpenAICompat.Profile = "vlm"
+			},
+			mention: "profile",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.Defaults()
+			cfg.Model.Provider = "openai_compat"
+			cfg.Model.OpenAICompat.BaseURL = "http://localhost:8000/v1"
+			test.mutate(&cfg)
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			if !strings.Contains(err.Error(), test.mention) {
+				t.Errorf("the error does not say which setting is wrong: %v", err)
+			}
+		})
+	}
+}
+
+func TestOllamaSettingsAreChecked(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Model.Provider = "ollama"
+	cfg.Model.Ollama.KeepAlive = "half an hour"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("a keep_alive that is not a duration was accepted")
+	}
+	if !strings.Contains(err.Error(), "keep_alive") {
+		t.Errorf("the error does not name the setting: %v", err)
+	}
+
+	// The defaults for a provider must survive being selected.
+	valid := config.Defaults()
+	valid.Model.Provider = "ollama"
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("the ollama defaults do not validate: %v", err)
+	}
+}

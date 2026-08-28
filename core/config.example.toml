@@ -63,6 +63,73 @@
 # in lockstep. Between 0 and 1.
 # jitter = 0.3
 
+# The most time one request may spend waiting across all its attempts.
+#
+# A server that is rate limiting may ask to be left alone for longer than the
+# person watching is willing to wait. Its figure is honoured exactly rather
+# than shortened — asking again early only earns the same refusal — so this is
+# what decides when to stop instead and say when it would have been free.
+#
+# 0 bounds retries by the attempt count alone.
+# budget = "1m30s"
+
+[model.ollama]
+# A local Ollama daemon, or the hosted service.
+#
+# One section for both: they are the same API at different addresses. For the
+# hosted service set base_url to "https://ollama.com" and supply a credential
+# the same way as for any other provider. A local daemon needs none.
+#
+# This uses Ollama's own API rather than its OpenAI-compatible one, because
+# that is where the things a runtime needs live: how much context the server
+# actually gave a model, whether it is loaded, and its thinking as a field
+# rather than mixed into the answer.
+# base_url = "http://localhost:11434"
+
+# How long a model stays in memory after a request. Empty leaves the server's
+# own default, which is the right choice on a machine doing other work.
+# Written as a duration: "30m", "1h", or "0" to unload immediately.
+# keep_alive = ""
+
+# Ask for the model to be loaded with this much context.
+#
+# Worth setting. Ollama otherwise sizes the context against free memory, and
+# on a busy machine a model trained for 128k is commonly loaded with 4k — and
+# the whole session is then planned against that smaller figure.
+# num_ctx = 0
+
+# Ask the model to report its reasoning separately from its answer.
+#
+# Off by default, because sending it to a model that does not think is an
+# error rather than something ignored. Reasoning is kept out of the answer
+# either way; this decides whether it is asked for at all.
+# think = false
+
+[model.openai_compat]
+# Any endpoint that speaks the OpenAI chat protocol: vLLM, LM Studio,
+# llama.cpp's server, OpenRouter, Groq, Together.
+#
+# The address the chat path hangs off, usually ending in /v1. There is no
+# default: an endpoint nobody named is not one to guess at.
+# base_url = ""
+
+# What this particular server does differently from the protocol it claims.
+#
+# "OpenAI-compatible" describes a request shape, not behaviour: servers
+# disagree about whether usage is reported, which field carries reasoning, and
+# what a status code means — one answers 403 for a prompt that is too long,
+# which otherwise reads as a permissions failure nobody can fix.
+#
+# Named here rather than guessed from the address, because a proxy in front of
+# a server makes the address say nothing about what is behind it.
+#
+# Known: generic, vllm, lmstudio, llamacpp, openrouter, groq, together.
+# profile = "generic"
+
+# What to call this endpoint in logs, so two of them can be told apart when
+# one is failing. Empty uses the profile name.
+# name = ""
+
 [context]
 # What the model is given of a long session. Replaying everything is what lets
 # a session survive a restart, but a session that goes on long enough stops

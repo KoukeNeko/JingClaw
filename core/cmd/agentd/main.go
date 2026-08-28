@@ -38,6 +38,8 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/gemini"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider/ollama"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider/openaicompat"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
 	"github.com/KoukeNeko/JingClaw/core/internal/secret"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/sqlite"
@@ -680,16 +682,84 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 			return nil, err
 		}
 
-		return provider.WithRetry(p, provider.RetryPolicy{
-			MaxAttempts: cfg.Model.Retry.MaxAttempts,
-			BaseDelay:   cfg.Model.Retry.BaseDelay,
-			MaxDelay:    cfg.Model.Retry.MaxDelay,
-			Jitter:      cfg.Model.Retry.Jitter,
-		}), nil
+		return provider.WithRetry(p, retryPolicy(cfg)), nil
+
+	case "ollama":
+		// A credential only if one was supplied: the hosted service needs one
+		// and a local daemon has nothing to check it against.
+		key, err := optionalKey(cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		p, err := ollama.New(ollama.Config{
+			BaseURL:   cfg.Model.Ollama.BaseURL,
+			APIKey:    key,
+			KeepAlive: cfg.Model.Ollama.KeepAlive,
+			NumCtx:    cfg.Model.Ollama.NumCtx,
+			Think:     cfg.Model.Ollama.Think,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return provider.WithRetry(p, retryPolicy(cfg)), nil
+
+	case "openai_compat":
+		key, err := optionalKey(cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		p, err := openaicompat.New(openaicompat.Config{
+			BaseURL: cfg.Model.OpenAICompat.BaseURL,
+			APIKey:  key,
+			Profile: cfg.Model.OpenAICompat.Profile,
+			Name:    cfg.Model.OpenAICompat.Name,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return provider.WithRetry(p, retryPolicy(cfg)), nil
 
 	default:
-		return nil, fmt.Errorf("unknown provider %q; use fake or gemini", cfg.Model.Provider)
+		return nil, fmt.Errorf(
+			"unknown provider %q; use gemini, ollama, openai_compat, or fake", cfg.Model.Provider)
 	}
+}
+
+// retryPolicy is shared by every provider that reaches the network, so a
+// deployment cannot end up with one of them retrying on different terms from
+// the rest.
+func retryPolicy(cfg config.Config) provider.RetryPolicy {
+	return provider.RetryPolicy{
+		MaxAttempts: cfg.Model.Retry.MaxAttempts,
+		BaseDelay:   cfg.Model.Retry.BaseDelay,
+		MaxDelay:    cfg.Model.Retry.MaxDelay,
+		Jitter:      cfg.Model.Retry.Jitter,
+		Budget:      cfg.Model.Retry.Budget,
+	}
+}
+
+// optionalKey loads a credential if one was configured, and is content when
+// none was.
+//
+// A local model server usually has no credential at all, so a missing one is
+// an ordinary state here rather than the startup failure it is for a hosted
+// provider.
+func optionalKey(cfg config.Config) (string, error) {
+	files, err := secret.DefaultFiles(cfg.Model.APIKeyFile)
+	if err != nil {
+		return "", err
+	}
+
+	key, err := secret.Load(secret.LoadOptions{EnvVars: cfg.Model.APIKeyEnv, Files: files})
+	if err != nil {
+		return "", err
+	}
+	if !key.IsSet() {
+		return "", nil
+	}
+	return key.Reveal(), nil
 }
 
 // resolveModel picks the model to run with. An explicit choice is verified
