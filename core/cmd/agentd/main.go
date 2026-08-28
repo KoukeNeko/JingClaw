@@ -344,6 +344,7 @@ func run() error {
 		control.NewGatewayServer(plane.Ingress, store, time.Now)))
 	api.Handle(controlv1connect.NewArtifactServiceHandler(control.NewArtifactServer(artifacts)))
 	api.Handle(controlv1connect.NewConsoleServiceHandler(control.NewConsoleServer(pairing, baseURL)))
+	api.Handle(controlv1connect.NewMemoryServiceHandler(control.NewMemoryServer(store)))
 	api.Handle(controlv1connect.NewChannelServiceHandler(
 		control.NewChannelServer(store, func() string { return id.WithPrefix("bnd") }, time.Now)))
 
@@ -361,6 +362,7 @@ func run() error {
 		controlv1connect.ChannelServiceName,
 		controlv1connect.GatewayIngressServiceName,
 		controlv1connect.ConsoleServiceName,
+		controlv1connect.MemoryServiceName,
 	} {
 		root.Handle("/"+service+"/", guarded)
 	}

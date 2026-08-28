@@ -55,6 +55,7 @@ var servicesForScope = map[Scope]map[string]bool{
 		"jingclaw.control.v1.GatewayIngressService": true,
 		"jingclaw.control.v1.ArtifactService":       true,
 		"jingclaw.control.v1.ConsoleService":        true,
+		"jingclaw.control.v1.MemoryService":         true,
 	},
 	ScopeGateway: {
 		"jingclaw.control.v1.GatewayIngressService": true,

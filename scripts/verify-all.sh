@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 FAILED=0
 for CHECK in verify-config.sh verify-console.sh verify-compaction.sh \
-	verify-mcp.sh verify-artifacts.sh; do
+	verify-mcp.sh verify-memory.sh verify-artifacts.sh; do
 	printf '\n=== %s ===\n' "$CHECK"
 	if ! "./$CHECK"; then
 		FAILED=$((FAILED + 1))

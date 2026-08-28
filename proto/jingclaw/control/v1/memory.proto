@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+import "google/protobuf/timestamp.proto";
+import "jingclaw/control/v1/common.proto";
+
+// MemoryService is how a person sees and removes what the agent believes.
+//
+// This is the load-bearing control, not a convenience. Every shipped assistant
+// that has had its memory poisoned was poisoned invisibly, and the advice that
+// followed each incident was the same: go and look at what it thinks it knows.
+// A memory a person cannot see is one they cannot correct.
+//
+// Reachable by the operator's own credential and by nothing else.
+service MemoryService {
+  rpc ListMemories(ListMemoriesRequest) returns (ListMemoriesResponse);
+
+  // ForgetMemory removes one for good.
+  //
+  // Distinct from a correction, which invalidates and keeps the history.
+  // Somebody who asks the agent to forget something and is told it stopped
+  // being true has not been answered.
+  rpc ForgetMemory(ForgetMemoryRequest) returns (ForgetMemoryResponse);
+}
+
+message ListMemoriesRequest {
+  RequestMeta meta = 1;
+
+  // Include what has been superseded, for showing what changed.
+  bool include_invalidated = 2;
+
+  int32 limit = 3;
+}
+
+message ListMemoriesResponse {
+  repeated Memory memories = 1;
+}
+
+message ForgetMemoryRequest {
+  RequestMeta meta = 1;
+  string id = 2;
+}
+
+message ForgetMemoryResponse {}
+
+message Memory {
+  string id = 1;
+
+  // workspace or principal, and what it belongs to.
+  string scope = 2;
+  string scope_ref = 3;
+
+  // instruction is carried on every turn; fact is looked up.
+  string kind = 4;
+
+  string text = 5;
+
+  // Where it came from. Shown rather than merely stored: a reader deciding
+  // whether to keep a memory needs to know who caused it, and an agent asked
+  // to weigh one needs the same.
+  TrustLevel trust = 6;
+  RunOrigin origin = 7;
+  string source_session_id = 8;
+  uint64 source_seq = 9;
+  string approved_by = 10;
+
+  google.protobuf.Timestamp created_at = 11;
+
+  // Set when this stopped being believed.
+  google.protobuf.Timestamp invalidated_at = 12;
+  string superseded_by = 13;
+}

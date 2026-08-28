@@ -74,7 +74,7 @@ func newRootCommand() *cobra.Command {
 
 	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand(),
 		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand(),
-		newArtifactCommand(), newConsoleCommand())
+		newArtifactCommand(), newConsoleCommand(), newMemoryCommand())
 	return root
 }
 
@@ -562,6 +562,111 @@ func newConsoleCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// newMemoryCommand shows and removes what the agent believes.
+//
+// This is the control the research says is load-bearing: every assistant whose
+// memory has been poisoned was poisoned invisibly, and a memory nobody can see
+// is one nobody can correct.
+func newMemoryCommand() *cobra.Command {
+	memory := &cobra.Command{Use: "memory", Short: "See and remove what the agent remembers"}
+
+	var history bool
+
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List everything the agent believes, newest first",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, err := dialMemory()
+			if err != nil {
+				return err
+			}
+
+			resp, err := client.ListMemories(cmd.Context(),
+				connect.NewRequest(&controlv1.ListMemoriesRequest{
+					Meta:               newMeta(),
+					IncludeInvalidated: history,
+				}))
+			if err != nil {
+				return err
+			}
+
+			memories := resp.Msg.GetMemories()
+			if len(memories) == 0 {
+				fmt.Fprintln(cmd.ErrOrStderr(), "nothing has been remembered")
+				return nil
+			}
+
+			for _, memory := range memories {
+				printMemory(memory)
+			}
+			return nil
+		},
+	}
+	list.Flags().BoolVar(&history, "history", false,
+		"include memories that have been superseded")
+
+	forget := &cobra.Command{
+		Use:   "forget <memory-id>",
+		Short: "Remove a memory for good",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := dialMemory()
+			if err != nil {
+				return err
+			}
+
+			if _, err := client.ForgetMemory(cmd.Context(),
+				connect.NewRequest(&controlv1.ForgetMemoryRequest{
+					Meta: newMeta(),
+					Id:   args[0],
+				})); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(cmd.ErrOrStderr(), "forgot %s\n", args[0])
+			return nil
+		},
+	}
+
+	memory.AddCommand(list, forget)
+	return memory
+}
+
+// printMemory shows a memory with where it came from.
+//
+// The provenance is the point. "The agent believes X" is not something a
+// person can act on; "the agent believes X because somebody on Discord said so
+// in this session" is.
+func printMemory(memory *controlv1.Memory) {
+	state := ""
+	if memory.GetInvalidatedAt() != nil {
+		state = " (superseded)"
+	}
+
+	fmt.Printf("%s  [%s · %s · %s]%s\n",
+		memory.GetId(), memory.GetKind(), memory.GetScope(), memory.GetScopeRef(), state)
+	fmt.Printf("    %s\n", memory.GetText())
+
+	from := "typed here"
+	if memory.GetOrigin().GetKind() == controlv1.RunOriginKind_RUN_ORIGIN_KIND_GATEWAY {
+		principal := memory.GetOrigin().GetPrincipal()
+		from = fmt.Sprintf("%s account %s — from outside this machine",
+			principal.GetPlatform(), principal.GetPrincipalId())
+	}
+
+	fmt.Printf("    %s · session %s at seq %d · approved by %s\n\n",
+		from, memory.GetSourceSessionId(), memory.GetSourceSeq(), memory.GetApprovedBy())
+}
+
+func dialMemory() (controlv1connect.MemoryServiceClient, error) {
+	httpClient, baseURL, err := authenticated()
+	if err != nil {
+		return nil, err
+	}
+	return controlv1connect.NewMemoryServiceClient(httpClient, baseURL), nil
 }
 
 func dialArtifacts() (controlv1connect.ArtifactServiceClient, error) {

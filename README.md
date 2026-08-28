@@ -276,6 +276,57 @@ A session started from the terminal shows up in the console, and a turn sent
 from the terminal streams into it while it is open — which is what "clients are
 projections" has to mean in practice rather than only in the design.
 
+## Memory
+
+Off by default. What is written here is read by every later session, by an
+agent that no longer knows where it came from, so turning it on is a decision
+somebody makes rather than one they inherit:
+
+```toml
+[memory]
+enabled = true
+```
+
+Then `remember` writes something down and `recall` looks it up. Three rules
+shape the rest, and each comes from something that has actually gone wrong in a
+shipped system rather than from taste.
+
+**Nothing is written unattended.** Remembering has its own permission level and
+every profile stops for it — not only gateway turns. A poisoned file read
+locally is untrusted text as surely as a chat message is, so an unattended
+local write would leave a hole in the whole approval story. What the approval
+shows is the proposed text *and* which session, which message and which
+principal produced it: a conditional injection that fires when you say "yes" to
+something innocuous is only visible if the screen says where the proposal came
+from.
+
+**Reading is scoped by who is asking.** What a Discord account told the agent
+is not recalled for the operator, and the operator's notes are not read into a
+channel. The scope comes from the turn, never from an argument the model could
+choose. What the *project* knows is shared, because that is what a project is.
+
+**What came from outside stays marked.** A gateway-origin memory is untrusted
+permanently — a fact derived from untrusted text is untrusted however many
+summaries it has been through — and is never put in front of the model as a
+standing direction. It can be looked up deliberately, labelled as coming from
+outside this machine.
+
+You can see all of it, which is the control that matters:
+
+```bash
+core/bin/agent memory list             # everything, with where each came from
+core/bin/agent memory list --history   # including what has been superseded
+core/bin/agent memory forget mem_01K…  # gone, not merely superseded
+```
+
+A correction invalidates rather than overwrites, so "what is believed now" and
+"what was believed then" are both answerable. Forgetting is the exception and
+really deletes: somebody who asks the agent to forget something and is told it
+stopped being true has not been answered.
+
+The reasoning, the evidence behind it, and what is deliberately not built are
+in `docs/research/05-memory.md`.
+
 ## Large output
 
 A build log that fails at line 40,000 is the most useful thing in a session and
