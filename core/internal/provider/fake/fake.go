@@ -48,6 +48,7 @@ func (p *Provider) Models(context.Context) ([]provider.ModelInfo, error) {
 		DisplayName:     "Fake echo",
 		Description:     "Deterministic echo provider used for offline testing.",
 		ContextWindow:   1 << 20,
+		ContextSource:   provider.ContextCatalog,
 		MaxOutputTokens: 1 << 16,
 		Capabilities:    provider.Capabilities{Streaming: true},
 	}}, nil

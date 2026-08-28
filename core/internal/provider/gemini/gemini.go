@@ -80,6 +80,7 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 			DisplayName:     model.DisplayName,
 			Description:     model.Description,
 			ContextWindow:   int64(model.InputTokenLimit),
+			ContextSource:   provider.ContextCatalog,
 			MaxOutputTokens: int64(model.OutputTokenLimit),
 			Capabilities: provider.Capabilities{
 				Streaming: true,

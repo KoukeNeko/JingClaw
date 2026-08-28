@@ -265,6 +265,10 @@ func run() error {
 		return nil
 	}
 
+	// Settled once, so the figure compaction plans against and the one the
+	// startup line reports cannot drift apart.
+	window, windowSource := contextWindow(cfg, selected)
+
 	hub := event.NewHub()
 
 	// Both halves of the gateway at once: accepting messages without routing
@@ -289,7 +293,7 @@ func run() error {
 			UsageFlushInterval: cfg.Delivery.UsageFlushInterval,
 		},
 		ContextBudget: runtime.ContextBudget{
-			Window:        contextWindow(cfg, selected),
+			Window:        window,
 			CompactAt:     cfg.Context.CompactAt,
 			KeepFraction:  cfg.Context.KeepFraction,
 			SummaryTokens: cfg.Context.SummaryTokens,
@@ -429,7 +433,8 @@ func run() error {
 		"base_url", baseURL,
 		"provider", modelProvider.Name(),
 		"model", selected.ID,
-		"context_window", contextWindow(cfg, selected),
+		"context_window", window,
+		"context_window_from", string(windowSource),
 		"workspace", ws.Root(),
 		"permission_profile", permissions.Profile(),
 		"config_file", configFile,
@@ -620,11 +625,18 @@ func describeTools(registry *tool.Registry, servers *mcp.Manager, cfg config.Con
 // compaction off, which is the honest outcome: summarising against a guessed
 // window would either throw history away early or fail to save the session
 // that needed saving.
-func contextWindow(cfg config.Config, model provider.ModelInfo) int64 {
+func contextWindow(cfg config.Config, model provider.ModelInfo) (int64, provider.ContextSource) {
 	if cfg.Context.Window > 0 {
-		return cfg.Context.Window
+		return cfg.Context.Window, provider.ContextOperator
 	}
-	return model.ContextWindow
+	if model.ContextWindow > 0 {
+		source := model.ContextSource
+		if source == provider.ContextUnknown {
+			source = provider.ContextCatalog
+		}
+		return model.ContextWindow, source
+	}
+	return 0, provider.ContextUnknown
 }
 
 // describeConfigFile says where the settings came from, and whether this run

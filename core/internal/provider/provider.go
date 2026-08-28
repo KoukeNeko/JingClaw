@@ -40,11 +40,55 @@ type ModelInfo struct {
 	DisplayName string
 	Description string
 
-	ContextWindow   int64
+	// ContextWindow is what to plan against: the room this model actually has
+	// right now.
+	//
+	// For a hosted model that is the model's own limit. For one served
+	// locally it is whatever the server allocated, which is routinely far
+	// less: the same weights that were trained for 128k are commonly loaded
+	// with 4k because that is what fit in the memory available. Budgeting
+	// against the larger number sends a request that cannot be served, and
+	// compacts far too late to save the session.
+	ContextWindow int64
+
+	// TrainedContext is the model's own maximum, when it is known and differs
+	// from what is loaded. It is not what compaction plans against; it is what
+	// tells an operator that raising a setting would buy them something.
+	TrainedContext int64
+
+	// ContextSource records where ContextWindow came from, because "the
+	// operator said so" and "nobody knew, so this is a default" are different
+	// claims and only one of them is worth trusting with a session.
+	ContextSource ContextSource
+
 	MaxOutputTokens int64
 
 	Capabilities Capabilities
 }
+
+// ContextSource is the provenance of a context window.
+type ContextSource string
+
+const (
+	// ContextUnknown means nothing established it. Compaction treats this as
+	// "no window" rather than inventing one.
+	ContextUnknown ContextSource = ""
+
+	// ContextOperator was set in configuration, and outranks everything: a
+	// person who serves the model knows what they gave it.
+	ContextOperator ContextSource = "operator"
+
+	// ContextRuntime came from the server reporting what it has loaded right
+	// now. The most trustworthy thing a machine can say about itself.
+	ContextRuntime ContextSource = "runtime"
+
+	// ContextCatalog came from a provider's model listing.
+	ContextCatalog ContextSource = "catalog"
+
+	// ContextTrained is the model's own maximum, which a server may not have
+	// given it. The weakest source, and never guessed from a model's name.
+	ContextTrained ContextSource = "trained"
+)
 
 type Capabilities struct {
 	Streaming bool
