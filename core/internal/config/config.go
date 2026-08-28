@@ -1190,327 +1190,253 @@ func DefaultPath() (string, error) {
 // the list of settings from the struct itself.
 const Example = `# JingClaw configuration.
 #
-# Every setting here has a default; a value only needs to appear if it differs.
-# Flags override this file, and JINGCLAW_-prefixed environment variables sit
-# between the two (JINGCLAW_AGENT_NAME sets agent.name, and so on).
+# Settings are shown at their defaults. Uncommenting one and leaving the value
+# alone changes nothing; the point is that the value is visible. The commented
+# ones are the rarer knobs.
 #
-# Durations are written the way Go writes them: "500ms", "2s", "10m".
+# Precedence: flags beat the environment, which beats this file. Every setting
+# has a JINGCLAW_ environment variable: JINGCLAW_MODEL_PROVIDER, and so on.
 
 [agent]
-# What the agent calls itself. Leave empty to have it not claim a name, which
-# is the honest choice when the account it speaks through is called something
-# else.
-# name = "JingClaw"
+name = "JingClaw"
 
-# Extra identity: tone, stance, what this deployment is for.
-# persona = """
-# You are careful and concise. You work on this team's Go services.
-# """
+# What runs may do without asking. "local" is for somebody at this machine.
+# Channels get their own, which is not settable here.
+permission_profile = "local"
 
-# Standing directions for every session.
-# instructions = """
-# Prefer table-driven tests. Do not add dependencies without saying why.
-# """
+# Read from the workspace root and put in front of the model. Missing files
+# are skipped.
+instruction_files = ["AGENTS.md", "JINGCLAW.md"]
 
-# Files read from the workspace when they exist. AGENTS.md is a convention
-# several tools already share.
-# instruction_files = ["AGENTS.md", "JINGCLAW.md"]
+# How many model turns one run may take before it gives up.
+max_iterations = 12
 
-# How many model turns a single run may take before it gives up.
-# max_iterations = 12
-
-# What local sessions may do without being asked: "local" allows reading and
-# editing the workspace and asks before running programs; "gateway" refuses to
-# run programs at all. Choose "gateway" on a machine you share.
-# permission_profile = "local"
+# Extra standing text. persona shapes how it writes; instructions are added to
+# every prompt. Neither is a permission: what the agent may do is decided by
+# the policy engine, which reads none of this.
+# persona = ""
+# instructions = ""
 
 [model]
 # Which model server to talk to.
 #
 #   "gemini"         Google's API. Needs a key.
-#   "ollama"         An Ollama daemon on this machine, or Ollama Cloud.
-#                    Settings in [model.ollama].
-#   "openai_compat"  Anything speaking the OpenAI chat protocol: vLLM,
-#                    LM Studio, llama.cpp, OpenRouter, Groq, Together.
-#                    Settings in [model.openai_compat].
-#   "fake"           No network and no credential. What the tests and demos
-#                    use, and what proves a problem is not the model.
-#
-# provider = "fake"
+#   "ollama"         A daemon on this machine, or Ollama Cloud. See below.
+#   "openai_compat"  vLLM, LM Studio, llama.cpp, OpenRouter, Groq, Together.
+#   "fake"           No network, no credential. What proves a problem is not
+#                    the model.
+provider = "fake"
 
-# Which model to ask for, in whatever the chosen provider calls it:
-# "gemma-4-31b-it" for gemini, "qwen3:8b" or "gemma4:31b-cloud" for ollama,
-# whatever /v1/models lists for openai_compat.
-#
-# Empty is allowed only when the provider serves exactly one model. Where
-# there are several the daemon refuses to start and names them, rather than
-# picking one and leaving somebody to work out later which it chose.
-# model = "gemma-4-31b-it"
+# Named as the chosen provider names it: "gemma-4-31b-it", "qwen3:8b",
+# whatever /v1/models lists. Empty is allowed only when the provider serves
+# exactly one model; otherwise the daemon names them and stops.
+# model = ""
 
-# Where the credential comes from. Both are consulted, environment first. It
-# is never written to a log and never passed to a program the agent runs.
-#
-# A model server on this machine usually needs none, and having none is an
-# ordinary state rather than a startup failure. Ollama Cloud reached directly
-# does need one; reached through a signed-in local daemon it does not.
-# api_key_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+# Where the credential comes from, environment first. Never logged, never
+# passed to a program the agent runs. A model server on this machine usually
+# needs none, and having none is not an error.
+api_key_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+api_key_file = "gemini.key"
 
-# Read from the config directory, and only if it is mode 600.
-# api_key_file = "gemini.key"
-
-# How fast the offline provider pretends to think, so streaming and
-# interruption can be watched at human speed.
+# How fast the offline provider pretends to think.
 # fake_delay = "150ms"
 
 [model.retry]
-# The right numbers depend on the account: a free tier hitting a daily quota
-# and a paid plan with generous limits want different behaviour.
+# A server's own Retry-After is honoured exactly, never shortened: asking again
+# early earns the same refusal. These bound what this code invents when the
+# server said nothing.
 # max_attempts = 4
 # base_delay = "500ms"
 # max_delay = "30s"
-
-# Spreads retries so several clients recovering from one outage do not resend
-# in lockstep. Between 0 and 1.
 # jitter = 0.3
 
-# The most time one request may spend waiting across all its attempts.
-#
-# A server that is rate limiting may ask to be left alone for longer than the
-# person watching is willing to wait. Its figure is honoured exactly rather
-# than shortened — asking again early only earns the same refusal — so this is
-# what decides when to stop instead and say when it would have been free.
-#
-# 0 bounds retries by the attempt count alone.
+# The most time one request may spend waiting across all its attempts. A server
+# asking for longer than this ends the request with a reason instead.
 # budget = "1m30s"
 
 [model.ollama]
-# A local Ollama daemon, or the hosted service.
-#
-# One section for both: they are the same API at different addresses. For the
-# hosted service set base_url to "https://ollama.com" and supply a credential
-# the same way as for any other provider. A local daemon needs none.
-#
-# This uses Ollama's own API rather than its OpenAI-compatible one, because
-# that is where the things a runtime needs live: how much context the server
-# actually gave a model, whether it is loaded, and its thinking as a field
-# rather than mixed into the answer.
-# base_url = "http://localhost:11434"
+base_url = "http://localhost:11434"
 
-# How long a model stays in memory after a request. Empty leaves the server's
-# own default, which is the right choice on a machine doing other work.
-# Written as a duration: "30m", "1h", or "0" to unload immediately.
+# For Ollama Cloud, set base_url to "https://ollama.com" and supply a
+# credential above. A local daemon needs none, including for cloud models it
+# proxies.
+
+# How long a model stays resident after a request. Empty leaves the server's
+# default. "30m", "1h", or "0" to unload at once.
 # keep_alive = ""
 
-# Ask for the model to be loaded with this much context.
-#
-# Worth setting. Ollama otherwise sizes the context against free memory, and
-# on a busy machine a model trained for 128k is commonly loaded with 4k — and
-# the whole session is then planned against that smaller figure.
+# Load the model with this much context. Worth setting: Ollama otherwise sizes
+# it against free memory, and a model trained for 128k is commonly given 4k —
+# which is then what the whole session is planned against.
 # num_ctx = 0
 
-# Ask the model to report its reasoning separately from its answer.
-#
-#   ""                            follow the model: ask when it says it can
-#   "off"                         never ask
-#   "on"                          always ask, at the server's own depth
-#   "low" "medium" "high" "max"   always ask, at that depth
-#
-# Empty is the useful setting. Asking a model that cannot think is an error
-# rather than something ignored, so anything fixed breaks the moment this
-# points at a different model.
-#
-# Reasoning is kept out of the answer whichever way this is set. It is a
-# separate kind of event and nothing forwards it to a chat channel.
-# think = ""
+# Ask for the model's reasoning separately. Empty follows the model, asking
+# only when it reports being able to, because asking one that cannot is an
+# error rather than something ignored. "off", "on", "low", "medium", "high",
+# "max". Reasoning never reaches a chat channel either way.
+think = ""
 
 [model.openai_compat]
-# Any endpoint that speaks the OpenAI chat protocol: vLLM, LM Studio,
-# llama.cpp's server, OpenRouter, Groq, Together.
-#
-# The address the chat path hangs off, usually ending in /v1. There is no
-# default: an endpoint nobody named is not one to guess at.
+# The address the chat path hangs off, usually ending in /v1. No default.
 # base_url = ""
 
-# What this particular server does differently from the protocol it claims.
-#
-# "OpenAI-compatible" describes a request shape, not behaviour: servers
-# disagree about whether usage is reported, which field carries reasoning, and
-# what a status code means — one answers 403 for a prompt that is too long,
-# which otherwise reads as a permissions failure nobody can fix.
-#
-# Named here rather than guessed from the address, because a proxy in front of
-# a server makes the address say nothing about what is behind it.
-#
-# Known: generic, vllm, lmstudio, llamacpp, openrouter, groq, together.
-# profile = "generic"
+# What this server does differently from the protocol it claims. Named rather
+# than guessed, because a proxy makes the address say nothing.
+# generic, vllm, lmstudio, llamacpp, openrouter, groq, together.
+profile = "generic"
 
-# What to call this endpoint in logs, so two of them can be told apart when
-# one is failing. Empty uses the profile name.
+# What to call this endpoint in logs. Empty uses the profile name.
 # name = ""
 
 [context]
-# What the model is given of a long session. Replaying everything is what lets
-# a session survive a restart, but a session that goes on long enough stops
-# working; the older part is summarised into the log so that it does not.
+# The model's window, in tokens. Zero asks the provider, which is right
+# whenever it knows; set it for a server that does not say.
+window = 0
 
-# The model's context window in tokens. Zero asks the provider, which knows
-# better than this file does. Set it for a local model served by something that
-# does not report one.
-# window = 0
-
-# The share of the window at which history is summarised. Below one because the
-# size of a request is estimated, not counted.
+# When to fold older turns into a summary, and how much to keep as it was.
 # compact_at = 0.7
-
-# The share of the window the recent turns may keep, verbatim, afterwards.
-# Must be below compact_at, or compacting would not make anything smaller.
 # keep_fraction = 0.3
-
-# The ceiling on the summary itself.
 # summary_tokens = 1024
-
-[tools]
-# How much of a file one read returns.
-# read_limit = 65536
-
-# Files above this are not read at all; the answer for one of those is to
-# search it instead.
-# max_readable_file = 8388608
-
-# The ceiling on replacing a file in full. A model rewriting something large is
-# nearly always making the wrong shape of edit.
-# max_overwrite_bytes = 131072
-
-# Files above this are skipped when searching. They are generated or minified
-# far more often than they are the answer.
-# max_searchable_file = 2097152
-
-# How many results glob_files and grep return before they stop and say so.
-# glob_results = 200
-# grep_results = 100
-
-# How long a program may run when it does not ask for a limit of its own, and
-# the most it may ask for.
-# command_timeout = "2m"
-# max_command_timeout = "10m"
-
-# How much of a program's output is kept. The middle is dropped first: the
-# start says what ran and the end says how it ended.
-# max_command_output = 32768
-
-[artifacts]
-# Where output too large to show the model is kept, so that truncating it is
-# not the same as destroying it. The model is given an excerpt and an id, and
-# reads the rest with read_artifact.
-
-# Empty puts it beside the database, where the rest of the durable state is.
-# dir = ""
-
-# The ceiling on one artifact. Larger than this is a file that belongs in the
-# workspace rather than output that was captured.
-# max_bytes = 67108864
-
-# The ceiling on one image put in front of the model. Larger is described in
-# words instead: a provider refuses a request that is too big, and a refused
-# request is worse than a picture nobody saw.
-# max_image_bytes = 8388608
 
 [memory]
 # What the agent carries between sessions.
 #
-# On. What makes that safe is not this setting but the one thing that has not
-# changed: nothing is ever written unattended. Writing a memory stops for a
-# person in every profile, so turning this on grants the agent the ability to
-# recall and to ask, never to decide by itself what it will believe later.
-#
-# What arrived from outside this machine stays marked as such and is never put
-# in front of the model as a standing instruction.
-#
-# Set it to false to run with no memory at all.
-# enabled = true
+# On. What makes that safe is that nothing is ever written unattended: writing
+# a memory stops for a person in every profile. What arrived from outside this
+# machine stays marked as such and never becomes a standing instruction.
+enabled = true
 
-# The ceiling on the standing directions injected every turn. Everything here
-# is context the work does not get.
+# The ceiling on standing directions injected every turn.
 # max_instruction_bytes = 2000
 
 [web]
-# Whether the agent may read web pages.
+# Whether the agent may read web pages. Reading only: no clicking, typing,
+# signing in or submitting.
 #
-# Off by default. Turning it on lets the agent pull in text written by people
-# who are not the operator, which the model reads alongside its own findings.
-# What comes back is labelled as somebody else's and is never treated as an
-# instruction, but the exposure is real and somebody should choose it.
-#
-# Reading only. There is no clicking, typing, signing in or submitting: that is
-# a different power and it is not in this tool.
-#
-# Local sessions fetch unattended. Sessions arriving from a chat platform stop
-# for the operator, because there the address is chosen by somebody else.
-# enabled = false
+# Local sessions fetch unattended. Channels stop for the operator, because
+# there the address is chosen by somebody else.
+enabled = false
 
-# How a page is fetched.
-#
-# "browser" drives a real browser. It is slower than an HTTP request and it
-# reaches the growing number of sites that answer anything else with a
-# challenge page — which an agent otherwise reads as though it were the
-# article. It needs Python and the cloakbrowser package on this machine.
-#
-# "none" disables fetching while leaving this section configured.
-# backend = "browser"
+# "browser" drives a real browser, which reaches the growing number of sites
+# that answer anything else with a challenge page. Needs Python and the
+# cloakbrowser package. "none" disables fetching.
+backend = "browser"
 
-# The interpreter the browser backend runs. Empty finds python3 on PATH.
 # python = ""
-
-# How long one page gets. A page still rendering at the deadline returns
-# whatever it has, which beats returning nothing.
 # timeout = "45s"
-
-# How much of a page's text reaches the model. The whole text is stored either
-# way and can be read back with read_artifact.
 # max_characters = 40000
-
-# How many of a page's links to list, so a next page can be named rather than
-# guessed. A navigation page has thousands and none are worth the context.
 # max_links = 50
 
-# The channels this agent answers in.
-#
-# Declared here so a deployment is described in the file rather than in
-# commands somebody has to remember running. Applied when the daemon starts;
-# declaring a channel that already exists updates it.
-#
-# Removing one from this file does not unbind it. A daemon started once with an
-# incomplete file would otherwise take channels away, and a binding decides who
-# can reach the agent. The startup log names any bound channel this file does
-# not, so nothing drifts unseen; "agent bindings remove" is how one goes.
-#
-# There are two lists, and which one a channel is in is what decides its
-# powers. Neither can run programs: channel permissions settle who is in the
-# room, which is what makes the rest reasonable, but they cannot settle whether
-# an account still belongs to its owner — and a stolen one holds the request
-# and the approval both. So that stays where somebody has to be at the machine.
+[tools]
+# Bounds on what one tool call may read, write or return. A tool that can fill
+# the context window in one call can end a session in one call.
+# read_limit = 65536
+# max_readable_file = 8388608
+# max_overwrite_bytes = 131072
+# max_searchable_file = 2097152
+# glob_results = 200
+# grep_results = 100
+# command_timeout = "2m"
+# max_command_timeout = "10m"
+# max_command_output = 32768
 
-# Rooms other people can type in. Reading runs unattended; changes, memory and
-# web pages stop and ask; programs are refused.
+[artifacts]
+# Where output too large to show is kept, content-addressed. Empty uses the
+# data directory.
+# dir = ""
+# max_bytes = 67108864
+# max_image_bytes = 8388608
+
+[mcp]
+# Tool servers speaking the Model Context Protocol, run as child processes.
 #
+# What a server says about itself decides what the model is told a tool does.
+# It does not decide what the tool may do: that is the level below, and it
+# lives here rather than in the server.
+# start_timeout = "30s"
+# call_timeout = "2m"
+# max_output = 32768
+
+# [[mcp.servers]]
+# Prefixes this server's tools, so installing one cannot shadow a built-in.
+# name = "fs"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+
+# The child gets nothing from this daemon's environment except what is named
+# here. The daemon holds the provider credentials.
+# env = { EXAMPLE = "value" }
+# pass_env = ["PATH", "HOME"]
+
+# What its tools are gated at: internal, workspace_read, network_read,
+# workspace_write, remember, execute, high_impact. Anything a server can do to
+# a machine deserves execute unless somebody has read it.
+# level = "execute"
+
+[delivery]
+# How often a streaming answer is flushed onward. Every delta becoming a
+# message is a rate limit rather than a feature.
+# text_flush_bytes = 240
+# text_flush_interval = "200ms"
+# usage_flush_interval = "2s"
+
+[workspace]
+# What the agent may touch. Every path is resolved inside it, symlinks
+# included, and anything outside is refused.
+root = "."
+
+[server]
+# Loopback only. This API can run programs, so an address reachable from
+# elsewhere is refused however it is written. Port 0 takes a free one and
+# publishes it in the discovery file.
+addr = "127.0.0.1:0"
+
+log_level = "info"
+
+# The embedded console, served from this same address.
+web_console = true
+
+# How long a printed pairing code stays valid.
+# pairing_ttl = "10m"
+
+# Empty uses the platform's own locations.
+# data_dir = ""
+# runtime_dir = ""
+
+[gateway]
+# Read by gatewayd. Only "discord" is implemented.
+platform = "discord"
+
+# Names this bot within JingClaw, so bindings and the delivery queue belong to
+# it. A second bot means a second account_id.
+account_id = "main"
+
+# The channels this agent answers in, applied when the daemon starts.
+# Declaring one that exists updates it.
+#
+# Removing one does not unbind it: a daemon started once against an incomplete
+# file would take away the thing that decides who can reach the agent. The
+# startup log names every bound channel this file does not.
+#
+# Which list a channel is in decides its powers. Neither can run programs.
+# Channel permissions settle who is in the room, which is what makes the rest
+# reasonable; they cannot settle whether an account still belongs to its owner,
+# and a stolen one holds the request and the approval both.
+
+# Rooms other people can type in. Reading is unattended; changes, memory and
+# web pages stop and ask.
 # [[gateway.channels]]
-# Several channels may share an entry when they share their rules. Repeating
-# everything else for each is how two of them drift apart.
+# Several channels may share an entry when they share their rules.
 # channel_ids = ["111111111111111111"]
 # tenant_id = "222222222222222222"
 # workspace_id = "default"
-#
-# Who may trigger work. Both empty permits nobody, which is the default a
-# channel should have rather than answering anyone who finds it.
+# Both empty permits nobody, which is the right default for a room.
 # users = ["333333333333333333"]
 # roles = []
 
-# Private channels you control, used as a remote console.
-#
-# The same as above, and additionally: fetching a page runs unattended, and an
-# approval can be answered in the channel by replying "approve <id>" or
+# Private channels you control. As above, and additionally: pages are fetched
+# unattended, and an approval can be answered by replying "approve <id>" or
 # "deny <id>". The channel is told what it is the first time it is used.
-#
 # [[gateway.consoles]]
 # channel_ids = ["111111111111111112"]
 # tenant_id = "222222222222222222"
@@ -1518,112 +1444,20 @@ const Example = `# JingClaw configuration.
 # users = ["333333333333333333"]
 # roles = []
 
-[mcp]
-# Tool servers speaking the Model Context Protocol, run as child processes.
-#
-# A server is somebody else's program. What it says about itself decides what
-# the model is told a tool does; it does not decide what the tool is allowed to
-# do. That is the level below, and it lives here rather than in the server.
+[gateway.discord]
+# Where the bot token comes from. The file must be mode 600, and the value
+# never reaches a log.
+token_env = ["DISCORD_BOT_TOKEN"]
+token_file = "discord.token"
 
-# How long a server has to start and answer the handshake.
-# start_timeout = "30s"
-
-# How long one tool call may take.
-# call_timeout = "2m"
-
-# The ceiling on one result, so a single call cannot fill the context window.
-# max_output = 32768
-
-# One table per server. Tools arrive named mcp_<server>_<tool>, so installing
-# one can never shadow a built-in: read_file keeps meaning the one that
-# respects the workspace boundary.
-#
-# [[mcp.servers]]
-# name = "sqlite"
-# command = "uvx"
-# args = ["mcp-server-sqlite", "--db-path", "/tmp/notes.db"]
-#
-# What its tools count as to the policy engine: internal, workspace_read,
-# workspace_write, execute or high_impact. Defaults to execute, the honest
-# floor for a call that makes another program on this machine act. Lower it
-# only for a server you have read.
-# level = "execute"
-#
-# Nothing is inherited from the daemon's environment that is not named here.
-# It holds the provider credentials, and a tool server is exactly the kind of
-# program that should not be handed them by default.
-# pass_env = ["GITHUB_TOKEN"]
-#
-# [mcp.servers.env]
-# LOG_LEVEL = "warn"
-
-[delivery]
-# How provider output becomes events. These bound the event log by the clock
-# rather than by whatever chunk size the provider happens to use, which is what
-# stops one talkative model turning every few characters into a write.
-# text_flush_bytes = 240
-# text_flush_interval = "200ms"
-# usage_flush_interval = "2s"
-
-[workspace]
-# The only directory tools can reach. Relative paths are resolved against the
-# directory the daemon starts in.
-# root = "."
-
-[server]
-# Loopback only. This API can run programs; exposing it deserves more thought
-# than a config line, so a non-loopback address is refused at startup.
-# addr = "127.0.0.1:0"
-
-# Where the database lives. Empty uses the platform's own location.
-# data_dir = ""
-
-# Where the discovery file lives, which is how the CLI and the gateway find a
-# running daemon. Empty uses the platform's own location.
-# runtime_dir = ""
-
-# One of debug, info, warn, error.
-# log_level = "info"
-
-# Serve the built-in console from the same loopback address. The daemon prints
-# the URL, which carries a one-time-visible token; the page keeps it for the
-# tab and takes it back out of the address bar. Over SSH, forward the port.
-# web_console = true
-
-# How long the code in that URL stays good. It works once whatever happens
-# here; this is the ceiling on how long an unused one is worth stealing out of
-# a screenshot. "agent console" mints another.
-# pairing_ttl = "10m"
-
-[gateway]
-# Read by gatewayd, not by the daemon. Only "discord" is implemented.
-# platform = "discord"
-
-# Names this bot account within JingClaw, so channel bindings and the delivery
-# queue belong to it. Running a second bot means a second account_id.
-# account_id = "main"
-
-# Where the bot token comes from. As with the API key, the file has to be mode
-# 600 and the value never reaches a log.
-# token_env = ["DISCORD_BOT_TOKEN"]
-# token_file = "discord.token"
-
-# How many messages one answer may become before it goes as a file instead. An
-# answer split into eight messages is a channel somebody has to scroll past for
-# the rest of the day; as a file it is one line they can open.
+# How many messages one answer may become before it goes as a file instead.
 # max_messages = 3
 
-# The ceiling on an upload, well under what the platform accepts. The point is
-# to be readable, not to be as large as possible.
+# The upload ceiling, well under what Discord accepts.
 # max_attachment_bytes = 4194304
 
-# The least time between "what it is doing now" lines. They rewrite one message
-# rather than stacking, so this is about how fast a person can read rather than
-# about how much a channel can hold.
+# The least time between "what it is doing now" lines, and between versions of
+# an answer still being written.
 # working_interval = "2s"
-
-# The least time between versions of an answer that is still being written.
-# An answer finished inside one interval never streams: it arrives whole,
-# which is what it should do.
 # stream_interval = "1.5s"
 `

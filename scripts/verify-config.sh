@@ -29,9 +29,19 @@ mkdir -p "$FRESH"
 HOME="$FRESH" XDG_CONFIG_HOME="$FRESH/.config" "$BIN" --print-prompt >/dev/null 2>&1 || true
 CREATED=$(find "$FRESH" -name config.toml | head -1)
 [ -n "$CREATED" ] || fail "no configuration file was created"
-grep -q '^# name = "JingClaw"' "$CREATED" || fail "what was created is not the commented example"
+grep -q '^name = "JingClaw"' "$CREATED" || fail "what was created is not the example"
 grep -q '^\[gateway\]' "$CREATED" || fail "the created file is missing sections"
 printf 'ok   creates a configuration file when there is none\n'
+
+# The settings it shows live are at their defaults, so a file somebody has read
+# and not edited behaves exactly as one they never opened. Without this, the
+# example is a set of choices nobody made.
+HOME="$FRESH" XDG_CONFIG_HOME="$FRESH/.config" "$BIN" --print-config > "$WORK/regenerated" 2>/dev/null ||
+	fail "the created file could not be read back"
+diff -q "$CREATED" "$WORK/regenerated" >/dev/null ||
+	fail "reading the created file back produces different settings:
+$(diff "$CREATED" "$WORK/regenerated" | head -20)"
+printf 'ok   what it writes live is what it would have defaulted to anyway\n'
 
 # 2. A wrong setting is explained, not stack-traced.
 cat > "$WORK/wrong.toml" <<'EOF'
