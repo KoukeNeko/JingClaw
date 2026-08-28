@@ -32,10 +32,11 @@ type fakeRuntime struct {
 }
 
 type turn struct {
-	session domain.SessionID
-	text    string
-	origin  domain.RunOrigin
-	targets []domain.DeliveryTarget
+	session     domain.SessionID
+	text        string
+	origin      domain.RunOrigin
+	targets     []domain.DeliveryTarget
+	attachments []domain.Attachment
 }
 
 func (r *fakeRuntime) CreateSession(ctx context.Context, title string) (domain.Session, error) {
@@ -56,12 +57,16 @@ func (r *fakeRuntime) CreateSession(ctx context.Context, title string) (domain.S
 func (r *fakeRuntime) SendTurnTo(
 	_ context.Context,
 	session domain.SessionID,
-	text string,
-	origin domain.RunOrigin,
-	targets []domain.DeliveryTarget,
+	sent domain.Turn,
 ) (domain.RunID, domain.MessageID, error) {
-	r.turns = append(r.turns, turn{session: session, text: text, origin: origin, targets: targets})
-	return domain.RunID("run-" + text), "msg", nil
+	r.turns = append(r.turns, turn{
+		session:     session,
+		text:        sent.Text,
+		origin:      sent.Origin,
+		targets:     sent.Targets,
+		attachments: sent.Attachments,
+	})
+	return domain.RunID("run-" + sent.Text), "msg", nil
 }
 
 func newIngress(t *testing.T) (*gateway.Ingress, *sqlite.Store, *fakeRuntime, *permission.Engine) {

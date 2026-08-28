@@ -125,6 +125,11 @@
 # workspace rather than output that was captured.
 # max_bytes = 67108864
 
+# The ceiling on one image put in front of the model. Larger is described in
+# words instead: a provider refuses a request that is too big, and a refused
+# request is worse than a picture nobody saw.
+# max_image_bytes = 8388608
+
 [memory]
 # What the agent carries between sessions.
 #

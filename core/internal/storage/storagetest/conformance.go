@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -346,6 +347,10 @@ func testEventPayloadsRoundTrip(t *testing.T, newStore Factory) {
 		{domain.EventUserMessageAdded, domain.UserMessageAdded{
 			MessageID: "msg_1", Text: "測試訊息", Trust: domain.TrustUser,
 			Origin: domain.RunOrigin{Kind: domain.OriginLocalClient, ClientID: "cli"},
+			Attachments: []domain.Attachment{{
+				ArtifactID: "sha256-abc", Name: "screenshot.png",
+				MediaType: "image/png", Size: 1234,
+			}},
 		}},
 		{domain.EventRunStateChanged, domain.RunStateChanged{
 			Status: domain.RunCancelled, Reason: "user pressed stop",
@@ -375,7 +380,10 @@ func testEventPayloadsRoundTrip(t *testing.T, newStore Factory) {
 		if got.Kind != want.kind {
 			t.Errorf("event %d kind %q, want %q", i, got.Kind, want.kind)
 		}
-		if got.Payload != want.payload {
+		// DeepEqual rather than ==: a payload with a slice in it is not
+		// comparable, and == on an interface holding one panics at runtime
+		// rather than failing to compile.
+		if !reflect.DeepEqual(got.Payload, want.payload) {
 			t.Errorf("event %d payload %#v, want %#v", i, got.Payload, want.payload)
 		}
 	}

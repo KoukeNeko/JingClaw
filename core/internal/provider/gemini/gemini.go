@@ -307,6 +307,15 @@ func toParts(blocks []provider.ContentBlock) ([]*genai.Part, error) {
 			}
 			parts = append(parts, part)
 
+		case provider.ImageBlock:
+			if len(b.Data) == 0 {
+				return nil, fmt.Errorf("gemini: an image block carries no data")
+			}
+			if b.MediaType == "" {
+				return nil, fmt.Errorf("gemini: an image block has no media type")
+			}
+			parts = append(parts, genai.NewPartFromBytes(b.Data, b.MediaType))
+
 		case provider.ToolResultBlock:
 			// The API distinguishes output from error by key, which is how the
 			// model learns a call failed rather than returned odd output.

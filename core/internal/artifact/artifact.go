@@ -271,3 +271,17 @@ func (r readerWithContext) Read(p []byte) (int, error) {
 	}
 	return r.inner.Read(p)
 }
+
+// A note on removing artifacts.
+//
+// There is deliberately no eviction here, and adding a bounded cache would be
+// a mistake dressed as housekeeping. The event log refers to artifacts by
+// identifier: a tool result points at the output it truncated, and a message
+// points at the image that arrived with it. Evicting a referenced blob leaves
+// the log intact and the thing it promises gone, so "the conversation can be
+// rebuilt from the log" quietly stops being true — and stops being true for
+// the old conversations nobody is looking at, which is where it will not be
+// noticed.
+//
+// If this ever needs to reclaim space, the rule is that only unreferenced
+// content may go, and finding out what is referenced means reading the log.

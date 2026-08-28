@@ -180,6 +180,23 @@ func runToProto(r domain.Run) *controlv1.Run {
 	return converted
 }
 
+func attachmentsToProto(attachments []domain.Attachment) []*controlv1.MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+
+	converted := make([]*controlv1.MessageAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		converted = append(converted, &controlv1.MessageAttachment{
+			ArtifactId: attachment.ArtifactID,
+			Name:       attachment.Name,
+			MediaType:  attachment.MediaType,
+			Size:       attachment.Size,
+		})
+	}
+	return converted
+}
+
 func artifactToProto(ref *domain.Artifact) *controlv1.Artifact {
 	if ref == nil {
 		return nil
@@ -204,10 +221,11 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 	case domain.UserMessageAdded:
 		out.Payload = &controlv1.Event_UserMessageAdded{
 			UserMessageAdded: &controlv1.UserMessageAdded{
-				MessageId: string(p.MessageID),
-				Text:      p.Text,
-				Trust:     trustToProto(p.Trust),
-				Origin:    originToProto(p.Origin),
+				MessageId:   string(p.MessageID),
+				Text:        p.Text,
+				Trust:       trustToProto(p.Trust),
+				Origin:      originToProto(p.Origin),
+				Attachments: attachmentsToProto(p.Attachments),
 			},
 		}
 

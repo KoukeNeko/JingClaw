@@ -26,6 +26,12 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 				Kind:     domain.OriginLocalClient,
 				ClientID: "jingclaw-cli",
 			},
+			Attachments: []domain.Attachment{{
+				ArtifactID: "sha256-" + strings.Repeat("cd", 32),
+				Name:       "screenshot.png",
+				MediaType:  "image/png",
+				Size:       48_213,
+			}},
 		},
 		domain.EventRunStateChanged: domain.RunStateChanged{
 			Status: domain.RunFailed,

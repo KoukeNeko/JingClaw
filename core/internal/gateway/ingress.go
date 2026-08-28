@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 )
 
@@ -20,8 +21,7 @@ type Runtime interface {
 
 	// SendTurnTo starts a run whose output goes back to the conversation it
 	// came from rather than to a control client.
-	SendTurnTo(ctx context.Context, session domain.SessionID, text string,
-		origin domain.RunOrigin, targets []domain.DeliveryTarget) (domain.RunID, domain.MessageID, error)
+	SendTurnTo(ctx context.Context, session domain.SessionID, turn domain.Turn) (domain.RunID, domain.MessageID, error)
 }
 
 // ProfileBinder records which permission profile a session runs under.
@@ -35,10 +35,20 @@ type ProfileBinder interface {
 // an unlisted account or an overheard remark is no, because this is the one
 // place where text written by anyone who can type into a channel meets a
 // process that can change files.
+// ArtifactStore is where the bytes that arrive with a message are kept.
+//
+// Declared here rather than imported as a concrete type, so the ingress
+// depends on the one thing it does — putting bytes somewhere durable — and not
+// on everything an artifact store can do.
+type ArtifactStore interface {
+	PutBytes(ctx context.Context, content []byte, mediaType string) (artifact.Ref, error)
+}
+
 type Ingress struct {
-	Store   Store
-	Runtime Runtime
-	Binder  ProfileBinder
+	Store     Store
+	Runtime   Runtime
+	Binder    ProfileBinder
+	Artifacts ArtifactStore
 
 	NewSessionTitle func(InboundMessage) string
 	Now             func() time.Time
@@ -114,7 +124,17 @@ func (i *Ingress) Accept(ctx context.Context, message InboundMessage) (Accepted,
 	// The reply belongs in the conversation the request came from.
 	targets := []domain.DeliveryTarget{message.Conversation.DeliveryTarget()}
 
-	runID, _, err := i.Runtime.SendTurnTo(ctx, session, message.Text, origin, targets)
+	stored, err := i.storeAttachments(ctx, message)
+	if err != nil {
+		return Accepted{}, err
+	}
+
+	runID, _, err := i.Runtime.SendTurnTo(ctx, session, domain.Turn{
+		Text:        message.Text,
+		Origin:      origin,
+		Targets:     targets,
+		Attachments: stored,
+	})
 	if err != nil {
 		return Accepted{}, err
 	}
@@ -200,4 +220,75 @@ func (i *Ingress) logger() *slog.Logger {
 		return i.Logger
 	}
 	return slog.Default()
+}
+
+// storeAttachments puts what arrived with a message into the artifact store.
+//
+// What is recorded in the log is a reference, never the bytes: an image is
+// large and the log is replayed on every turn. The store is content-addressed,
+// so the same screenshot sent twice costs nothing the second time.
+//
+// An attachment the adapter did not fetch is still recorded, with no artifact
+// behind it. Dropping it silently would leave a message that makes no sense on
+// its own and no way to find out why.
+func (i *Ingress) storeAttachments(
+	ctx context.Context,
+	message InboundMessage,
+) ([]domain.Attachment, error) {
+	if len(message.Attachments) == 0 {
+		return nil, nil
+	}
+
+	kept := 0
+	stored := make([]domain.Attachment, 0, len(message.Attachments))
+
+	for _, attachment := range message.Attachments {
+		recorded := domain.Attachment{
+			Name:      attachment.Name,
+			MediaType: canonicalMediaType(attachment.ContentType),
+			Size:      attachment.Size,
+		}
+
+		switch {
+		case len(attachment.Data) == 0 || i.Artifacts == nil:
+			// The adapter did not fetch it, or there is nowhere to put it.
+
+		case kept >= maxImagesPerMessage:
+			i.Logger.Info("not keeping any more attachments from one message",
+				"name", attachment.Name, "limit", maxImagesPerMessage)
+
+		default:
+			// The declared type is not believed: it came from the platform,
+			// which got it from whoever uploaded the file.
+			mediaType, err := checkImage(attachment.ContentType, attachment.Data)
+			if err != nil {
+				i.Logger.Info("not keeping an attachment",
+					"name", attachment.Name, "reason", err)
+				break
+			}
+
+			// The bytes are made durable before the event that refers to them.
+			// A crash between the two leaves an artifact nobody points at,
+			// which is litter; the other order leaves a conversation that
+			// cannot be replayed, which is a broken promise.
+			ref, err := i.Artifacts.PutBytes(ctx, attachment.Data, mediaType)
+			if err != nil {
+				// Keeping the record without the bytes is better than refusing
+				// the whole message: somebody asked a question, and the part of
+				// it that is text still works.
+				i.Logger.Warn("could not keep an attachment",
+					"name", attachment.Name, "error", err)
+				break
+			}
+
+			recorded.ArtifactID = ref.ID
+			recorded.MediaType = mediaType
+			recorded.Size = ref.Size
+			kept++
+		}
+
+		stored = append(stored, recorded)
+	}
+
+	return stored, nil
 }

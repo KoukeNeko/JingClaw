@@ -217,12 +217,15 @@ func (a *Adapter) onMessage(event *events.MessageCreate) {
 		return
 	}
 
-	inbound := a.toInbound(message, event.GuildID, trigger)
-
 	// A short, independent deadline: the handler must not wait on the agent,
-	// and this call only hands the work over.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// and this call only hands the work over. Fetching files happens inside
+	// it, which is why the whole thing gets a little longer than the handover
+	// alone would need.
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
+
+	inbound := a.toInbound(message, event.GuildID, trigger)
+	inbound.Attachments = a.collectAttachments(ctx, message.Attachments)
 
 	if err := a.sink.Deliver(ctx, inbound); err != nil {
 		a.config.Logger.Warn("could not hand a message to the agent",

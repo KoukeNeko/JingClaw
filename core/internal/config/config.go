@@ -181,6 +181,11 @@ type Artifacts struct {
 	// MaxBytes bounds one artifact. Something larger is a file that belongs in
 	// the workspace, not output that was captured.
 	MaxBytes int64 `koanf:"max_bytes"`
+
+	// MaxImageBytes bounds one image put in front of the model. Something
+	// larger is described in words instead: a provider refuses a request that
+	// is too big, and a refused request is worse than a picture nobody saw.
+	MaxImageBytes int64 `koanf:"max_image_bytes"`
 }
 
 // Memory is what the agent carries between sessions.
@@ -348,7 +353,8 @@ func Defaults() Config {
 			MaxCommandOutput:  32 * 1024,
 		},
 		Artifacts: Artifacts{
-			MaxBytes: 64 << 20,
+			MaxBytes:      64 << 20,
+			MaxImageBytes: 8 << 20,
 		},
 		Memory: Memory{
 			Enabled:             false,
@@ -675,6 +681,7 @@ func (c Config) rangeProblems() []Problem {
 		{"context.summary_tokens", int64(c.Context.SummaryTokens), "A summary of nothing is not a summary."},
 		{"mcp.max_output", int64(c.MCP.MaxOutput), "Zero would discard whatever a tool server answered."},
 		{"artifacts.max_bytes", c.Artifacts.MaxBytes, "Zero would mean nothing can be kept."},
+		{"artifacts.max_image_bytes", c.Artifacts.MaxImageBytes, "Zero would mean no image is ever shown to the model."},
 		{"gateway.max_messages", int64(c.Gateway.MaxMessages), "Zero would send every answer as a file."},
 		{"gateway.max_attachment_bytes", int64(c.Gateway.MaxAttachmentBytes), "Zero would make every attachment empty."},
 		{"gateway.working_interval", int64(c.Gateway.WorkingInterval), "Zero would say what it is doing on every tool call."},
@@ -992,6 +999,11 @@ const Example = `# JingClaw configuration.
 # The ceiling on one artifact. Larger than this is a file that belongs in the
 # workspace rather than output that was captured.
 # max_bytes = 67108864
+
+# The ceiling on one image put in front of the model. Larger is described in
+# words instead: a provider refuses a request that is too big, and a refused
+# request is worse than a picture nobody saw.
+# max_image_bytes = 8388608
 
 [memory]
 # What the agent carries between sessions.

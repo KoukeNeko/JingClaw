@@ -128,6 +128,20 @@ type ToolUseBlock struct {
 	Opaque json.RawMessage
 }
 
+// ImageBlock carries an image the model is meant to look at.
+//
+// The bytes travel inline rather than as a reference, because a provider is a
+// remote service and cannot read this machine's disk. They are read out of the
+// artifact store at the moment a request is assembled and are not kept in the
+// conversation between turns: an image is large, and the event log holds a
+// reference to it rather than a copy.
+type ImageBlock struct {
+	// MediaType is the IANA type, which providers require and do not sniff.
+	MediaType string
+
+	Data []byte
+}
+
 // ToolResultBlock carries an observation back to the model. A failed tool is
 // still a result: the model needs to read the error to do something different.
 type ToolResultBlock struct {
@@ -139,6 +153,7 @@ type ToolResultBlock struct {
 
 func (TextBlock) contentBlock()       {}
 func (ToolUseBlock) contentBlock()    {}
+func (ImageBlock) contentBlock()      {}
 func (ToolResultBlock) contentBlock() {}
 
 // ToolDeclaration is a tool as the model sees it.

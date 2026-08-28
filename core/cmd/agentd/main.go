@@ -254,7 +254,7 @@ func run() error {
 	// Both halves of the gateway at once: accepting messages without routing
 	// replies back would answer into the void, and the two are built together
 	// so that cannot be half-configured.
-	plane := gateway.NewPlane(store, nil, permissions,
+	plane := gateway.NewPlane(store, nil, permissions, artifacts,
 		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
 	plane.Projector.WorkingInterval = cfg.Gateway.WorkingInterval
 	plane.Projector.StreamInterval = cfg.Gateway.StreamInterval
@@ -278,6 +278,8 @@ func run() error {
 			KeepFraction:  cfg.Context.KeepFraction,
 			SummaryTokens: cfg.Context.SummaryTokens,
 		},
+		Attachments:     artifacts,
+		MaxImageBytes:   cfg.Artifacts.MaxImageBytes,
 		SystemPrompt:    prompt.Render(layers),
 		SystemPromptFor: standingDirections(cfg, memoryOptions, logger),
 		MaxIterations:   cfg.Agent.MaxIterations,

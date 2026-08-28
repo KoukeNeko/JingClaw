@@ -15,10 +15,18 @@ import (
 // These field names are on-disk format. Renaming one is a migration.
 
 type userMessageAddedJSON struct {
-	MessageID string        `json:"message_id"`
-	Text      string        `json:"text"`
-	Trust     string        `json:"trust"`
-	Origin    runOriginJSON `json:"origin"`
+	MessageID   string           `json:"message_id"`
+	Text        string           `json:"text"`
+	Trust       string           `json:"trust"`
+	Origin      runOriginJSON    `json:"origin"`
+	Attachments []attachmentJSON `json:"attachments,omitempty"`
+}
+
+type attachmentJSON struct {
+	ArtifactID string `json:"artifact_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	MediaType  string `json:"media_type,omitempty"`
+	Size       int64  `json:"size,omitempty"`
 }
 
 type runStateChangedJSON struct {
@@ -111,6 +119,40 @@ type externalPrincipal struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
+func encodeAttachments(attachments []domain.Attachment) []attachmentJSON {
+	if len(attachments) == 0 {
+		return nil
+	}
+
+	encoded := make([]attachmentJSON, 0, len(attachments))
+	for _, attachment := range attachments {
+		encoded = append(encoded, attachmentJSON{
+			ArtifactID: attachment.ArtifactID,
+			Name:       attachment.Name,
+			MediaType:  attachment.MediaType,
+			Size:       attachment.Size,
+		})
+	}
+	return encoded
+}
+
+func decodeAttachments(stored []attachmentJSON) []domain.Attachment {
+	if len(stored) == 0 {
+		return nil
+	}
+
+	decoded := make([]domain.Attachment, 0, len(stored))
+	for _, attachment := range stored {
+		decoded = append(decoded, domain.Attachment{
+			ArtifactID: attachment.ArtifactID,
+			Name:       attachment.Name,
+			MediaType:  attachment.MediaType,
+			Size:       attachment.Size,
+		})
+	}
+	return decoded
+}
+
 func encodeArtifact(ref *domain.Artifact) *artifactJSON {
 	if ref == nil {
 		return nil
@@ -130,10 +172,11 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 	switch p := payload.(type) {
 	case domain.UserMessageAdded:
 		return json.Marshal(userMessageAddedJSON{
-			MessageID: string(p.MessageID),
-			Text:      p.Text,
-			Trust:     string(p.Trust),
-			Origin:    encodeOrigin(p.Origin),
+			MessageID:   string(p.MessageID),
+			Text:        p.Text,
+			Trust:       string(p.Trust),
+			Origin:      encodeOrigin(p.Origin),
+			Attachments: encodeAttachments(p.Attachments),
 		})
 
 	case domain.RunStateChanged:
@@ -230,10 +273,11 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
 		}
 		return domain.UserMessageAdded{
-			MessageID: domain.MessageID(p.MessageID),
-			Text:      p.Text,
-			Trust:     domain.TrustLevel(p.Trust),
-			Origin:    decodeOrigin(p.Origin),
+			MessageID:   domain.MessageID(p.MessageID),
+			Text:        p.Text,
+			Trust:       domain.TrustLevel(p.Trust),
+			Origin:      decodeOrigin(p.Origin),
+			Attachments: decodeAttachments(p.Attachments),
 		}, nil
 
 	case domain.EventRunStateChanged:

@@ -276,6 +276,38 @@ A session started from the terminal shows up in the console, and a turn sent
 from the terminal streams into it while it is open — which is what "clients are
 projections" has to mean in practice rather than only in the design.
 
+## Images
+
+Send the bot a screenshot on Discord and it looks at it. The path is the same
+shape as everything else here: the adapter fetches the bytes, the ingress puts
+them in the artifact store, the **event carries a reference** — not the picture
+— and the bytes are read back when a request is assembled. An image is large
+and the log is replayed on every turn, so a conversation that carried copies of
+everything ever sent to it would stop working long before the context window
+did.
+
+The adapter fetches rather than passing a link inward. Discord's link is signed
+for a client this daemon is not and it expires, so a conversation replayed next
+month would find nothing behind it — and the gateway is the only part of this
+system meant to talk to the platform at all.
+
+**The declared type is not believed.** It comes from the platform, which got it
+from whoever uploaded the file. The bytes have to agree with the label, the
+label has to be on a short list — PNG, JPEG, WebP — and the header has to
+declare a picture small enough to decode. That last one matters on its own: a
+bounded number of bytes is not a bounded amount of work, and a few dozen bytes
+of PNG header can promise 900 million pixels.
+
+SVG is a document that can carry script and is not accepted. An attachment that
+cannot be shown is still named in the message, because "here, fix this" makes
+no sense at all if the attachment is invisible.
+
+A picture from a gateway turn is labelled as coming from outside this machine.
+That is not a security control — text inside an image is a known way to instruct
+a model, and no label prevents it. What holds is the same thing that always
+holds here: a run's permissions come from where it came from, and nothing the
+model reads can raise them.
+
 ## Memory
 
 Off by default. What is written here is read by every later session, by an

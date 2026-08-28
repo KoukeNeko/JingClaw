@@ -112,6 +112,52 @@ type Run struct {
 	FinishedAt      *time.Time
 }
 
+// Turn is one thing somebody said, and where the answer is owed.
+//
+// A struct rather than five parameters because the list was already at the
+// length where a caller has to count commas, and attachments would have made
+// it six.
+type Turn struct {
+	Text   string
+	Origin RunOrigin
+
+	// Targets are where the reply goes. A turn with none is answered to
+	// nobody, which is a bug rather than a feature.
+	Targets []DeliveryTarget
+
+	// Attachments are files that arrived with it, already in the artifact
+	// store. The bytes do not travel through here.
+	Attachments []Attachment
+}
+
+// Attachment is a file that arrived with a message.
+//
+// The bytes are in the artifact store and this is the reference to them. They
+// are deliberately not in the event: an image is large, the log is replayed on
+// every turn, and a conversation carrying copies of everything ever sent to it
+// would stop working long before the context window did.
+type Attachment struct {
+	ArtifactID string
+	Name       string
+	MediaType  string
+	Size       int64
+}
+
+// IsImage reports whether this is something a model can look at.
+//
+// Decided by the declared media type, not by sniffing the bytes: what a
+// provider will accept is a question about the type it is told, and guessing
+// differently from the sender is how a request gets rejected for a reason
+// nobody can see.
+func (a Attachment) IsImage() bool {
+	switch a.MediaType {
+	case "image/png", "image/jpeg", "image/webp", "image/gif":
+		return true
+	default:
+		return false
+	}
+}
+
 // MemoryID identifies one thing the agent has been told to remember.
 type MemoryID string
 
@@ -229,6 +275,11 @@ type UserMessageAdded struct {
 	Text      string
 	Trust     TrustLevel
 	Origin    RunOrigin
+
+	// Attachments are what arrived with it, by reference. The bytes are in the
+	// artifact store; the model is shown the images among them when a request
+	// is assembled.
+	Attachments []Attachment
 }
 
 type RunStateChanged struct {

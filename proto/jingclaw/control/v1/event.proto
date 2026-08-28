@@ -40,6 +40,23 @@ message UserMessageAdded {
 
   TrustLevel trust = 3;
   RunOrigin origin = 4;
+
+  // Files that arrived with it, by reference. The bytes are in the artifact
+  // store: an image is large and this event is replayed on every turn.
+  repeated MessageAttachment attachments = 5;
+}
+
+// MessageAttachment is a file that came with a message.
+//
+// An empty artifact_id means it was not kept — too large, or a kind of file
+// this agent does not store. The rest of the fields still arrive, because a
+// message that makes no sense without its attachment should at least say one
+// was sent.
+message MessageAttachment {
+  string artifact_id = 1;
+  string name = 2;
+  string media_type = 3;
+  int64 size = 4;
 }
 
 message RunStateChanged {

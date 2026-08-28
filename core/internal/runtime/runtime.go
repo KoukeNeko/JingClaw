@@ -96,6 +96,11 @@ type DeliveryObserver interface {
 	Observe(ctx context.Context, run domain.Run, event domain.Event) error
 }
 
+// AttachmentReader reads back a file that arrived with a message.
+type AttachmentReader interface {
+	ReadRange(id string, offset, limit int64) ([]byte, int64, error)
+}
+
 // IDGenerator produces identifiers. Injected so tests can be deterministic.
 type IDGenerator func() string
 
@@ -140,6 +145,19 @@ type Options struct {
 
 	// Coalescing paces how provider deltas become events.
 	Coalescing Coalescing
+
+	// Attachments reads back the files that arrived with a message, so the
+	// images among them can be put in front of the model.
+	//
+	// Left nil, attachments are described in words rather than shown. That is
+	// a working agent rather than a broken one, which is the right behaviour
+	// for a provider or a deployment that cannot take images anyway.
+	Attachments AttachmentReader
+
+	// MaxImageBytes bounds one image put in front of the model. Something
+	// larger is described instead: a provider will refuse the request, and a
+	// refused request is worse than a described picture.
+	MaxImageBytes int64
 
 	// ContextBudget bounds how much of a session is sent to the model. Left
 	// zero, history is replayed in full and a long session eventually stops
@@ -323,8 +341,11 @@ func (r *Runtime) SendTurn(
 	text string,
 	origin domain.RunOrigin,
 ) (domain.RunID, domain.MessageID, error) {
-	return r.SendTurnTo(ctx, sessionID, text, origin,
-		[]domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient, Ref: origin.ClientID}})
+	return r.SendTurnTo(ctx, sessionID, domain.Turn{
+		Text:    text,
+		Origin:  origin,
+		Targets: []domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient, Ref: origin.ClientID}},
+	})
 }
 
 // SendTurnTo starts a run whose output is delivered somewhere named by the
@@ -336,9 +357,7 @@ func (r *Runtime) SendTurn(
 func (r *Runtime) SendTurnTo(
 	ctx context.Context,
 	sessionID domain.SessionID,
-	text string,
-	origin domain.RunOrigin,
-	targets []domain.DeliveryTarget,
+	turn domain.Turn,
 ) (domain.RunID, domain.MessageID, error) {
 	r.mu.RLock()
 	draining := r.draining
@@ -361,8 +380,8 @@ func (r *Runtime) SendTurnTo(
 		ID:              runID,
 		SessionID:       sessionID,
 		Status:          domain.RunQueued,
-		Origin:          origin,
-		DeliveryTargets: targets,
+		Origin:          turn.Origin,
+		DeliveryTargets: turn.Targets,
 		CreatedAt:       r.opts.Now(),
 	}
 	if err := r.opts.Store.CreateRun(ctx, run); err != nil {
@@ -371,11 +390,14 @@ func (r *Runtime) SendTurnTo(
 
 	if err := r.append(ctx, sessionID, runID, domain.EventUserMessageAdded, domain.UserMessageAdded{
 		MessageID: messageID,
-		Text:      text,
-		// A turn typed by the operator into a control-plane client. Gateway
-		// traffic will arrive as TrustUntrusted once M1b lands.
-		Trust:  domain.TrustUser,
-		Origin: origin,
+		Text:      turn.Text,
+		// Trust follows where the turn came from. A message that arrived
+		// through a gateway is text from an account on somebody else's
+		// service, and recording it as though the operator typed it would
+		// throw away the one thing that distinguishes them.
+		Trust:       trustForOrigin(turn.Origin),
+		Origin:      turn.Origin,
+		Attachments: turn.Attachments,
 	}); err != nil {
 		return "", "", err
 	}
@@ -1031,6 +1053,14 @@ func artifactOf(result tool.Result) *domain.Artifact {
 		Size:      result.Artifact.Size,
 		MediaType: result.Artifact.MediaType,
 	}
+}
+
+// trustForOrigin is how much a turn's own text is to be believed.
+func trustForOrigin(origin domain.RunOrigin) domain.TrustLevel {
+	if origin.Kind == domain.OriginGateway {
+		return domain.TrustUntrusted
+	}
+	return domain.TrustUser
 }
 
 func (r *Runtime) toolDeclarations() []provider.ToolDeclaration {

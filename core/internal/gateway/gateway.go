@@ -120,8 +120,20 @@ type Attachment struct {
 	ContentType string
 	Size        int64
 
-	// NativeRef is how the adapter retrieves it. Opaque above the adapter.
-	NativeRef string
+	// Data is the file itself, fetched by the adapter before the message was
+	// handed inward.
+	//
+	// The bytes travel rather than a link, because a link to somebody else's
+	// service expires and is signed for a client this daemon is not. A
+	// conversation that cannot be replayed next month is not a durable one,
+	// and the adapter is the only part of this system that is supposed to talk
+	// to the platform at all.
+	//
+	// Empty when the adapter declined to fetch it — too large, or a kind of
+	// file this agent does not keep. The rest of the fields still arrive, so
+	// the model can be told something was sent rather than being left to
+	// wonder why a message makes no sense on its own.
+	Data []byte
 }
 
 // InboundMessage is a normalized message from a platform.
@@ -305,6 +317,7 @@ func NewPlane(
 	store Store,
 	rt Runtime,
 	binder ProfileBinder,
+	artifacts ArtifactStore,
 	newID func() string,
 	now func() time.Time,
 	logger *slog.Logger,
@@ -315,11 +328,12 @@ func NewPlane(
 
 	return &Plane{
 		Ingress: &Ingress{
-			Store:   store,
-			Runtime: rt,
-			Binder:  binder,
-			Now:     now,
-			Logger:  logger,
+			Store:     store,
+			Runtime:   rt,
+			Binder:    binder,
+			Artifacts: artifacts,
+			Now:       now,
+			Logger:    logger,
 		},
 		Projector: NewProjector(store, newID, now),
 	}
