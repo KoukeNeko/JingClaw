@@ -113,7 +113,7 @@ func (s *Store) selectMemories(
 		if !query.IncludeInvalidated && candidate.InvalidatedAt != nil {
 			continue
 		}
-		if query.Kind != "" && candidate.Kind != query.Kind {
+		if query.Activation != "" && candidate.Activation != query.Activation {
 			continue
 		}
 		if len(query.Scopes) > 0 && !inScope(candidate, query.Scopes) {

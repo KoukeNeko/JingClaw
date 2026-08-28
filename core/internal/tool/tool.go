@@ -219,6 +219,34 @@ type Tool interface {
 	Execute(ctx context.Context, call Call) (Result, error)
 }
 
+// Leveled is a tool whose risk depends on what it was asked to do.
+//
+// Spec.Level is a floor, and always was — the comment on Level has said so
+// since it was written. Some tools are genuinely two different things
+// depending on their arguments: writing something down that nobody will see
+// unless they ask for it, against writing something that goes in front of the
+// model on every future turn. A policy that cannot tell those apart has to
+// treat the cheap one as expensive, and an approval that fires constantly is
+// one people learn to click through.
+//
+// It may only raise. A tool that could lower its own level would be a tool
+// deciding its own permissions.
+type Leveled interface {
+	LevelFor(call Call) Level
+}
+
+// EffectiveLevel is the level a call should actually be judged at.
+func EffectiveLevel(t Tool, call Call) Level {
+	level := t.Spec().Level
+
+	if leveled, ok := t.(Leveled); ok {
+		if raised := leveled.LevelFor(call); raised > level {
+			return raised
+		}
+	}
+	return level
+}
+
 // ErrorCode identifies a failure in a way the model can pattern-match on.
 type ErrorCode string
 

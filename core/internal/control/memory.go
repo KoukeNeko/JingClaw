@@ -80,7 +80,7 @@ func memoryToProto(memory domain.Memory) *controlv1.Memory {
 		Id:              string(memory.ID),
 		Scope:           string(memory.Scope),
 		ScopeRef:        memory.ScopeRef,
-		Kind:            string(memory.Kind),
+		Activation:      string(memory.Activation),
 		Text:            memory.Text,
 		Trust:           trustToProto(memory.Trust),
 		Origin:          originToProto(memory.Origin),

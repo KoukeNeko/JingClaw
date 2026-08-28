@@ -37,7 +37,7 @@ func storeMemory(t *testing.T, store *memory.Store, id, text string, origin doma
 		ID:            domain.MemoryID(id),
 		Scope:         domain.ScopeWorkspace,
 		ScopeRef:      "/srv/app",
-		Kind:          domain.MemoryFact,
+		Activation:    domain.MemoryRetrieval,
 		Text:          text,
 		Trust:         domain.TrustUser,
 		Origin:        origin,
@@ -110,7 +110,7 @@ func TestSupersededMemoriesAreShownOnlyWhenAsked(t *testing.T) {
 
 	corrected := domain.Memory{
 		ID: "mem_2", Scope: domain.ScopeWorkspace, ScopeRef: "/srv/app",
-		Kind: domain.MemoryFact, Text: "the API is at example.net",
+		Activation: domain.MemoryRetrieval, Text: "the API is at example.net",
 		Trust: domain.TrustUser, Origin: origin,
 		SourceSession: "ses_1", SourceSeq: 9, ApprovedBy: "operator",
 		CreatedAt: time.Unix(1_700_003_600, 0).UTC(),

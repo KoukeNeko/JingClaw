@@ -10,7 +10,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
 
-const memoryColumns = `id, scope, scope_ref, kind, text, trust,
+const memoryColumns = `id, scope, scope_ref, activation, text, trust,
 	origin_kind, origin_client, origin_platform, origin_principal,
 	source_session, source_seq, approved_by,
 	created_at, invalidated_at, superseded_by`
@@ -18,7 +18,7 @@ const memoryColumns = `id, scope, scope_ref, kind, text, trust,
 // The search joins the table to its index, where "text" names a column in
 // both, so the same list has to be qualified there.
 const memoryColumnsQualified = `memories.id, memories.scope, memories.scope_ref,
-	memories.kind, memories.text, memories.trust,
+	memories.activation, memories.text, memories.trust,
 	memories.origin_kind, memories.origin_client,
 	memories.origin_platform, memories.origin_principal,
 	memories.source_session, memories.source_seq, memories.approved_by,
@@ -40,7 +40,7 @@ func (s *Store) Remember(
 			string(memory.ID),
 			string(memory.Scope),
 			memory.ScopeRef,
-			string(memory.Kind),
+			string(memory.Activation),
 			memory.Text,
 			string(memory.Trust),
 			string(memory.Origin.Kind),
@@ -182,9 +182,9 @@ func memoryFilter(query storage.MemoryQuery) (string, []any) {
 		clauses = append(clauses, "("+strings.Join(scopes, " OR ")+")")
 	}
 
-	if query.Kind != "" {
-		clauses = append(clauses, "memories.kind = ?")
-		args = append(args, string(query.Kind))
+	if query.Activation != "" {
+		clauses = append(clauses, "memories.activation = ?")
+		args = append(args, string(query.Activation))
 	}
 	if !query.IncludeInvalidated {
 		clauses = append(clauses, "memories.invalidated_at IS NULL")
@@ -239,7 +239,7 @@ func (s *Store) queryMemories(ctx context.Context, query string, args ...any) ([
 		var (
 			memory       domain.Memory
 			scope        string
-			kind         string
+			activation   string
 			trust        string
 			originKind   string
 			platform     string
@@ -251,7 +251,7 @@ func (s *Store) queryMemories(ctx context.Context, query string, args ...any) ([
 		)
 
 		if err := rows.Scan(
-			&memory.ID, &scope, &memory.ScopeRef, &kind, &memory.Text, &trust,
+			&memory.ID, &scope, &memory.ScopeRef, &activation, &memory.Text, &trust,
 			&originKind, &memory.Origin.ClientID, &platform, &principal,
 			&memory.SourceSession, &sourceSeq, &memory.ApprovedBy,
 			&createdAt, &invalidated, &supersededBy,
@@ -260,7 +260,7 @@ func (s *Store) queryMemories(ctx context.Context, query string, args ...any) ([
 		}
 
 		memory.Scope = domain.MemoryScope(scope)
-		memory.Kind = domain.MemoryKind(kind)
+		memory.Activation = domain.MemoryActivation(activation)
 		memory.Trust = domain.TrustLevel(trust)
 		memory.Origin.Kind = domain.RunOriginKind(originKind)
 		memory.SourceSeq = domain.Seq(sourceSeq)

@@ -88,12 +88,12 @@ func (t *Remember) Spec() tool.Spec {
     "text": {
       "type": "string",
       "minLength": 1,
-      "description": "What to remember, in one or two sentences. State it plainly and completely; it will be read without this conversation around it."
+      "description": "What to remember, as one self-contained claim. State it plainly and completely; it will be read without this conversation around it. One claim per memory: a memory that says three things cannot be corrected without discarding the two that were still true."
     },
-    "kind": {
+    "activation": {
       "type": "string",
-      "enum": ["fact", "instruction"],
-      "description": "A fact is looked up when wanted. An instruction is put in front of the model on every turn, so use it only for standing direction. Defaults to fact."
+      "enum": ["retrieval", "standing"],
+      "description": "retrieval is looked up when it is wanted, and is what almost everything should be. standing is put in front of the model on every future turn, shapes every run, and needs a person to agree. Defaults to retrieval."
     },
     "scope": {
       "type": "string",
@@ -108,9 +108,12 @@ func (t *Remember) Spec() tool.Spec {
   "required": ["text"],
   "additionalProperties": false
 }`),
-		// Its own level, and one both profiles stop for. What is written here
-		// is read by every later session.
-		Level: tool.LevelRemember,
+		// The floor is what a retrieval-only write costs: it changes the
+		// agent's own state and nothing else until somebody asks for it.
+		// LevelFor raises this to LevelRemember for a standing memory, which
+		// is the write that shapes every future run and is worth stopping a
+		// person for.
+		Level: tool.LevelInternal,
 		Capabilities: tool.Capabilities{
 			// Not idempotent: asking twice writes twice, which is why
 			// corrections name what they replace.
@@ -121,9 +124,34 @@ func (t *Remember) Spec() tool.Spec {
 
 type rememberArgs struct {
 	Text       string `json:"text"`
-	Kind       string `json:"kind"`
+	Activation string `json:"activation"`
 	Scope      string `json:"scope"`
 	Supersedes string `json:"supersedes"`
+}
+
+// LevelFor separates writing something down from giving it authority.
+//
+// A retrieval-only memory changes nothing until somebody asks for it, and
+// stopping for a person on every one of those produces "permanently asking
+// whether to permanently remember" — an approval that fires constantly is one
+// people learn to click through, which is worse than not asking.
+//
+// A standing memory goes in front of the model on every future run. That is
+// the privileged operation, and it is the one worth a person's attention.
+func (t *Remember) LevelFor(call tool.Call) tool.Level {
+	var args rememberArgs
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		// Unreadable arguments are judged at the higher level. Guessing the
+		// cheap one for something we cannot parse is the wrong way to be
+		// wrong.
+		return tool.LevelRemember
+	}
+
+	if activation, err := memoryActivation(args.Activation); err == nil &&
+		activation == domain.MemoryStanding {
+		return tool.LevelRemember
+	}
+	return tool.LevelInternal
 }
 
 func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, error) {
@@ -142,7 +170,7 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 			"a memory may be %d bytes and this is %d", maxTextBytes, len(text))
 	}
 
-	kind, err := memoryKind(args.Kind)
+	activation, err := memoryActivation(args.Activation)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -157,11 +185,11 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 	}
 
 	written := domain.Memory{
-		ID:       domain.MemoryID(t.NewID()),
-		Scope:    scope,
-		ScopeRef: ref,
-		Kind:     kind,
-		Text:     text,
+		ID:         domain.MemoryID(t.NewID()),
+		Scope:      scope,
+		ScopeRef:   ref,
+		Activation: activation,
+		Text:       text,
 		// The trust of the turn that produced it, which for anything arriving
 		// through a gateway is the lowest there is — and stays that way
 		// however many times it is summarised afterwards.
@@ -183,7 +211,7 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 	}
 
 	return tool.Result{
-		Content: fmt.Sprintf("%s (%s, %s)\n%s", summary, kind, scope, text),
+		Content: fmt.Sprintf("%s (%s, %s)\n%s", summary, activation, scope, text),
 		Summary: summary,
 	}, nil
 }
@@ -222,30 +250,51 @@ func (t *Remember) checkSupersedes(
 		"Use an id that recall returned.", "there is no memory %s", id)
 }
 
+// memoryScope settles who a memory belongs to, and refuses the one combination
+// that is not a matter of permission.
+//
+// A turn from outside this machine may write about the person it came from and
+// nothing else. What the *project* knows is read by every local run, including
+// ones that can execute programs, so letting a chat account write there would
+// make a message somebody sent into something the machine believes about its
+// own work. Promoting anything to that scope is the operator's to do, from a
+// control-plane client.
 func (t *Remember) memoryScope(
 	requested string,
 	call tool.CallContext,
 ) (domain.MemoryScope, string, error) {
 	switch requested {
 	case "", "workspace":
+		if call.FromGateway() {
+			// Default to the one scope it may write, rather than refusing a
+			// turn that never named a scope at all.
+			if requested == "" {
+				return domain.ScopePrincipal, call.PrincipalKey(), nil
+			}
+			return "", "", tool.Errorf(tool.CodePermissionDenied,
+				"Remember it about the person instead, or ask the operator to record it for the project.",
+				"a turn from outside this machine cannot write what the project knows")
+		}
 		return domain.ScopeWorkspace, t.WorkspaceRef, nil
+
 	case "person":
 		return domain.ScopePrincipal, call.PrincipalKey(), nil
+
 	default:
 		return "", "", tool.Errorf(tool.CodeInvalidArguments,
 			"Use workspace or person.", "%q is not a scope", requested)
 	}
 }
 
-func memoryKind(requested string) (domain.MemoryKind, error) {
+func memoryActivation(requested string) (domain.MemoryActivation, error) {
 	switch requested {
-	case "", "fact":
-		return domain.MemoryFact, nil
-	case "instruction":
-		return domain.MemoryInstruction, nil
+	case "", "retrieval":
+		return domain.MemoryRetrieval, nil
+	case "standing":
+		return domain.MemoryStanding, nil
 	default:
 		return "", tool.Errorf(tool.CodeInvalidArguments,
-			"Use fact or instruction.", "%q is not a kind of memory", requested)
+			"Use retrieval or standing.", "%q is not a kind of activation", requested)
 	}
 }
 
@@ -374,7 +423,7 @@ func render(memories []domain.Memory) string {
 	var out strings.Builder
 
 	for _, memory := range memories {
-		fmt.Fprintf(&out, "%s [%s, %s", memory.ID, memory.Kind, memory.Scope)
+		fmt.Fprintf(&out, "%s [%s, %s", memory.ID, memory.Activation, memory.Scope)
 		if memory.Trust == domain.TrustUntrusted {
 			fmt.Fprintf(&out, ", from outside this machine")
 		}
@@ -406,9 +455,9 @@ func Instructions(
 	}
 
 	found, err := store.Memories(ctx, storage.MemoryQuery{
-		Scopes: options.scopesFor(contextForRun(run)),
-		Kind:   domain.MemoryInstruction,
-		Limit:  maxRecallLimit,
+		Scopes:     options.scopesFor(contextForRun(run)),
+		Activation: domain.MemoryStanding,
+		Limit:      maxRecallLimit,
 	})
 	if err != nil {
 		return "", err

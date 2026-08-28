@@ -32,6 +32,12 @@ func (r *Runtime) evaluate(ctx context.Context, run domain.Run, spec tool.Spec, 
 		return gate{decision: permission.Allow}
 	}
 
+	// A tool may be two different things depending on what it was asked to do,
+	// and the policy is shown the one that applies here rather than the floor.
+	if invoked, ok := r.opts.Tools.Lookup(call.Name); ok {
+		spec.Level = tool.EffectiveLevel(invoked, call)
+	}
+
 	outcome := r.opts.Permissions.Evaluate(ctx, permission.Request{
 		Spec:      spec,
 		Call:      call,

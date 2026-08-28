@@ -21,6 +21,11 @@ service MemoryService {
   // Distinct from a correction, which invalidates and keeps the history.
   // Somebody who asks the agent to forget something and is told it stopped
   // being true has not been answered.
+  //
+  // It removes what the agent believes, not every trace of the fact: the
+  // conversation it came from is still in the event log, because an
+  // append-only log cannot forget. That is what the provenance on each memory
+  // is for — it says where else to look.
   rpc ForgetMemory(ForgetMemoryRequest) returns (ForgetMemoryResponse);
 }
 
@@ -51,8 +56,9 @@ message Memory {
   string scope = 2;
   string scope_ref = 3;
 
-  // instruction is carried on every turn; fact is looked up.
-  string kind = 4;
+  // standing is carried on every turn; retrieval is looked up. It names the
+  // mechanism rather than pretending to be an ontology.
+  string activation = 4;
 
   string text = 5;
 

@@ -291,19 +291,26 @@ Then `remember` writes something down and `recall` looks it up. Three rules
 shape the rest, and each comes from something that has actually gone wrong in a
 shipped system rather than from taste.
 
-**Nothing is written unattended.** Remembering has its own permission level and
-every profile stops for it — not only gateway turns. A poisoned file read
-locally is untrusted text as surely as a chat message is, so an unattended
-local write would leave a hole in the whole approval story. What the approval
-shows is the proposed text *and* which session, which message and which
-principal produced it: a conditional injection that fires when you say "yes" to
-something innocuous is only visible if the screen says where the proposal came
-from.
+**What stops for a person is authority, not persistence.** A memory has an
+`activation`: `retrieval` is looked up when it is wanted, `standing` goes in
+front of the model on every future run. Writing the first changes nothing until
+somebody asks for it, so it does not interrupt. Writing the second shapes every
+future run without anybody asking, so it does. That split matters because an
+approval that fires on every write is one people learn to click through — and a
+one-click approve-everything flow is not an approval.
+
+What the approval shows is the proposed text *and* which session, which message
+and which principal produced it: a conditional injection that fires when you say
+"yes" to something innocuous is only visible if the screen says where the
+proposal came from.
 
 **Reading is scoped by who is asking.** What a Discord account told the agent
 is not recalled for the operator, and the operator's notes are not read into a
 channel. The scope comes from the turn, never from an argument the model could
-choose. What the *project* knows is shared, because that is what a project is.
+choose. What the *project* knows is shared, because that is what a project is —
+but a turn from outside this machine can only write about the person it came
+from. Project knowledge is read by local runs that can execute programs, so
+promoting anything into it is the operator's to do.
 
 **What came from outside stays marked.** A gateway-origin memory is untrusted
 permanently — a fact derived from untrusted text is untrusted however many
@@ -320,9 +327,22 @@ core/bin/agent memory forget mem_01K…  # gone, not merely superseded
 ```
 
 A correction invalidates rather than overwrites, so "what is believed now" and
-"what was believed then" are both answerable. Forgetting is the exception and
-really deletes: somebody who asks the agent to forget something and is told it
-stopped being true has not been answered.
+"what was believed then" are both answerable. Two corrections to the same
+memory cannot both win: the second is refused, because a supersession graph
+that forks has no answer to which branch is believed.
+
+Forgetting removes the memory, index and all — the agent will not recall it or
+carry it again. It does **not** erase the conversation the memory came from:
+that is still in the event log, because an append-only log cannot forget, and
+that is the price of it being able to say what happened. The provenance on each
+memory is what tells you where else to look.
+
+Retrieval is SQLite FTS5, and it fails silently — it does not crash, the agent
+just looks as though it forgot. `TestRecallOnParaphrase` measures exactly that
+against a corpus of realistic paraphrases and prints what it missed. It stands
+at **6 of 11**, and the misses are all the same shape: the same thing said in
+other words. That number is the evidence for adding embeddings when the time
+comes, and there is no point adding them before there is a number.
 
 The reasoning, the evidence behind it, and what is deliberately not built are
 in `docs/research/05-memory.md`.

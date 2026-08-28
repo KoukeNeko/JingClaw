@@ -113,6 +113,15 @@ type MemoryStore interface {
 	Memory(ctx context.Context, id domain.MemoryID) (domain.Memory, error)
 
 	// Forget removes a memory for good, index and all.
+	//
+	// It removes what the agent believes, not every trace of the fact. The
+	// conversation the memory came from is still in the event log, and so is
+	// the tool call that wrote it — an append-only log cannot forget, which is
+	// the price of it being able to say what happened.
+	//
+	// That is why provenance is on every memory: forgetting tells you where
+	// else to look. Saying "deleted" without saying which of the two was meant
+	// is the part that would be dishonest.
 	Forget(ctx context.Context, id domain.MemoryID) error
 }
 
@@ -125,8 +134,8 @@ type MemoryStore interface {
 type MemoryQuery struct {
 	Scopes []MemoryScopeRef
 
-	// Kind empty means either.
-	Kind domain.MemoryKind
+	// Activation empty means either.
+	Activation domain.MemoryActivation
 
 	// IncludeInvalidated returns superseded memories too, which is for showing
 	// a person what changed rather than for telling a model anything.

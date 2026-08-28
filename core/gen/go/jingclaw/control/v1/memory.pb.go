@@ -221,9 +221,10 @@ type Memory struct {
 	// workspace or principal, and what it belongs to.
 	Scope    string `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
 	ScopeRef string `protobuf:"bytes,3,opt,name=scope_ref,json=scopeRef,proto3" json:"scope_ref,omitempty"`
-	// instruction is carried on every turn; fact is looked up.
-	Kind string `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
-	Text string `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	// standing is carried on every turn; retrieval is looked up. It names the
+	// mechanism rather than pretending to be an ontology.
+	Activation string `protobuf:"bytes,4,opt,name=activation,proto3" json:"activation,omitempty"`
+	Text       string `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
 	// Where it came from. Shown rather than merely stored: a reader deciding
 	// whether to keep a memory needs to know who caused it, and an agent asked
 	// to weigh one needs the same.
@@ -291,9 +292,9 @@ func (x *Memory) GetScopeRef() string {
 	return ""
 }
 
-func (x *Memory) GetKind() string {
+func (x *Memory) GetActivation() string {
 	if x != nil {
-		return x.Kind
+		return x.Activation
 	}
 	return ""
 }
@@ -375,12 +376,14 @@ const file_jingclaw_control_v1_memory_proto_rawDesc = "" +
 	"\x13ForgetMemoryRequest\x124\n" +
 	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\"\x16\n" +
-	"\x14ForgetMemoryResponse\"\xf1\x03\n" +
+	"\x14ForgetMemoryResponse\"\xfd\x03\n" +
 	"\x06Memory\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05scope\x18\x02 \x01(\tR\x05scope\x12\x1b\n" +
-	"\tscope_ref\x18\x03 \x01(\tR\bscopeRef\x12\x12\n" +
-	"\x04kind\x18\x04 \x01(\tR\x04kind\x12\x12\n" +
+	"\tscope_ref\x18\x03 \x01(\tR\bscopeRef\x12\x1e\n" +
+	"\n" +
+	"activation\x18\x04 \x01(\tR\n" +
+	"activation\x12\x12\n" +
 	"\x04text\x18\x05 \x01(\tR\x04text\x125\n" +
 	"\x05trust\x18\x06 \x01(\x0e2\x1f.jingclaw.control.v1.TrustLevelR\x05trust\x126\n" +
 	"\x06origin\x18\a \x01(\v2\x1e.jingclaw.control.v1.RunOriginR\x06origin\x12*\n" +

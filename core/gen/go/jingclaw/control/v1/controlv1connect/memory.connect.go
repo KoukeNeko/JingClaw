@@ -49,6 +49,11 @@ type MemoryServiceClient interface {
 	// Distinct from a correction, which invalidates and keeps the history.
 	// Somebody who asks the agent to forget something and is told it stopped
 	// being true has not been answered.
+	//
+	// It removes what the agent believes, not every trace of the fact: the
+	// conversation it came from is still in the event log, because an
+	// append-only log cannot forget. That is what the provenance on each memory
+	// is for — it says where else to look.
 	ForgetMemory(context.Context, *connect.Request[v1.ForgetMemoryRequest]) (*connect.Response[v1.ForgetMemoryResponse], error)
 }
 
@@ -102,6 +107,11 @@ type MemoryServiceHandler interface {
 	// Distinct from a correction, which invalidates and keeps the history.
 	// Somebody who asks the agent to forget something and is told it stopped
 	// being true has not been answered.
+	//
+	// It removes what the agent believes, not every trace of the fact: the
+	// conversation it came from is still in the event log, because an
+	// append-only log cannot forget. That is what the provenance on each memory
+	// is for — it says where else to look.
 	ForgetMemory(context.Context, *connect.Request[v1.ForgetMemoryRequest]) (*connect.Response[v1.ForgetMemoryResponse], error)
 }
 

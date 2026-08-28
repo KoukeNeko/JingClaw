@@ -132,18 +132,25 @@ const (
 	ScopePrincipal MemoryScope = "principal"
 )
 
-// MemoryKind decides how a memory reaches the model.
-type MemoryKind string
+// MemoryActivation decides how a memory reaches the model.
+//
+// It names the mechanism rather than pretending to be an ontology. "Instruction
+// or fact" was the earlier shape and it decided nothing: "the user is called
+// 江委員" is a fact that belongs in every prompt, and "prefer Helm for
+// Kubernetes questions" is an instruction with no business being there while
+// somebody writes Python. What matters is whether it is carried or looked up.
+type MemoryActivation string
 
 const (
-	// MemoryInstruction is standing direction, put in front of the model on
-	// every turn. It is bounded, because everything here is context that the
-	// work does not get.
-	MemoryInstruction MemoryKind = "instruction"
+	// MemoryStanding is put in front of the model on every turn. It is bounded
+	// and it is the privileged kind: a memory here shapes every future run
+	// without anybody asking for it, which is why writing one stops for a
+	// person and writing the other does not.
+	MemoryStanding MemoryActivation = "standing"
 
-	// MemoryFact is looked up when it is wanted. Most memories are these:
+	// MemoryRetrieval is looked up when it is wanted. Most memories are these:
 	// something worth having is not the same as something worth carrying.
-	MemoryFact MemoryKind = "fact"
+	MemoryRetrieval MemoryActivation = "retrieval"
 )
 
 // Memory is one thing the agent has been told to remember across sessions.
@@ -152,11 +159,11 @@ const (
 // nobody can check, and the way untrusted text becomes a trusted fact is by
 // passing through a summary that dropped where it came from.
 type Memory struct {
-	ID       MemoryID
-	Scope    MemoryScope
-	ScopeRef string
-	Kind     MemoryKind
-	Text     string
+	ID         MemoryID
+	Scope      MemoryScope
+	ScopeRef   string
+	Activation MemoryActivation
+	Text       string
 
 	// Trust is the least trusted thing that contributed to this memory, not
 	// the trust of whoever approved it. It only ever travels downwards.

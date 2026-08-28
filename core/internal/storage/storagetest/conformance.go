@@ -567,12 +567,12 @@ func testConcurrentAppendsAreDense(t *testing.T, newStore Factory) {
 
 func newMemory(id, text string, scope domain.MemoryScope, ref string) domain.Memory {
 	return domain.Memory{
-		ID:       domain.MemoryID(id),
-		Scope:    scope,
-		ScopeRef: ref,
-		Kind:     domain.MemoryFact,
-		Text:     text,
-		Trust:    domain.TrustUser,
+		ID:         domain.MemoryID(id),
+		Scope:      scope,
+		ScopeRef:   ref,
+		Activation: domain.MemoryRetrieval,
+		Text:       text,
+		Trust:      domain.TrustUser,
 		Origin: domain.RunOrigin{
 			Kind:     domain.OriginLocalClient,
 			ClientID: "jingclaw-cli",

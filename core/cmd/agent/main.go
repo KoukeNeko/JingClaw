@@ -616,8 +616,15 @@ func newMemoryCommand() *cobra.Command {
 
 	forget := &cobra.Command{
 		Use:   "forget <memory-id>",
-		Short: "Remove a memory for good",
-		Args:  cobra.ExactArgs(1),
+		Short: "Stop the agent believing something",
+		Long: "Removes a memory, index and all: the agent will not recall it or\n" +
+			"carry it again.\n\n" +
+			"It does not erase the conversation the memory came from. That is\n" +
+			"still in the event log, because an append-only log cannot forget —\n" +
+			"which is the price of it being able to say what happened. The\n" +
+			"listing shows which session each memory came from, so you know\n" +
+			"where else to look.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := dialMemory()
 			if err != nil {
@@ -632,7 +639,8 @@ func newMemoryCommand() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(cmd.ErrOrStderr(), "forgot %s\n", args[0])
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"forgot %s — the conversation it came from is still in the log\n", args[0])
 			return nil
 		},
 	}
@@ -653,7 +661,7 @@ func printMemory(memory *controlv1.Memory) {
 	}
 
 	fmt.Printf("%s  [%s · %s · %s]%s\n",
-		memory.GetId(), memory.GetKind(), memory.GetScope(), memory.GetScopeRef(), state)
+		memory.GetId(), memory.GetActivation(), memory.GetScope(), memory.GetScopeRef(), state)
 	fmt.Printf("    %s\n", memory.GetText())
 
 	from := "typed here"

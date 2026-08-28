@@ -141,19 +141,26 @@ approve_until_done() {
 $(cut -c1-120 "$EVENTS" | tail -15)"
 }
 
+# Writing something down does not interrupt; giving it authority over every
+# future run does. An approval that fires on every write is one people learn to
+# click through, so the split is the point.
 SESSION=$(agent session create --title "remembering" | tr -d '\r\n')
 agent attach "$SESSION" >"$WORK/first" 2>&1 &
 FIRST=$!
 agent send "$SESSION" \
-	"Use the remember tool to record this about the project: the deploy script needs sudo. Then say you have done it." >/dev/null
+	"Use the remember tool to record this about the project: the deploy script needs sudo. Use the default activation. Then say you have done it." >/dev/null
 approve_until_done "$WORK/first"
 kill "$FIRST" 2>/dev/null || true
 wait "$FIRST" 2>/dev/null || true
 
-grep -q 'approval.requested' "$WORK/first" ||
-	fail "remembering did not stop for a person:
+grep -q 'approval.requested' "$WORK/first" &&
+	fail "a retrieval-only write stopped for a person; approvals that fire on every
+write are the ones people learn to click through:
 $(cut -c1-120 "$WORK/first" | tail -15)"
-printf 'ok   remembering stopped and asked\n'
+grep -q 'tool.completed         remember' "$WORK/first" ||
+	fail "the memory was never written:
+$(cut -c1-120 "$WORK/first" | tail -15)"
+printf 'ok   writing something down did not interrupt\n'
 
 agent memory list >"$WORK/listed" 2>&1
 grep -q 'sudo' "$WORK/listed" ||
@@ -162,7 +169,31 @@ $(cat "$WORK/listed")"
 grep -q 'typed here' "$WORK/listed" ||
 	fail "the listing does not say where it came from:
 $(cat "$WORK/listed")"
+grep -q 'retrieval' "$WORK/listed" ||
+	fail "the listing does not say how it activates:
+$(cat "$WORK/listed")"
 printf 'ok   it is in the listing, with where it came from\n'
+
+# The free tier bounds input tokens per minute, and these turns are not small.
+sleep 20
+
+# A standing direction is the privileged write, and it stops.
+STANDING=$(agent session create --title "standing" | tr -d '\r\n')
+SESSION=$STANDING
+agent attach "$STANDING" >"$WORK/standing" 2>&1 &
+WATCH=$!
+agent send "$STANDING" \
+	"Use the remember tool with activation set to standing to record: always run gofmt before committing. Then say you have done it." >/dev/null
+approve_until_done "$WORK/standing"
+kill "$WATCH" 2>/dev/null || true
+wait "$WATCH" 2>/dev/null || true
+
+grep -q 'approval.requested' "$WORK/standing" ||
+	fail "a standing direction was written without stopping for anybody:
+$(cut -c1-120 "$WORK/standing" | tail -15)"
+printf 'ok   giving a memory authority over every run stopped and asked\n'
+
+sleep 20
 
 # A different session entirely.
 SECOND=$(agent session create --title "recalling" | tr -d '\r\n')
