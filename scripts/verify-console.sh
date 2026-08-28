@@ -47,15 +47,24 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 done
 
 BASE="http://127.0.0.1:7791"
-TOKEN=$(grep -o '?t=[A-Za-z0-9_-]*' "$WORK/daemon.out" | cut -c4-)
-[ -n "$TOKEN" ] || fail "the daemon did not print a console URL: $(cat "$WORK/daemon.out")"
+
+CODE=$(grep -o '?c=[A-Za-z0-9-]*' "$WORK/daemon.out" | cut -c4-)
+[ -n "$CODE" ] || fail "the daemon did not print a console URL: $(cat "$WORK/daemon.out")"
 printf 'ok   the daemon says where the console is\n'
+
+# The line the daemon prints goes into a terminal's scrollback, so what is in
+# it must be a code and not the credential itself.
+grep -q '?t=' "$WORK/daemon.out" &&
+	fail "the printed URL carries a credential rather than a code"
+grep -qE '\?c=[A-Z0-9]{4}-' "$WORK/daemon.out" ||
+	fail "the printed code is not in the shape a person can read"
+printf 'ok   what it prints is a code, not a credential\n'
 
 # 1. The page loads with no credential. A browser cannot present one on the
 #    request that fetches the page it would get the token from.
 for FILE in / /app.js /app.css; do
-	CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$FILE")
-	[ "$CODE" = 200 ] || fail "$FILE returned $CODE without a credential"
+	STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$FILE")
+	[ "$STATUS" = 200 ] || fail "$FILE returned $STATUS without a credential"
 done
 printf 'ok   the console loads without a credential\n'
 
@@ -64,18 +73,46 @@ curl -s -D - -o /dev/null "$BASE/" | grep -qi 'content-security-policy' ||
 printf 'ok   and with a policy that keeps it from reaching anywhere else\n'
 
 # 2. Everything it can do needs one.
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
 	-H 'content-type: application/json' -d '{}' \
 	"$BASE/jingclaw.control.v1.SessionService/ListSessions")
-[ "$CODE" = 401 ] || fail "an uncredentialed API call returned $CODE, want 401"
+[ "$STATUS" = 401 ] || fail "an uncredentialed API call returned $STATUS, want 401"
 printf 'ok   the API behind it refuses an uncredentialed call\n'
 
 # 3. A name that resolves here is still refused, credential or not.
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example.com:7791' "$BASE/")
-[ "$CODE" = 403 ] || fail "a rebound host reached the console: $CODE"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example.com:7791' "$BASE/")
+[ "$STATUS" = 403 ] || fail "a rebound host reached the console: $STATUS"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example.com:7791' \
+	-X POST -d '{}' "$BASE/pair")
+[ "$STATUS" = 403 ] || fail "a rebound host reached the exchange: $STATUS"
 printf 'ok   and a rebound host reaches neither\n'
 
-# 4. The browser's own transport: a unary call is a POST with a JSON body.
+# 4. The code buys a credential, once.
+TOKEN=$(curl -s -X POST -H 'content-type: application/json' \
+	-d "{\"code\":\"$CODE\"}" "$BASE/pair" |
+	sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+[ -n "$TOKEN" ] || fail "the code did not buy a credential"
+printf 'ok   a code buys a credential\n'
+
+CODE_AGAIN=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+	-H 'content-type: application/json' -d "{\"code\":\"$CODE\"}" "$BASE/pair")
+[ "$CODE_AGAIN" = 403 ] || fail "the code worked a second time: $CODE_AGAIN"
+printf 'ok   and only once\n'
+
+# 5. What it bought is narrower than what the CLI holds. A page somebody was
+#    let into must not be able to let anything else in, or rewrite which
+#    channels the gateway listens to.
+for FORBIDDEN in \
+	jingclaw.control.v1.ConsoleService/IssuePairingCode \
+	jingclaw.control.v1.ChannelService/ListBindings; do
+	STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+		-H 'content-type: application/json' -H "authorization: Bearer $TOKEN" \
+		-d '{}' "$BASE/$FORBIDDEN")
+	[ "$STATUS" = 403 ] || fail "the console credential reached $FORBIDDEN: $STATUS"
+done
+printf 'ok   and cannot mint another or rewrite bindings\n'
+
+# 6. The browser's own transport: a unary call is a POST with a JSON body.
 SESSION=$(curl -s -X POST \
 	-H 'content-type: application/json' \
 	-H "authorization: Bearer $TOKEN" \
@@ -88,7 +125,7 @@ printf 'ok   a unary call works as plain JSON over POST\n'
 "$WORK/agent" --config "$WORK/config.toml" send "$SESSION" "hello from the terminal" >/dev/null
 sleep 1
 
-# 5. A streaming call: the request is enveloped too, and the answer comes back
+# 7. A streaming call: the request is enveloped too, and the answer comes back
 #    in length-prefixed frames. Getting this wrong is what a second client
 #    finds and one client never does.
 python3 - "$SESSION" "$WORK/framed" <<'FRAME'
@@ -120,7 +157,7 @@ grep -q 'hello from the terminal' "$WORK/stream" ||
 $(head -c 400 "$WORK/stream")"
 printf 'ok   a streaming call works, and carries what the CLI sent\n'
 
-# 6. Turning it off means it is off.
+# 8. Turning it off means it is off.
 sed -i.bak 's/web_console = true/web_console = false/' "$WORK/config.toml"
 kill "$DAEMON"; wait "$DAEMON" 2>/dev/null || true
 
@@ -133,8 +170,10 @@ while ! grep -q Listening "$WORK/off.out" 2>/dev/null; do
 	sleep 0.1
 done
 
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/")
-[ "$CODE" = 404 ] || fail "the console still answers with web_console = false: $CODE"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/")
+[ "$STATUS" = 404 ] || fail "the console still answers with web_console = false: $STATUS"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d '{}' "$BASE/pair")
+[ "$STATUS" = 404 ] || fail "the exchange still answers with web_console = false: $STATUS"
 grep -q Console "$WORK/off.out" && fail "the banner still advertises a console that is off"
 printf 'ok   turning it off turns it off\n'
 

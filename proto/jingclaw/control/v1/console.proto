@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+import "google/protobuf/timestamp.proto";
+import "jingclaw/control/v1/common.proto";
+
+// ConsoleService issues the codes a browser uses to get a credential.
+//
+// It is reachable by the operator's own credential and not by the console's:
+// a page that was let in must not be able to let anything else in.
+service ConsoleService {
+  // IssuePairingCode mints a short-lived, single-use code.
+  //
+  // The code is what travels — through a terminal's scrollback, a screenshot,
+  // an SSH session somebody else can scroll back through — so it is the thing
+  // that expires. The credential it buys never appears anywhere a person can
+  // read it by accident.
+  rpc IssuePairingCode(IssuePairingCodeRequest) returns (IssuePairingCodeResponse);
+}
+
+message IssuePairingCodeRequest {
+  RequestMeta meta = 1;
+}
+
+message IssuePairingCodeResponse {
+  string code = 1;
+
+  // The address to open, with the code already in it.
+  string url = 2;
+
+  google.protobuf.Timestamp expires_at = 3;
+}

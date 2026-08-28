@@ -269,6 +269,11 @@ type Server struct {
 	// answer for a machine with no desktop on it, which is where this agent is
 	// most useful and where a native client cannot go.
 	WebConsole bool `koanf:"web_console"`
+
+	// PairingTTL is how long the code a browser exchanges for its credential
+	// stays good. It is short because the code is the part that ends up in a
+	// terminal's scrollback and in screenshots.
+	PairingTTL time.Duration `koanf:"pairing_ttl"`
 }
 
 // Defaults are what runs when nothing says otherwise.
@@ -328,6 +333,7 @@ func Defaults() Config {
 			Addr:       "127.0.0.1:0",
 			LogLevel:   "info",
 			WebConsole: true,
+			PairingTTL: 10 * time.Minute,
 		},
 		Gateway: Gateway{
 			Platform:  "discord",
@@ -1003,6 +1009,11 @@ const Example = `# JingClaw configuration.
 # the URL, which carries a one-time-visible token; the page keeps it for the
 # tab and takes it back out of the address bar. Over SSH, forward the port.
 # web_console = true
+
+# How long the code in that URL stays good. It works once whatever happens
+# here; this is the ceiling on how long an unused one is worth stealing out of
+# a screenshot. "agent console" mints another.
+# pairing_ttl = "10m"
 
 [gateway]
 # Read by gatewayd, not by the daemon. Only "discord" is implemented.

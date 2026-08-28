@@ -74,7 +74,7 @@ func newRootCommand() *cobra.Command {
 
 	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand(),
 		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand(),
-		newArtifactCommand())
+		newArtifactCommand(), newConsoleCommand())
 	return root
 }
 
@@ -530,6 +530,38 @@ func newArtifactCommand() *cobra.Command {
 
 	artifact.AddCommand(get)
 	return artifact
+}
+
+// newConsoleCommand mints a fresh code for the browser.
+//
+// Without it, losing the line the daemon printed would mean restarting the
+// daemon — which would change the credential the CLI and the gateway are also
+// using. A code that expires needs a way to get another one, or it is just an
+// obstacle.
+func newConsoleCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "console",
+		Short: "Print an address for the web console, with a fresh code",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			httpClient, baseURL, err := authenticated()
+			if err != nil {
+				return err
+			}
+
+			client := controlv1connect.NewConsoleServiceClient(httpClient, baseURL)
+			resp, err := client.IssuePairingCode(cmd.Context(),
+				connect.NewRequest(&controlv1.IssuePairingCodeRequest{Meta: newMeta()}))
+			if err != nil {
+				return err
+			}
+
+			fmt.Println(resp.Msg.GetUrl())
+			fmt.Fprintf(cmd.ErrOrStderr(), "valid once, until %s\n",
+				resp.Msg.GetExpiresAt().AsTime().Local().Format("15:04:05"))
+			return nil
+		},
+	}
 }
 
 func dialArtifacts() (controlv1connect.ArtifactServiceClient, error) {

@@ -238,7 +238,8 @@ over SSH, a container, somebody else's Linux box. So a console ships inside the
 binary, and the daemon prints where it is:
 
 ```
-Console:   http://127.0.0.1:54832/?t=A-Z2a1JB8valNeI…
+Console:   http://127.0.0.1:54832/?c=4EDM-HB22-V5LY-6BKA
+           valid once, until 13:58:19 (agent console for another)
 ```
 
 Open it and you get the session list, a live timeline, approvals with
@@ -253,12 +254,23 @@ length-prefixed frames. That is deliberate. A static binary that needs a
 not a static binary, and the browser needs no proxy to reach the same endpoint
 the CLI uses.
 
-The token is in the URL because a browser cannot present a bearer token on the
-request that loads the page it would get one from. The page takes it back out
-of the address bar immediately and keeps it for the tab; the files themselves
-are served without a credential, because they are code rather than data and
-everything the console can *do* is behind the check. The Host validation
-applies either way.
+What is in that URL is a **code, not a credential**. It works once, expires,
+and buys the browser its own token — which is narrower than the one the CLI
+holds and can be revoked without touching it. A console credential cannot mint
+another, and cannot rewrite which channels the gateway listens to.
+
+That distinction is the whole point of the line above. It is going to sit in a
+terminal's scrollback, on a machine somebody else can scroll back through,
+inside a screenshot of a demo. A code that stopped working an hour ago is a
+very different thing to leave lying there than a credential that works until
+the daemon restarts. `agent console` prints another when you need one.
+
+The page takes the code out of the address bar before anything else happens,
+and keeps what it bought in `localStorage` so a reload and a second tab work —
+a code only works once, so a second tab has no way to get its own. The files
+themselves are served without a credential, because they are code rather than
+data and everything the console can *do* is behind the check. The Host
+validation applies to all of it.
 
 A session started from the terminal shows up in the console, and a turn sent
 from the terminal streams into it while it is open — which is what "clients are

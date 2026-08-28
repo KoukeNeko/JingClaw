@@ -42,13 +42,14 @@
 <div id="locked">
   <div class="card">
     <h1>JingClaw</h1>
-    <p>This console needs the address <code>agentd</code> printed when it started.</p>
-    <p class="hint">It looks like <code>http://127.0.0.1:PORT/?t=…</code>. The token is in
-       the daemon's own output, not here, so a page that has not been given it cannot do anything.</p>
+    <p>This console needs a pairing code. <code>agentd</code> printed one when it started:</p>
+    <p class="hint"><code>agent console</code> prints another. A code works once and expires,
+       so what it leaves in a terminal's scrollback stops being worth anything.</p>
     <form id="unlock">
-      <label for="token">Or paste the token</label>
-      <input id="token" type="password" autocomplete="off" spellcheck="false">
-      <button type="submit">Unlock</button>
+      <label for="code">Paste the code</label>
+      <input id="code" type="text" autocomplete="off" spellcheck="false"
+             placeholder="XXXX-XXXX-XXXX-XXXX">
+      <button type="submit">Pair</button>
     </form>
     <p id="unlock-error" role="alert" hidden></p>
   </div>

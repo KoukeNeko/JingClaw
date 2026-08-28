@@ -1,6 +1,7 @@
 package webui_test
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,16 +66,44 @@ func TestThePageIsNotSomewhereElseToBorrow(t *testing.T) {
 	}
 }
 
-// A credential that reached the page must not stay in the address bar, where
-// it ends up in history and in every screenshot of it.
-func TestThePageTakesTheTokenOutOfTheURL(t *testing.T) {
-	response := get(t, "/app.js")
-
-	body := make([]byte, 64*1024)
-	read, _ := response.Body.Read(body)
-	script := string(body[:read])
+// What arrives in the URL is a code that works once, and even that does not
+// stay in the address bar, where it would end up in history and in every
+// screenshot of the page.
+func TestThePageTradesACodeAndClearsTheURL(t *testing.T) {
+	script := body(t, "/app.js")
 
 	if !strings.Contains(script, "history.replaceState") {
-		t.Error("the script does not clear the token from the address bar")
+		t.Error("the script does not clear the code from the address bar")
 	}
+	if !strings.Contains(script, "'/pair'") {
+		t.Error("the script does not exchange the code for a credential")
+	}
+	// The credential itself must never be what the URL carries.
+	if strings.Contains(script, "params.get('t')") {
+		t.Error("the script still reads a credential straight out of the URL")
+	}
+}
+
+// Everything the console renders comes from somewhere untrusted — a model's
+// text, a tool's output, an MCP server's answer — and the page holds a
+// credential. Building any of it as markup is how the two meet.
+func TestThePageNeverBuildsMarkupFromContent(t *testing.T) {
+	script := body(t, "/app.js")
+
+	for _, forbidden := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("the script uses %s", forbidden)
+		}
+	}
+}
+
+func body(t *testing.T, path string) string {
+	t.Helper()
+
+	response := get(t, path)
+	content, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(content)
 }

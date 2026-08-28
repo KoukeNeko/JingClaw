@@ -197,6 +197,11 @@
 # tab and takes it back out of the address bar. Over SSH, forward the port.
 # web_console = true
 
+# How long the code in that URL stays good. It works once whatever happens
+# here; this is the ceiling on how long an unused one is worth stealing out of
+# a screenshot. "agent console" mints another.
+# pairing_ttl = "10m"
+
 [gateway]
 # Read by gatewayd, not by the daemon. Only "discord" is implemented.
 # platform = "discord"

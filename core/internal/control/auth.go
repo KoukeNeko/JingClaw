@@ -31,6 +31,16 @@ const (
 
 	// ScopeGateway reaches the ingress and nothing else.
 	ScopeGateway Scope = "gateway"
+
+	// ScopeConsole is what a browser gets.
+	//
+	// It is separate from the operator's own credential for two reasons.
+	// Revoking a browser should not also change the one the CLI and the
+	// gateway are using, and a page that a person opened from a link should
+	// not be able to do everything that person can: it reads and drives
+	// sessions, and does not rewrite which channels the gateway will listen
+	// to.
+	ScopeConsole Scope = "console"
 )
 
 // servicesForScope lists the fully-qualified proto services a scope may call.
@@ -44,9 +54,14 @@ var servicesForScope = map[Scope]map[string]bool{
 		"jingclaw.control.v1.ChannelService":        true,
 		"jingclaw.control.v1.GatewayIngressService": true,
 		"jingclaw.control.v1.ArtifactService":       true,
+		"jingclaw.control.v1.ConsoleService":        true,
 	},
 	ScopeGateway: {
 		"jingclaw.control.v1.GatewayIngressService": true,
+	},
+	ScopeConsole: {
+		"jingclaw.control.v1.SessionService":  true,
+		"jingclaw.control.v1.ArtifactService": true,
 	},
 }
 

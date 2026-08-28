@@ -7,6 +7,7 @@
 
 const API = '/jingclaw.control.v1.';
 const TOKEN_KEY = 'jingclaw.token';
+const REDEEM_PATH = '/pair';
 const CLIENT_ID = 'jingclaw-web';
 const SESSION_POLL_MS = 4000;
 // Enough of a build log to find the failure in, without putting four hundred
@@ -146,34 +147,75 @@ function concat(a, b) {
 
 // ------------------------------------------------------------------ unlock
 
-function readTokenFromURL() {
+function readCodeFromURL() {
   const params = new URLSearchParams(location.search);
-  const token = params.get('t');
-  if (!token) return null;
+  const code = params.get('c');
+  if (!code) return null;
 
-  // Taken out of the address bar immediately: a credential in a URL ends up in
-  // history, in a screenshot, and in whatever the next page is told referred it.
+  // Taken out of the address bar before anything else happens. A code in a URL
+  // ends up in history, in a screenshot, and in whatever the next page is told
+  // referred it — and it is still good until it is used.
   history.replaceState(null, '', location.pathname);
+  return code;
+}
+
+// redeem exchanges the code for this browser's own credential.
+//
+// The code travels through places people can read — a terminal's scrollback,
+// an SSH session somebody else can scroll back through — so it works once and
+// expires. What it buys is narrower than the credential the CLI holds and can
+// be revoked without touching it.
+async function redeem(code) {
+  const response = await fetch(REDEEM_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  if (!response.ok) {
+    throw new Error('That code is not valid. Run "agent console" for another.');
+  }
+
+  const { token } = await response.json();
+  if (!token) throw new Error('The daemon returned no credential.');
   return token;
 }
 
-async function unlock(token) {
+async function useToken(token) {
   state.token = token;
-  // The cheapest call that proves the credential works, so a wrong token says
-  // so here rather than by everything quietly failing later.
+  // The cheapest call that proves the credential works, so a dead one says so
+  // here rather than by everything quietly failing later.
   await call('SessionService', 'ListSessions', {});
-  sessionStorage.setItem(TOKEN_KEY, token);
+
+  // localStorage rather than sessionStorage: a code works once, so a second
+  // tab has no way to get its own. Sharing what the first tab redeemed is what
+  // makes opening a second tab, or reloading, work at all.
+  //
+  // The daemon usually takes a fresh port each start, which makes each run its
+  // own origin and leaves nothing behind that still works. When the port is
+  // pinned, a stale credential fails the call above and is cleared.
+  localStorage.setItem(TOKEN_KEY, token);
 }
 
 async function start() {
-  const token = readTokenFromURL() || sessionStorage.getItem(TOKEN_KEY);
-  if (!token) return showLocked();
+  const code = readCodeFromURL();
 
-  try {
-    await unlock(token);
-  } catch (err) {
-    sessionStorage.removeItem(TOKEN_KEY);
-    return showLocked(err.message);
+  if (code) {
+    try {
+      await useToken(await redeem(code));
+    } catch (err) {
+      localStorage.removeItem(TOKEN_KEY);
+      return showLocked(err.message);
+    }
+  } else {
+    const stored = localStorage.getItem(TOKEN_KEY);
+    if (!stored) return showLocked();
+
+    try {
+      await useToken(stored);
+    } catch {
+      localStorage.removeItem(TOKEN_KEY);
+      return showLocked('This browser is no longer paired with the daemon.');
+    }
   }
 
   el('locked').hidden = true;
@@ -641,7 +683,7 @@ el('unlock').addEventListener('submit', async (event) => {
   el('unlock-error').hidden = true;
 
   try {
-    await unlock(el('token').value.trim());
+    await useToken(await redeem(el('code').value.trim()));
     location.reload();
   } catch (err) {
     showLocked(err.message);
