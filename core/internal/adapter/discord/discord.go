@@ -264,11 +264,16 @@ func (a *Adapter) toInbound(
 	}
 
 	// A thread is the natural unit of work, so it becomes the session. Outside
-	// one, the message that started the exchange stands in as a stable key.
+	// one, the channel is: two people mentioning the bot in #agent are
+	// continuing one conversation, and a thread is how somebody says they want
+	// a separate one.
+	//
+	// This used to key on the arriving message's id, which meant every mention
+	// got a session of its own. From the channel that looked exactly like an
+	// agent with no memory: ask it something, then say "go ahead", and it has
+	// never heard of you.
 	if message.Thread != nil {
 		conversation.ThreadID = message.Thread.ID().String()
-	} else {
-		conversation.RootMessageID = message.ID.String()
 	}
 
 	principal := jcgateway.Principal{

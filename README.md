@@ -407,6 +407,18 @@ So each script starts a real daemon, drives it the way a person would, and
 checks what came out. `verify-artifacts.sh` needs a provider credential —
 only a model calls tools — and skips itself when there is none.
 
+## What is one conversation
+
+A Discord **thread** is a session. Outside a thread, the **channel** is: two
+people mentioning the bot in `#agent` are continuing one conversation, and
+opening a thread is how somebody says they want a separate one.
+
+This is worth stating because getting it wrong is invisible from the code and
+obvious from the channel. Keying on the arriving message's id — which is what
+this did until it was noticed — gives every mention a session of its own, and
+what that looks like is an agent with no memory: ask it something, say "go
+ahead", and it has never heard of you.
+
 ## What it is doing, on Discord
 
 A run that reads four files and waits on a test suite used to say nothing at

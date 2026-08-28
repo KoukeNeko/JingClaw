@@ -90,8 +90,15 @@ type ConversationRef struct {
 	ChannelID string
 	ThreadID  string
 
-	// RootMessageID stands in when a platform has no threads, so a
-	// conversation still has a stable key.
+	// RootMessageID identifies a conversation on a platform that has no
+	// threads and where a reply chain is the unit instead — email, say.
+	//
+	// It must never be set to the id of the message being delivered. Doing so
+	// gives every message a key of its own, which is not a conversation: it is
+	// an agent that has never heard of you, once per message.
+	//
+	// Kept here rather than deleted because a platform that works that way is
+	// the reason the field exists, and the next adapter will need it.
 	RootMessageID string
 }
 

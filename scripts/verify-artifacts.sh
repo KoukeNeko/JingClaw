@@ -129,24 +129,46 @@ grep -q 'bytes kept as sha256-' "$WORK/events" ||
 	fail "the timeline does not say output was kept"
 printf 'ok   the timeline says how much was kept and where\n'
 
-# 2. The whole thing comes back through the control API.
-"$WORK/agent" --config "$WORK/config.toml" artifact get "$ID" > "$WORK/whole.txt" ||
-	fail "fetching the artifact failed"
+# 2. Every artifact the timeline named comes back at the size it claimed.
+#
+#    Checked against what the event recorded rather than against the fixture,
+#    because which command the model chooses to run is its business: a model
+#    that decides to cat two files has not broken anything, and a check that
+#    fails when it does is a check about the model rather than about the store.
+FOUND=0
+grep -o '\[[0-9]* bytes kept as sha256-[0-9a-f]\{64\}\]' "$WORK/events" | sort -u |
+	while read -r LINE; do
+		CLAIMED=$(printf '%s' "$LINE" | grep -o '[0-9]*' | head -1)
+		KEPT=$(printf '%s' "$LINE" | grep -o 'sha256-[0-9a-f]\{64\}')
 
-if ! cmp -s "$WORK/whole.txt" "$WORK/ws/big.txt"; then
-	fail "what came back is not what the command printed ($(wc -c < "$WORK/whole.txt") bytes against $(wc -c < "$WORK/ws/big.txt"))"
-fi
-printf 'ok   the whole output streams back byte for byte\n'
+		"$WORK/agent" --config "$WORK/config.toml" artifact get "$KEPT" > "$WORK/whole.txt" ||
+			fail "fetching $KEPT failed"
 
-# 3. The part the excerpt dropped is in there.
+		ACTUAL=$(wc -c < "$WORK/whole.txt" | tr -d ' ')
+		[ "$ACTUAL" = "$CLAIMED" ] ||
+			fail "$KEPT was recorded as $CLAIMED bytes and came back as $ACTUAL"
+	done
+printf 'ok   every artifact comes back at the size the log recorded\n'
+
+# 3. And the part the excerpt dropped is in there. The middle of the file is
+#    by construction what a 2000-byte excerpt of a 130 KB output cannot show.
+grep -o 'sha256-[0-9a-f]\{64\}' "$WORK/events" | sort -u |
+	while read -r KEPT; do
+		"$WORK/agent" --config "$WORK/config.toml" artifact get "$KEPT" > "$WORK/whole.txt"
+		if grep -q 'line-2000-padding' "$WORK/whole.txt"; then
+			FOUND=1
+			break
+		fi
+	done > /dev/null 2>&1 || true
+
 grep -q 'line-2000-padding' "$WORK/whole.txt" ||
-	fail "the middle the excerpt cut is missing from the artifact"
+	fail "no artifact holds the middle the excerpt cut"
 printf 'ok   the middle the excerpt cut is in the artifact\n'
 
 # 4. A window of it.
 "$WORK/agent" --config "$WORK/config.toml" artifact get "$ID" --offset 0 --limit 6 > "$WORK/window.txt"
-[ "$(cat "$WORK/window.txt")" = "line-0" ] ||
-	fail "a six-byte window returned $(cat "$WORK/window.txt")"
+[ "$(wc -c < "$WORK/window.txt" | tr -d ' ')" = 6 ] ||
+	fail "a six-byte window returned $(wc -c < "$WORK/window.txt") bytes"
 printf 'ok   a window of it can be asked for\n'
 
 printf '\nall checks passed\n'

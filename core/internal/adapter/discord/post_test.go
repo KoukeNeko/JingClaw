@@ -337,3 +337,62 @@ func TestOnlyAnswersBecomeFiles(t *testing.T) {
 		t.Error("an answer that fits was sent as a file")
 	}
 }
+
+// Two mentions in one channel are one conversation.
+//
+// Keying on the arriving message's id gave each its own session, which from
+// the channel looks exactly like an agent with no memory: ask it something,
+// say "go ahead", and it has never heard of you.
+func TestOneChannelIsOneConversation(t *testing.T) {
+	first := jcgateway.ConversationRef{
+		Platform: jcgateway.PlatformDiscord, AccountID: "main",
+		TenantID: "guild_1", ChannelID: "channel_1",
+	}
+	second := first
+
+	if first.Key() != second.Key() {
+		t.Errorf("two messages in one channel have different keys:\n%s\n%s",
+			first.Key(), second.Key())
+	}
+}
+
+// A thread is how somebody says they want a separate conversation, so it has
+// to actually be one.
+func TestAThreadIsItsOwnConversation(t *testing.T) {
+	channel := jcgateway.ConversationRef{
+		Platform: jcgateway.PlatformDiscord, AccountID: "main",
+		TenantID: "guild_1", ChannelID: "channel_1",
+	}
+	thread := channel
+	thread.ThreadID = "thread_1"
+
+	if channel.Key() == thread.Key() {
+		t.Error("a thread shares its channel's history")
+	}
+
+	other := thread
+	other.ThreadID = "thread_2"
+	if thread.Key() == other.Key() {
+		t.Error("two threads share one history")
+	}
+}
+
+// Different channels, and different guilds, must not share a history either.
+func TestConversationsAreSeparatedByWhereTheyAre(t *testing.T) {
+	base := jcgateway.ConversationRef{
+		Platform: jcgateway.PlatformDiscord, AccountID: "main",
+		TenantID: "guild_1", ChannelID: "channel_1",
+	}
+
+	elsewhere := base
+	elsewhere.ChannelID = "channel_2"
+	if base.Key() == elsewhere.Key() {
+		t.Error("two channels share one history")
+	}
+
+	otherGuild := base
+	otherGuild.TenantID = "guild_2"
+	if base.Key() == otherGuild.Key() {
+		t.Error("two servers share one history")
+	}
+}

@@ -431,3 +431,63 @@ func TestClaimBasedAccess(t *testing.T) {
 		t.Fatalf("a principal without the role was accepted: %v", err)
 	}
 }
+
+// inChannel is a message sent in a channel rather than in a thread, which is
+// where the conversation key used to come apart.
+func inChannel(key, text string) gateway.InboundMessage {
+	message := message(key, text, discordPrincipal("user_1"))
+	message.Conversation.ThreadID = ""
+	return message
+}
+
+// Two mentions in one channel continue one session.
+//
+// This is what "the agent has no memory" looked like from a channel: each
+// message keyed a conversation of its own, so asking something and then saying
+// "go ahead" reached an agent that had never heard of the first message.
+func TestTwoMessagesInAChannelContinueOneSession(t *testing.T) {
+	ingress, store, _, _ := newIngress(t)
+	bindChannel(t, store, "user_1")
+
+	first, err := ingress.Accept(context.Background(), inChannel("m1", "開始吧"))
+	if err != nil {
+		t.Fatalf("first message: %v", err)
+	}
+
+	second, err := ingress.Accept(context.Background(), inChannel("m2", "繼續"))
+	if err != nil {
+		t.Fatalf("second message: %v", err)
+	}
+
+	if first.SessionID != second.SessionID {
+		t.Errorf("two messages in one channel produced sessions %s and %s",
+			first.SessionID, second.SessionID)
+	}
+	if first.RunID == second.RunID {
+		t.Error("the second message did not start a run of its own")
+	}
+}
+
+// A thread is how somebody says they want to start something else, so it has
+// to be a session of its own.
+func TestAThreadGetsItsOwnSession(t *testing.T) {
+	ingress, store, _, _ := newIngress(t)
+	bindChannel(t, store, "user_1")
+
+	channel, err := ingress.Accept(context.Background(), inChannel("m1", "開始吧"))
+	if err != nil {
+		t.Fatalf("channel message: %v", err)
+	}
+
+	threaded := inChannel("m2", "另一件事")
+	threaded.Conversation.ThreadID = "thread_9"
+
+	thread, err := ingress.Accept(context.Background(), threaded)
+	if err != nil {
+		t.Fatalf("thread message: %v", err)
+	}
+
+	if channel.SessionID == thread.SessionID {
+		t.Error("a thread continued the channel's session")
+	}
+}
