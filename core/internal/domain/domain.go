@@ -453,6 +453,12 @@ const (
 	StopCancelled     StopReason = "cancelled"
 	StopError         StopReason = "error"
 
+	// StopUnknown is a reason the provider gave that this build does not
+	// recognise. It is its own value so that an unfamiliar one is not quietly
+	// recorded as a normal ending, which would make a truncated answer
+	// indistinguishable from a complete one.
+	StopUnknown StopReason = "unknown"
+
 	// Reserved for M1, when a turn can end because the model asked for a tool.
 	StopToolUse StopReason = "tool_use"
 )

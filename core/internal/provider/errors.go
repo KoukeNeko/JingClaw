@@ -33,6 +33,16 @@ const (
 	// but not the caller's fault and not fixed by sending less.
 	KindOverloaded ErrorKind = "overloaded"
 
+	// KindResourceExhausted: the machine serving the model has not got the
+	// memory, the KV cache or a free slot for this request.
+	//
+	// Distinct from KindQuotaExhausted, which is about an account's
+	// allowance. This is about hardware, and it says nothing about whether
+	// anybody is owed anything: a local server refusing a long prompt because
+	// it will not fit in VRAM is not a billing event, and resending the same
+	// request unchanged will not fit either.
+	KindResourceExhausted ErrorKind = "resource_exhausted"
+
 	// KindTransient: network blips and 5xx.
 	KindTransient ErrorKind = "transient"
 
@@ -76,7 +86,7 @@ func (k ErrorKind) Retryable() bool {
 // failed because the account is out of allowance.
 func (k ErrorKind) NeedsOperator() bool {
 	switch k {
-	case KindQuotaExhausted, KindAuth, KindNotFound:
+	case KindQuotaExhausted, KindAuth, KindNotFound, KindResourceExhausted:
 		return true
 	default:
 		return false

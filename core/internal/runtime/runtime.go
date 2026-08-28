@@ -952,6 +952,13 @@ func (r *Runtime) generateTurn(
 				return nil, err
 			}
 
+		case provider.ReasoningDelta:
+			// Dropped on purpose, and stated rather than left to a missing
+			// case. A model's working-out is not its answer, and this is the
+			// path that ends with text posted to whoever asked. Showing it is
+			// a decision with its own audience and its own switch, not
+			// something to acquire by falling through.
+
 		case provider.Completed:
 			stopReason = e.StopReason
 		}

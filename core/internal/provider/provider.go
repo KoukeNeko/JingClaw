@@ -196,6 +196,23 @@ type ToolCallRequested struct {
 	Opaque json.RawMessage
 }
 
+// ReasoningDelta is a chunk of the model's own thinking, where a provider
+// exposes it.
+//
+// A separate event from TextDelta, and the separation is the point: this is
+// not the answer. Backends disagree about almost everything here — some send
+// it as "reasoning", some as "reasoning_content", some inline in the content
+// wrapped in tags, and some let the caller choose — but they agree that it is
+// working-out rather than what the model is telling anybody.
+//
+// Folded into TextDelta it would be indistinguishable from the answer by the
+// time anything downstream saw it, and would be posted wherever the answer
+// goes. Nothing consumes this yet; it exists so that the first backend to
+// produce reasoning cannot leak it by default.
+type ReasoningDelta struct {
+	Text string
+}
+
 // UsageDelta reports token accounting. Providers send it at different points,
 // so the runtime treats each one as the latest known total rather than
 // something to accumulate.
@@ -206,9 +223,21 @@ type UsageDelta struct {
 // Completed marks the end of a generation and why it stopped.
 type Completed struct {
 	StopReason domain.StopReason
+
+	// RawReason is what the provider actually said, kept whether or not it
+	// mapped onto anything known.
+	//
+	// The set of stop reasons is not closed in practice — one gateway
+	// normalizes several upstream vocabularies and still passes the original
+	// through, because they do not agree. An adapter that has to choose
+	// between the known values will pick one, and "it stopped normally" is a
+	// plausible, wrong, and unfalsifiable answer for a generation that was
+	// actually cut off.
+	RawReason string
 }
 
 func (TextDelta) isEvent()         {}
+func (ReasoningDelta) isEvent()    {}
 func (ToolCallRequested) isEvent() {}
 func (UsageDelta) isEvent()        {}
 func (Completed) isEvent()         {}
