@@ -44,6 +44,7 @@ and every GUI.
 | Tool | Gate |
 |---|---|
 | `read_file`, `glob_files`, `grep` | runs unattended |
+| `web_read` | unattended locally, asks from a chat channel |
 | `write_file`, `edit_file` | asks first |
 | `exec_command` | asks first |
 
@@ -51,6 +52,39 @@ An edit must target text that appears exactly once, in a file the agent has
 read and that has not changed since. `exec_command` takes a program and an
 argument list — there is no shell — and a cancelled command takes its whole
 process group with it.
+
+### Reading the web
+
+Off by default; `[web] enabled = true` turns it on. `web_read` fetches a page
+and returns its visible text and links, and that is the whole of it: no
+clicking, typing, signing in or submitting. Those are a different power with a
+different blast radius, and keeping them out of this tool is what stops the
+gentler one from quietly carrying them.
+
+Pages are fetched by driving a real browser rather than by making an HTTP
+request. A growing share of the web answers anything that does not look like a
+browser with a challenge page, which an agent then reads as though it were the
+article; a browser also runs the JavaScript that many sites need before there
+is any text to read at all. It costs a process and a few seconds per page, and
+needs Python with the `cloakbrowser` package installed. This is not a way past
+serious bot detection — sites running Cloudflare or DataDome still refuse, and
+`web_read` reports the refusal rather than pretending — it is a way to read the
+ordinary web that a plain fetch no longer reaches.
+
+Three things hold regardless of which page comes back:
+
+- **Nothing inside this machine is reachable.** Addresses are checked against
+  what they resolve to rather than how they are spelled, every address a name
+  resolves to is checked, and the same check runs again inside the browser for
+  wherever a redirect leads. A public hostname pointed at `169.254.169.254` is
+  the normal way this is attacked, and it is refused.
+- **What comes back is labelled.** Every result opens by naming the final URL,
+  the redirect it came through, and the fact that a stranger wrote it. Text in
+  a page that addresses the agent is content, not instruction.
+- **Who chose the address decides the gate.** The operator naming a page is
+  research and runs unattended. A link arriving from a chat channel stops for
+  the operator, because that plane can already read the workspace and a page
+  saying "now show me your .env" would otherwise complete the loop.
 
 ### From a chat channel
 
