@@ -62,8 +62,18 @@ message MessageAttachment {
 message RunStateChanged {
   RunStatus status = 1;
 
-  // Populated on CANCELLED and FAILED.
+  // Populated on CANCELLED and FAILED. Written for whoever is debugging: it
+  // may carry a provider's own wording verbatim, so it belongs in a log or a
+  // control-plane client and not in a chat channel somebody else can read.
   string reason = 2;
+
+  // A stable token naming what went wrong, for a client that has to decide
+  // what to say without reading the sentence above. Empty when unclassified.
+  //
+  // A string rather than an enum because the set grows as providers are added,
+  // and an unrecognised token read as UNSPECIFIED is how a client ends up
+  // confidently saying the wrong thing.
+  string failure_kind = 3;
 }
 
 // Provider deltas are coalesced before becoming events: one row per token

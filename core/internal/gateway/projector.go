@@ -228,10 +228,15 @@ func (p *Projector) observeState(
 		// halfway through was paid for, and a reader asking what it cost is
 		// asking most often about exactly this case.
 		//
+		// What it must not say is payload.Reason. That field carries the
+		// upstream provider's own words, and this is a channel other people
+		// read: it has already put a billing endpoint, a quota metric and an
+		// account's limits in front of everybody in a room. The log keeps the
+		// whole of it; a stranger gets a sentence.
 		summary := p.close(run.ID)
 		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
 			State:   string(payload.Status),
-			Detail:  payload.Reason,
+			Detail:  explainFailure(payload.FailureKind),
 			Summary: summary,
 		})
 
@@ -312,6 +317,47 @@ func (p *Projector) forget(run domain.RunID) {
 // there is not an obvious one. Getting this exactly right for every tool,
 // including ones from servers this code has never seen, is not something a
 // status line is worth.
+// explainFailure says what a channel should be told about a run that ended
+// badly.
+//
+// Three questions, and only three: is it worth trying again, does somebody
+// have to go and fix something, or is this simply broken. Anything more
+// specific is either the operator's business or the provider's, and this is
+// neither's channel.
+//
+// It reads a classification rather than the failure text, so it cannot be
+// steered by wording that arrived from outside this machine.
+func explainFailure(kind string) string {
+	switch kind {
+	case "rate_limited", "overloaded":
+		return "the model is busy right now — try again shortly"
+
+	case "retry_budget_exhausted":
+		return "the model is rate limited for longer than this was willing to wait — try again in a few minutes"
+
+	case "quota_exhausted", "auth", "not_found":
+		// Deliberately vague about which. "Out of credit", "the key is wrong"
+		// and "that model does not exist" are all facts about the operator's
+		// account, and a channel is the wrong room for any of them.
+		return "the model is unavailable until the operator looks at it"
+
+	case "context_overflow":
+		return "the conversation got too long for the model to read"
+
+	case "content_filtered":
+		return "the model declined to answer that"
+
+	case "interrupted":
+		return "stopped"
+
+	case "transient", "invalid_request", "":
+		return "something went wrong at the model"
+
+	default:
+		return "something went wrong at the model"
+	}
+}
+
 func describeCall(name, arguments string) string {
 	var decoded map[string]any
 	if err := json.Unmarshal([]byte(arguments), &decoded); err != nil {

@@ -550,11 +550,47 @@ func (r *Runtime) finishFromError(ctx context.Context, run domain.Run, err error
 		return
 	}
 
-	r.finish(writeCtx, run, domain.RunFailed, err.Error())
+	r.finish(writeCtx, run, domain.RunFailed, err.Error(), classifyFailure(err))
 }
 
-func (r *Runtime) finish(ctx context.Context, run domain.Run, status domain.RunStatus, reason string) {
-	if err := r.transition(ctx, run, status, reason); err != nil {
+// classifyFailure names what went wrong in a form a client can branch on.
+//
+// The alternative is every client matching on the sentence in Reason, which is
+// often a provider's own prose: written for a person, changed without notice,
+// and in at least one case posted verbatim into a chat channel because nothing
+// downstream had any other way to tell one failure from another.
+func classifyFailure(err error) string {
+	if errors.Is(err, ErrUserInterrupted) {
+		return "interrupted"
+	}
+
+	var exhausted *provider.ErrRetryBudgetExhausted
+	if errors.As(err, &exhausted) {
+		// Retryable on its merits, abandoned because the wait was longer than
+		// this request was allowed to take. That is a different thing to tell
+		// somebody than a failure, so it keeps its own name.
+		return "retry_budget_exhausted"
+	}
+
+	if kind := provider.KindOf(err); kind != provider.KindUnknown {
+		return string(kind)
+	}
+	return ""
+}
+
+func (r *Runtime) finish(
+	ctx context.Context,
+	run domain.Run,
+	status domain.RunStatus,
+	reason string,
+	failureKind ...string,
+) {
+	var kind string
+	if len(failureKind) > 0 {
+		kind = failureKind[0]
+	}
+
+	if err := r.transition(ctx, run, status, reason, kind); err != nil {
 		// Nowhere left to report this: the log itself is the reporting
 		// channel. Surfacing it in the daemon log is all that remains.
 		r.opts.Logger.Error("failed to record terminal run state",
@@ -568,7 +604,13 @@ func (r *Runtime) finish(ctx context.Context, run domain.Run, status domain.RunS
 // transition writes the run's new state, then the event announcing it. Order
 // matters: a client that sees the event and immediately queries the run must
 // not find it still in the old state.
-func (r *Runtime) transition(ctx context.Context, run domain.Run, status domain.RunStatus, reason string) error {
+func (r *Runtime) transition(
+	ctx context.Context,
+	run domain.Run,
+	status domain.RunStatus,
+	reason string,
+	failureKind ...string,
+) error {
 	run.Status = status
 	if status.IsTerminal() {
 		now := r.opts.Now()
@@ -579,9 +621,15 @@ func (r *Runtime) transition(ctx context.Context, run domain.Run, status domain.
 		return err
 	}
 
+	var kind string
+	if len(failureKind) > 0 {
+		kind = failureKind[0]
+	}
+
 	return r.append(ctx, run.SessionID, run.ID, domain.EventRunStateChanged, domain.RunStateChanged{
-		Status: status,
-		Reason: reason,
+		Status:      status,
+		Reason:      reason,
+		FailureKind: kind,
 	})
 }
 

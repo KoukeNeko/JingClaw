@@ -30,8 +30,9 @@ type attachmentJSON struct {
 }
 
 type runStateChangedJSON struct {
-	Status string `json:"status"`
-	Reason string `json:"reason,omitempty"`
+	Status      string `json:"status"`
+	Reason      string `json:"reason,omitempty"`
+	FailureKind string `json:"failure_kind,omitempty"`
 }
 
 type assistantTextDeltaJSON struct {
@@ -181,8 +182,9 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 
 	case domain.RunStateChanged:
 		return json.Marshal(runStateChangedJSON{
-			Status: string(p.Status),
-			Reason: p.Reason,
+			Status:      string(p.Status),
+			Reason:      p.Reason,
+			FailureKind: p.FailureKind,
 		})
 
 	case domain.AssistantTextDelta:
@@ -286,8 +288,9 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
 		}
 		return domain.RunStateChanged{
-			Status: domain.RunStatus(p.Status),
-			Reason: p.Reason,
+			Status:      domain.RunStatus(p.Status),
+			Reason:      p.Reason,
+			FailureKind: p.FailureKind,
 		}, nil
 
 	case domain.EventAssistantTextDelta:

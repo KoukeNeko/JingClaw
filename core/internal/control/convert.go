@@ -232,8 +232,9 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 	case domain.RunStateChanged:
 		out.Payload = &controlv1.Event_RunStateChanged{
 			RunStateChanged: &controlv1.RunStateChanged{
-				Status: runStatusToProto(p.Status),
-				Reason: p.Reason,
+				Status:      runStatusToProto(p.Status),
+				Reason:      p.Reason,
+				FailureKind: p.FailureKind,
 			},
 		}
 

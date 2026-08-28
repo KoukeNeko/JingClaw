@@ -34,8 +34,9 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			}},
 		},
 		domain.EventRunStateChanged: domain.RunStateChanged{
-			Status: domain.RunFailed,
-			Reason: "provider unavailable",
+			Status:      domain.RunFailed,
+			Reason:      "provider unavailable",
+			FailureKind: "overloaded",
 		},
 		domain.EventAssistantTextDelta: domain.AssistantTextDelta{
 			MessageID: "msg_2",

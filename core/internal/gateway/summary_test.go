@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
@@ -172,5 +173,72 @@ func TestUsageIsTakenAsCumulative(t *testing.T) {
 	}
 	if summary.CachedInputTokens != 3000 {
 		t.Errorf("cached input was lost: %+v", summary)
+	}
+}
+
+// The incident this exists to prevent.
+//
+// A rate limit put the provider's entire reply into a channel with fourteen
+// people in it: the billing endpoint, the quota metric, the account's limit,
+// and a link to the pricing page. None of that is the channel's business, and
+// all of it was there because the only thing the projector had to work with
+// was the upstream sentence.
+func TestAFailureTellsAChannelNothingAboutTheOperatorsAccount(t *testing.T) {
+	leaked := "You exceeded your current quota, please check your plan and billing details. " +
+		"Quota exceeded for metric: generativelanguage.googleapis.com/" +
+		"generate_content_free_tier_input_token_count, limit: 16000, model: gemma-4-31b"
+
+	said := explainFailure("rate_limited")
+
+	for _, secret := range []string{
+		"quota", "billing", "googleapis.com", "16000", "gemma-4-31b", "plan",
+	} {
+		if strings.Contains(strings.ToLower(said), secret) {
+			t.Errorf("the channel is told %q, which leaks %q", said, secret)
+		}
+	}
+	if strings.Contains(said, leaked) {
+		t.Error("the upstream message was passed through verbatim")
+	}
+	// Still useful: a reader has to learn whether waiting will help.
+	if !strings.Contains(said, "try again") {
+		t.Errorf("the channel is not told what to do: %q", said)
+	}
+}
+
+// The two situations a reader most needs told apart. Waiting fixes one and
+// will never fix the other, and saying "try again shortly" to somebody whose
+// allowance is gone until tomorrow wastes their evening.
+func TestWaitingAndNotWaitingAreSaidDifferently(t *testing.T) {
+	temporary := explainFailure("rate_limited")
+	exhausted := explainFailure("quota_exhausted")
+
+	if temporary == exhausted {
+		t.Fatalf("a short rate limit and a spent allowance read identically: %q", temporary)
+	}
+	if !strings.Contains(temporary, "shortly") {
+		t.Errorf("a temporary limit does not suggest waiting: %q", temporary)
+	}
+	if strings.Contains(strings.ToLower(exhausted), "shortly") {
+		t.Errorf("a spent allowance suggests waiting, which will not help: %q", exhausted)
+	}
+	if !strings.Contains(exhausted, "operator") {
+		t.Errorf("a spent allowance does not point at who can fix it: %q", exhausted)
+	}
+}
+
+// Whatever arrives, including a classification this build has never heard of,
+// produces something safe rather than an empty status or a passthrough.
+func TestEveryFailureKindProducesSomethingSafe(t *testing.T) {
+	for _, kind := range []string{
+		"rate_limited", "quota_exhausted", "overloaded", "transient",
+		"invalid_request", "auth", "not_found", "context_overflow",
+		"content_filtered", "interrupted", "retry_budget_exhausted",
+		"", "a_kind_from_a_provider_that_does_not_exist_yet",
+	} {
+		said := explainFailure(kind)
+		if strings.TrimSpace(said) == "" {
+			t.Errorf("%q produced nothing to say", kind)
+		}
 	}
 }

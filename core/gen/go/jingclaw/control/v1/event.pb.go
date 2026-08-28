@@ -447,8 +447,17 @@ func (x *MessageAttachment) GetSize() int64 {
 type RunStateChanged struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Status RunStatus              `protobuf:"varint,1,opt,name=status,proto3,enum=jingclaw.control.v1.RunStatus" json:"status,omitempty"`
-	// Populated on CANCELLED and FAILED.
-	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	// Populated on CANCELLED and FAILED. Written for whoever is debugging: it
+	// may carry a provider's own wording verbatim, so it belongs in a log or a
+	// control-plane client and not in a chat channel somebody else can read.
+	Reason string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	// A stable token naming what went wrong, for a client that has to decide
+	// what to say without reading the sentence above. Empty when unclassified.
+	//
+	// A string rather than an enum because the set grows as providers are added,
+	// and an unrecognised token read as UNSPECIFIED is how a client ends up
+	// confidently saying the wrong thing.
+	FailureKind   string `protobuf:"bytes,3,opt,name=failure_kind,json=failureKind,proto3" json:"failure_kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -493,6 +502,13 @@ func (x *RunStateChanged) GetStatus() RunStatus {
 func (x *RunStateChanged) GetReason() string {
 	if x != nil {
 		return x.Reason
+	}
+	return ""
+}
+
+func (x *RunStateChanged) GetFailureKind() string {
+	if x != nil {
+		return x.FailureKind
 	}
 	return ""
 }
@@ -1322,10 +1338,11 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"media_type\x18\x03 \x01(\tR\tmediaType\x12\x12\n" +
-	"\x04size\x18\x04 \x01(\x03R\x04size\"a\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\"\x84\x01\n" +
 	"\x0fRunStateChanged\x126\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x1e.jingclaw.control.v1.RunStatusR\x06status\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"G\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12!\n" +
+	"\ffailure_kind\x18\x03 \x01(\tR\vfailureKind\"G\n" +
 	"\x12AssistantTextDelta\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x12\n" +

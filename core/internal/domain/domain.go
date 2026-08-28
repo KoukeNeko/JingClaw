@@ -284,7 +284,19 @@ type UserMessageAdded struct {
 
 type RunStateChanged struct {
 	Status RunStatus
+
+	// Reason is written for whoever is debugging, and may carry a provider's
+	// own wording verbatim. That makes it right for a log and for a
+	// control-plane client, and wrong for a chat channel other people read.
 	Reason string
+
+	// FailureKind names what went wrong in a form a client can branch on
+	// without reading Reason. Empty when there is nothing to classify.
+	//
+	// It exists because the alternative is a client matching on English prose
+	// written by somebody else's API, which changes without notice and turns
+	// a presentation decision into a guess.
+	FailureKind string
 }
 
 type AssistantTextDelta struct {
