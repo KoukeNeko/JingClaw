@@ -29,6 +29,16 @@ const (
 	// LevelWorkspaceRead reads the workspace without side effects.
 	LevelWorkspaceRead
 
+	// LevelNetworkRead retrieves something from the network without changing
+	// it: fetching a page, not filling in its form.
+	//
+	// It sits above reading the workspace because the bytes come back chosen
+	// by somebody else, and below writing to it because nothing on this
+	// machine changes. The risk it carries is not damage but influence: what
+	// arrives is attacker-controlled text that the model will read as though
+	// it were research.
+	LevelNetworkRead
+
 	// LevelWorkspaceWrite modifies the workspace.
 	LevelWorkspaceWrite
 
@@ -52,6 +62,8 @@ func (l Level) String() string {
 	switch l {
 	case LevelInternal:
 		return "internal"
+	case LevelNetworkRead:
+		return "network_read"
 	case LevelWorkspaceRead:
 		return "workspace_read"
 	case LevelWorkspaceWrite:
@@ -73,8 +85,8 @@ func (l Level) String() string {
 // a log prints are the same word.
 func LevelByName(name string) (Level, bool) {
 	for _, level := range []Level{
-		LevelInternal, LevelWorkspaceRead, LevelWorkspaceWrite,
-		LevelRemember, LevelExecute, LevelHighImpact,
+		LevelInternal, LevelWorkspaceRead, LevelNetworkRead,
+		LevelWorkspaceWrite, LevelRemember, LevelExecute, LevelHighImpact,
 	} {
 		if level.String() == name {
 			return level, true

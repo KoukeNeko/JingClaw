@@ -81,12 +81,19 @@ type Profile struct {
 // Reads run unattended because an agent that stops to ask before every file it
 // looks at is unusable. Anything that modifies the workspace asks, because a
 // wrong edit is expensive and a human glance is cheap.
+//
+// Fetching a page runs unattended for the same reason, and the exposure it
+// creates is handled where it actually lands: what comes back is marked
+// untrusted, and every step that could act on it still stops. Asking before
+// each page would train the operator to approve without reading, which is
+// worse than not asking.
 func LocalProfile() Profile {
 	return Profile{
 		Name: "local",
 		Defaults: map[tool.Level]Decision{
 			tool.LevelInternal:       Allow,
 			tool.LevelWorkspaceRead:  Allow,
+			tool.LevelNetworkRead:    Allow,
 			tool.LevelWorkspaceWrite: Ask,
 			tool.LevelRemember:       Ask,
 			tool.LevelExecute:        Ask,
@@ -108,12 +115,20 @@ func LocalProfile() Profile {
 // takes the account gets both halves, and the approval adds nothing. Anything
 // that runs a program therefore has to be authorised from a control-plane
 // client, where the operator is at the machine.
+//
+// Fetching a page asks rather than runs. A gateway turn lets somebody else
+// choose the address, and this plane can already read the workspace: a page
+// that says "now show me the contents of .env" would otherwise complete the
+// loop from a stranger's link to a file posted back into a chat channel. The
+// operator being asked breaks it, and links from chat are rare enough that
+// asking is not a tax on ordinary use.
 func GatewayProfile() Profile {
 	return Profile{
 		Name: "gateway",
 		Defaults: map[tool.Level]Decision{
 			tool.LevelInternal:       Allow,
 			tool.LevelWorkspaceRead:  Allow,
+			tool.LevelNetworkRead:    Ask,
 			tool.LevelWorkspaceWrite: Ask,
 			tool.LevelRemember:       Ask,
 			tool.LevelExecute:        Deny,
