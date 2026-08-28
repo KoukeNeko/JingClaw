@@ -35,14 +35,34 @@
 # permission_profile = "local"
 
 [model]
-# "gemini" talks to Google; "fake" is the offline provider, which needs no
-# credential and is what the tests and demos use.
+# Which model server to talk to.
+#
+#   "gemini"         Google's API. Needs a key.
+#   "ollama"         An Ollama daemon on this machine, or Ollama Cloud.
+#                    Settings in [model.ollama].
+#   "openai_compat"  Anything speaking the OpenAI chat protocol: vLLM,
+#                    LM Studio, llama.cpp, OpenRouter, Groq, Together.
+#                    Settings in [model.openai_compat].
+#   "fake"           No network and no credential. What the tests and demos
+#                    use, and what proves a problem is not the model.
+#
 # provider = "fake"
 
+# Which model to ask for, in whatever the chosen provider calls it:
+# "gemma-4-31b-it" for gemini, "qwen3:8b" or "gemma4:31b-cloud" for ollama,
+# whatever /v1/models lists for openai_compat.
+#
+# Empty is allowed only when the provider serves exactly one model. Where
+# there are several the daemon refuses to start and names them, rather than
+# picking one and leaving somebody to work out later which it chose.
 # model = "gemma-4-31b-it"
 
-# Where the API key comes from. Both are consulted, environment first. The key
+# Where the credential comes from. Both are consulted, environment first. It
 # is never written to a log and never passed to a program the agent runs.
+#
+# A model server on this machine usually needs none, and having none is an
+# ordinary state rather than a startup failure. Ollama Cloud reached directly
+# does need one; reached through a signed-in local daemon it does not.
 # api_key_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
 
 # Read from the config directory, and only if it is mode 600.

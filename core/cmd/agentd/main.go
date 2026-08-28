@@ -71,7 +71,7 @@ func run() error {
 		// configuration file, and exists only so one run can differ from it.
 		// They carry no defaults of their own: the file already holds those,
 		// and a second copy here would be one more place for them to disagree.
-		providerName = flag.String("provider", "", "model provider: fake or gemini")
+		providerName = flag.String("provider", "", "model provider: gemini, ollama, openai_compat, or fake")
 		model        = flag.String("model", "", "model to use")
 		addr         = flag.String("addr", "", "loopback address to listen on; port 0 picks a free one")
 		dataDir      = flag.String("data-dir", "", "directory for the database")
