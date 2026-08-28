@@ -12,8 +12,9 @@ import (
 type ErrorKind string
 
 const (
-	// KindRateLimited: the caller is over quota. Honour RetryAfter when the
-	// server supplied one rather than guessing.
+	// KindRateLimited: too many requests or tokens inside a short window —
+	// per second, per minute. It clears on its own, so it is worth waiting
+	// out.
 	KindRateLimited ErrorKind = "rate_limited"
 
 	// KindOverloaded: the provider is temporarily out of capacity. Retryable,
@@ -66,8 +67,13 @@ type Error struct {
 
 	StatusCode int
 
-	// RetryAfter is set only when the server said so. An absent value means
-	// "back off on your own schedule", not "retry immediately".
+	// RetryAfter is set only when the server said so, and is the earliest
+	// moment a retry may be sent rather than a suggestion to be rounded down.
+	// A server that says twenty seconds and is asked again after five answers
+	// the same way, having spent an attempt to learn nothing.
+	//
+	// An absent value means "back off on your own schedule", not "retry
+	// immediately".
 	RetryAfter *time.Duration
 
 	RequestID string

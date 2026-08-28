@@ -151,13 +151,69 @@ func TestRetryAfterOverridesBackoff(t *testing.T) {
 	}
 }
 
-func TestRetryAfterIsCappedByMaxDelay(t *testing.T) {
+// A server's figure is not rounded down to something more convenient.
+//
+// This used to be capped at MaxDelay, which reads as prudent and is not: the
+// server said when its window reopens, and asking again before then spends an
+// attempt to be told exactly the same thing. MaxDelay bounds the backoff this
+// code invents, not the deadline the other side states.
+func TestAServerDelayIsNotShortenedToSomethingConvenient(t *testing.T) {
 	after := time.Hour
 	err := &provider.Error{Kind: provider.KindRateLimited, RetryAfter: &after}
 
 	policy := provider.RetryPolicy{BaseDelay: time.Millisecond, MaxDelay: 30 * time.Second}
-	if delay := policy.Delay(1, err); delay != 30*time.Second {
-		t.Errorf("delay %v, want the max of 30s", delay)
+	if delay := policy.Delay(1, err); delay < time.Hour {
+		t.Errorf("delay %v, want at least the hour the server asked for", delay)
+	}
+}
+
+// What actually protects the person waiting: a delay too long to sit through
+// ends the request and says so, rather than being shortened into one certain
+// to fail.
+func TestADelayBeyondTheBudgetGivesUpRatherThanRetryingEarly(t *testing.T) {
+	after := time.Hour
+	upstream := &alwaysRateLimited{after: after}
+
+	retrying := provider.WithRetry(upstream, provider.RetryPolicy{
+		MaxAttempts: 4,
+		BaseDelay:   time.Millisecond,
+		MaxDelay:    30 * time.Second,
+		Budget:      90 * time.Second,
+	})
+
+	_, err := retrying.Generate(context.Background(), provider.Request{})
+
+	var exhausted *provider.ErrRetryBudgetExhausted
+	if !errors.As(err, &exhausted) {
+		t.Fatalf("want a budget error, got %v", err)
+	}
+	if exhausted.Needed < time.Hour {
+		t.Errorf("the reported wait is %v, want the hour the server asked for", exhausted.Needed)
+	}
+	if upstream.calls != 1 {
+		t.Errorf("the request was sent %d times; it must not be retried early", upstream.calls)
+	}
+	// The reason survives, so a reader is told what actually happened rather
+	// than that something timed out.
+	if provider.KindOf(err) != provider.KindRateLimited {
+		t.Errorf("the underlying cause was lost: %v", err)
+	}
+}
+
+// alwaysRateLimited fails at Generate with a server-stated delay.
+type alwaysRateLimited struct {
+	after time.Duration
+	calls int
+}
+
+func (p *alwaysRateLimited) Name() string { return "limited" }
+
+func (p *alwaysRateLimited) Models(context.Context) ([]provider.ModelInfo, error) { return nil, nil }
+
+func (p *alwaysRateLimited) Generate(context.Context, provider.Request) (provider.Stream, error) {
+	p.calls++
+	return nil, &provider.Error{
+		Kind: provider.KindRateLimited, Provider: "limited", StatusCode: 429, RetryAfter: &p.after,
 	}
 }
 

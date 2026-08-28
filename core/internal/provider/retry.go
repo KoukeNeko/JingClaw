@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"math/rand/v2"
@@ -20,6 +21,15 @@ type RetryPolicy struct {
 	// Jitter spreads retries so a fleet of clients recovering from the same
 	// outage does not resend in lockstep.
 	Jitter float64
+
+	// Budget bounds the total time spent waiting across all attempts for one
+	// request. Somebody is watching a chat channel while this happens, and a
+	// server may ask for a delay longer than they are willing to sit through;
+	// the honest answer then is to stop and say when it would be free, not to
+	// retry early and fail again.
+	//
+	// Zero means the only bound is MaxAttempts.
+	Budget time.Duration
 }
 
 func DefaultRetryPolicy() RetryPolicy {
@@ -28,16 +38,25 @@ func DefaultRetryPolicy() RetryPolicy {
 		BaseDelay:   500 * time.Millisecond,
 		MaxDelay:    30 * time.Second,
 		Jitter:      0.3,
+		Budget:      90 * time.Second,
 	}
 }
 
-// Delay computes the wait before the given attempt, honouring a server's
-// Retry-After over any locally computed schedule: the server knows when its
-// quota resets and we do not.
+// Delay computes the wait before the given attempt.
+//
+// A server's own figure wins outright and is never rounded down. It is the
+// earliest moment a retry may be sent, not an estimate to be improved on: the
+// server knows when its window reopens and this process does not, and asking
+// again before then spends an attempt to be told the same thing. MaxDelay
+// bounds what this code invents, not what the server states — a delay too long
+// to wait out is refused by the budget rather than shortened into a request
+// certain to fail.
 func (p RetryPolicy) Delay(attempt int, err error) time.Duration {
 	if after, ok := RetryAfter(err); ok {
-		if after > p.MaxDelay {
-			return p.MaxDelay
+		// Jittered upward only. Every client told "twenty seconds" returning
+		// at exactly twenty seconds rebuilds the spike that caused the limit.
+		if p.Jitter > 0 {
+			after += time.Duration(rand.Float64() * p.Jitter * float64(after))
 		}
 		return after
 	}
@@ -87,6 +106,34 @@ type Retrying struct {
 	sleep func(context.Context, time.Duration) error
 }
 
+// withinBudget reports whether another wait of this length is affordable, and
+// how much would remain after it.
+func (p RetryPolicy) withinBudget(spent, next time.Duration) bool {
+	if p.Budget <= 0 {
+		return true
+	}
+	return spent+next <= p.Budget
+}
+
+// ErrRetryBudgetExhausted reports that a failure was retryable but the wait
+// the server asked for is longer than this request may spend.
+//
+// A distinct error because it is a different thing to tell somebody. The
+// request did not fail on its merits; it ran out of patience, and the
+// underlying error says when it would have been worth trying again.
+type ErrRetryBudgetExhausted struct {
+	Waited time.Duration
+	Needed time.Duration
+	Cause  error
+}
+
+func (e *ErrRetryBudgetExhausted) Error() string {
+	return fmt.Sprintf("provider: gave up after waiting %s; the next attempt was %s away: %v",
+		e.Waited.Round(time.Second), e.Needed.Round(time.Second), e.Cause)
+}
+
+func (e *ErrRetryBudgetExhausted) Unwrap() error { return e.Cause }
+
 func WithRetry(p Provider, policy RetryPolicy) *Retrying {
 	return &Retrying{Provider: p, Policy: policy, sleep: sleepContext}
 }
@@ -108,7 +155,10 @@ func (r *Retrying) Generate(ctx context.Context, req Request) (Stream, error) {
 		attempts = 1
 	}
 
-	var lastErr error
+	var (
+		lastErr error
+		spent   time.Duration
+	)
 	for attempt := 1; attempt <= attempts; attempt++ {
 		stream, err := r.Provider.Generate(ctx, req)
 		if err == nil {
@@ -120,6 +170,7 @@ func (r *Retrying) Generate(ctx context.Context, req Request) (Stream, error) {
 				request: req,
 				stream:  stream,
 				attempt: attempt,
+				spent:   spent,
 				sleep:   sleep,
 			}, nil
 		}
@@ -134,9 +185,14 @@ func (r *Retrying) Generate(ctx context.Context, req Request) (Stream, error) {
 			return nil, err
 		}
 
-		if err := sleep(ctx, r.Policy.Delay(attempt, err)); err != nil {
+		wait := r.Policy.Delay(attempt, err)
+		if !r.Policy.withinBudget(spent, wait) {
+			return nil, &ErrRetryBudgetExhausted{Waited: spent, Needed: wait, Cause: err}
+		}
+		if err := sleep(ctx, wait); err != nil {
 			return nil, err
 		}
+		spent += wait
 	}
 
 	return nil, lastErr
@@ -150,6 +206,7 @@ type retryingStream struct {
 
 	stream  Stream
 	attempt int
+	spent   time.Duration
 
 	// emitted latches once the caller has been given anything at all. From
 	// that moment the request can never be resent, because the caller is
@@ -181,9 +238,14 @@ func (s *retryingStream) Recv(ctx context.Context) (Event, error) {
 			return nil, err
 		}
 
-		if waitErr := s.sleep(ctx, s.parent.Policy.Delay(s.attempt, err)); waitErr != nil {
+		wait := s.parent.Policy.Delay(s.attempt, err)
+		if !s.parent.Policy.withinBudget(s.spent, wait) {
+			return nil, &ErrRetryBudgetExhausted{Waited: s.spent, Needed: wait, Cause: err}
+		}
+		if waitErr := s.sleep(ctx, wait); waitErr != nil {
 			return nil, waitErr
 		}
+		s.spent += wait
 
 		// The abandoned stream is closed before another is opened, so a
 		// provider holding a connection per stream does not accumulate one
