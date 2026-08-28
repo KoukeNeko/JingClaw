@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"fmt"
 	"github.com/disgoorg/disgo/discord"
 
 	"encoding/json"
@@ -575,5 +576,190 @@ func TestAFileWithNoLabelIsGuessedFromItsName(t *testing.T) {
 		Filename: "shot.png", ContentType: &labelled,
 	}); got != labelled {
 		t.Errorf("the label was ignored in favour of the name: %q", got)
+	}
+}
+
+// The summary sits under an answer somebody is reading, so it has to say the
+// three things they would ask and stop.
+func TestSummaryReportsToolsSourcesAndCost(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State:  "completed",
+		Detail: "12s",
+		Summary: &jcgateway.RunSummary{
+			Tools: []jcgateway.ToolUse{
+				{Name: "web_read", Calls: 2},
+				{Name: "read_file", Calls: 3, Failed: 1},
+			},
+			Sources: []jcgateway.Source{
+				{Kind: "web", Ref: "https://example.com/docs", Retained: true},
+				{Kind: "file", Ref: "notes.md", Retained: true},
+			},
+			InputTokens:       4231,
+			CachedInputTokens: 3000,
+			OutputTokens:      380,
+		},
+	})
+
+	for _, want := range []string{
+		"Done in 12s",
+		"web_read ×2",
+		"read_file ×3 (1 failed)",
+		"https://example.com/docs",
+		"notes.md",
+		"4231 in / 380 out",
+		"3000 of the input was cached",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("the summary does not mention %q:\n%s", want, rendered)
+		}
+	}
+}
+
+// The claim the summary must never make. Nothing here can observe a model
+// declining to rely on something it was shown; material folded into a summary
+// may well have shaped the answer through that summary. Calling it unused
+// would be inventing a causal fact out of a structural one.
+func TestSummaryNeverClaimsASourceWentUnused(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State: "completed",
+		Summary: &jcgateway.RunSummary{
+			Sources: []jcgateway.Source{
+				{Kind: "web", Ref: "https://example.com/kept", Retained: true},
+				{Kind: "web", Ref: "https://example.com/folded", Retained: false},
+			},
+		},
+	})
+
+	for _, forbidden := range []string{"unused", "not used", "ignored", "discarded"} {
+		if strings.Contains(strings.ToLower(rendered), forbidden) {
+			t.Errorf("the summary claims a source went unused (%q):\n%s", forbidden, rendered)
+		}
+	}
+	if !strings.Contains(rendered, "folded into a summary") {
+		t.Errorf("the summary does not say what actually happened:\n%s", rendered)
+	}
+}
+
+// Zero means the provider reported nothing, not that nothing was spent.
+func TestSummaryOmitsTokensRatherThanReportingZero(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State:   "completed",
+		Summary: &jcgateway.RunSummary{Tools: []jcgateway.ToolUse{{Name: "grep", Calls: 1}}},
+	})
+
+	if strings.Contains(rendered, "0 in") || strings.Contains(rendered, "in / 0 out") {
+		t.Errorf("an unreported token count was printed as zero:\n%s", rendered)
+	}
+}
+
+// Work that failed halfway was still paid for, and that is the case a reader
+// most often wants accounted for.
+func TestAFailedRunStillAccountsForItself(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State:  "failed",
+		Detail: "the model gave up",
+		Summary: &jcgateway.RunSummary{
+			Tools:        []jcgateway.ToolUse{{Name: "web_read", Calls: 1, Failed: 1}},
+			InputTokens:  12000,
+			OutputTokens: 90,
+		},
+	})
+
+	if !strings.Contains(rendered, "the model gave up") {
+		t.Errorf("the failure reason is gone:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "12.0k in / 90 out") {
+		t.Errorf("a failed run does not report its cost:\n%s", rendered)
+	}
+}
+
+// A run with nothing to report adds nothing. A summary that is always there
+// and usually empty is noise under every answer.
+func TestNoSummaryAddsNothing(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{State: "completed", Detail: "3s"})
+
+	if rendered != "_Done in 3s._" {
+		t.Errorf("an empty summary added something:\n%q", rendered)
+	}
+}
+
+// A status line does not go through the splitter, and Discord refuses an
+// oversized message outright — so an unbounded summary would take the "Done"
+// line down with it. Worse than no summary at all.
+func TestSummaryStaysPostable(t *testing.T) {
+	sources := make([]jcgateway.Source, 0, 12)
+	for i := range 12 {
+		sources = append(sources, jcgateway.Source{
+			Kind: "web",
+			// The shape that actually causes this: a real URL with a few
+			// hundred characters of tracking parameters on the end.
+			Ref: "https://example.com/a/very/long/path/segment/" + strings.Repeat("tracking-parameter-", 20) +
+				string(rune('a'+i)),
+			Retained: i%2 == 0,
+		})
+	}
+
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State:   "completed",
+		Detail:  "2m30s",
+		Summary: &jcgateway.RunSummary{Sources: sources, InputTokens: 90000, OutputTokens: 1200},
+	})
+
+	if len(rendered) > maxMessageLength {
+		t.Fatalf("the status line is %d characters, over Discord's %d limit",
+			len(rendered), maxMessageLength)
+	}
+	// Bounded, not silent: the reader still learns what the run cost.
+	for _, want := range []string{"Done in 2m30s", "90.0k in / 1200 out"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("bounding the summary lost %q:\n%s", want, rendered)
+		}
+	}
+}
+
+// One absurd address must not crowd out the others when the list does fit.
+func TestALongAddressIsShortenedNotDropped(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State: "completed",
+		Summary: &jcgateway.RunSummary{Sources: []jcgateway.Source{
+			{Kind: "web", Ref: "https://example.com/" + strings.Repeat("x", 400), Retained: true},
+			{Kind: "file", Ref: "notes.md", Retained: true},
+		}},
+	})
+
+	if !strings.Contains(rendered, "https://example.com/xxx") {
+		t.Errorf("the long address was dropped entirely:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "…") {
+		t.Errorf("the long address was not shortened:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "notes.md") {
+		t.Errorf("a long address crowded out the one after it:\n%s", rendered)
+	}
+}
+
+// The tool list has no bound of its own: an MCP server may register many tools
+// with names nobody here chose. Whatever it produces still has to be postable.
+func TestAnEnormousToolListIsStillPostable(t *testing.T) {
+	tools := make([]jcgateway.ToolUse, 0, 200)
+	for i := range 200 {
+		tools = append(tools, jcgateway.ToolUse{
+			Name:  fmt.Sprintf("mcp_some_server_a_rather_long_tool_name_number_%d", i),
+			Calls: 1,
+		})
+	}
+
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State:   "completed",
+		Detail:  "9s",
+		Summary: &jcgateway.RunSummary{Tools: tools, InputTokens: 500, OutputTokens: 10},
+	})
+
+	if len(rendered) > maxMessageLength {
+		t.Fatalf("the status line is %d characters, over Discord's %d limit",
+			len(rendered), maxMessageLength)
+	}
+	if !strings.Contains(rendered, "too long to post in full") {
+		t.Errorf("the summary was cut without saying so:\n%s", rendered)
 	}
 }

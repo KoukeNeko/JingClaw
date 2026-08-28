@@ -52,6 +52,10 @@ type Projector struct {
 	pending      map[domain.MessageID]*strings.Builder
 	lastWorking  map[domain.RunID]time.Time
 	lastStreamed map[domain.MessageID]time.Time
+
+	// records accumulate what each run has done, for the summary posted when
+	// it ends.
+	records map[domain.RunID]*runRecord
 }
 
 // defaultWorkingInterval is roughly what a person reads at, and comfortably
@@ -77,6 +81,7 @@ func NewProjector(store Store, newID func() string, now func() time.Time) *Proje
 		pending:         make(map[domain.MessageID]*strings.Builder),
 		lastWorking:     make(map[domain.RunID]time.Time),
 		lastStreamed:    make(map[domain.MessageID]time.Time),
+		records:         make(map[domain.RunID]*runRecord),
 	}
 }
 
@@ -110,6 +115,11 @@ type ApprovalPayload struct {
 type StatusPayload struct {
 	State  string `json:"state"`
 	Detail string `json:"detail,omitempty"`
+
+	// Summary accounts for a run that has ended: what it reached for, what it
+	// drew on, and what it cost. Absent while a run is still going, because
+	// none of those questions have an answer yet.
+	Summary *RunSummary `json:"summary,omitempty"`
 }
 
 // Observe queues whatever this event warrants saying.
@@ -150,6 +160,8 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		})
 
 	case domain.ToolCallRequested:
+		p.record(run.ID).requested(payload)
+
 		// What it is doing, while it is doing it. Throttled, because a run
 		// that reads six files in a second would otherwise send six lines
 		// nobody can read and a rate limit nobody wanted.
@@ -160,6 +172,22 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 			State:  "working",
 			Detail: describeCall(payload.Name, payload.Arguments),
 		})
+
+	case domain.ToolCallCompleted:
+		// Nothing is said now: a finished tool call is not news to a channel.
+		// It is recorded so the run can account for itself when it ends.
+		p.record(run.ID).completed(payload, event.Seq)
+		return nil
+
+	case domain.UsageChanged:
+		p.record(run.ID).usage = payload.Usage
+		return nil
+
+	case domain.ConversationCompacted:
+		// Everything up to here is now a summary rather than itself, which is
+		// what decides whether a source was still in front of the model.
+		p.record(run.ID).compactedThrough = payload.ThroughSeq
+		return nil
 
 	case domain.ApprovalRequested:
 		return p.enqueue(ctx, run, target, DispatchApproval, ApprovalPayload{
@@ -185,16 +213,26 @@ func (p *Projector) observeState(
 ) error {
 	switch payload.Status {
 	case domain.RunRunning:
+		// Seeing a run start is what makes its eventual summary complete. A
+		// run resumed from an approval after a restart never passes here, and
+		// its summary says so rather than under-reporting in silence.
+		p.record(run.ID).seen = true
+
 		// Long tasks are the ones where silence is worst: a channel that hears
 		// nothing for a minute cannot tell working from broken.
 		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "running"})
 
 	case domain.RunFailed, domain.RunCancelled:
 		// A run that ends badly must say so. Ending in silence looks exactly
-		// like still working.
+		// like still working. It still accounts for itself: work that failed
+		// halfway through was paid for, and a reader asking what it cost is
+		// asking most often about exactly this case.
+		//
+		summary := p.close(run.ID)
 		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
-			State:  string(payload.Status),
-			Detail: payload.Reason,
+			State:   string(payload.Status),
+			Detail:  payload.Reason,
+			Summary: summary,
 		})
 
 	case domain.RunCompleted:
@@ -202,9 +240,11 @@ func (p *Projector) observeState(
 		// saying what it was doing, which would otherwise sit above the answer
 		// claiming the agent is still busy.
 		p.forget(run.ID)
+		summary := p.close(run.ID)
 		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
-			State:  "completed",
-			Detail: p.Now().Sub(run.CreatedAt).Round(time.Second).String(),
+			State:   "completed",
+			Detail:  p.Now().Sub(run.CreatedAt).Round(time.Second).String(),
+			Summary: summary,
 		})
 
 	default:
@@ -224,6 +264,39 @@ func (p *Projector) shouldSayWorking(run domain.RunID) bool {
 
 	p.lastWorking[run] = now
 	return true
+}
+
+// record returns a run's accumulator, creating it if this is the first thing
+// seen for that run.
+func (p *Projector) record(run domain.RunID) *runRecord {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	existing, ok := p.records[run]
+	if !ok {
+		existing = newRunRecord()
+		p.records[run] = existing
+	}
+	return existing
+}
+
+// close renders a run's summary and releases what was held for it.
+//
+// Nothing is kept after a run ends: these records are the one structure here
+// that grows with the number of runs a daemon has served rather than with the
+// number in flight.
+func (p *Projector) close(run domain.RunID) *RunSummary {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	existing, ok := p.records[run]
+	if !ok {
+		return nil
+	}
+	delete(p.records, run)
+
+	summary := existing.summarise()
+	return &summary
 }
 
 func (p *Projector) forget(run domain.RunID) {

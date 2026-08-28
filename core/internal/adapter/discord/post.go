@@ -67,9 +67,9 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	// channel and starts being something to scroll past for the rest of the
 	// day. A file is one line somebody can open if they want it.
 	//
-	// Only for the agent's own answers: an approval or a status line is short
-	// by construction, and turning one into an attachment would hide the thing
-	// somebody has to act on.
+	// Only for the agent's own answers. An approval is short, and a status
+	// line is bounded where it is rendered; turning either into an attachment
+	// would hide the thing somebody has to act on.
 	if shouldSendAsFile(dispatch.Kind, len(segments), a.maxMessages()) {
 		return a.finishAsFile(channelID, dispatch, body)
 	}
@@ -503,20 +503,203 @@ func renderStatus(payload jcgateway.StatusPayload) string {
 		}
 		return fmt.Sprintf("_Working on it — `%s`_", payload.Detail)
 	case "completed":
-		if payload.Detail == "" {
-			return "_Done._"
+		headline := "_Done._"
+		if payload.Detail != "" {
+			headline = fmt.Sprintf("_Done in %s._", payload.Detail)
 		}
-		return fmt.Sprintf("_Done in %s._", payload.Detail)
+		return headline + renderSummary(payload.Summary)
 	case "cancelled":
-		return "_Stopped._"
+		return "_Stopped._" + renderSummary(payload.Summary)
 	case "failed":
-		if payload.Detail == "" {
-			return "_That did not work._"
+		headline := "_That did not work._"
+		if payload.Detail != "" {
+			headline = fmt.Sprintf("_That did not work: %s_", payload.Detail)
 		}
-		return fmt.Sprintf("_That did not work: %s_", payload.Detail)
+		return headline + renderSummary(payload.Summary)
 	default:
 		return ""
 	}
+}
+
+// renderSummary accounts for a run that has ended.
+//
+// It is deliberately not a table. This sits under an answer somebody is
+// reading, and the questions it exists to answer — what did it look at, what
+// did that cost — are answered faster by three short lines than by a grid.
+func renderSummary(summary *jcgateway.RunSummary) string {
+	if summary == nil {
+		return ""
+	}
+
+	// A status line does not go through the splitter, and Discord refuses an
+	// oversized message outright — so an unbounded summary would take the
+	// "Done" line down with it, which is worse than no summary at all.
+	//
+	// Naming the addresses is what usually grows, so that goes first. The
+	// hard bound after it is not redundant: the tool list is as long as the
+	// number of tools installed, and an MCP server may register many with
+	// names nobody here chose.
+	if rendered := joinSummary(summaryLines(summary, true)); len(rendered) <= maxSummaryLength {
+		return rendered
+	}
+	return bound(joinSummary(summaryLines(summary, false)))
+}
+
+// bound cuts a summary that is still too long after the addresses have gone.
+func bound(rendered string) string {
+	if len(rendered) <= maxSummaryLength {
+		return rendered
+	}
+
+	runes := []rune(rendered)
+	if len(runes) > maxSummaryLength {
+		runes = runes[:maxSummaryLength]
+	}
+
+	// Cut back to a line boundary, so the result does not end mid-figure and
+	// read as a number it is not.
+	trimmed := string(runes)
+	if at := strings.LastIndex(trimmed, "\n-# "); at > 0 {
+		trimmed = trimmed[:at]
+	}
+	return trimmed + "\n-# (this summary was too long to post in full)"
+}
+
+// maxSummaryLength leaves room for the headline the summary hangs off.
+const maxSummaryLength = maxMessageLength - 200
+
+func summaryLines(summary *jcgateway.RunSummary, listSources bool) []string {
+	var lines []string
+	if tools := renderTools(summary.Tools); tools != "" {
+		lines = append(lines, tools)
+	}
+	if listSources {
+		lines = append(lines, renderSources(summary)...)
+	} else if counted := countSources(summary); counted != "" {
+		lines = append(lines, counted)
+	}
+	if cost := renderCost(summary); cost != "" {
+		lines = append(lines, cost)
+	}
+	if summary.Partial {
+		// Said rather than hidden. A list that is quietly short reads as a
+		// complete account of a run that did less than it did.
+		lines = append(lines, "began before this gateway did, so the lists above are partial")
+	}
+	return lines
+}
+
+func joinSummary(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\n-# " + strings.Join(lines, "\n-# ")
+}
+
+// countSources is what is said when naming them all will not fit.
+func countSources(summary *jcgateway.RunSummary) string {
+	total := len(summary.Sources) + summary.SourcesOmitted
+	if total == 0 {
+		return ""
+	}
+
+	var folded int
+	for _, source := range summary.Sources {
+		if !source.Retained {
+			folded++
+		}
+	}
+	if folded == 0 {
+		return fmt.Sprintf("read %d sources, too many to name here", total)
+	}
+	return fmt.Sprintf("read %d sources, too many to name here; %d were folded into a summary before answering",
+		total, folded)
+}
+
+func renderTools(tools []jcgateway.ToolUse) string {
+	if len(tools) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(tools))
+	for _, use := range tools {
+		part := use.Name
+		if use.Calls > 1 {
+			part = fmt.Sprintf("%s ×%d", use.Name, use.Calls)
+		}
+		if use.Failed > 0 {
+			part += fmt.Sprintf(" (%d failed)", use.Failed)
+		}
+		parts = append(parts, part)
+	}
+	return "used " + strings.Join(parts, ", ")
+}
+
+// renderSources says what a run drew on, and what it no longer had in front of
+// it by the time it answered.
+//
+// The second group is not "sources it did not use". Nothing here can know
+// that: material folded into a summary may well have shaped the answer through
+// the summary. The claim made is only the one the log can support.
+func renderSources(summary *jcgateway.RunSummary) []string {
+	var retained, folded []string
+	for _, source := range summary.Sources {
+		if source.Retained {
+			retained = append(retained, shortenRef(source.Ref))
+		} else {
+			folded = append(folded, shortenRef(source.Ref))
+		}
+	}
+
+	var lines []string
+	if len(retained) > 0 {
+		lines = append(lines, "read "+strings.Join(retained, ", "))
+	}
+	if len(folded) > 0 {
+		lines = append(lines,
+			"read earlier, folded into a summary before answering: "+strings.Join(folded, ", "))
+	}
+	if summary.SourcesOmitted > 0 {
+		lines = append(lines, fmt.Sprintf("and %d more not listed", summary.SourcesOmitted))
+	}
+	return lines
+}
+
+// shortenRef keeps an address identifiable without letting one of them fill
+// the line. Tracking parameters routinely run to hundreds of characters and
+// none of them help a reader recognise where something came from.
+func shortenRef(ref string) string {
+	const maxRefLength = 96
+
+	runes := []rune(ref)
+	if len(runes) <= maxRefLength {
+		return ref
+	}
+	return string(runes[:maxRefLength]) + "…"
+}
+
+func renderCost(summary *jcgateway.RunSummary) string {
+	if summary.InputTokens == 0 && summary.OutputTokens == 0 {
+		// Zero means the provider reported nothing, not that nothing was
+		// spent. Printing "0 tokens" would be stating a figure that is wrong.
+		return ""
+	}
+
+	cost := fmt.Sprintf("%s in / %s out",
+		formatTokens(summary.InputTokens), formatTokens(summary.OutputTokens))
+	if summary.CachedInputTokens > 0 {
+		cost += fmt.Sprintf(" (%s of the input was cached)", formatTokens(summary.CachedInputTokens))
+	}
+	return cost
+}
+
+// formatTokens keeps large counts readable. The exact figure matters to nobody
+// reading a chat channel; the order of magnitude is the whole message.
+func formatTokens(count int64) string {
+	if count < 10000 {
+		return fmt.Sprintf("%d", count)
+	}
+	return fmt.Sprintf("%.1fk", float64(count)/1000)
 }
 
 // splitForDiscord cuts text into postable segments.
