@@ -1,6 +1,8 @@
 package discord
 
 import (
+	"github.com/disgoorg/disgo/discord"
+
 	"encoding/json"
 	"log/slog"
 	"strings"
@@ -543,5 +545,35 @@ func TestEachAnswerGrowsInItsOwnMessage(t *testing.T) {
 	// An answer with no id never had a message of its own.
 	if _, ok := adapter.liveAnswer(""); ok {
 		t.Error("an empty id found a message")
+	}
+}
+
+// Discord does not always label a file. Refusing every unlabelled attachment
+// would mean silently ignoring pictures for a reason nobody could see — and
+// the guess here is only about whether to spend a download, because the
+// ingress checks the bytes regardless.
+func TestAFileWithNoLabelIsGuessedFromItsName(t *testing.T) {
+	for name, want := range map[string]string{
+		"shot.png":    "image/png",
+		"photo.JPG":   "image/jpeg",
+		"thing.jpeg":  "image/jpeg",
+		"anim.webp":   "image/webp",
+		"notes.txt":   "",
+		"archive.zip": "",
+		"noextension": "",
+	} {
+		got := contentTypeOf(discord.Attachment{Filename: name})
+		if got != want {
+			t.Errorf("%s guessed as %q, want %q", name, got, want)
+		}
+	}
+
+	// A label that is there wins over the name, because it is the more
+	// specific thing the platform knew.
+	labelled := "image/webp"
+	if got := contentTypeOf(discord.Attachment{
+		Filename: "shot.png", ContentType: &labelled,
+	}); got != labelled {
+		t.Errorf("the label was ignored in favour of the name: %q", got)
 	}
 }

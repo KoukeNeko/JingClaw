@@ -9,13 +9,16 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"connectrpc.com/connect"
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
+	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
+	"github.com/KoukeNeko/JingClaw/core/internal/media"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
@@ -44,14 +47,25 @@ type SessionStore interface {
 	ListRuns(ctx context.Context, session domain.SessionID) ([]domain.Run, error)
 }
 
-type Server struct {
-	rt    *runtime.Runtime
-	store SessionStore
-	hub   *event.Hub
+// AttachmentStore is where files sent with a turn are kept.
+type AttachmentStore interface {
+	PutBytes(ctx context.Context, content []byte, mediaType string) (artifact.Ref, error)
 }
 
-func NewServer(rt *runtime.Runtime, store SessionStore, hub *event.Hub) *Server {
-	return &Server{rt: rt, store: store, hub: hub}
+type Server struct {
+	rt        *runtime.Runtime
+	store     SessionStore
+	hub       *event.Hub
+	artifacts AttachmentStore
+}
+
+func NewServer(
+	rt *runtime.Runtime,
+	store SessionStore,
+	hub *event.Hub,
+	artifacts AttachmentStore,
+) *Server {
+	return &Server{rt: rt, store: store, hub: hub, artifacts: artifacts}
 }
 
 func (s *Server) CreateSession(
@@ -127,7 +141,17 @@ func (s *Server) SendTurn(
 		ClientID: req.Msg.GetMeta().GetClientId(),
 	}
 
-	runID, messageID, err := s.rt.SendTurn(ctx, sessionID, req.Msg.GetText(), origin)
+	attachments, err := s.keepAttachments(ctx, req.Msg.GetAttachments())
+	if err != nil {
+		return nil, err
+	}
+
+	runID, messageID, err := s.rt.SendTurnTo(ctx, sessionID, domain.Turn{
+		Text:        req.Msg.GetText(),
+		Origin:      origin,
+		Targets:     []domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient, Ref: origin.ClientID}},
+		Attachments: attachments,
+	})
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -138,6 +162,56 @@ func (s *Server) SendTurn(
 		RunId:     string(runID),
 		MessageId: string(messageID),
 	}), nil
+}
+
+// keepAttachments puts what a client sent into the artifact store.
+//
+// Checked exactly as a file arriving from a chat platform is. A control client
+// is trusted to make requests; that is not the same as its files being safe to
+// decode, and the machine that runs out of memory decoding a malicious PNG is
+// this one either way.
+//
+// A file that will not do is refused rather than dropped. The caller is a
+// person at their own terminal who can see the answer and try again, which is
+// not true of a message arriving from a channel.
+func (s *Server) keepAttachments(
+	ctx context.Context,
+	sent []*controlv1.InlineAttachment,
+) ([]domain.Attachment, error) {
+	if len(sent) == 0 {
+		return nil, nil
+	}
+	if s.artifacts == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("this daemon has nowhere to keep attachments"))
+	}
+	if len(sent) > media.MaxImagesPerMessage {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("a turn may carry %d files and this has %d",
+				media.MaxImagesPerMessage, len(sent)))
+	}
+
+	kept := make([]domain.Attachment, 0, len(sent))
+	for _, attachment := range sent {
+		mediaType, err := media.CheckImage(attachment.GetMediaType(), attachment.GetData())
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+
+		ref, err := s.artifacts.PutBytes(ctx, attachment.GetData(), mediaType)
+		if err != nil {
+			return nil, toConnectError(err)
+		}
+
+		kept = append(kept, domain.Attachment{
+			ArtifactID: ref.ID,
+			Name:       attachment.GetName(),
+			MediaType:  mediaType,
+			Size:       ref.Size,
+		})
+	}
+
+	return kept, nil
 }
 
 func (s *Server) InterruptRun(

@@ -17,6 +17,7 @@ import (
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
+	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
@@ -58,8 +59,14 @@ func newServer(t *testing.T, chunkDelay time.Duration) controlv1connect.SessionS
 		Logger:        slog.New(slog.DiscardHandler),
 	})
 
+	artifacts, err := artifact.Open(t.TempDir(), 0)
+	if err != nil {
+		t.Fatalf("open artifacts: %v", err)
+	}
+
 	mux := http.NewServeMux()
-	mux.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub)))
+	mux.Handle(controlv1connect.NewSessionServiceHandler(
+		control.NewServer(rt, store, hub, artifacts)))
 
 	// The port is unknown until the test server starts, so host validation is
 	// exercised separately in TestAuthMiddleware.

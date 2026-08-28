@@ -12,9 +12,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -147,7 +149,9 @@ func newSessionCommand() *cobra.Command {
 }
 
 func newSendCommand() *cobra.Command {
-	return &cobra.Command{
+	var attach []string
+
+	cmd := &cobra.Command{
 		Use:   "send <session-id> <text>",
 		Short: "Send a user turn and print the run ID",
 		Args:  cobra.ExactArgs(2),
@@ -157,10 +161,16 @@ func newSendCommand() *cobra.Command {
 				return err
 			}
 
+			attachments, err := readAttachments(attach)
+			if err != nil {
+				return err
+			}
+
 			resp, err := client.SendTurn(cmd.Context(), connect.NewRequest(&controlv1.SendTurnRequest{
-				Meta:      newMeta(),
-				SessionId: args[0],
-				Text:      args[1],
+				Meta:        newMeta(),
+				SessionId:   args[0],
+				Text:        args[1],
+				Attachments: attachments,
 			}))
 			if err != nil {
 				return err
@@ -172,6 +182,11 @@ func newSendCommand() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringSliceVar(&attach, "attach", nil,
+		"an image to send with the turn; may be repeated")
+
+	return cmd
 }
 
 func newAttachCommand() *cobra.Command {
@@ -250,6 +265,35 @@ func newInterruptCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&reason, "reason", "", "why the run is being interrupted")
 	return cmd
+}
+
+// readAttachments loads the files a turn is being sent with.
+//
+// The bytes travel to the daemon rather than the path, because the daemon may
+// be on another machine reached through a forwarded port, where a path names a
+// file it cannot see.
+func readAttachments(paths []string) ([]*controlv1.InlineAttachment, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	attachments := make([]*controlv1.InlineAttachment, 0, len(paths))
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+
+		// What it is, guessed from the name. The daemon checks the bytes and
+		// refuses if the two disagree, so this is a label rather than a claim.
+		attachments = append(attachments, &controlv1.InlineAttachment{
+			Name:      filepath.Base(path),
+			MediaType: mime.TypeByExtension(filepath.Ext(path)),
+			Data:      data,
+		})
+	}
+
+	return attachments, nil
 }
 
 func newApprovalsCommand() *cobra.Command {

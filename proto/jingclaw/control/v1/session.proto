@@ -43,6 +43,22 @@ message SendTurnRequest {
 
   string session_id = 2;
   string text = 3;
+
+  // Files to send with it. The bytes travel here rather than a path, because
+  // the daemon may be on another machine reached through a forwarded port and
+  // a path would name a file it cannot see.
+  repeated InlineAttachment attachments = 4;
+}
+
+// InlineAttachment is a file a client is sending with a turn.
+//
+// The daemon checks it before keeping it, exactly as it checks one arriving
+// from a chat platform: a control client is trusted to make requests, which is
+// not the same as its files being safe to decode.
+message InlineAttachment {
+  string name = 1;
+  string media_type = 2;
+  bytes data = 3;
 }
 
 // Deliberately does not carry the answer. The caller subscribes to the event

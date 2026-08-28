@@ -278,7 +278,17 @@ projections" has to mean in practice rather than only in the design.
 
 ## Images
 
-Send the bot a screenshot on Discord and it looks at it. The path is the same
+Send the bot a screenshot on Discord — **attached to the message that mentions
+it**, not sent separately — and it looks at it. Without the Message Content
+intent the bot only sees messages addressed to it, so a picture posted on its
+own is a picture it was never shown.
+
+From a terminal it is the same picture, a flag away:
+
+```bash
+core/bin/agent send <session-id> "what is wrong with this layout" --attach shot.png
+```
+ The path is the same
 shape as everything else here: the adapter fetches the bytes, the ingress puts
 them in the artifact store, the **event carries a reference** — not the picture
 — and the bytes are read back when a request is assembled. An image is large

@@ -1,4 +1,11 @@
-package gateway
+// Package media decides whether a file is what it says it is.
+//
+// It sits on its own because the question is the same wherever a file comes
+// from. A screenshot pasted into a chat and one attached by the operator at
+// their own terminal are both bytes somebody else produced, and a control
+// client being trusted to make requests is not the same as its files being
+// safe to decode.
+package media
 
 import (
 	"bytes"
@@ -25,10 +32,14 @@ import (
 // GIF is a sequence of frames pretending to be a picture and is not here
 // either.
 const (
-	maxImageBytes       = 8 << 20
-	maxImagePixels      = 40_000_000
-	maxImageSide        = 12_000
-	maxImagesPerMessage = 4
+	MaxImageBytes  = 8 << 20
+	MaxImagePixels = 40_000_000
+	MaxImageSide   = 12_000
+
+	// MaxImagesPerMessage is how many one message may carry. A model does not
+	// need ten pictures to answer a question, and each of them is paid for
+	// again on every turn it stays in the conversation.
+	MaxImagesPerMessage = 4
 )
 
 var acceptedImageTypes = map[string]bool{
@@ -37,9 +48,9 @@ var acceptedImageTypes = map[string]bool{
 	"image/webp": true,
 }
 
-var errNotAnImage = errors.New("gateway: not an image this agent accepts")
+var ErrNotAnImage = errors.New("gateway: not an image this agent accepts")
 
-// checkImage decides whether a file that arrived may be kept and shown.
+// CheckImage decides whether a file that arrived may be kept and shown.
 //
 // The declared type is not believed. It comes from the platform, which got it
 // from whoever uploaded the file, and a picture that says it is a PNG while
@@ -49,47 +60,47 @@ var errNotAnImage = errors.New("gateway: not an image this agent accepts")
 // The size limits are two, not one. A bounded number of bytes is not a bounded
 // amount of work: a few megabytes of PNG can decode to gigabytes of pixels,
 // and the machine that runs out of memory is this one.
-func checkImage(declared string, data []byte) (mediaType string, err error) {
-	declared = canonicalMediaType(declared)
+func CheckImage(declared string, data []byte) (mediaType string, err error) {
+	declared = CanonicalMediaType(declared)
 	if !acceptedImageTypes[declared] {
-		return "", fmt.Errorf("%w: %s", errNotAnImage, declared)
+		return "", fmt.Errorf("%w: %s", ErrNotAnImage, declared)
 	}
-	if len(data) > maxImageBytes {
+	if len(data) > MaxImageBytes {
 		return "", fmt.Errorf("gateway: an image may be %d bytes and this is %d",
-			maxImageBytes, len(data))
+			MaxImageBytes, len(data))
 	}
 
-	sniffed := canonicalMediaType(http.DetectContentType(data))
+	sniffed := CanonicalMediaType(http.DetectContentType(data))
 	if sniffed != declared {
-		return "", fmt.Errorf("%w: labelled %s and is %s", errNotAnImage, declared, sniffed)
+		return "", fmt.Errorf("%w: labelled %s and is %s", ErrNotAnImage, declared, sniffed)
 	}
 
 	// Header only. Deciding whether it is safe to decode by decoding it would
 	// be deciding after the fact.
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return "", fmt.Errorf("%w: its header does not parse: %v", errNotAnImage, err)
+		return "", fmt.Errorf("%w: its header does not parse: %v", ErrNotAnImage, err)
 	}
 	if formatMediaType(format) != declared {
 		return "", fmt.Errorf("%w: labelled %s and decodes as %s",
-			errNotAnImage, declared, format)
+			ErrNotAnImage, declared, format)
 	}
 
-	if config.Width > maxImageSide || config.Height > maxImageSide {
+	if config.Width > MaxImageSide || config.Height > MaxImageSide {
 		return "", fmt.Errorf("gateway: %dx%d is past the %d a side allowed",
-			config.Width, config.Height, maxImageSide)
+			config.Width, config.Height, MaxImageSide)
 	}
-	if config.Width*config.Height > maxImagePixels {
+	if config.Width*config.Height > MaxImagePixels {
 		return "", fmt.Errorf("gateway: %dx%d is %d pixels, past the %d allowed",
-			config.Width, config.Height, config.Width*config.Height, maxImagePixels)
+			config.Width, config.Height, config.Width*config.Height, MaxImagePixels)
 	}
 
 	return declared, nil
 }
 
-// canonicalMediaType drops the parameters a sniffer adds and the spellings a
+// CanonicalMediaType drops the parameters a sniffer adds and the spellings a
 // platform might use.
-func canonicalMediaType(declared string) string {
+func CanonicalMediaType(declared string) string {
 	if index := strings.IndexByte(declared, ';'); index >= 0 {
 		declared = declared[:index]
 	}

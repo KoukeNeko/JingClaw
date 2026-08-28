@@ -341,7 +341,7 @@ func run() error {
 	plane.Ingress.Runtime = rt
 
 	api := http.NewServeMux()
-	api.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub)))
+	api.Handle(controlv1connect.NewSessionServiceHandler(control.NewServer(rt, store, hub, artifacts)))
 	api.Handle(controlv1connect.NewGatewayIngressServiceHandler(
 		control.NewGatewayServer(plane.Ingress, store, time.Now)))
 	api.Handle(controlv1connect.NewArtifactServiceHandler(control.NewArtifactServer(artifacts)))

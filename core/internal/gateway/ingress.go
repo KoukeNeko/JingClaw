@@ -9,6 +9,7 @@ import (
 
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
+	"github.com/KoukeNeko/JingClaw/core/internal/media"
 )
 
 // Runtime is the slice of the agent runtime the ingress needs.
@@ -245,7 +246,7 @@ func (i *Ingress) storeAttachments(
 	for _, attachment := range message.Attachments {
 		recorded := domain.Attachment{
 			Name:      attachment.Name,
-			MediaType: canonicalMediaType(attachment.ContentType),
+			MediaType: media.CanonicalMediaType(attachment.ContentType),
 			Size:      attachment.Size,
 		}
 
@@ -253,14 +254,14 @@ func (i *Ingress) storeAttachments(
 		case len(attachment.Data) == 0 || i.Artifacts == nil:
 			// The adapter did not fetch it, or there is nowhere to put it.
 
-		case kept >= maxImagesPerMessage:
+		case kept >= media.MaxImagesPerMessage:
 			i.Logger.Info("not keeping any more attachments from one message",
-				"name", attachment.Name, "limit", maxImagesPerMessage)
+				"name", attachment.Name, "limit", media.MaxImagesPerMessage)
 
 		default:
 			// The declared type is not believed: it came from the platform,
 			// which got it from whoever uploaded the file.
-			mediaType, err := checkImage(attachment.ContentType, attachment.Data)
+			mediaType, err := media.CheckImage(attachment.ContentType, attachment.Data)
 			if err != nil {
 				i.Logger.Info("not keeping an attachment",
 					"name", attachment.Name, "reason", err)

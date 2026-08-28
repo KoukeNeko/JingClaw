@@ -1,4 +1,4 @@
-package gateway
+package media
 
 import (
 	"bytes"
@@ -46,7 +46,7 @@ func TestARealImageIsAccepted(t *testing.T) {
 		// And with the parameters a sniffer adds.
 		"image/png; charset=binary": pngBytes(t, 8, 8),
 	} {
-		mediaType, err := checkImage(declared, data)
+		mediaType, err := CheckImage(declared, data)
 		if err != nil {
 			t.Errorf("%s was refused: %v", declared, err)
 			continue
@@ -61,13 +61,13 @@ func TestARealImageIsAccepted(t *testing.T) {
 // uploaded the file. A picture claiming to be a PNG while being something else
 // is the oldest trick there is.
 func TestTheLabelHasToMatchTheBytes(t *testing.T) {
-	if _, err := checkImage("image/png", jpegBytes(t, 8, 8)); err == nil {
+	if _, err := CheckImage("image/png", jpegBytes(t, 8, 8)); err == nil {
 		t.Error("a JPEG labelled as a PNG was accepted")
 	}
-	if _, err := checkImage("image/png", []byte("<svg><script>alert(1)</script></svg>")); err == nil {
+	if _, err := CheckImage("image/png", []byte("<svg><script>alert(1)</script></svg>")); err == nil {
 		t.Error("an SVG labelled as a PNG was accepted")
 	}
-	if _, err := checkImage("image/png", []byte("#!/bin/sh\nrm -rf /")); err == nil {
+	if _, err := CheckImage("image/png", []byte("#!/bin/sh\nrm -rf /")); err == nil {
 		t.Error("a shell script labelled as a PNG was accepted")
 	}
 }
@@ -84,7 +84,7 @@ func TestOnlyThreeFormatsAreAccepted(t *testing.T) {
 		"text/html",
 		"",
 	} {
-		if _, err := checkImage(declared, pngBytes(t, 8, 8)); err == nil {
+		if _, err := CheckImage(declared, pngBytes(t, 8, 8)); err == nil {
 			t.Errorf("%q was accepted", declared)
 		}
 	}
@@ -119,7 +119,7 @@ func hugePNGHeader(width, height uint32) []byte {
 func TestADecompressionBombIsRefusedOnItsHeader(t *testing.T) {
 	bomb := hugePNGHeader(30_000, 30_000)
 
-	if len(bomb) > maxImageBytes {
+	if len(bomb) > MaxImageBytes {
 		t.Fatalf("the bomb is %d bytes and would be caught by the byte limit alone", len(bomb))
 	}
 
@@ -133,18 +133,18 @@ func TestADecompressionBombIsRefusedOnItsHeader(t *testing.T) {
 		t.Fatalf("the header parses as %dx%d", config.Width, config.Height)
 	}
 
-	if _, err := checkImage("image/png", bomb); err == nil {
+	if _, err := CheckImage("image/png", bomb); err == nil {
 		t.Error("a small file that promises 900 million pixels was accepted")
 	}
 
 	// And one that is merely tall rather than large in total is refused too.
-	if _, err := checkImage("image/png", hugePNGHeader(4, 60_000)); err == nil {
+	if _, err := CheckImage("image/png", hugePNGHeader(4, 60_000)); err == nil {
 		t.Error("a 4x60000 sliver was accepted")
 	}
 }
 
 func TestSomethingTooLargeIsRefused(t *testing.T) {
-	if _, err := checkImage("image/png", make([]byte, maxImageBytes+1)); err == nil {
+	if _, err := CheckImage("image/png", make([]byte, MaxImageBytes+1)); err == nil {
 		t.Error("a file past the byte limit was accepted")
 	}
 }
@@ -153,10 +153,10 @@ func TestSomethingTooLargeIsRefused(t *testing.T) {
 func TestARuinedFileIsRefused(t *testing.T) {
 	whole := pngBytes(t, 32, 32)
 
-	if _, err := checkImage("image/png", whole[:20]); err == nil {
+	if _, err := CheckImage("image/png", whole[:20]); err == nil {
 		t.Error("a truncated PNG was accepted")
 	}
-	if _, err := checkImage("image/png", nil); err == nil {
+	if _, err := CheckImage("image/png", nil); err == nil {
 		t.Error("an empty file was accepted")
 	}
 }

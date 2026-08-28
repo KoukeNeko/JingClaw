@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,6 +50,15 @@ func (a *Adapter) collectAttachments(
 
 	collected := make([]jcgateway.Attachment, 0, len(attachments))
 	fetched := 0
+
+	// Said out loud, at a level somebody will see. A file that is quietly not
+	// fetched looks exactly like a file that was never sent, and the question
+	// it leaves — "why can it not see my screenshot" — is answerable only if
+	// the log says what happened to it.
+	defer func() {
+		a.config.Logger.Info("handled the files on a message",
+			"sent", len(attachments), "fetched", fetched)
+	}()
 
 	for _, attachment := range attachments {
 		record := jcgateway.Attachment{
@@ -125,12 +135,27 @@ func (a *Adapter) fetch(ctx context.Context, url string) ([]byte, error) {
 
 // contentTypeOf is what Discord says the file is, which is what whoever
 // uploaded it said. It is a hint for deciding whether to spend a download on
-// it, and nothing downstream believes it.
+// it, and nothing downstream believes it: the ingress checks the bytes.
+//
+// Discord does not always send one. Falling back to the extension is a guess,
+// but it is a guess about whether to spend a download rather than about
+// whether the file is safe, and refusing every attachment that arrived without
+// a label would mean silently ignoring pictures for a reason nobody could see.
 func contentTypeOf(attachment discord.Attachment) string {
-	if attachment.ContentType != nil {
+	if attachment.ContentType != nil && *attachment.ContentType != "" {
 		return *attachment.ContentType
 	}
-	return ""
+
+	switch strings.ToLower(filepath.Ext(attachment.Filename)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	default:
+		return ""
+	}
 }
 
 // looksFetchable is the cheap filter that runs before the download.
