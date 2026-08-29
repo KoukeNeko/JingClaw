@@ -30,6 +30,14 @@ type ConsoleRuntime interface {
 		scope domain.RememberScope,
 		decidedBy string,
 	) (domain.Approval, error)
+
+	PendingQuestions(ctx context.Context, session domain.SessionID) ([]domain.Question, error)
+
+	AnswerQuestion(
+		ctx context.Context,
+		id domain.QuestionID,
+		answer, answeredBy string,
+	) (domain.Question, error)
 }
 
 // consoleCommand is something typed in a console channel that is an
@@ -37,6 +45,10 @@ type ConsoleRuntime interface {
 type consoleCommand struct {
 	verb string
 	arg  string
+
+	// rest is everything after the argument, for the one command whose
+	// answer is a sentence rather than an id.
+	rest string
 }
 
 // parseConsoleCommand recognises the few things a console channel can be told.
@@ -46,7 +58,22 @@ type consoleCommand struct {
 // might be swallowed as a command is one nobody can talk in.
 func parseConsoleCommand(text string) (consoleCommand, bool) {
 	fields := strings.Fields(strings.TrimSpace(text))
-	if len(fields) == 0 || len(fields) > 2 {
+	if len(fields) == 0 {
+		return consoleCommand{}, false
+	}
+
+	// One command takes words rather than a single argument, because an
+	// answer is a sentence. It is matched before the length check that keeps
+	// every other command from swallowing an ordinary message.
+	if strings.EqualFold(fields[0], "answer") && len(fields) >= 3 {
+		return consoleCommand{
+			verb: "answer",
+			arg:  fields[1],
+			rest: strings.Join(fields[2:], " "),
+		}, true
+	}
+
+	if len(fields) > 2 {
 		return consoleCommand{}, false
 	}
 
@@ -63,6 +90,8 @@ func parseConsoleCommand(text string) (consoleCommand, bool) {
 		return consoleCommand{verb: "deny", arg: arg}, arg != ""
 	case "pending", "approvals":
 		return consoleCommand{verb: "pending"}, arg == ""
+	case "questions", "asked":
+		return consoleCommand{verb: "questions"}, arg == ""
 	case "artifact", "file":
 		return consoleCommand{verb: "artifact", arg: arg}, arg != ""
 	case "help", "motd":
@@ -101,6 +130,17 @@ func (i *Ingress) handleConsole(
 	// can see, not for a run somebody started at the machine: the point of the
 	// channel is remote control of its own conversations, and reaching past
 	// them would make every bound channel a way to approve anything.
+	if command.verb == "questions" || command.verb == "answer" {
+		asked, err := i.Console.PendingQuestions(ctx, session)
+		if err != nil {
+			return err
+		}
+		if command.verb == "questions" {
+			return i.say(ctx, message, session, renderAsked(asked))
+		}
+		return i.answer(ctx, message, session, asked, command)
+	}
+
 	waiting, err := i.Console.PendingApprovals(ctx, session)
 	if err != nil {
 		return err
@@ -115,6 +155,59 @@ func (i *Ingress) handleConsole(
 	}
 
 	return nil
+}
+
+// answer settles a question from the channel that was asked it.
+func (i *Ingress) answer(
+	ctx context.Context,
+	message InboundMessage,
+	session domain.SessionID,
+	asked []domain.Question,
+	command consoleCommand,
+) error {
+	var found *domain.Question
+	for index, question := range asked {
+		if strings.EqualFold(string(question.ID), command.arg) {
+			found = &asked[index]
+			break
+		}
+	}
+	if found == nil {
+		return i.say(ctx, message, session, fmt.Sprintf(
+			"Nothing here is waiting on %s. Type `questions` to see what is.", command.arg))
+	}
+
+	// Recorded as the platform account that typed it, not as the operator
+	// running the daemon. Who answered is part of what the log is for.
+	answeredBy := message.Principal.ID
+	if answeredBy == "" {
+		answeredBy = string(message.Principal.Platform)
+	}
+
+	answered, err := i.Console.AnswerQuestion(ctx, found.ID, command.rest, answeredBy)
+	if err != nil {
+		return i.say(ctx, message, session, fmt.Sprintf("That did not work: %v", err))
+	}
+
+	return i.say(ctx, message, session,
+		fmt.Sprintf("Answered %s: %s", answered.ID, answered.Answer))
+}
+
+// renderAsked lists what the agent is waiting to be told.
+func renderAsked(asked []domain.Question) string {
+	if len(asked) == 0 {
+		return "Nothing here is waiting on an answer."
+	}
+
+	var out strings.Builder
+	for _, question := range asked {
+		fmt.Fprintf(&out, "%s — %s\n", question.ID, question.Prompt)
+		for _, option := range question.Options {
+			fmt.Fprintf(&out, "  %s: %s\n", option.ID, option.Label)
+		}
+	}
+	out.WriteString("\nReply `answer <id> <your answer>`.")
+	return out.String()
 }
 
 func (i *Ingress) decide(
@@ -329,6 +422,7 @@ func consoleMOTD(binding Binding) string {
 	out.WriteString("It can read and search the workspace, fetch web pages, and read what I remember.\n")
 	out.WriteString("Changes to files and to memory stop and ask, and you can answer here: ")
 	out.WriteString("`pending` lists what is waiting, `approve <id>` and `deny <id>` decide it.\n")
+	out.WriteString("`questions` lists what the agent has asked, `answer <id> <your answer>` tells it.\n")
 	out.WriteString("`artifact <id>` hands over something a run stored.\n\n")
 
 	out.WriteString("**It cannot run programs.** That needs somebody at the machine.\n")

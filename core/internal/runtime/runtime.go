@@ -189,6 +189,9 @@ type Options struct {
 	// short and readable rather than shaped like everything else.
 	NewPlanItemID IDGenerator
 
+	// NewQuestionID names a question a person will be asked.
+	NewQuestionID IDGenerator
+
 	Now    func() time.Time
 	Logger *slog.Logger
 }
@@ -241,6 +244,7 @@ func New(ctx context.Context, opts Options) *Runtime {
 		"NewEventID":    opts.NewEventID,
 		"NewApprovalID": opts.NewApprovalID,
 		"NewPlanItemID": opts.NewPlanItemID,
+		"NewQuestionID": opts.NewQuestionID,
 	}
 	for name, value := range required {
 		if isNilOption(value) {
@@ -1088,7 +1092,10 @@ func (r *Runtime) generateTurn(
 // but two calls can still contend for the same file, and getting that wrong
 // costs far more than the latency saved.
 func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingCall) (bool, error) {
-	var suspended bool
+	var (
+		suspended bool
+		why       parked
+	)
 
 	for _, pending := range calls {
 		if err := ctx.Err(); err != nil {
@@ -1111,8 +1118,8 @@ func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingC
 		if err != nil {
 			return false, err
 		}
-		if park {
-			suspended = true
+		if park != notParked {
+			suspended, why = true, park
 			// Later calls in the same turn stay outstanding on purpose: they
 			// may well depend on the one being reviewed, and running them
 			// first would act on an assumption the human has not confirmed.
@@ -1125,16 +1132,36 @@ func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingC
 	}
 
 	if suspended {
-		r.suspend(ctx, run)
+		r.suspend(ctx, run, why)
 	}
 	return suspended, nil
 }
 
-// settleCall resolves one call to either a result or a request for approval.
-func (r *Runtime) settleCall(ctx context.Context, run domain.Run, call tool.Call) (tool.Result, bool, error) {
+// parked says why a call produced no result.
+//
+// Two reasons, and the difference is what a person sees: a run stopped on an
+// approval is waiting for somebody to allow something, and one stopped on a
+// question is waiting for somebody to say what they want. Reported as one
+// state, every client would offer the wrong control.
+type parked string
+
+const (
+	notParked         parked = ""
+	parkedForApproval parked = "approval"
+	parkedForAnswer   parked = "answer"
+)
+
+// settleCall resolves one call to a result, or to a reason it is waiting.
+func (r *Runtime) settleCall(ctx context.Context, run domain.Run, call tool.Call) (tool.Result, parked, error) {
 	if r.opts.Tools == nil {
 		return tool.Errorf(tool.CodeNotFound, "",
-			"no tools are available in this session").Result(), false, nil
+			"no tools are available in this session").Result(), notParked, nil
+	}
+
+	// Settled by finding an answer rather than by running anything. This is
+	// the one tool whose result a person types.
+	if call.Name == AskName {
+		return r.settleAsk(ctx, run, call)
 	}
 
 	registered, known := r.opts.Tools.Lookup(call.Name)
@@ -1142,35 +1169,35 @@ func (r *Runtime) settleCall(ctx context.Context, run domain.Run, call tool.Call
 		// An unknown tool never reaches the policy engine; there is nothing to
 		// evaluate, and the model needs to be told it asked for something that
 		// does not exist.
-		return r.opts.Tools.Execute(ctx, call), false, nil
+		return r.opts.Tools.Execute(ctx, call), notParked, nil
 	}
 
 	// A decision already made for this call wins: this is a resumed run.
 	decided, err := r.opts.Store.ApprovalForCall(ctx, run.ID, domain.ToolCallID(call.ID))
 	switch {
 	case err == nil && decided.Status == domain.ApprovalAllowed:
-		return r.opts.Tools.Execute(ctx, call), false, nil
+		return r.opts.Tools.Execute(ctx, call), notParked, nil
 	case err == nil && decided.Status == domain.ApprovalDenied:
-		return deniedResult(call, "a human declined this action"), false, nil
+		return deniedResult(call, "a human declined this action"), notParked, nil
 	case err == nil && decided.IsPending():
 		// Already waiting; do not raise a second prompt for it.
-		return tool.Result{}, true, nil
+		return tool.Result{}, parkedForApproval, nil
 	case err != nil && !errors.Is(err, storage.ErrApprovalNotFound):
-		return tool.Result{}, false, err
+		return tool.Result{}, notParked, err
 	}
 
 	switch outcome := r.evaluate(ctx, run, registered.Spec(), call); outcome.decision {
 	case permission.Allow:
-		return r.opts.Tools.Execute(ctx, call), false, nil
+		return r.opts.Tools.Execute(ctx, call), notParked, nil
 
 	case permission.Deny:
-		return deniedResult(call, outcome.outcome.Reason), false, nil
+		return deniedResult(call, outcome.outcome.Reason), notParked, nil
 
 	default:
 		if err := r.requestApproval(ctx, run, registered, call, outcome.outcome); err != nil {
-			return tool.Result{}, false, err
+			return tool.Result{}, notParked, err
 		}
-		return tool.Result{}, true, nil
+		return tool.Result{}, parkedForApproval, nil
 	}
 }
 

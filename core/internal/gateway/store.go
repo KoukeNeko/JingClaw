@@ -33,6 +33,12 @@ const (
 	// DispatchApproval asks the conversation to decide about a tool call.
 	DispatchApproval DispatchKind = "approval"
 
+	// DispatchQuestion asks the conversation something the agent needs to
+	// know. Distinct from an approval because the two want different
+	// answers: an approval is allowed or denied, and this is answered with
+	// words or a choice.
+	DispatchQuestion DispatchKind = "question"
+
 	// DispatchStatus reports a run beginning or ending, so a channel is not
 	// left wondering whether anything is happening.
 	DispatchStatus DispatchKind = "status"

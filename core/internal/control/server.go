@@ -431,12 +431,20 @@ func toConnectError(err error) error {
 		return nil
 	case errors.Is(err, storage.ErrSessionNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
-	case errors.Is(err, runtime.ErrRunNotFound), errors.Is(err, storage.ErrApprovalNotFound):
+	case errors.Is(err, runtime.ErrRunNotFound),
+		errors.Is(err, storage.ErrApprovalNotFound),
+		errors.Is(err, storage.ErrQuestionNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
-	case errors.Is(err, runtime.ErrApprovalNotPending), errors.Is(err, storage.ErrApprovalDecided):
+	case errors.Is(err, runtime.ErrApprovalNotPending),
+		errors.Is(err, storage.ErrApprovalDecided),
+		errors.Is(err, storage.ErrQuestionAnswered):
 		// Someone already answered. FailedPrecondition rather than an error
 		// state: the prompt is settled, the client is simply late.
 		return connect.NewError(connect.CodeFailedPrecondition, err)
+	case errors.Is(err, runtime.ErrNoAnswer):
+		// The caller sent nothing. InvalidArgument rather than internal: this
+		// is a client to fix, not a daemon.
+		return connect.NewError(connect.CodeInvalidArgument, err)
 	case errors.Is(err, runtime.ErrShuttingDown):
 		return connect.NewError(connect.CodeUnavailable, err)
 	case errors.Is(err, context.Canceled):
@@ -515,5 +523,47 @@ func (s *Server) SetSessionModel(
 
 	return connect.NewResponse(&controlv1.SetSessionModelResponse{
 		Session: sessionToProto(session),
+	}), nil
+}
+
+// ListQuestions is what the agent has asked and nobody has answered.
+//
+// Alongside ListApprovals rather than folded into it: a client offers a
+// different control for the two, and a list that mixed them would make every
+// client work out which kind each row was.
+func (s *Server) ListQuestions(
+	ctx context.Context,
+	req *connect.Request[controlv1.ListQuestionsRequest],
+) (*connect.Response[controlv1.ListQuestionsResponse], error) {
+	questions, err := s.rt.PendingQuestions(ctx, domain.SessionID(req.Msg.GetSessionId()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	out := make([]*controlv1.Question, 0, len(questions))
+	for _, question := range questions {
+		out = append(out, questionToProto(question))
+	}
+	return connect.NewResponse(&controlv1.ListQuestionsResponse{Questions: out}), nil
+}
+
+// AnswerQuestion unblocks a run that stopped to ask.
+func (s *Server) AnswerQuestion(
+	ctx context.Context,
+	req *connect.Request[controlv1.AnswerQuestionRequest],
+) (*connect.Response[controlv1.AnswerQuestionResponse], error) {
+	answeredBy := req.Msg.GetMeta().GetClientId()
+	if answeredBy == "" {
+		answeredBy = "unknown"
+	}
+
+	question, err := s.rt.AnswerQuestion(ctx,
+		domain.QuestionID(req.Msg.GetQuestionId()), req.Msg.GetAnswer(), answeredBy)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	return connect.NewResponse(&controlv1.AnswerQuestionResponse{
+		Question: questionToProto(question),
 	}), nil
 }

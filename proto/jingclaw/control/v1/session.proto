@@ -112,6 +112,45 @@ message Approval {
   string preview = 11;
 }
 
+// Question is a paused run waiting for an answer from a person.
+message Question {
+  string id = 1;
+  string session_id = 2;
+  string run_id = 3;
+  string tool_call_id = 4;
+
+  string prompt = 5;
+  QuestionKind kind = 6;
+  repeated QuestionOption options = 7;
+
+  QuestionStatus status = 8;
+  string answer = 9;
+
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message ListQuestionsRequest {
+  string session_id = 1;
+}
+
+message ListQuestionsResponse {
+  repeated Question questions = 1;
+}
+
+message AnswerQuestionRequest {
+  RequestMeta meta = 1;
+  string question_id = 2;
+
+  // The chosen option's id for a choice, or the text as typed. An empty
+  // answer is refused rather than stored: a run resumed with nothing has
+  // been told the person had no opinion, which is not what silence means.
+  string answer = 3;
+}
+
+message AnswerQuestionResponse {
+  Question question = 1;
+}
+
 message ListApprovalsRequest {
   string session_id = 1;
 }
@@ -370,6 +409,12 @@ service SessionService {
   rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
   rpc DecideApproval(DecideApprovalRequest) returns (DecideApprovalResponse);
 
+  // ListQuestions is what the agent has asked and nobody has answered.
+  rpc ListQuestions(ListQuestionsRequest) returns (ListQuestionsResponse);
+
+  // AnswerQuestion unblocks a run that stopped to ask.
+  rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);
+
   // ListModels is what this daemon's provider offers, and which one a session
   // is using.
   //
@@ -472,6 +517,11 @@ message GetSessionViewResponse {
   // watching it happen would otherwise see a run working through a plan it
   // cannot see.
   repeated PlanItem plan = 7;
+
+  // Questions still waiting on somebody. Like pending approvals: a client
+  // that showed the conversation without these would show a session that
+  // appears finished and is actually waiting to be answered.
+  repeated Question pending_questions = 8;
 }
 
 // ViewMessage is one turn as a client would draw it.

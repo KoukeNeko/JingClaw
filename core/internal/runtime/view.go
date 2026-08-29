@@ -37,6 +37,11 @@ type SessionView struct {
 	// Truncated says older messages exist than the ones returned.
 	Truncated bool
 
+	// Questions are what the agent asked and nobody has answered. Like
+	// pending approvals: without them a client draws a conversation that
+	// looks finished and is actually waiting to be answered.
+	Questions []domain.Question
+
 	// Plan is what the agent said it was going to do, if it said anything.
 	// Without it a client that opened a session rather than watching it
 	// happen sees a run working through a plan it cannot see.
@@ -111,6 +116,9 @@ func (r *Runtime) SessionViewOf(
 	view.Messages = messages
 
 	if view.Plan, err = r.opts.Store.Plan(ctx, sessionID); err != nil {
+		return SessionView{}, err
+	}
+	if view.Questions, err = r.opts.Store.PendingQuestions(ctx, sessionID); err != nil {
 		return SessionView{}, err
 	}
 

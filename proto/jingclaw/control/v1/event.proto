@@ -33,6 +33,8 @@ message Event {
     RunDirections run_directions = 20;
     AssistantReasoningDelta assistant_reasoning_delta = 21;
     PlanChanged plan_changed = 22;
+    QuestionAsked question_asked = 23;
+    QuestionAnswered question_answered = 24;
   }
 }
 
@@ -174,6 +176,67 @@ enum PlanStatus {
 // that cannot be understood from a single entry.
 message PlanChanged {
   repeated PlanItem items = 1;
+}
+
+// The run stopping to ask a person something. Every client sees it, so
+// whoever is nearest can answer.
+//
+// Not an approval. An approval asks whether something may happen and is
+// answered yes or no; this asks what the person wants and is answered with
+// their words.
+message QuestionAsked {
+  string question_id = 1;
+  string call_id = 2;
+
+  // What is being asked, in the model's own words.
+  string prompt = 3;
+
+  QuestionKind kind = 4;
+
+  // What may be chosen, for a choice. Empty for free text.
+  repeated QuestionOption options = 5;
+}
+
+enum QuestionKind {
+  QUESTION_KIND_UNSPECIFIED = 0;
+
+  // A fixed set. A model that knows the options should say so rather than
+  // hoping the answer matches one.
+  QUESTION_KIND_CHOICE = 1;
+
+  // Words — a branch name, a path, a reason.
+  QUESTION_KIND_TEXT = 2;
+}
+
+message QuestionOption {
+  string id = 1;
+  string label = 2;
+
+  // What a person needs to tell two options apart when the labels alone do
+  // not. Optional.
+  string detail = 3;
+}
+
+message QuestionAnswered {
+  string question_id = 1;
+  string call_id = 2;
+
+  QuestionStatus status = 3;
+
+  // The chosen option's id for a choice, or the text as typed.
+  string answer = 4;
+
+  // Which client answered, for the audit trail.
+  string answered_by = 5;
+}
+
+enum QuestionStatus {
+  QUESTION_STATUS_UNSPECIFIED = 0;
+  QUESTION_STATUS_PENDING = 1;
+  QUESTION_STATUS_ANSWERED = 2;
+
+  // Nobody will answer, because the run it belonged to ended.
+  QUESTION_STATUS_CANCELLED = 3;
 }
 
 message ApprovalRequested {

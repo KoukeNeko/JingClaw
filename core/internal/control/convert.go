@@ -295,6 +295,28 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 			PlanChanged: &controlv1.PlanChanged{Items: planItemsToProto(p.Items)},
 		}
 
+	case domain.QuestionAsked:
+		out.Payload = &controlv1.Event_QuestionAsked{
+			QuestionAsked: &controlv1.QuestionAsked{
+				QuestionId: string(p.QuestionID),
+				CallId:     string(p.CallID),
+				Prompt:     p.Prompt,
+				Kind:       questionKindToProto(p.Kind),
+				Options:    questionOptionsToProto(p.Options),
+			},
+		}
+
+	case domain.QuestionAnswered:
+		out.Payload = &controlv1.Event_QuestionAnswered{
+			QuestionAnswered: &controlv1.QuestionAnswered{
+				QuestionId: string(p.QuestionID),
+				CallId:     string(p.CallID),
+				Status:     questionStatusToProto(p.Status),
+				Answer:     p.Answer,
+				AnsweredBy: p.AnsweredBy,
+			},
+		}
+
 	case domain.ApprovalRequested:
 		out.Payload = &controlv1.Event_ApprovalRequested{
 			ApprovalRequested: &controlv1.ApprovalRequested{
@@ -358,6 +380,11 @@ func sessionViewToProto(view runtime.SessionView) *controlv1.GetSessionViewRespo
 		HeadSeq:   uint64(view.HeadSeq),
 		Truncated: view.Truncated,
 		Plan:      planItemsToProto(view.Plan),
+	}
+
+	out.PendingQuestions = make([]*controlv1.Question, 0, len(view.Questions))
+	for _, question := range view.Questions {
+		out.PendingQuestions = append(out.PendingQuestions, questionToProto(question))
 	}
 
 	out.Messages = make([]*controlv1.ViewMessage, 0, len(view.Messages))
@@ -438,5 +465,54 @@ func planStatusToProto(status domain.PlanStatus) controlv1.PlanStatus {
 		return controlv1.PlanStatus_PLAN_STATUS_ABANDONED
 	default:
 		return controlv1.PlanStatus_PLAN_STATUS_UNSPECIFIED
+	}
+}
+
+func questionToProto(q domain.Question) *controlv1.Question {
+	return &controlv1.Question{
+		Id:         string(q.ID),
+		SessionId:  string(q.SessionID),
+		RunId:      string(q.RunID),
+		ToolCallId: string(q.ToolCallID),
+		Prompt:     q.Prompt,
+		Kind:       questionKindToProto(q.Kind),
+		Options:    questionOptionsToProto(q.Options),
+		Status:     questionStatusToProto(q.Status),
+		Answer:     q.Answer,
+		CreatedAt:  timestamppb.New(q.CreatedAt),
+	}
+}
+
+func questionOptionsToProto(options []domain.QuestionOption) []*controlv1.QuestionOption {
+	out := make([]*controlv1.QuestionOption, 0, len(options))
+	for _, option := range options {
+		out = append(out, &controlv1.QuestionOption{
+			Id: option.ID, Label: option.Label, Detail: option.Detail,
+		})
+	}
+	return out
+}
+
+func questionKindToProto(kind domain.QuestionKind) controlv1.QuestionKind {
+	switch kind {
+	case domain.QuestionChoice:
+		return controlv1.QuestionKind_QUESTION_KIND_CHOICE
+	case domain.QuestionText:
+		return controlv1.QuestionKind_QUESTION_KIND_TEXT
+	default:
+		return controlv1.QuestionKind_QUESTION_KIND_UNSPECIFIED
+	}
+}
+
+func questionStatusToProto(status domain.QuestionStatus) controlv1.QuestionStatus {
+	switch status {
+	case domain.AnswerPending:
+		return controlv1.QuestionStatus_QUESTION_STATUS_PENDING
+	case domain.AnswerGiven:
+		return controlv1.QuestionStatus_QUESTION_STATUS_ANSWERED
+	case domain.AnswerAbandoned:
+		return controlv1.QuestionStatus_QUESTION_STATUS_CANCELLED
+	default:
+		return controlv1.QuestionStatus_QUESTION_STATUS_UNSPECIFIED
 	}
 }

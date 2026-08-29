@@ -250,6 +250,52 @@ public struct PendingApproval: Equatable, Sendable, Decodable {
     }
 }
 
+/// A question the agent is waiting to have answered.
+public struct PendingQuestion: Identifiable, Equatable, Sendable, Decodable {
+    public var id: String
+    public var prompt: String
+    public var kind: String
+    public var options: [Option]
+
+    public struct Option: Identifiable, Equatable, Sendable, Decodable {
+        public var id: String
+        public var label: String
+        public var detail: String
+
+        public init(id: String, label: String = "", detail: String = "") {
+            self.id = id
+            self.label = label
+            self.detail = detail
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            label = try container.decodeIfPresent(String.self, forKey: .label) ?? ""
+            detail = try container.decodeIfPresent(String.self, forKey: .detail) ?? ""
+        }
+
+        private enum CodingKeys: String, CodingKey { case id, label, detail }
+    }
+
+    public init(id: String, prompt: String = "", kind: String = "", options: [Option] = []) {
+        self.id = id
+        self.prompt = prompt
+        self.kind = kind
+        self.options = options
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        options = try container.decodeIfPresent([Option].self, forKey: .options) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, prompt, kind, options }
+}
+
 /// Stored output named on an event, without its bytes.
 public struct ArtifactRef: Sendable, Decodable, Equatable {
     public var id: String

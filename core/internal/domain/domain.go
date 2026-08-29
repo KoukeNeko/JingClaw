@@ -268,6 +268,8 @@ const (
 	EventConversationCompacted     EventKind = "conversation.compacted"
 	EventRunDirections             EventKind = "run.directions"
 	EventPlanChanged               EventKind = "plan.changed"
+	EventQuestionAsked             EventKind = "question.asked"
+	EventQuestionAnswered          EventKind = "question.answered"
 )
 
 // ToolCallID identifies one tool invocation within a run.
@@ -472,6 +474,8 @@ func AllEventKinds() []EventKind {
 		EventConversationCompacted,
 		EventRunDirections,
 		EventPlanChanged,
+		EventQuestionAsked,
+		EventQuestionAnswered,
 		EventApprovalRequested,
 		EventApprovalResolved,
 	}
@@ -488,6 +492,8 @@ func (ToolCallCompleted) isEventPayload()         {}
 func (ConversationCompacted) isEventPayload()     {}
 func (RunDirections) isEventPayload()             {}
 func (PlanChanged) isEventPayload()               {}
+func (QuestionAsked) isEventPayload()             {}
+func (QuestionAnswered) isEventPayload()          {}
 
 // StopReason says why a generation ended. Providers spell this differently;
 // the runtime needs one vocabulary to decide whether a turn is genuinely
@@ -629,6 +635,117 @@ type ApprovalRequested struct {
 	// Preview is the call rendered for review, where the tool could render
 	// one. See Approval.Preview.
 	Preview string
+}
+
+// QuestionID identifies one thing the agent asked a person.
+type QuestionID string
+
+// Question is a paused run waiting for an answer from a person.
+//
+// Not an approval. An approval asks whether something may happen and is
+// answered yes or no; this asks what the person wants and is answered with
+// their words. Sharing the machinery would mean one of the two pretending to
+// be the other, and the difference matters at exactly the moment it is being
+// read: "allow this?" and "which of these?" are not the same question.
+//
+// Persisted for the same reason approvals are: the pause has to survive a
+// restart. A run stopped on a question is not an orphan to clean up, it is
+// work waiting for an answer that may come hours later.
+type Question struct {
+	ID        QuestionID
+	SessionID SessionID
+	RunID     RunID
+
+	// ToolCallID ties this to the call that asked, so a resumed run finds the
+	// answer for the call it is settling rather than for some other question.
+	ToolCallID ToolCallID
+
+	// Prompt is what is being asked, in the model's own words.
+	Prompt string
+
+	Kind QuestionKind
+
+	// Options are what may be chosen, for a choice. Empty for free text.
+	Options []QuestionOption
+
+	Status QuestionStatus
+
+	// Answer is what came back: the chosen option's id for a choice, or the
+	// text as typed.
+	Answer string
+
+	// AnsweredBy identifies the client that answered, for the audit trail.
+	AnsweredBy string
+
+	CreatedAt  time.Time
+	AnsweredAt *time.Time
+}
+
+// IsPending reports whether this is still waiting on somebody.
+func (q Question) IsPending() bool { return q.Status == AnswerPending }
+
+// QuestionKind is what shape of answer is wanted.
+type QuestionKind string
+
+const (
+	// QuestionChoice offers a fixed set. A model that knows the options
+	// should say so rather than hoping the answer matches one.
+	QuestionChoice QuestionKind = "choice"
+
+	// QuestionText asks for words — a branch name, a path, a reason.
+	QuestionText QuestionKind = "text"
+)
+
+// IsValid reports whether this is a kind of question that can be asked.
+func (k QuestionKind) IsValid() bool {
+	return k == QuestionChoice || k == QuestionText
+}
+
+// QuestionOption is one thing that may be chosen.
+type QuestionOption struct {
+	ID    string
+	Label string
+
+	// Detail is what a person needs to tell two options apart when the labels
+	// alone do not. Optional.
+	Detail string
+}
+
+// QuestionStatus is where a question has got to.
+//
+// Named for the answer rather than for the question — AnswerGiven rather than
+// QuestionAnswered — because QuestionAnswered is the event that says it
+// happened, and one name for both would make "the status" and "the thing that
+// announced it" indistinguishable at every call site.
+type QuestionStatus string
+
+const (
+	AnswerPending QuestionStatus = "pending"
+	AnswerGiven   QuestionStatus = "answered"
+
+	// AnswerAbandoned is a question nobody will answer, because the run it
+	// belonged to ended. Recorded rather than deleted: a question that
+	// vanishes leaves a log where a run paused for no visible reason.
+	AnswerAbandoned QuestionStatus = "cancelled"
+)
+
+// QuestionAsked is the run stopping to ask. Every client sees it, so whoever
+// is nearest can answer.
+type QuestionAsked struct {
+	QuestionID QuestionID
+	CallID     ToolCallID
+	Prompt     string
+	Kind       QuestionKind
+	Options    []QuestionOption
+}
+
+// QuestionAnswered records the answer and who gave it.
+type QuestionAnswered struct {
+	QuestionID QuestionID
+	CallID     ToolCallID
+	Status     QuestionStatus
+	Answer     string
+	AnsweredBy string
 }
 
 // PlanItem is one step of what the agent says it is going to do.

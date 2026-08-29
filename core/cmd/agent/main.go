@@ -76,7 +76,8 @@ func newRootCommand() *cobra.Command {
 
 	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand(),
 		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand(),
-		newArtifactCommand(), newConsoleCommand(), newMemoryCommand())
+		newArtifactCommand(), newConsoleCommand(), newMemoryCommand(),
+		newQuestionsCommand(), newAnswerCommand())
 	return root
 }
 
@@ -515,6 +516,12 @@ func describe(ev *controlv1.Event, showOutput bool) (label, detail string) {
 	case *controlv1.Event_AssistantTextDelta:
 		return "assistant.delta", payload.AssistantTextDelta.GetText()
 
+	case *controlv1.Event_QuestionAsked:
+		return "question", renderQuestionLine(payload.QuestionAsked)
+
+	case *controlv1.Event_QuestionAnswered:
+		return "answered", payload.QuestionAnswered.GetAnswer()
+
 	case *controlv1.Event_PlanChanged:
 		return "plan", renderPlanLine(payload.PlanChanged.GetItems())
 
@@ -693,6 +700,79 @@ func newArtifactCommand() *cobra.Command {
 
 	artifact.AddCommand(get)
 	return artifact
+}
+
+// newQuestionsCommand lists what the agent has asked and nobody has answered.
+func newQuestionsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "questions <session-id>",
+		Short: "List questions the agent is waiting on",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := dial()
+			if err != nil {
+				return err
+			}
+
+			resp, err := client.ListQuestions(cmd.Context(),
+				connect.NewRequest(&controlv1.ListQuestionsRequest{SessionId: args[0]}))
+			if err != nil {
+				return err
+			}
+
+			questions := resp.Msg.GetQuestions()
+			if len(questions) == 0 {
+				fmt.Fprintln(cmd.ErrOrStderr(), "nothing waiting")
+				return nil
+			}
+
+			for _, question := range questions {
+				fmt.Printf("%s  %s\n", question.GetId(), question.GetPrompt())
+				for _, option := range question.GetOptions() {
+					fmt.Printf("    %s  %s", option.GetId(), option.GetLabel())
+					if detail := option.GetDetail(); detail != "" {
+						fmt.Printf("  (%s)", detail)
+					}
+					fmt.Println()
+				}
+				if question.GetKind() == controlv1.QuestionKind_QUESTION_KIND_TEXT {
+					fmt.Println("    (answer in your own words)")
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// newAnswerCommand unblocks a run that stopped to ask.
+func newAnswerCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "answer <question-id> <answer>",
+		Short: "Answer a question the agent is waiting on",
+		// The answer is taken as the rest of the line rather than one
+		// argument, so a person can type a sentence without quoting it.
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := dial()
+			if err != nil {
+				return err
+			}
+
+			resp, err := client.AnswerQuestion(cmd.Context(),
+				connect.NewRequest(&controlv1.AnswerQuestionRequest{
+					Meta:       newMeta(),
+					QuestionId: args[0],
+					Answer:     strings.Join(args[1:], " "),
+				}))
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintf(cmd.ErrOrStderr(), "answered %s: %s\n",
+				resp.Msg.GetQuestion().GetId(), resp.Msg.GetQuestion().GetAnswer())
+			return nil
+		},
+	}
 }
 
 // newConsoleCommand pairs a browser, and says which ones are paired.
@@ -1056,4 +1136,23 @@ func renderPlanLine(items []*controlv1.PlanItem) string {
 		line += "  " + current
 	}
 	return line
+}
+
+// renderQuestionLine is a question and how to answer it.
+//
+// The id is included because answering needs it, and somebody watching a
+// stream is exactly the person about to answer.
+func renderQuestionLine(asked *controlv1.QuestionAsked) string {
+	line := fmt.Sprintf("%s — %s", asked.GetQuestionId(), asked.GetPrompt())
+
+	options := asked.GetOptions()
+	if len(options) == 0 {
+		return line
+	}
+
+	labels := make([]string, 0, len(options))
+	for _, option := range options {
+		labels = append(labels, fmt.Sprintf("%s=%s", option.GetId(), option.GetLabel()))
+	}
+	return line + "  [" + strings.Join(labels, ", ") + "]"
 }

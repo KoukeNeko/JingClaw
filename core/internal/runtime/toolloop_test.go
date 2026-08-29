@@ -126,6 +126,7 @@ func newToolHarness(t *testing.T, turns [][]provider.Event) (*runtime.Runtime, *
 		NewEventID:    next("evt"),
 		NewApprovalID: next("apr"),
 		NewPlanItemID: next("todo"),
+		NewQuestionID: next("qst"),
 		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
 		Logger:        slog.New(slog.DiscardHandler),
 	})

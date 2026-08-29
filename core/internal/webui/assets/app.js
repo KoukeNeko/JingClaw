@@ -32,6 +32,7 @@ const state = {
   openMessage: null,
   openReasoning: null,
   plan: [],
+  questions: new Map(),
 };
 
 // ---------------------------------------------------------------- transport
@@ -305,12 +306,14 @@ async function selectSession(id) {
   state.seq = 0;
   state.openMessage = null;
   state.approvals.clear();
+  state.questions.clear();
   state.plan = [];
   state.runId = null;
   setRunStatus('');
 
   el('timeline').replaceChildren();
   renderPlan();
+  renderQuestions();
   el('session-title').textContent = titleOf(id);
   el('input').disabled = false;
   el('send').disabled = false;
@@ -405,6 +408,18 @@ async function openFromView(id) {
     // see.
     state.plan = view.plan || [];
     renderPlan();
+
+    // From the view as well as from events: a session opened while the agent
+    // was waiting would otherwise look like one that had simply stopped.
+    state.questions.clear();
+    for (const question of view.pendingQuestions || []) {
+      state.questions.set(question.id, {
+        questionId: question.id,
+        prompt: question.prompt,
+        options: question.options || [],
+      });
+    }
+    renderQuestions();
 
     state.approvals.clear();
     for (const approval of view.pendingApprovals || []) {
@@ -532,6 +547,17 @@ function applyEvent(event) {
   if (event.assistantTextDelta) {
     state.openReasoning = null;
     return appendAssistant(event.assistantTextDelta.text || '');
+  }
+
+  if (event.questionAsked) {
+    const asked = event.questionAsked;
+    state.questions.set(asked.questionId, asked);
+    return renderQuestions();
+  }
+
+  if (event.questionAnswered) {
+    state.questions.delete(event.questionAnswered.questionId);
+    return renderQuestions();
   }
 
   if (event.planChanged) {
@@ -805,6 +831,91 @@ function remember(source) {
   const approval = approvalFrom(source);
   if (!approval.approvalId) return;
   state.approvals.set(approval.approvalId, approval);
+}
+
+// renderQuestions draws what the agent is waiting to be told.
+//
+// Its own panel rather than sharing the approvals one: an approval is allowed
+// or denied and this is answered, and a panel that offered both sets of
+// controls would offer the wrong one half the time.
+function renderQuestions() {
+  const panel = el('questions');
+  panel.replaceChildren();
+  panel.hidden = state.questions.size === 0;
+
+  for (const question of state.questions.values()) {
+    const row = document.createElement('div');
+    row.className = 'question';
+
+    const prompt = document.createElement('div');
+    prompt.className = 'prompt';
+    prompt.textContent = question.prompt || '';
+    row.append(prompt);
+
+    const options = question.options || [];
+    if (options.length > 0) {
+      const choices = document.createElement('div');
+      choices.className = 'choices';
+      for (const option of options) {
+        choices.append(choiceButton(question, option));
+      }
+      row.append(choices);
+    } else {
+      row.append(answerBox(question));
+    }
+
+    panel.append(row);
+  }
+}
+
+function choiceButton(question, option) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = option.label || option.id;
+  if (option.detail) button.title = option.detail;
+
+  button.addEventListener('click', () => answerQuestion(question, option.id, button));
+  return button;
+}
+
+// answerBox is for a question with no options, where the answer is words.
+function answerBox(question) {
+  const form = document.createElement('form');
+  form.className = 'answer';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Your answer';
+  input.autocomplete = 'off';
+
+  const send = document.createElement('button');
+  send.type = 'submit';
+  send.textContent = 'Answer';
+
+  form.addEventListener('submit', (submitted) => {
+    submitted.preventDefault();
+    const text = input.value.trim();
+    if (text) answerQuestion(question, text, send);
+  });
+
+  form.append(input, send);
+  return form;
+}
+
+async function answerQuestion(question, answer, control) {
+  control.disabled = true;
+  try {
+    await call('SessionService', 'AnswerQuestion', {
+      questionId: question.questionId, answer,
+    });
+    // The answer arrives as an event too; removing it here keeps the panel
+    // from sitting there looking unanswered in the meantime.
+    state.questions.delete(question.questionId);
+    renderQuestions();
+  } catch (err) {
+    control.disabled = false;
+    setDaemonStatus(`could not answer — ${err.message}`);
+  }
 }
 
 // renderPlan draws what the agent said it was going to do.

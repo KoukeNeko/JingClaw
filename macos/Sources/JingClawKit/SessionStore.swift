@@ -15,6 +15,13 @@ public final class SessionStore {
     public private(set) var status: String = ""
     public private(set) var selected: String?
 
+    /// What the agent has asked and nobody has answered.
+    ///
+    /// Its own list rather than folded in with approvals: an approval is
+    /// allowed or denied and this is answered, and a panel offering both sets
+    /// of controls would offer the wrong one half the time.
+    public private(set) var asked: [PendingQuestion] = []
+
     /// What each waiting approval is actually asking for.
     ///
     /// The reducer keeps the ids, because that is what three clients have to
@@ -87,6 +94,7 @@ public final class SessionStore {
         }
 
         await loadApprovals()
+        await loadQuestions()
         await loadModels()
         follow(id, after: state.headSeq)
     }
@@ -114,6 +122,36 @@ public final class SessionStore {
             waiting.removeAll { $0.id == approvalID }
         } catch {
             status = "\(error)"
+        }
+    }
+
+    /// Fetches what the agent is waiting to be told.
+    ///
+    /// From the daemon rather than accumulated from events, for the same
+    /// reason approvals are: a session opened while the agent was waiting
+    /// would otherwise look like one that had simply stopped.
+    public func loadQuestions() async {
+        guard let id = selected else { return }
+        do {
+            let listed: QuestionListResponse = try await client.call(
+                "SessionService", "ListQuestions", ["sessionId": id])
+            asked = listed.questions ?? []
+        } catch {
+            status = "could not read what is being asked: \(error)"
+        }
+    }
+
+    /// Answers a question, which resumes the run that asked it.
+    public func answer(_ questionID: String, with answer: String) async {
+        do {
+            try await client.send(
+                "SessionService", "AnswerQuestion",
+                ["questionId": questionID, "answer": answer])
+            // Removed here rather than waiting for the event, so the control
+            // somebody just used stops being usable.
+            asked.removeAll { $0.id == questionID }
+        } catch {
+            status = "could not answer: \(error)"
         }
     }
 
@@ -245,6 +283,12 @@ public final class SessionStore {
                             if self.state.pendingApprovals != before {
                                 await self.loadApprovals()
                             }
+                            // A question is not in the shared state, so the
+                            // event kind is what says to go and look.
+                            if applied.kind == "question.asked"
+                                || applied.kind == "question.answered" {
+                                await self.loadQuestions()
+                            }
                         }
                     }
                 } catch {
@@ -266,6 +310,10 @@ public struct SessionSummary: Decodable, Identifiable, Sendable {
 
 struct SessionListResponse: Decodable {
     var sessions: [SessionSummary]?
+}
+
+struct QuestionListResponse: Decodable {
+    var questions: [PendingQuestion]?
 }
 
 struct PlanResponse: Decodable {

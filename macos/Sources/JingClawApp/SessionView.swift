@@ -33,6 +33,10 @@ struct SessionView: View {
 
                 Timeline(state: store.state, store: store)
 
+                if !store.asked.isEmpty {
+                    Questions(store: store)
+                }
+
                 if !store.state.pendingApprovals.isEmpty {
                     Approvals(store: store)
                 }
@@ -298,6 +302,84 @@ private struct ToolCallRow: View {
         Task {
             await store.saveArtifact(call.artifact, to: url)
             saving = false
+        }
+    }
+}
+
+/// What the agent is waiting to be told.
+///
+/// Its own panel rather than sharing the approvals one: an approval is
+/// allowed or denied and this is answered, and a panel offering both sets of
+/// controls would offer the wrong one half the time.
+private struct Questions: View {
+    @Bindable var store: SessionStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(store.asked) { question in
+                QuestionRow(question: question, store: store)
+            }
+        }
+        .padding(12)
+        .background(.quaternary)
+    }
+}
+
+private struct QuestionRow: View {
+    let question: PendingQuestion
+    @Bindable var store: SessionStore
+
+    @State private var typed = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(question.prompt).font(.callout).bold()
+
+            if question.options.isEmpty {
+                HStack(spacing: 8) {
+                    TextField("Your answer", text: $typed)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(send)
+
+                    Button("Answer", action: send)
+                        .disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } else {
+                // Wrapping, because a question with five options on a narrow
+                // window would otherwise push the last of them off the edge.
+                FlowOptions(options: question.options) { chosen in
+                    Task { await store.answer(question.id, with: chosen) }
+                }
+            }
+        }
+    }
+
+    private func send() {
+        let answer = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !answer.isEmpty else { return }
+        typed = ""
+        Task { await store.answer(question.id, with: answer) }
+    }
+}
+
+/// The options of a choice, wrapped across lines.
+private struct FlowOptions: View {
+    let options: [PendingQuestion.Option]
+    let choose: (String) -> Void
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { buttons }
+            VStack(alignment: .leading, spacing: 6) { buttons }
+        }
+    }
+
+    private var buttons: some View {
+        ForEach(options) { option in
+            Button(option.label.isEmpty ? option.id : option.label) {
+                choose(option.id)
+            }
+            .help(option.detail)
         }
     }
 }

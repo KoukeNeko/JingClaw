@@ -86,6 +86,13 @@ func Dispatch(dispatch jcgateway.Dispatch, style Style) (string, error) {
 		}
 		return NormalizeText(payload.Text), nil
 
+	case jcgateway.DispatchQuestion:
+		var payload jcgateway.QuestionPayload
+		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+			return "", fmt.Errorf("render: could not decode question payload: %w", err)
+		}
+		return renderQuestion(payload, style), nil
+
 	case jcgateway.DispatchApproval:
 		var payload jcgateway.ApprovalPayload
 		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
@@ -226,6 +233,41 @@ func renderApproval(payload jcgateway.ApprovalPayload, style Style) string {
 	fmt.Fprintf(&out, "\nApprove it from a JingClaw client:\n%s",
 		style.block("agent approve "+payload.ApprovalID))
 
+	return out.String()
+}
+
+// renderQuestion is the agent asking somebody something.
+//
+// The options are numbered as well as named: somebody answering from a phone
+// types the shortest thing that works, and an id like "keep_compatible" is
+// not it.
+func renderQuestion(payload jcgateway.QuestionPayload, style Style) string {
+	var out strings.Builder
+
+	out.WriteString(style.bold("A question for you") + "\n")
+	out.WriteString(payload.Prompt + "\n")
+
+	for _, option := range payload.Options {
+		fmt.Fprintf(&out, "- %s: %s", style.bold(option.ID), option.Label)
+		if option.Detail != "" {
+			fmt.Fprintf(&out, " — %s", option.Detail)
+		}
+		out.WriteString("\n")
+	}
+
+	if payload.AnswerableHere {
+		// A console channel. Who can read and type here is settled by the
+		// platform's own permissions, and the person reading this is the one
+		// who owns it.
+		fmt.Fprintf(&out, "\nReply `answer %s <your answer>`.", payload.QuestionID)
+		return out.String()
+	}
+
+	// Everywhere else, deliberately not offered — for the same reason an
+	// approval is not. A run steered from a room other people can type in is
+	// steered by whoever is in the room.
+	fmt.Fprintf(&out, "\nAnswer it from a JingClaw client:\n%s",
+		style.block("agent answer "+payload.QuestionID+" <your answer>"))
 	return out.String()
 }
 

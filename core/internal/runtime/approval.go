@@ -177,13 +177,25 @@ func (r *Runtime) resume(ctx context.Context, runID domain.RunID) error {
 	}
 
 	// Still waiting on another prompt: the run stays paused until every
-	// outstanding call has an answer.
+	// outstanding call has an answer. Approvals and questions both, because
+	// a run can be waiting on one of each and resuming on the first would
+	// send it back round to ask the other again.
 	pending, err := r.opts.Store.PendingApprovals(ctx, run.SessionID)
 	if err != nil {
 		return err
 	}
 	for _, approval := range pending {
 		if approval.RunID == runID {
+			return nil
+		}
+	}
+
+	questions, err := r.opts.Store.PendingQuestions(ctx, run.SessionID)
+	if err != nil {
+		return err
+	}
+	for _, question := range questions {
+		if question.RunID == runID {
 			return nil
 		}
 	}
@@ -206,9 +218,18 @@ func (r *Runtime) resume(ctx context.Context, runID domain.RunID) error {
 	return nil
 }
 
-// suspend parks a run until its approvals are answered.
-func (r *Runtime) suspend(ctx context.Context, run domain.Run) {
-	if err := r.transition(ctx, run, domain.RunAwaitingApproval, "waiting for approval"); err != nil {
+// suspend parks a run until a person answers.
+//
+// The state says which kind of answer, because every client offers a
+// different control for the two: allow or deny for an approval, and a reply
+// for a question. Reported as one state, one of them is always wrong.
+func (r *Runtime) suspend(ctx context.Context, run domain.Run, why parked) {
+	status, reason := domain.RunAwaitingApproval, "waiting for approval"
+	if why == parkedForAnswer {
+		status, reason = domain.RunAwaitingInput, "waiting for an answer"
+	}
+
+	if err := r.transition(ctx, run, status, reason); err != nil {
 		r.opts.Logger.Error("failed to record a suspended run",
 			"run_id", string(run.ID), "error", err)
 	}

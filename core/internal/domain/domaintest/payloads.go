@@ -96,6 +96,23 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 				{ID: "todo_3", Title: "跑一次測試確認", Status: domain.PlanPending},
 			},
 		},
+		domain.EventQuestionAsked: domain.QuestionAsked{
+			QuestionID: "qst_1",
+			CallID:     "call_3",
+			Prompt:     "要使用哪個 migration 策略？",
+			Kind:       domain.QuestionChoice,
+			Options: []domain.QuestionOption{
+				{ID: "a", Label: "保留相容 schema", Detail: "舊版本還能讀"},
+				{ID: "b", Label: "直接升級"},
+			},
+		},
+		domain.EventQuestionAnswered: domain.QuestionAnswered{
+			QuestionID: "qst_1",
+			CallID:     "call_3",
+			Status:     domain.AnswerGiven,
+			Answer:     "b",
+			AnsweredBy: "jingclaw-cli",
+		},
 		domain.EventApprovalRequested: domain.ApprovalRequested{
 			ApprovalID: "apr_1",
 			CallID:     "call_2",

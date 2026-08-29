@@ -202,6 +202,19 @@ button.danger { color: var(--error); }
   max-width: 16rem;
 }
 
+#questions {
+  border-bottom: 1px solid var(--line);
+  padding: 0.7rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+#questions .prompt { font-weight: 600; margin-bottom: 0.4rem; }
+#questions .choices { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+#questions .answer { display: flex; gap: 0.4rem; }
+#questions .answer input { flex: 1 1 auto; }
+
 /* The plan sits above the conversation: it is where the work is now, and
    drawn among the messages it would scroll away exactly when it mattered. */
 #plan {

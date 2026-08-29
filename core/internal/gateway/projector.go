@@ -182,6 +182,43 @@ type ApprovalPayload struct {
 	DecidableHere bool `json:"decidable_here,omitempty"`
 }
 
+// QuestionPayload is the agent asking a person something.
+//
+// Separate from an approval because the two want different controls: an
+// approval is allowed or denied, and this is answered with words or a choice.
+type QuestionPayload struct {
+	QuestionID string `json:"question_id"`
+	Prompt     string `json:"prompt"`
+
+	// Kind is "choice" or "text".
+	Kind string `json:"kind"`
+
+	Options []QuestionOptionPayload `json:"options,omitempty"`
+
+	// AnswerableHere says this conversation may answer, which is true of a
+	// console channel and not of an ordinary one. Carried rather than worked
+	// out by whatever renders the message, for the same reason an approval
+	// carries it: which channels are consoles is a fact about the deployment.
+	AnswerableHere bool `json:"answerable_here,omitempty"`
+}
+
+// QuestionOptionPayload is one thing a person may choose.
+type QuestionOptionPayload struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func optionPayloads(options []domain.QuestionOption) []QuestionOptionPayload {
+	out := make([]QuestionOptionPayload, 0, len(options))
+	for _, option := range options {
+		out = append(out, QuestionOptionPayload{
+			ID: option.ID, Label: option.Label, Detail: option.Detail,
+		})
+	}
+	return out
+}
+
 // StatusPayload reports a change a reader would notice.
 //
 // A platform is expected to keep one of these visible at a time and rewrite it
@@ -326,6 +363,21 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 			Summary:       payload.Summary,
 			Effects:       payload.Effects,
 			DecidableHere: p.isConsole(ctx, target),
+		})
+
+	case domain.QuestionAsked:
+		// Carried to every channel, unlike an approval's detail. A question
+		// is what the run is waiting on, and a channel that showed nothing
+		// would show a conversation that had simply stopped.
+		//
+		// Whether it can be answered from here is another matter, and it is
+		// said rather than left to be discovered by typing.
+		return p.enqueue(ctx, run, target, DispatchQuestion, QuestionPayload{
+			QuestionID:     string(payload.QuestionID),
+			Prompt:         payload.Prompt,
+			Kind:           string(payload.Kind),
+			Options:        optionPayloads(payload.Options),
+			AnswerableHere: p.isConsole(ctx, target),
 		})
 
 	case domain.RunStateChanged:

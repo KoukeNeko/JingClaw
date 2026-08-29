@@ -14,9 +14,21 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/memory"
+	"github.com/KoukeNeko/JingClaw/core/internal/tool"
+	"github.com/KoukeNeko/JingClaw/core/internal/tool/builtin"
 )
 
 func newPlanRuntime(t *testing.T) (*runtime.Runtime, *memory.Store) {
+	t.Helper()
+	return newScriptedRuntime(t, nil)
+}
+
+// newScriptedRuntime builds a runtime whose model follows a script.
+//
+// The provider is given at construction rather than swapped in afterwards: a
+// runtime with a setter for its provider is one that can have it changed
+// mid-run, which is a thing no test wants and every reader has to rule out.
+func newScriptedRuntime(t *testing.T, script []fake.Turn) (*runtime.Runtime, *memory.Store) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -29,11 +41,21 @@ func newPlanRuntime(t *testing.T) (*runtime.Runtime, *memory.Store) {
 		return func() string { return fmt.Sprintf("%s_%d", prefix, counter.Add(1)) }
 	}
 
+	offline := fake.New(0)
+	offline.Script = script
+
+	// A model is only offered what is registered, and the runtime refuses a
+	// call for a tool it has no registry to look in — so a scripted ask_user
+	// needs the tool to exist even though the runtime settles it itself.
+	registry := tool.NewRegistry()
+	registry.MustRegister(&builtin.AskUser{})
+
 	var steps atomic.Uint64
 	return runtime.New(ctx, runtime.Options{
 		Store:         store,
 		Hub:           event.NewHub(),
-		Provider:      fake.New(0),
+		Provider:      offline,
+		Tools:         registry,
 		Model:         fake.ModelID,
 		NewSessionID:  next("ses"),
 		NewRunID:      next("run"),
@@ -41,6 +63,7 @@ func newPlanRuntime(t *testing.T) (*runtime.Runtime, *memory.Store) {
 		NewEventID:    next("evt"),
 		NewApprovalID: next("apr"),
 		NewPlanItemID: func() string { return fmt.Sprintf("todo_%d", steps.Add(1)) },
+		NewQuestionID: next("qst"),
 		Now:           time.Now,
 		Logger:        slog.New(slog.DiscardHandler),
 	}), store

@@ -29,6 +29,7 @@ type Store struct {
 	// the same name.
 	pruned    map[domain.SessionID]domain.Seq
 	approvals map[domain.ApprovalID]domain.Approval
+	questions map[domain.QuestionID]domain.Question
 
 	// memoryOrder preserves insertion order, so a listing is stable when two
 	// memories share a timestamp — which they do constantly in tests.
@@ -41,6 +42,7 @@ var _ storage.Store = (*Store)(nil)
 func New() *Store {
 	return &Store{
 		sessions:  make(map[domain.SessionID]domain.Session),
+		questions: make(map[domain.QuestionID]domain.Question),
 		plans:     make(map[domain.SessionID][]domain.PlanItem),
 		runs:      make(map[domain.RunID]domain.Run),
 		events:    make(map[domain.SessionID][]domain.Event),
@@ -462,4 +464,119 @@ func (s *Store) ApprovalForCall(ctx context.Context, run domain.RunID, call doma
 		}
 	}
 	return domain.Approval{}, storage.ErrApprovalNotFound
+}
+
+func (s *Store) CreateQuestion(ctx context.Context, question domain.Question) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.questions == nil {
+		s.questions = make(map[domain.QuestionID]domain.Question)
+	}
+	// One question per tool call, the same rule the schema enforces: two
+	// prompts for one call would each resume the run.
+	for _, existing := range s.questions {
+		if existing.RunID == question.RunID && existing.ToolCallID == question.ToolCallID {
+			return storage.ErrQuestionAnswered
+		}
+	}
+	s.questions[question.ID] = question
+	return nil
+}
+
+func (s *Store) Question(ctx context.Context, id domain.QuestionID) (domain.Question, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Question{}, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	question, ok := s.questions[id]
+	if !ok {
+		return domain.Question{}, storage.ErrQuestionNotFound
+	}
+	return question, nil
+}
+
+func (s *Store) QuestionForCall(
+	ctx context.Context,
+	run domain.RunID,
+	call domain.ToolCallID,
+) (domain.Question, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Question{}, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, question := range s.questions {
+		if question.RunID == run && question.ToolCallID == call {
+			return question, nil
+		}
+	}
+	return domain.Question{}, storage.ErrQuestionNotFound
+}
+
+func (s *Store) PendingQuestions(
+	ctx context.Context,
+	session domain.SessionID,
+) ([]domain.Question, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var pending []domain.Question
+	for _, question := range s.questions {
+		if question.SessionID == session && question.IsPending() {
+			pending = append(pending, question)
+		}
+	}
+
+	sort.Slice(pending, func(i, j int) bool {
+		if pending[i].CreatedAt.Equal(pending[j].CreatedAt) {
+			return pending[i].ID < pending[j].ID
+		}
+		return pending[i].CreatedAt.Before(pending[j].CreatedAt)
+	})
+	return pending, nil
+}
+
+func (s *Store) AnswerQuestion(
+	ctx context.Context,
+	id domain.QuestionID,
+	status domain.QuestionStatus,
+	answer, answeredBy string,
+	at time.Time,
+) (domain.Question, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Question{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	question, ok := s.questions[id]
+	if !ok {
+		return domain.Question{}, storage.ErrQuestionNotFound
+	}
+	if !question.IsPending() {
+		return domain.Question{}, storage.ErrQuestionAnswered
+	}
+
+	question.Status = status
+	question.Answer = answer
+	question.AnsweredBy = answeredBy
+	question.AnsweredAt = &at
+	s.questions[id] = question
+
+	return question, nil
 }

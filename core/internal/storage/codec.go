@@ -85,6 +85,28 @@ type planChangedJSON struct {
 	Items []planItemJSON `json:"items"`
 }
 
+type questionOptionJSON struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type questionAskedJSON struct {
+	QuestionID string               `json:"question_id"`
+	CallID     string               `json:"call_id"`
+	Prompt     string               `json:"prompt"`
+	Kind       string               `json:"kind"`
+	Options    []questionOptionJSON `json:"options,omitempty"`
+}
+
+type questionAnsweredJSON struct {
+	QuestionID string `json:"question_id"`
+	CallID     string `json:"call_id"`
+	Status     string `json:"status"`
+	Answer     string `json:"answer,omitempty"`
+	AnsweredBy string `json:"answered_by,omitempty"`
+}
+
 type approvalRequestedJSON struct {
 	ApprovalID string   `json:"approval_id"`
 	CallID     string   `json:"call_id"`
@@ -264,6 +286,30 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 		}
 		return json.Marshal(planChangedJSON{Items: items})
 
+	case domain.QuestionAsked:
+		options := make([]questionOptionJSON, 0, len(p.Options))
+		for _, option := range p.Options {
+			options = append(options, questionOptionJSON{
+				ID: option.ID, Label: option.Label, Detail: option.Detail,
+			})
+		}
+		return json.Marshal(questionAskedJSON{
+			QuestionID: string(p.QuestionID),
+			CallID:     string(p.CallID),
+			Prompt:     p.Prompt,
+			Kind:       string(p.Kind),
+			Options:    options,
+		})
+
+	case domain.QuestionAnswered:
+		return json.Marshal(questionAnsweredJSON{
+			QuestionID: string(p.QuestionID),
+			CallID:     string(p.CallID),
+			Status:     string(p.Status),
+			Answer:     p.Answer,
+			AnsweredBy: p.AnsweredBy,
+		})
+
 	case domain.ApprovalRequested:
 		return json.Marshal(approvalRequestedJSON{
 			ApprovalID: string(p.ApprovalID),
@@ -418,6 +464,38 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			})
 		}
 		return domain.PlanChanged{Items: items}, nil
+
+	case domain.EventQuestionAsked:
+		var p questionAskedJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		options := make([]domain.QuestionOption, 0, len(p.Options))
+		for _, option := range p.Options {
+			options = append(options, domain.QuestionOption{
+				ID: option.ID, Label: option.Label, Detail: option.Detail,
+			})
+		}
+		return domain.QuestionAsked{
+			QuestionID: domain.QuestionID(p.QuestionID),
+			CallID:     domain.ToolCallID(p.CallID),
+			Prompt:     p.Prompt,
+			Kind:       domain.QuestionKind(p.Kind),
+			Options:    options,
+		}, nil
+
+	case domain.EventQuestionAnswered:
+		var p questionAnsweredJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		return domain.QuestionAnswered{
+			QuestionID: domain.QuestionID(p.QuestionID),
+			CallID:     domain.ToolCallID(p.CallID),
+			Status:     domain.QuestionStatus(p.Status),
+			Answer:     p.Answer,
+			AnsweredBy: p.AnsweredBy,
+		}, nil
 
 	case domain.EventApprovalRequested:
 		var p approvalRequestedJSON

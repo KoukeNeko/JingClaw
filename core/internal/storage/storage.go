@@ -31,6 +31,12 @@ var (
 	// ErrApprovalDecided guards the race where two clients answer the same
 	// prompt: the second answer must not run the tool again.
 	ErrApprovalDecided = errors.New("storage: approval has already been decided")
+
+	ErrQuestionNotFound = errors.New("storage: question not found")
+
+	// ErrQuestionAnswered guards the same race approvals guard: two clients
+	// answering the same prompt must not resume the run twice.
+	ErrQuestionAnswered = errors.New("storage: question has already been answered")
 )
 
 type SessionStore interface {
@@ -43,6 +49,30 @@ type SessionStore interface {
 	// changing that underneath would attribute a turn to a model that did not
 	// write it.
 	SetSessionModel(ctx context.Context, id domain.SessionID, model string, at time.Time) error
+}
+
+// QuestionStore holds what the agent asked and what came back.
+//
+// Separate from approvals because the two are different questions: an
+// approval asks whether something may happen and is answered yes or no, and
+// this asks what a person wants and is answered with their words.
+type QuestionStore interface {
+	CreateQuestion(ctx context.Context, question domain.Question) error
+	Question(ctx context.Context, id domain.QuestionID) (domain.Question, error)
+
+	// QuestionForCall finds the question a tool call asked, so a resumed run
+	// settles the call it is looking at rather than some other question.
+	QuestionForCall(ctx context.Context, run domain.RunID, call domain.ToolCallID) (domain.Question, error)
+
+	PendingQuestions(ctx context.Context, session domain.SessionID) ([]domain.Question, error)
+
+	AnswerQuestion(
+		ctx context.Context,
+		id domain.QuestionID,
+		status domain.QuestionStatus,
+		answer, answeredBy string,
+		at time.Time,
+	) (domain.Question, error)
 }
 
 // PlanStore holds what the agent said it was going to do.
@@ -182,6 +212,7 @@ type MemoryScopeRef struct {
 
 type Store interface {
 	PlanStore
+	QuestionStore
 	SessionStore
 	RunStore
 	ApprovalStore

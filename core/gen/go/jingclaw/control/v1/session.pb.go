@@ -928,6 +928,318 @@ func (x *Approval) GetPreview() string {
 	return ""
 }
 
+// Question is a paused run waiting for an answer from a person.
+type Question struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	RunId         string                 `protobuf:"bytes,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	ToolCallId    string                 `protobuf:"bytes,4,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
+	Prompt        string                 `protobuf:"bytes,5,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	Kind          QuestionKind           `protobuf:"varint,6,opt,name=kind,proto3,enum=jingclaw.control.v1.QuestionKind" json:"kind,omitempty"`
+	Options       []*QuestionOption      `protobuf:"bytes,7,rep,name=options,proto3" json:"options,omitempty"`
+	Status        QuestionStatus         `protobuf:"varint,8,opt,name=status,proto3,enum=jingclaw.control.v1.QuestionStatus" json:"status,omitempty"`
+	Answer        string                 `protobuf:"bytes,9,opt,name=answer,proto3" json:"answer,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Question) Reset() {
+	*x = Question{}
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Question) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Question) ProtoMessage() {}
+
+func (x *Question) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Question.ProtoReflect.Descriptor instead.
+func (*Question) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *Question) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Question) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *Question) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *Question) GetToolCallId() string {
+	if x != nil {
+		return x.ToolCallId
+	}
+	return ""
+}
+
+func (x *Question) GetPrompt() string {
+	if x != nil {
+		return x.Prompt
+	}
+	return ""
+}
+
+func (x *Question) GetKind() QuestionKind {
+	if x != nil {
+		return x.Kind
+	}
+	return QuestionKind_QUESTION_KIND_UNSPECIFIED
+}
+
+func (x *Question) GetOptions() []*QuestionOption {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+func (x *Question) GetStatus() QuestionStatus {
+	if x != nil {
+		return x.Status
+	}
+	return QuestionStatus_QUESTION_STATUS_UNSPECIFIED
+}
+
+func (x *Question) GetAnswer() string {
+	if x != nil {
+		return x.Answer
+	}
+	return ""
+}
+
+func (x *Question) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+type ListQuestionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListQuestionsRequest) Reset() {
+	*x = ListQuestionsRequest{}
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListQuestionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListQuestionsRequest) ProtoMessage() {}
+
+func (x *ListQuestionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListQuestionsRequest.ProtoReflect.Descriptor instead.
+func (*ListQuestionsRequest) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListQuestionsRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type ListQuestionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Questions     []*Question            `protobuf:"bytes,1,rep,name=questions,proto3" json:"questions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListQuestionsResponse) Reset() {
+	*x = ListQuestionsResponse{}
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListQuestionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListQuestionsResponse) ProtoMessage() {}
+
+func (x *ListQuestionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListQuestionsResponse.ProtoReflect.Descriptor instead.
+func (*ListQuestionsResponse) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ListQuestionsResponse) GetQuestions() []*Question {
+	if x != nil {
+		return x.Questions
+	}
+	return nil
+}
+
+type AnswerQuestionRequest struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Meta       *RequestMeta           `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
+	QuestionId string                 `protobuf:"bytes,2,opt,name=question_id,json=questionId,proto3" json:"question_id,omitempty"`
+	// The chosen option's id for a choice, or the text as typed. An empty
+	// answer is refused rather than stored: a run resumed with nothing has
+	// been told the person had no opinion, which is not what silence means.
+	Answer        string `protobuf:"bytes,3,opt,name=answer,proto3" json:"answer,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionRequest) Reset() {
+	*x = AnswerQuestionRequest{}
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionRequest) ProtoMessage() {}
+
+func (x *AnswerQuestionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionRequest.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionRequest) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AnswerQuestionRequest) GetMeta() *RequestMeta {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
+func (x *AnswerQuestionRequest) GetQuestionId() string {
+	if x != nil {
+		return x.QuestionId
+	}
+	return ""
+}
+
+func (x *AnswerQuestionRequest) GetAnswer() string {
+	if x != nil {
+		return x.Answer
+	}
+	return ""
+}
+
+type AnswerQuestionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Question      *Question              `protobuf:"bytes,1,opt,name=question,proto3" json:"question,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionResponse) Reset() {
+	*x = AnswerQuestionResponse{}
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionResponse) ProtoMessage() {}
+
+func (x *AnswerQuestionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionResponse.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionResponse) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *AnswerQuestionResponse) GetQuestion() *Question {
+	if x != nil {
+		return x.Question
+	}
+	return nil
+}
+
 type ListApprovalsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -937,7 +1249,7 @@ type ListApprovalsRequest struct {
 
 func (x *ListApprovalsRequest) Reset() {
 	*x = ListApprovalsRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[11]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -949,7 +1261,7 @@ func (x *ListApprovalsRequest) String() string {
 func (*ListApprovalsRequest) ProtoMessage() {}
 
 func (x *ListApprovalsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[11]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -962,7 +1274,7 @@ func (x *ListApprovalsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApprovalsRequest.ProtoReflect.Descriptor instead.
 func (*ListApprovalsRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{11}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListApprovalsRequest) GetSessionId() string {
@@ -981,7 +1293,7 @@ type ListApprovalsResponse struct {
 
 func (x *ListApprovalsResponse) Reset() {
 	*x = ListApprovalsResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[12]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -993,7 +1305,7 @@ func (x *ListApprovalsResponse) String() string {
 func (*ListApprovalsResponse) ProtoMessage() {}
 
 func (x *ListApprovalsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[12]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1006,7 +1318,7 @@ func (x *ListApprovalsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApprovalsResponse.ProtoReflect.Descriptor instead.
 func (*ListApprovalsResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{12}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListApprovalsResponse) GetApprovals() []*Approval {
@@ -1031,7 +1343,7 @@ type DecideApprovalRequest struct {
 
 func (x *DecideApprovalRequest) Reset() {
 	*x = DecideApprovalRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[13]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1043,7 +1355,7 @@ func (x *DecideApprovalRequest) String() string {
 func (*DecideApprovalRequest) ProtoMessage() {}
 
 func (x *DecideApprovalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[13]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1056,7 +1368,7 @@ func (x *DecideApprovalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecideApprovalRequest.ProtoReflect.Descriptor instead.
 func (*DecideApprovalRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{13}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DecideApprovalRequest) GetMeta() *RequestMeta {
@@ -1096,7 +1408,7 @@ type DecideApprovalResponse struct {
 
 func (x *DecideApprovalResponse) Reset() {
 	*x = DecideApprovalResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[14]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1108,7 +1420,7 @@ func (x *DecideApprovalResponse) String() string {
 func (*DecideApprovalResponse) ProtoMessage() {}
 
 func (x *DecideApprovalResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[14]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1121,7 +1433,7 @@ func (x *DecideApprovalResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecideApprovalResponse.ProtoReflect.Descriptor instead.
 func (*DecideApprovalResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{14}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DecideApprovalResponse) GetApproval() *Approval {
@@ -1160,7 +1472,7 @@ type InboundMessage struct {
 
 func (x *InboundMessage) Reset() {
 	*x = InboundMessage{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[15]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1172,7 +1484,7 @@ func (x *InboundMessage) String() string {
 func (*InboundMessage) ProtoMessage() {}
 
 func (x *InboundMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[15]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1185,7 +1497,7 @@ func (x *InboundMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundMessage.ProtoReflect.Descriptor instead.
 func (*InboundMessage) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{15}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *InboundMessage) GetPlatform() string {
@@ -1306,7 +1618,7 @@ type PrincipalClaim struct {
 
 func (x *PrincipalClaim) Reset() {
 	*x = PrincipalClaim{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[16]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1318,7 +1630,7 @@ func (x *PrincipalClaim) String() string {
 func (*PrincipalClaim) ProtoMessage() {}
 
 func (x *PrincipalClaim) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[16]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1331,7 +1643,7 @@ func (x *PrincipalClaim) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PrincipalClaim.ProtoReflect.Descriptor instead.
 func (*PrincipalClaim) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{16}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PrincipalClaim) GetNamespace() string {
@@ -1357,7 +1669,7 @@ type DeliverInboundRequest struct {
 
 func (x *DeliverInboundRequest) Reset() {
 	*x = DeliverInboundRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[17]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1369,7 +1681,7 @@ func (x *DeliverInboundRequest) String() string {
 func (*DeliverInboundRequest) ProtoMessage() {}
 
 func (x *DeliverInboundRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[17]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1382,7 +1694,7 @@ func (x *DeliverInboundRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverInboundRequest.ProtoReflect.Descriptor instead.
 func (*DeliverInboundRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{17}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DeliverInboundRequest) GetMessage() *InboundMessage {
@@ -1405,7 +1717,7 @@ type DeliverInboundResponse struct {
 
 func (x *DeliverInboundResponse) Reset() {
 	*x = DeliverInboundResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[18]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1417,7 +1729,7 @@ func (x *DeliverInboundResponse) String() string {
 func (*DeliverInboundResponse) ProtoMessage() {}
 
 func (x *DeliverInboundResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[18]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1430,7 +1742,7 @@ func (x *DeliverInboundResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverInboundResponse.ProtoReflect.Descriptor instead.
 func (*DeliverInboundResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{18}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DeliverInboundResponse) GetSessionId() string {
@@ -1474,7 +1786,7 @@ type Dispatch struct {
 
 func (x *Dispatch) Reset() {
 	*x = Dispatch{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[19]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1486,7 +1798,7 @@ func (x *Dispatch) String() string {
 func (*Dispatch) ProtoMessage() {}
 
 func (x *Dispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[19]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1499,7 +1811,7 @@ func (x *Dispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Dispatch.ProtoReflect.Descriptor instead.
 func (*Dispatch) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{19}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *Dispatch) GetId() string {
@@ -1568,7 +1880,7 @@ type SubscribeDispatchesResponse struct {
 
 func (x *SubscribeDispatchesResponse) Reset() {
 	*x = SubscribeDispatchesResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[20]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1580,7 +1892,7 @@ func (x *SubscribeDispatchesResponse) String() string {
 func (*SubscribeDispatchesResponse) ProtoMessage() {}
 
 func (x *SubscribeDispatchesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[20]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1593,7 +1905,7 @@ func (x *SubscribeDispatchesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeDispatchesResponse.ProtoReflect.Descriptor instead.
 func (*SubscribeDispatchesResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{20}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SubscribeDispatchesResponse) GetDispatch() *Dispatch {
@@ -1615,7 +1927,7 @@ type SubscribeDispatchesRequest struct {
 
 func (x *SubscribeDispatchesRequest) Reset() {
 	*x = SubscribeDispatchesRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[21]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1627,7 +1939,7 @@ func (x *SubscribeDispatchesRequest) String() string {
 func (*SubscribeDispatchesRequest) ProtoMessage() {}
 
 func (x *SubscribeDispatchesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[21]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1640,7 +1952,7 @@ func (x *SubscribeDispatchesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeDispatchesRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeDispatchesRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{21}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SubscribeDispatchesRequest) GetAccountId() string {
@@ -1670,7 +1982,7 @@ type AcknowledgeDispatchRequest struct {
 
 func (x *AcknowledgeDispatchRequest) Reset() {
 	*x = AcknowledgeDispatchRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[22]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1682,7 +1994,7 @@ func (x *AcknowledgeDispatchRequest) String() string {
 func (*AcknowledgeDispatchRequest) ProtoMessage() {}
 
 func (x *AcknowledgeDispatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[22]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1695,7 +2007,7 @@ func (x *AcknowledgeDispatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcknowledgeDispatchRequest.ProtoReflect.Descriptor instead.
 func (*AcknowledgeDispatchRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{22}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *AcknowledgeDispatchRequest) GetMeta() *RequestMeta {
@@ -1727,7 +2039,7 @@ type AcknowledgeDispatchResponse struct {
 
 func (x *AcknowledgeDispatchResponse) Reset() {
 	*x = AcknowledgeDispatchResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[23]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1739,7 +2051,7 @@ func (x *AcknowledgeDispatchResponse) String() string {
 func (*AcknowledgeDispatchResponse) ProtoMessage() {}
 
 func (x *AcknowledgeDispatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[23]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1752,7 +2064,7 @@ func (x *AcknowledgeDispatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcknowledgeDispatchResponse.ProtoReflect.Descriptor instead.
 func (*AcknowledgeDispatchResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{23}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{28}
 }
 
 type Binding struct {
@@ -1773,7 +2085,7 @@ type Binding struct {
 
 func (x *Binding) Reset() {
 	*x = Binding{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[24]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1785,7 +2097,7 @@ func (x *Binding) String() string {
 func (*Binding) ProtoMessage() {}
 
 func (x *Binding) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[24]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1798,7 +2110,7 @@ func (x *Binding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Binding.ProtoReflect.Descriptor instead.
 func (*Binding) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{24}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *Binding) GetId() string {
@@ -1879,7 +2191,7 @@ type ListBindingsRequest struct {
 
 func (x *ListBindingsRequest) Reset() {
 	*x = ListBindingsRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[25]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1891,7 +2203,7 @@ func (x *ListBindingsRequest) String() string {
 func (*ListBindingsRequest) ProtoMessage() {}
 
 func (x *ListBindingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[25]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1904,7 +2216,7 @@ func (x *ListBindingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBindingsRequest.ProtoReflect.Descriptor instead.
 func (*ListBindingsRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{25}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{30}
 }
 
 type ListBindingsResponse struct {
@@ -1916,7 +2228,7 @@ type ListBindingsResponse struct {
 
 func (x *ListBindingsResponse) Reset() {
 	*x = ListBindingsResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[26]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1928,7 +2240,7 @@ func (x *ListBindingsResponse) String() string {
 func (*ListBindingsResponse) ProtoMessage() {}
 
 func (x *ListBindingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[26]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1941,7 +2253,7 @@ func (x *ListBindingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBindingsResponse.ProtoReflect.Descriptor instead.
 func (*ListBindingsResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{26}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ListBindingsResponse) GetBindings() []*Binding {
@@ -1961,7 +2273,7 @@ type UpsertBindingRequest struct {
 
 func (x *UpsertBindingRequest) Reset() {
 	*x = UpsertBindingRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[27]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1973,7 +2285,7 @@ func (x *UpsertBindingRequest) String() string {
 func (*UpsertBindingRequest) ProtoMessage() {}
 
 func (x *UpsertBindingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[27]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1986,7 +2298,7 @@ func (x *UpsertBindingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertBindingRequest.ProtoReflect.Descriptor instead.
 func (*UpsertBindingRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{27}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *UpsertBindingRequest) GetMeta() *RequestMeta {
@@ -2012,7 +2324,7 @@ type UpsertBindingResponse struct {
 
 func (x *UpsertBindingResponse) Reset() {
 	*x = UpsertBindingResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[28]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2024,7 +2336,7 @@ func (x *UpsertBindingResponse) String() string {
 func (*UpsertBindingResponse) ProtoMessage() {}
 
 func (x *UpsertBindingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[28]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2037,7 +2349,7 @@ func (x *UpsertBindingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertBindingResponse.ProtoReflect.Descriptor instead.
 func (*UpsertBindingResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{28}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *UpsertBindingResponse) GetBinding() *Binding {
@@ -2057,7 +2369,7 @@ type DeleteBindingRequest struct {
 
 func (x *DeleteBindingRequest) Reset() {
 	*x = DeleteBindingRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[29]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2069,7 +2381,7 @@ func (x *DeleteBindingRequest) String() string {
 func (*DeleteBindingRequest) ProtoMessage() {}
 
 func (x *DeleteBindingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[29]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2082,7 +2394,7 @@ func (x *DeleteBindingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteBindingRequest.ProtoReflect.Descriptor instead.
 func (*DeleteBindingRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{29}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *DeleteBindingRequest) GetMeta() *RequestMeta {
@@ -2107,7 +2419,7 @@ type DeleteBindingResponse struct {
 
 func (x *DeleteBindingResponse) Reset() {
 	*x = DeleteBindingResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[30]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2119,7 +2431,7 @@ func (x *DeleteBindingResponse) String() string {
 func (*DeleteBindingResponse) ProtoMessage() {}
 
 func (x *DeleteBindingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[30]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2132,7 +2444,7 @@ func (x *DeleteBindingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteBindingResponse.ProtoReflect.Descriptor instead.
 func (*DeleteBindingResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{30}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{35}
 }
 
 // Frames carried by SubscribeEvents. Named for its RPC per buf's standard
@@ -2152,7 +2464,7 @@ type SubscribeEventsResponse struct {
 
 func (x *SubscribeEventsResponse) Reset() {
 	*x = SubscribeEventsResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[31]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2164,7 +2476,7 @@ func (x *SubscribeEventsResponse) String() string {
 func (*SubscribeEventsResponse) ProtoMessage() {}
 
 func (x *SubscribeEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[31]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2177,7 +2489,7 @@ func (x *SubscribeEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeEventsResponse.ProtoReflect.Descriptor instead.
 func (*SubscribeEventsResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{31}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SubscribeEventsResponse) GetValue() isSubscribeEventsResponse_Value {
@@ -2272,7 +2584,7 @@ type ResyncRequired struct {
 
 func (x *ResyncRequired) Reset() {
 	*x = ResyncRequired{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[32]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2284,7 +2596,7 @@ func (x *ResyncRequired) String() string {
 func (*ResyncRequired) ProtoMessage() {}
 
 func (x *ResyncRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[32]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2297,7 +2609,7 @@ func (x *ResyncRequired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResyncRequired.ProtoReflect.Descriptor instead.
 func (*ResyncRequired) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{32}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ResyncRequired) GetOldestSeq() uint64 {
@@ -2326,7 +2638,7 @@ type ListModelsRequest struct {
 
 func (x *ListModelsRequest) Reset() {
 	*x = ListModelsRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[33]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2338,7 +2650,7 @@ func (x *ListModelsRequest) String() string {
 func (*ListModelsRequest) ProtoMessage() {}
 
 func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[33]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2351,7 +2663,7 @@ func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelsRequest.ProtoReflect.Descriptor instead.
 func (*ListModelsRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{33}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ListModelsRequest) GetMeta() *RequestMeta {
@@ -2386,7 +2698,7 @@ type ListModelsResponse struct {
 
 func (x *ListModelsResponse) Reset() {
 	*x = ListModelsResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[34]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2398,7 +2710,7 @@ func (x *ListModelsResponse) String() string {
 func (*ListModelsResponse) ProtoMessage() {}
 
 func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[34]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2411,7 +2723,7 @@ func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelsResponse.ProtoReflect.Descriptor instead.
 func (*ListModelsResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{34}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ListModelsResponse) GetProvider() string {
@@ -2460,7 +2772,7 @@ type ModelInfo struct {
 
 func (x *ModelInfo) Reset() {
 	*x = ModelInfo{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[35]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2472,7 +2784,7 @@ func (x *ModelInfo) String() string {
 func (*ModelInfo) ProtoMessage() {}
 
 func (x *ModelInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[35]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2485,7 +2797,7 @@ func (x *ModelInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelInfo.ProtoReflect.Descriptor instead.
 func (*ModelInfo) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{35}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ModelInfo) GetId() string {
@@ -2542,7 +2854,7 @@ type SetSessionModelRequest struct {
 
 func (x *SetSessionModelRequest) Reset() {
 	*x = SetSessionModelRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[36]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2554,7 +2866,7 @@ func (x *SetSessionModelRequest) String() string {
 func (*SetSessionModelRequest) ProtoMessage() {}
 
 func (x *SetSessionModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[36]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2567,7 +2879,7 @@ func (x *SetSessionModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSessionModelRequest.ProtoReflect.Descriptor instead.
 func (*SetSessionModelRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{36}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *SetSessionModelRequest) GetMeta() *RequestMeta {
@@ -2600,7 +2912,7 @@ type SetSessionModelResponse struct {
 
 func (x *SetSessionModelResponse) Reset() {
 	*x = SetSessionModelResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[37]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2612,7 +2924,7 @@ func (x *SetSessionModelResponse) String() string {
 func (*SetSessionModelResponse) ProtoMessage() {}
 
 func (x *SetSessionModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[37]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2625,7 +2937,7 @@ func (x *SetSessionModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSessionModelResponse.ProtoReflect.Descriptor instead.
 func (*SetSessionModelResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{37}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *SetSessionModelResponse) GetSession() *Session {
@@ -2648,7 +2960,7 @@ type GetSessionViewRequest struct {
 
 func (x *GetSessionViewRequest) Reset() {
 	*x = GetSessionViewRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[38]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2660,7 +2972,7 @@ func (x *GetSessionViewRequest) String() string {
 func (*GetSessionViewRequest) ProtoMessage() {}
 
 func (x *GetSessionViewRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[38]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2673,7 +2985,7 @@ func (x *GetSessionViewRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionViewRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionViewRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{38}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *GetSessionViewRequest) GetMeta() *RequestMeta {
@@ -2717,14 +3029,18 @@ type GetSessionViewResponse struct {
 	// as on the event because a client that opened a session rather than
 	// watching it happen would otherwise see a run working through a plan it
 	// cannot see.
-	Plan          []*PlanItem `protobuf:"bytes,7,rep,name=plan,proto3" json:"plan,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Plan []*PlanItem `protobuf:"bytes,7,rep,name=plan,proto3" json:"plan,omitempty"`
+	// Questions still waiting on somebody. Like pending approvals: a client
+	// that showed the conversation without these would show a session that
+	// appears finished and is actually waiting to be answered.
+	PendingQuestions []*Question `protobuf:"bytes,8,rep,name=pending_questions,json=pendingQuestions,proto3" json:"pending_questions,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetSessionViewResponse) Reset() {
 	*x = GetSessionViewResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[39]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2736,7 +3052,7 @@ func (x *GetSessionViewResponse) String() string {
 func (*GetSessionViewResponse) ProtoMessage() {}
 
 func (x *GetSessionViewResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[39]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2749,7 +3065,7 @@ func (x *GetSessionViewResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionViewResponse.ProtoReflect.Descriptor instead.
 func (*GetSessionViewResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{39}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *GetSessionViewResponse) GetSession() *Session {
@@ -2801,6 +3117,13 @@ func (x *GetSessionViewResponse) GetPlan() []*PlanItem {
 	return nil
 }
 
+func (x *GetSessionViewResponse) GetPendingQuestions() []*Question {
+	if x != nil {
+		return x.PendingQuestions
+	}
+	return nil
+}
+
 // ViewMessage is one turn as a client would draw it.
 //
 // Assembled by the server because assembling it is the part that costs: a
@@ -2829,7 +3152,7 @@ type ViewMessage struct {
 
 func (x *ViewMessage) Reset() {
 	*x = ViewMessage{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[40]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2841,7 +3164,7 @@ func (x *ViewMessage) String() string {
 func (*ViewMessage) ProtoMessage() {}
 
 func (x *ViewMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[40]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2854,7 +3177,7 @@ func (x *ViewMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ViewMessage.ProtoReflect.Descriptor instead.
 func (*ViewMessage) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{40}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ViewMessage) GetId() string {
@@ -2926,7 +3249,7 @@ type ViewToolCall struct {
 
 func (x *ViewToolCall) Reset() {
 	*x = ViewToolCall{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[41]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2938,7 +3261,7 @@ func (x *ViewToolCall) String() string {
 func (*ViewToolCall) ProtoMessage() {}
 
 func (x *ViewToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[41]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2951,7 +3274,7 @@ func (x *ViewToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ViewToolCall.ProtoReflect.Descriptor instead.
 func (*ViewToolCall) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{41}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ViewToolCall) GetCallId() string {
@@ -3005,7 +3328,7 @@ type ListSessionsRequest struct {
 
 func (x *ListSessionsRequest) Reset() {
 	*x = ListSessionsRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[42]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3017,7 +3340,7 @@ func (x *ListSessionsRequest) String() string {
 func (*ListSessionsRequest) ProtoMessage() {}
 
 func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[42]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3030,7 +3353,7 @@ func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsRequest.ProtoReflect.Descriptor instead.
 func (*ListSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{42}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ListSessionsRequest) GetMeta() *RequestMeta {
@@ -3049,7 +3372,7 @@ type ListSessionsResponse struct {
 
 func (x *ListSessionsResponse) Reset() {
 	*x = ListSessionsResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[43]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3061,7 +3384,7 @@ func (x *ListSessionsResponse) String() string {
 func (*ListSessionsResponse) ProtoMessage() {}
 
 func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[43]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3074,7 +3397,7 @@ func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsResponse.ProtoReflect.Descriptor instead.
 func (*ListSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{43}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ListSessionsResponse) GetSessions() []*Session {
@@ -3094,7 +3417,7 @@ type ListRunsRequest struct {
 
 func (x *ListRunsRequest) Reset() {
 	*x = ListRunsRequest{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[44]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3106,7 +3429,7 @@ func (x *ListRunsRequest) String() string {
 func (*ListRunsRequest) ProtoMessage() {}
 
 func (x *ListRunsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[44]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3119,7 +3442,7 @@ func (x *ListRunsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRunsRequest.ProtoReflect.Descriptor instead.
 func (*ListRunsRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{44}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ListRunsRequest) GetMeta() *RequestMeta {
@@ -3145,7 +3468,7 @@ type ListRunsResponse struct {
 
 func (x *ListRunsResponse) Reset() {
 	*x = ListRunsResponse{}
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[45]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3157,7 +3480,7 @@ func (x *ListRunsResponse) String() string {
 func (*ListRunsResponse) ProtoMessage() {}
 
 func (x *ListRunsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_session_proto_msgTypes[45]
+	mi := &file_jingclaw_control_v1_session_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3170,7 +3493,7 @@ func (x *ListRunsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRunsResponse.ProtoReflect.Descriptor instead.
 func (*ListRunsResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{45}
+	return file_jingclaw_control_v1_session_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ListRunsResponse) GetRuns() []*Run {
@@ -3250,7 +3573,34 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x18\n" +
-	"\apreview\x18\v \x01(\tR\apreview\"5\n" +
+	"\apreview\x18\v \x01(\tR\apreview\"\x90\x03\n" +
+	"\bQuestion\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x15\n" +
+	"\x06run_id\x18\x03 \x01(\tR\x05runId\x12 \n" +
+	"\ftool_call_id\x18\x04 \x01(\tR\n" +
+	"toolCallId\x12\x16\n" +
+	"\x06prompt\x18\x05 \x01(\tR\x06prompt\x125\n" +
+	"\x04kind\x18\x06 \x01(\x0e2!.jingclaw.control.v1.QuestionKindR\x04kind\x12=\n" +
+	"\aoptions\x18\a \x03(\v2#.jingclaw.control.v1.QuestionOptionR\aoptions\x12;\n" +
+	"\x06status\x18\b \x01(\x0e2#.jingclaw.control.v1.QuestionStatusR\x06status\x12\x16\n" +
+	"\x06answer\x18\t \x01(\tR\x06answer\x129\n" +
+	"\n" +
+	"created_at\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"5\n" +
+	"\x14ListQuestionsRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"T\n" +
+	"\x15ListQuestionsResponse\x12;\n" +
+	"\tquestions\x18\x01 \x03(\v2\x1d.jingclaw.control.v1.QuestionR\tquestions\"\x86\x01\n" +
+	"\x15AnswerQuestionRequest\x124\n" +
+	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x12\x1f\n" +
+	"\vquestion_id\x18\x02 \x01(\tR\n" +
+	"questionId\x12\x16\n" +
+	"\x06answer\x18\x03 \x01(\tR\x06answer\"S\n" +
+	"\x16AnswerQuestionResponse\x129\n" +
+	"\bquestion\x18\x01 \x01(\v2\x1d.jingclaw.control.v1.QuestionR\bquestion\"5\n" +
 	"\x14ListApprovalsRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"T\n" +
@@ -3382,7 +3732,7 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12!\n" +
-	"\fmax_messages\x18\x03 \x01(\x05R\vmaxMessages\"\xff\x02\n" +
+	"\fmax_messages\x18\x03 \x01(\x05R\vmaxMessages\"\xcb\x03\n" +
 	"\x16GetSessionViewResponse\x126\n" +
 	"\asession\x18\x01 \x01(\v2\x1c.jingclaw.control.v1.SessionR\asession\x12<\n" +
 	"\bmessages\x18\x02 \x03(\v2 .jingclaw.control.v1.ViewMessageR\bmessages\x12J\n" +
@@ -3391,7 +3741,8 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"active_run\x18\x04 \x01(\v2\x18.jingclaw.control.v1.RunR\tactiveRun\x12\x19\n" +
 	"\bhead_seq\x18\x05 \x01(\x04R\aheadSeq\x12\x1c\n" +
 	"\ttruncated\x18\x06 \x01(\bR\ttruncated\x121\n" +
-	"\x04plan\x18\a \x03(\v2\x1d.jingclaw.control.v1.PlanItemR\x04plan\"\x85\x02\n" +
+	"\x04plan\x18\a \x03(\v2\x1d.jingclaw.control.v1.PlanItemR\x04plan\x12J\n" +
+	"\x11pending_questions\x18\b \x03(\v2\x1d.jingclaw.control.v1.QuestionR\x10pendingQuestions\"\x85\x02\n" +
 	"\vViewMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\x04role\x18\x02 \x01(\x0e2 .jingclaw.control.v1.MessageRoleR\x04role\x12\x12\n" +
@@ -3440,7 +3791,8 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\x0eChannelService\x12c\n" +
 	"\fListBindings\x12(.jingclaw.control.v1.ListBindingsRequest\x1a).jingclaw.control.v1.ListBindingsResponse\x12f\n" +
 	"\rUpsertBinding\x12).jingclaw.control.v1.UpsertBindingRequest\x1a*.jingclaw.control.v1.UpsertBindingResponse\x12f\n" +
-	"\rDeleteBinding\x12).jingclaw.control.v1.DeleteBindingRequest\x1a*.jingclaw.control.v1.DeleteBindingResponse2\xef\b\n" +
+	"\rDeleteBinding\x12).jingclaw.control.v1.DeleteBindingRequest\x1a*.jingclaw.control.v1.DeleteBindingResponse2\xc2\n" +
+	"\n" +
 	"\x0eSessionService\x12f\n" +
 	"\rCreateSession\x12).jingclaw.control.v1.CreateSessionRequest\x1a*.jingclaw.control.v1.CreateSessionResponse\x12c\n" +
 	"\fListSessions\x12(.jingclaw.control.v1.ListSessionsRequest\x1a).jingclaw.control.v1.ListSessionsResponse\x12W\n" +
@@ -3450,7 +3802,9 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\x0fSubscribeEvents\x12+.jingclaw.control.v1.SubscribeEventsRequest\x1a,.jingclaw.control.v1.SubscribeEventsResponse0\x01\x12c\n" +
 	"\fInterruptRun\x12(.jingclaw.control.v1.InterruptRunRequest\x1a).jingclaw.control.v1.InterruptRunResponse\x12f\n" +
 	"\rListApprovals\x12).jingclaw.control.v1.ListApprovalsRequest\x1a*.jingclaw.control.v1.ListApprovalsResponse\x12i\n" +
-	"\x0eDecideApproval\x12*.jingclaw.control.v1.DecideApprovalRequest\x1a+.jingclaw.control.v1.DecideApprovalResponse\x12]\n" +
+	"\x0eDecideApproval\x12*.jingclaw.control.v1.DecideApprovalRequest\x1a+.jingclaw.control.v1.DecideApprovalResponse\x12f\n" +
+	"\rListQuestions\x12).jingclaw.control.v1.ListQuestionsRequest\x1a*.jingclaw.control.v1.ListQuestionsResponse\x12i\n" +
+	"\x0eAnswerQuestion\x12*.jingclaw.control.v1.AnswerQuestionRequest\x1a+.jingclaw.control.v1.AnswerQuestionResponse\x12]\n" +
 	"\n" +
 	"ListModels\x12&.jingclaw.control.v1.ListModelsRequest\x1a'.jingclaw.control.v1.ListModelsResponse\x12l\n" +
 	"\x0fSetSessionModel\x12+.jingclaw.control.v1.SetSessionModelRequest\x1a,.jingclaw.control.v1.SetSessionModelResponseB\xde\x01\n" +
@@ -3469,7 +3823,7 @@ func file_jingclaw_control_v1_session_proto_rawDescGZIP() []byte {
 }
 
 var file_jingclaw_control_v1_session_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_jingclaw_control_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_jingclaw_control_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
 var file_jingclaw_control_v1_session_proto_goTypes = []any{
 	(MessageTrigger)(0),                 // 0: jingclaw.control.v1.MessageTrigger
 	(DispatchKind)(0),                   // 1: jingclaw.control.v1.DispatchKind
@@ -3485,152 +3839,172 @@ var file_jingclaw_control_v1_session_proto_goTypes = []any{
 	(*InterruptRunRequest)(nil),         // 11: jingclaw.control.v1.InterruptRunRequest
 	(*InterruptRunResponse)(nil),        // 12: jingclaw.control.v1.InterruptRunResponse
 	(*Approval)(nil),                    // 13: jingclaw.control.v1.Approval
-	(*ListApprovalsRequest)(nil),        // 14: jingclaw.control.v1.ListApprovalsRequest
-	(*ListApprovalsResponse)(nil),       // 15: jingclaw.control.v1.ListApprovalsResponse
-	(*DecideApprovalRequest)(nil),       // 16: jingclaw.control.v1.DecideApprovalRequest
-	(*DecideApprovalResponse)(nil),      // 17: jingclaw.control.v1.DecideApprovalResponse
-	(*InboundMessage)(nil),              // 18: jingclaw.control.v1.InboundMessage
-	(*PrincipalClaim)(nil),              // 19: jingclaw.control.v1.PrincipalClaim
-	(*DeliverInboundRequest)(nil),       // 20: jingclaw.control.v1.DeliverInboundRequest
-	(*DeliverInboundResponse)(nil),      // 21: jingclaw.control.v1.DeliverInboundResponse
-	(*Dispatch)(nil),                    // 22: jingclaw.control.v1.Dispatch
-	(*SubscribeDispatchesResponse)(nil), // 23: jingclaw.control.v1.SubscribeDispatchesResponse
-	(*SubscribeDispatchesRequest)(nil),  // 24: jingclaw.control.v1.SubscribeDispatchesRequest
-	(*AcknowledgeDispatchRequest)(nil),  // 25: jingclaw.control.v1.AcknowledgeDispatchRequest
-	(*AcknowledgeDispatchResponse)(nil), // 26: jingclaw.control.v1.AcknowledgeDispatchResponse
-	(*Binding)(nil),                     // 27: jingclaw.control.v1.Binding
-	(*ListBindingsRequest)(nil),         // 28: jingclaw.control.v1.ListBindingsRequest
-	(*ListBindingsResponse)(nil),        // 29: jingclaw.control.v1.ListBindingsResponse
-	(*UpsertBindingRequest)(nil),        // 30: jingclaw.control.v1.UpsertBindingRequest
-	(*UpsertBindingResponse)(nil),       // 31: jingclaw.control.v1.UpsertBindingResponse
-	(*DeleteBindingRequest)(nil),        // 32: jingclaw.control.v1.DeleteBindingRequest
-	(*DeleteBindingResponse)(nil),       // 33: jingclaw.control.v1.DeleteBindingResponse
-	(*SubscribeEventsResponse)(nil),     // 34: jingclaw.control.v1.SubscribeEventsResponse
-	(*ResyncRequired)(nil),              // 35: jingclaw.control.v1.ResyncRequired
-	(*ListModelsRequest)(nil),           // 36: jingclaw.control.v1.ListModelsRequest
-	(*ListModelsResponse)(nil),          // 37: jingclaw.control.v1.ListModelsResponse
-	(*ModelInfo)(nil),                   // 38: jingclaw.control.v1.ModelInfo
-	(*SetSessionModelRequest)(nil),      // 39: jingclaw.control.v1.SetSessionModelRequest
-	(*SetSessionModelResponse)(nil),     // 40: jingclaw.control.v1.SetSessionModelResponse
-	(*GetSessionViewRequest)(nil),       // 41: jingclaw.control.v1.GetSessionViewRequest
-	(*GetSessionViewResponse)(nil),      // 42: jingclaw.control.v1.GetSessionViewResponse
-	(*ViewMessage)(nil),                 // 43: jingclaw.control.v1.ViewMessage
-	(*ViewToolCall)(nil),                // 44: jingclaw.control.v1.ViewToolCall
-	(*ListSessionsRequest)(nil),         // 45: jingclaw.control.v1.ListSessionsRequest
-	(*ListSessionsResponse)(nil),        // 46: jingclaw.control.v1.ListSessionsResponse
-	(*ListRunsRequest)(nil),             // 47: jingclaw.control.v1.ListRunsRequest
-	(*ListRunsResponse)(nil),            // 48: jingclaw.control.v1.ListRunsResponse
-	(*timestamppb.Timestamp)(nil),       // 49: google.protobuf.Timestamp
-	(RunStatus)(0),                      // 50: jingclaw.control.v1.RunStatus
-	(*RunOrigin)(nil),                   // 51: jingclaw.control.v1.RunOrigin
-	(*DeliveryTarget)(nil),              // 52: jingclaw.control.v1.DeliveryTarget
-	(*RequestMeta)(nil),                 // 53: jingclaw.control.v1.RequestMeta
-	(ApprovalStatus)(0),                 // 54: jingclaw.control.v1.ApprovalStatus
-	(RememberScope)(0),                  // 55: jingclaw.control.v1.RememberScope
-	(ApprovalDecision)(0),               // 56: jingclaw.control.v1.ApprovalDecision
-	(*StreamHello)(nil),                 // 57: jingclaw.control.v1.StreamHello
-	(*Event)(nil),                       // 58: jingclaw.control.v1.Event
-	(*StreamHeartbeat)(nil),             // 59: jingclaw.control.v1.StreamHeartbeat
-	(*PlanItem)(nil),                    // 60: jingclaw.control.v1.PlanItem
-	(*Artifact)(nil),                    // 61: jingclaw.control.v1.Artifact
+	(*Question)(nil),                    // 14: jingclaw.control.v1.Question
+	(*ListQuestionsRequest)(nil),        // 15: jingclaw.control.v1.ListQuestionsRequest
+	(*ListQuestionsResponse)(nil),       // 16: jingclaw.control.v1.ListQuestionsResponse
+	(*AnswerQuestionRequest)(nil),       // 17: jingclaw.control.v1.AnswerQuestionRequest
+	(*AnswerQuestionResponse)(nil),      // 18: jingclaw.control.v1.AnswerQuestionResponse
+	(*ListApprovalsRequest)(nil),        // 19: jingclaw.control.v1.ListApprovalsRequest
+	(*ListApprovalsResponse)(nil),       // 20: jingclaw.control.v1.ListApprovalsResponse
+	(*DecideApprovalRequest)(nil),       // 21: jingclaw.control.v1.DecideApprovalRequest
+	(*DecideApprovalResponse)(nil),      // 22: jingclaw.control.v1.DecideApprovalResponse
+	(*InboundMessage)(nil),              // 23: jingclaw.control.v1.InboundMessage
+	(*PrincipalClaim)(nil),              // 24: jingclaw.control.v1.PrincipalClaim
+	(*DeliverInboundRequest)(nil),       // 25: jingclaw.control.v1.DeliverInboundRequest
+	(*DeliverInboundResponse)(nil),      // 26: jingclaw.control.v1.DeliverInboundResponse
+	(*Dispatch)(nil),                    // 27: jingclaw.control.v1.Dispatch
+	(*SubscribeDispatchesResponse)(nil), // 28: jingclaw.control.v1.SubscribeDispatchesResponse
+	(*SubscribeDispatchesRequest)(nil),  // 29: jingclaw.control.v1.SubscribeDispatchesRequest
+	(*AcknowledgeDispatchRequest)(nil),  // 30: jingclaw.control.v1.AcknowledgeDispatchRequest
+	(*AcknowledgeDispatchResponse)(nil), // 31: jingclaw.control.v1.AcknowledgeDispatchResponse
+	(*Binding)(nil),                     // 32: jingclaw.control.v1.Binding
+	(*ListBindingsRequest)(nil),         // 33: jingclaw.control.v1.ListBindingsRequest
+	(*ListBindingsResponse)(nil),        // 34: jingclaw.control.v1.ListBindingsResponse
+	(*UpsertBindingRequest)(nil),        // 35: jingclaw.control.v1.UpsertBindingRequest
+	(*UpsertBindingResponse)(nil),       // 36: jingclaw.control.v1.UpsertBindingResponse
+	(*DeleteBindingRequest)(nil),        // 37: jingclaw.control.v1.DeleteBindingRequest
+	(*DeleteBindingResponse)(nil),       // 38: jingclaw.control.v1.DeleteBindingResponse
+	(*SubscribeEventsResponse)(nil),     // 39: jingclaw.control.v1.SubscribeEventsResponse
+	(*ResyncRequired)(nil),              // 40: jingclaw.control.v1.ResyncRequired
+	(*ListModelsRequest)(nil),           // 41: jingclaw.control.v1.ListModelsRequest
+	(*ListModelsResponse)(nil),          // 42: jingclaw.control.v1.ListModelsResponse
+	(*ModelInfo)(nil),                   // 43: jingclaw.control.v1.ModelInfo
+	(*SetSessionModelRequest)(nil),      // 44: jingclaw.control.v1.SetSessionModelRequest
+	(*SetSessionModelResponse)(nil),     // 45: jingclaw.control.v1.SetSessionModelResponse
+	(*GetSessionViewRequest)(nil),       // 46: jingclaw.control.v1.GetSessionViewRequest
+	(*GetSessionViewResponse)(nil),      // 47: jingclaw.control.v1.GetSessionViewResponse
+	(*ViewMessage)(nil),                 // 48: jingclaw.control.v1.ViewMessage
+	(*ViewToolCall)(nil),                // 49: jingclaw.control.v1.ViewToolCall
+	(*ListSessionsRequest)(nil),         // 50: jingclaw.control.v1.ListSessionsRequest
+	(*ListSessionsResponse)(nil),        // 51: jingclaw.control.v1.ListSessionsResponse
+	(*ListRunsRequest)(nil),             // 52: jingclaw.control.v1.ListRunsRequest
+	(*ListRunsResponse)(nil),            // 53: jingclaw.control.v1.ListRunsResponse
+	(*timestamppb.Timestamp)(nil),       // 54: google.protobuf.Timestamp
+	(RunStatus)(0),                      // 55: jingclaw.control.v1.RunStatus
+	(*RunOrigin)(nil),                   // 56: jingclaw.control.v1.RunOrigin
+	(*DeliveryTarget)(nil),              // 57: jingclaw.control.v1.DeliveryTarget
+	(*RequestMeta)(nil),                 // 58: jingclaw.control.v1.RequestMeta
+	(ApprovalStatus)(0),                 // 59: jingclaw.control.v1.ApprovalStatus
+	(QuestionKind)(0),                   // 60: jingclaw.control.v1.QuestionKind
+	(*QuestionOption)(nil),              // 61: jingclaw.control.v1.QuestionOption
+	(QuestionStatus)(0),                 // 62: jingclaw.control.v1.QuestionStatus
+	(RememberScope)(0),                  // 63: jingclaw.control.v1.RememberScope
+	(ApprovalDecision)(0),               // 64: jingclaw.control.v1.ApprovalDecision
+	(*StreamHello)(nil),                 // 65: jingclaw.control.v1.StreamHello
+	(*Event)(nil),                       // 66: jingclaw.control.v1.Event
+	(*StreamHeartbeat)(nil),             // 67: jingclaw.control.v1.StreamHeartbeat
+	(*PlanItem)(nil),                    // 68: jingclaw.control.v1.PlanItem
+	(*Artifact)(nil),                    // 69: jingclaw.control.v1.Artifact
 }
 var file_jingclaw_control_v1_session_proto_depIdxs = []int32{
-	49, // 0: jingclaw.control.v1.Session.created_at:type_name -> google.protobuf.Timestamp
-	49, // 1: jingclaw.control.v1.Session.updated_at:type_name -> google.protobuf.Timestamp
-	50, // 2: jingclaw.control.v1.Run.status:type_name -> jingclaw.control.v1.RunStatus
-	51, // 3: jingclaw.control.v1.Run.origin:type_name -> jingclaw.control.v1.RunOrigin
-	52, // 4: jingclaw.control.v1.Run.delivery_targets:type_name -> jingclaw.control.v1.DeliveryTarget
-	49, // 5: jingclaw.control.v1.Run.created_at:type_name -> google.protobuf.Timestamp
-	49, // 6: jingclaw.control.v1.Run.finished_at:type_name -> google.protobuf.Timestamp
-	53, // 7: jingclaw.control.v1.CreateSessionRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	54, // 0: jingclaw.control.v1.Session.created_at:type_name -> google.protobuf.Timestamp
+	54, // 1: jingclaw.control.v1.Session.updated_at:type_name -> google.protobuf.Timestamp
+	55, // 2: jingclaw.control.v1.Run.status:type_name -> jingclaw.control.v1.RunStatus
+	56, // 3: jingclaw.control.v1.Run.origin:type_name -> jingclaw.control.v1.RunOrigin
+	57, // 4: jingclaw.control.v1.Run.delivery_targets:type_name -> jingclaw.control.v1.DeliveryTarget
+	54, // 5: jingclaw.control.v1.Run.created_at:type_name -> google.protobuf.Timestamp
+	54, // 6: jingclaw.control.v1.Run.finished_at:type_name -> google.protobuf.Timestamp
+	58, // 7: jingclaw.control.v1.CreateSessionRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
 	3,  // 8: jingclaw.control.v1.CreateSessionResponse.session:type_name -> jingclaw.control.v1.Session
-	53, // 9: jingclaw.control.v1.SendTurnRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	58, // 9: jingclaw.control.v1.SendTurnRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
 	8,  // 10: jingclaw.control.v1.SendTurnRequest.attachments:type_name -> jingclaw.control.v1.InlineAttachment
-	53, // 11: jingclaw.control.v1.InterruptRunRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	50, // 12: jingclaw.control.v1.InterruptRunResponse.status:type_name -> jingclaw.control.v1.RunStatus
-	54, // 13: jingclaw.control.v1.Approval.status:type_name -> jingclaw.control.v1.ApprovalStatus
-	49, // 14: jingclaw.control.v1.Approval.created_at:type_name -> google.protobuf.Timestamp
-	13, // 15: jingclaw.control.v1.ListApprovalsResponse.approvals:type_name -> jingclaw.control.v1.Approval
-	53, // 16: jingclaw.control.v1.DecideApprovalRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	55, // 17: jingclaw.control.v1.DecideApprovalRequest.remember:type_name -> jingclaw.control.v1.RememberScope
-	56, // 18: jingclaw.control.v1.DecideApprovalRequest.decision:type_name -> jingclaw.control.v1.ApprovalDecision
-	13, // 19: jingclaw.control.v1.DecideApprovalResponse.approval:type_name -> jingclaw.control.v1.Approval
-	19, // 20: jingclaw.control.v1.InboundMessage.principal_claims:type_name -> jingclaw.control.v1.PrincipalClaim
-	0,  // 21: jingclaw.control.v1.InboundMessage.trigger:type_name -> jingclaw.control.v1.MessageTrigger
-	49, // 22: jingclaw.control.v1.InboundMessage.occurred_at:type_name -> google.protobuf.Timestamp
-	18, // 23: jingclaw.control.v1.DeliverInboundRequest.message:type_name -> jingclaw.control.v1.InboundMessage
-	1,  // 24: jingclaw.control.v1.Dispatch.kind:type_name -> jingclaw.control.v1.DispatchKind
-	49, // 25: jingclaw.control.v1.Dispatch.created_at:type_name -> google.protobuf.Timestamp
-	22, // 26: jingclaw.control.v1.SubscribeDispatchesResponse.dispatch:type_name -> jingclaw.control.v1.Dispatch
-	53, // 27: jingclaw.control.v1.AcknowledgeDispatchRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	19, // 28: jingclaw.control.v1.Binding.allowed_claims:type_name -> jingclaw.control.v1.PrincipalClaim
-	49, // 29: jingclaw.control.v1.Binding.created_at:type_name -> google.protobuf.Timestamp
-	27, // 30: jingclaw.control.v1.ListBindingsResponse.bindings:type_name -> jingclaw.control.v1.Binding
-	53, // 31: jingclaw.control.v1.UpsertBindingRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	27, // 32: jingclaw.control.v1.UpsertBindingRequest.binding:type_name -> jingclaw.control.v1.Binding
-	27, // 33: jingclaw.control.v1.UpsertBindingResponse.binding:type_name -> jingclaw.control.v1.Binding
-	53, // 34: jingclaw.control.v1.DeleteBindingRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	57, // 35: jingclaw.control.v1.SubscribeEventsResponse.hello:type_name -> jingclaw.control.v1.StreamHello
-	58, // 36: jingclaw.control.v1.SubscribeEventsResponse.event:type_name -> jingclaw.control.v1.Event
-	59, // 37: jingclaw.control.v1.SubscribeEventsResponse.heartbeat:type_name -> jingclaw.control.v1.StreamHeartbeat
-	35, // 38: jingclaw.control.v1.SubscribeEventsResponse.resync_required:type_name -> jingclaw.control.v1.ResyncRequired
-	53, // 39: jingclaw.control.v1.ListModelsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	38, // 40: jingclaw.control.v1.ListModelsResponse.models:type_name -> jingclaw.control.v1.ModelInfo
-	53, // 41: jingclaw.control.v1.SetSessionModelRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	3,  // 42: jingclaw.control.v1.SetSessionModelResponse.session:type_name -> jingclaw.control.v1.Session
-	53, // 43: jingclaw.control.v1.GetSessionViewRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	3,  // 44: jingclaw.control.v1.GetSessionViewResponse.session:type_name -> jingclaw.control.v1.Session
-	43, // 45: jingclaw.control.v1.GetSessionViewResponse.messages:type_name -> jingclaw.control.v1.ViewMessage
-	13, // 46: jingclaw.control.v1.GetSessionViewResponse.pending_approvals:type_name -> jingclaw.control.v1.Approval
-	4,  // 47: jingclaw.control.v1.GetSessionViewResponse.active_run:type_name -> jingclaw.control.v1.Run
-	60, // 48: jingclaw.control.v1.GetSessionViewResponse.plan:type_name -> jingclaw.control.v1.PlanItem
-	2,  // 49: jingclaw.control.v1.ViewMessage.role:type_name -> jingclaw.control.v1.MessageRole
-	49, // 50: jingclaw.control.v1.ViewMessage.at:type_name -> google.protobuf.Timestamp
-	44, // 51: jingclaw.control.v1.ViewMessage.tool_calls:type_name -> jingclaw.control.v1.ViewToolCall
-	61, // 52: jingclaw.control.v1.ViewToolCall.artifact:type_name -> jingclaw.control.v1.Artifact
-	53, // 53: jingclaw.control.v1.ListSessionsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	3,  // 54: jingclaw.control.v1.ListSessionsResponse.sessions:type_name -> jingclaw.control.v1.Session
-	53, // 55: jingclaw.control.v1.ListRunsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	4,  // 56: jingclaw.control.v1.ListRunsResponse.runs:type_name -> jingclaw.control.v1.Run
-	20, // 57: jingclaw.control.v1.GatewayIngressService.DeliverInbound:input_type -> jingclaw.control.v1.DeliverInboundRequest
-	24, // 58: jingclaw.control.v1.GatewayIngressService.SubscribeDispatches:input_type -> jingclaw.control.v1.SubscribeDispatchesRequest
-	25, // 59: jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch:input_type -> jingclaw.control.v1.AcknowledgeDispatchRequest
-	28, // 60: jingclaw.control.v1.ChannelService.ListBindings:input_type -> jingclaw.control.v1.ListBindingsRequest
-	30, // 61: jingclaw.control.v1.ChannelService.UpsertBinding:input_type -> jingclaw.control.v1.UpsertBindingRequest
-	32, // 62: jingclaw.control.v1.ChannelService.DeleteBinding:input_type -> jingclaw.control.v1.DeleteBindingRequest
-	5,  // 63: jingclaw.control.v1.SessionService.CreateSession:input_type -> jingclaw.control.v1.CreateSessionRequest
-	45, // 64: jingclaw.control.v1.SessionService.ListSessions:input_type -> jingclaw.control.v1.ListSessionsRequest
-	47, // 65: jingclaw.control.v1.SessionService.ListRuns:input_type -> jingclaw.control.v1.ListRunsRequest
-	41, // 66: jingclaw.control.v1.SessionService.GetSessionView:input_type -> jingclaw.control.v1.GetSessionViewRequest
-	7,  // 67: jingclaw.control.v1.SessionService.SendTurn:input_type -> jingclaw.control.v1.SendTurnRequest
-	10, // 68: jingclaw.control.v1.SessionService.SubscribeEvents:input_type -> jingclaw.control.v1.SubscribeEventsRequest
-	11, // 69: jingclaw.control.v1.SessionService.InterruptRun:input_type -> jingclaw.control.v1.InterruptRunRequest
-	14, // 70: jingclaw.control.v1.SessionService.ListApprovals:input_type -> jingclaw.control.v1.ListApprovalsRequest
-	16, // 71: jingclaw.control.v1.SessionService.DecideApproval:input_type -> jingclaw.control.v1.DecideApprovalRequest
-	36, // 72: jingclaw.control.v1.SessionService.ListModels:input_type -> jingclaw.control.v1.ListModelsRequest
-	39, // 73: jingclaw.control.v1.SessionService.SetSessionModel:input_type -> jingclaw.control.v1.SetSessionModelRequest
-	21, // 74: jingclaw.control.v1.GatewayIngressService.DeliverInbound:output_type -> jingclaw.control.v1.DeliverInboundResponse
-	23, // 75: jingclaw.control.v1.GatewayIngressService.SubscribeDispatches:output_type -> jingclaw.control.v1.SubscribeDispatchesResponse
-	26, // 76: jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch:output_type -> jingclaw.control.v1.AcknowledgeDispatchResponse
-	29, // 77: jingclaw.control.v1.ChannelService.ListBindings:output_type -> jingclaw.control.v1.ListBindingsResponse
-	31, // 78: jingclaw.control.v1.ChannelService.UpsertBinding:output_type -> jingclaw.control.v1.UpsertBindingResponse
-	33, // 79: jingclaw.control.v1.ChannelService.DeleteBinding:output_type -> jingclaw.control.v1.DeleteBindingResponse
-	6,  // 80: jingclaw.control.v1.SessionService.CreateSession:output_type -> jingclaw.control.v1.CreateSessionResponse
-	46, // 81: jingclaw.control.v1.SessionService.ListSessions:output_type -> jingclaw.control.v1.ListSessionsResponse
-	48, // 82: jingclaw.control.v1.SessionService.ListRuns:output_type -> jingclaw.control.v1.ListRunsResponse
-	42, // 83: jingclaw.control.v1.SessionService.GetSessionView:output_type -> jingclaw.control.v1.GetSessionViewResponse
-	9,  // 84: jingclaw.control.v1.SessionService.SendTurn:output_type -> jingclaw.control.v1.SendTurnResponse
-	34, // 85: jingclaw.control.v1.SessionService.SubscribeEvents:output_type -> jingclaw.control.v1.SubscribeEventsResponse
-	12, // 86: jingclaw.control.v1.SessionService.InterruptRun:output_type -> jingclaw.control.v1.InterruptRunResponse
-	15, // 87: jingclaw.control.v1.SessionService.ListApprovals:output_type -> jingclaw.control.v1.ListApprovalsResponse
-	17, // 88: jingclaw.control.v1.SessionService.DecideApproval:output_type -> jingclaw.control.v1.DecideApprovalResponse
-	37, // 89: jingclaw.control.v1.SessionService.ListModels:output_type -> jingclaw.control.v1.ListModelsResponse
-	40, // 90: jingclaw.control.v1.SessionService.SetSessionModel:output_type -> jingclaw.control.v1.SetSessionModelResponse
-	74, // [74:91] is the sub-list for method output_type
-	57, // [57:74] is the sub-list for method input_type
-	57, // [57:57] is the sub-list for extension type_name
-	57, // [57:57] is the sub-list for extension extendee
-	0,  // [0:57] is the sub-list for field type_name
+	58, // 11: jingclaw.control.v1.InterruptRunRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	55, // 12: jingclaw.control.v1.InterruptRunResponse.status:type_name -> jingclaw.control.v1.RunStatus
+	59, // 13: jingclaw.control.v1.Approval.status:type_name -> jingclaw.control.v1.ApprovalStatus
+	54, // 14: jingclaw.control.v1.Approval.created_at:type_name -> google.protobuf.Timestamp
+	60, // 15: jingclaw.control.v1.Question.kind:type_name -> jingclaw.control.v1.QuestionKind
+	61, // 16: jingclaw.control.v1.Question.options:type_name -> jingclaw.control.v1.QuestionOption
+	62, // 17: jingclaw.control.v1.Question.status:type_name -> jingclaw.control.v1.QuestionStatus
+	54, // 18: jingclaw.control.v1.Question.created_at:type_name -> google.protobuf.Timestamp
+	14, // 19: jingclaw.control.v1.ListQuestionsResponse.questions:type_name -> jingclaw.control.v1.Question
+	58, // 20: jingclaw.control.v1.AnswerQuestionRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	14, // 21: jingclaw.control.v1.AnswerQuestionResponse.question:type_name -> jingclaw.control.v1.Question
+	13, // 22: jingclaw.control.v1.ListApprovalsResponse.approvals:type_name -> jingclaw.control.v1.Approval
+	58, // 23: jingclaw.control.v1.DecideApprovalRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	63, // 24: jingclaw.control.v1.DecideApprovalRequest.remember:type_name -> jingclaw.control.v1.RememberScope
+	64, // 25: jingclaw.control.v1.DecideApprovalRequest.decision:type_name -> jingclaw.control.v1.ApprovalDecision
+	13, // 26: jingclaw.control.v1.DecideApprovalResponse.approval:type_name -> jingclaw.control.v1.Approval
+	24, // 27: jingclaw.control.v1.InboundMessage.principal_claims:type_name -> jingclaw.control.v1.PrincipalClaim
+	0,  // 28: jingclaw.control.v1.InboundMessage.trigger:type_name -> jingclaw.control.v1.MessageTrigger
+	54, // 29: jingclaw.control.v1.InboundMessage.occurred_at:type_name -> google.protobuf.Timestamp
+	23, // 30: jingclaw.control.v1.DeliverInboundRequest.message:type_name -> jingclaw.control.v1.InboundMessage
+	1,  // 31: jingclaw.control.v1.Dispatch.kind:type_name -> jingclaw.control.v1.DispatchKind
+	54, // 32: jingclaw.control.v1.Dispatch.created_at:type_name -> google.protobuf.Timestamp
+	27, // 33: jingclaw.control.v1.SubscribeDispatchesResponse.dispatch:type_name -> jingclaw.control.v1.Dispatch
+	58, // 34: jingclaw.control.v1.AcknowledgeDispatchRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	24, // 35: jingclaw.control.v1.Binding.allowed_claims:type_name -> jingclaw.control.v1.PrincipalClaim
+	54, // 36: jingclaw.control.v1.Binding.created_at:type_name -> google.protobuf.Timestamp
+	32, // 37: jingclaw.control.v1.ListBindingsResponse.bindings:type_name -> jingclaw.control.v1.Binding
+	58, // 38: jingclaw.control.v1.UpsertBindingRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	32, // 39: jingclaw.control.v1.UpsertBindingRequest.binding:type_name -> jingclaw.control.v1.Binding
+	32, // 40: jingclaw.control.v1.UpsertBindingResponse.binding:type_name -> jingclaw.control.v1.Binding
+	58, // 41: jingclaw.control.v1.DeleteBindingRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	65, // 42: jingclaw.control.v1.SubscribeEventsResponse.hello:type_name -> jingclaw.control.v1.StreamHello
+	66, // 43: jingclaw.control.v1.SubscribeEventsResponse.event:type_name -> jingclaw.control.v1.Event
+	67, // 44: jingclaw.control.v1.SubscribeEventsResponse.heartbeat:type_name -> jingclaw.control.v1.StreamHeartbeat
+	40, // 45: jingclaw.control.v1.SubscribeEventsResponse.resync_required:type_name -> jingclaw.control.v1.ResyncRequired
+	58, // 46: jingclaw.control.v1.ListModelsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	43, // 47: jingclaw.control.v1.ListModelsResponse.models:type_name -> jingclaw.control.v1.ModelInfo
+	58, // 48: jingclaw.control.v1.SetSessionModelRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	3,  // 49: jingclaw.control.v1.SetSessionModelResponse.session:type_name -> jingclaw.control.v1.Session
+	58, // 50: jingclaw.control.v1.GetSessionViewRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	3,  // 51: jingclaw.control.v1.GetSessionViewResponse.session:type_name -> jingclaw.control.v1.Session
+	48, // 52: jingclaw.control.v1.GetSessionViewResponse.messages:type_name -> jingclaw.control.v1.ViewMessage
+	13, // 53: jingclaw.control.v1.GetSessionViewResponse.pending_approvals:type_name -> jingclaw.control.v1.Approval
+	4,  // 54: jingclaw.control.v1.GetSessionViewResponse.active_run:type_name -> jingclaw.control.v1.Run
+	68, // 55: jingclaw.control.v1.GetSessionViewResponse.plan:type_name -> jingclaw.control.v1.PlanItem
+	14, // 56: jingclaw.control.v1.GetSessionViewResponse.pending_questions:type_name -> jingclaw.control.v1.Question
+	2,  // 57: jingclaw.control.v1.ViewMessage.role:type_name -> jingclaw.control.v1.MessageRole
+	54, // 58: jingclaw.control.v1.ViewMessage.at:type_name -> google.protobuf.Timestamp
+	49, // 59: jingclaw.control.v1.ViewMessage.tool_calls:type_name -> jingclaw.control.v1.ViewToolCall
+	69, // 60: jingclaw.control.v1.ViewToolCall.artifact:type_name -> jingclaw.control.v1.Artifact
+	58, // 61: jingclaw.control.v1.ListSessionsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	3,  // 62: jingclaw.control.v1.ListSessionsResponse.sessions:type_name -> jingclaw.control.v1.Session
+	58, // 63: jingclaw.control.v1.ListRunsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	4,  // 64: jingclaw.control.v1.ListRunsResponse.runs:type_name -> jingclaw.control.v1.Run
+	25, // 65: jingclaw.control.v1.GatewayIngressService.DeliverInbound:input_type -> jingclaw.control.v1.DeliverInboundRequest
+	29, // 66: jingclaw.control.v1.GatewayIngressService.SubscribeDispatches:input_type -> jingclaw.control.v1.SubscribeDispatchesRequest
+	30, // 67: jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch:input_type -> jingclaw.control.v1.AcknowledgeDispatchRequest
+	33, // 68: jingclaw.control.v1.ChannelService.ListBindings:input_type -> jingclaw.control.v1.ListBindingsRequest
+	35, // 69: jingclaw.control.v1.ChannelService.UpsertBinding:input_type -> jingclaw.control.v1.UpsertBindingRequest
+	37, // 70: jingclaw.control.v1.ChannelService.DeleteBinding:input_type -> jingclaw.control.v1.DeleteBindingRequest
+	5,  // 71: jingclaw.control.v1.SessionService.CreateSession:input_type -> jingclaw.control.v1.CreateSessionRequest
+	50, // 72: jingclaw.control.v1.SessionService.ListSessions:input_type -> jingclaw.control.v1.ListSessionsRequest
+	52, // 73: jingclaw.control.v1.SessionService.ListRuns:input_type -> jingclaw.control.v1.ListRunsRequest
+	46, // 74: jingclaw.control.v1.SessionService.GetSessionView:input_type -> jingclaw.control.v1.GetSessionViewRequest
+	7,  // 75: jingclaw.control.v1.SessionService.SendTurn:input_type -> jingclaw.control.v1.SendTurnRequest
+	10, // 76: jingclaw.control.v1.SessionService.SubscribeEvents:input_type -> jingclaw.control.v1.SubscribeEventsRequest
+	11, // 77: jingclaw.control.v1.SessionService.InterruptRun:input_type -> jingclaw.control.v1.InterruptRunRequest
+	19, // 78: jingclaw.control.v1.SessionService.ListApprovals:input_type -> jingclaw.control.v1.ListApprovalsRequest
+	21, // 79: jingclaw.control.v1.SessionService.DecideApproval:input_type -> jingclaw.control.v1.DecideApprovalRequest
+	15, // 80: jingclaw.control.v1.SessionService.ListQuestions:input_type -> jingclaw.control.v1.ListQuestionsRequest
+	17, // 81: jingclaw.control.v1.SessionService.AnswerQuestion:input_type -> jingclaw.control.v1.AnswerQuestionRequest
+	41, // 82: jingclaw.control.v1.SessionService.ListModels:input_type -> jingclaw.control.v1.ListModelsRequest
+	44, // 83: jingclaw.control.v1.SessionService.SetSessionModel:input_type -> jingclaw.control.v1.SetSessionModelRequest
+	26, // 84: jingclaw.control.v1.GatewayIngressService.DeliverInbound:output_type -> jingclaw.control.v1.DeliverInboundResponse
+	28, // 85: jingclaw.control.v1.GatewayIngressService.SubscribeDispatches:output_type -> jingclaw.control.v1.SubscribeDispatchesResponse
+	31, // 86: jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch:output_type -> jingclaw.control.v1.AcknowledgeDispatchResponse
+	34, // 87: jingclaw.control.v1.ChannelService.ListBindings:output_type -> jingclaw.control.v1.ListBindingsResponse
+	36, // 88: jingclaw.control.v1.ChannelService.UpsertBinding:output_type -> jingclaw.control.v1.UpsertBindingResponse
+	38, // 89: jingclaw.control.v1.ChannelService.DeleteBinding:output_type -> jingclaw.control.v1.DeleteBindingResponse
+	6,  // 90: jingclaw.control.v1.SessionService.CreateSession:output_type -> jingclaw.control.v1.CreateSessionResponse
+	51, // 91: jingclaw.control.v1.SessionService.ListSessions:output_type -> jingclaw.control.v1.ListSessionsResponse
+	53, // 92: jingclaw.control.v1.SessionService.ListRuns:output_type -> jingclaw.control.v1.ListRunsResponse
+	47, // 93: jingclaw.control.v1.SessionService.GetSessionView:output_type -> jingclaw.control.v1.GetSessionViewResponse
+	9,  // 94: jingclaw.control.v1.SessionService.SendTurn:output_type -> jingclaw.control.v1.SendTurnResponse
+	39, // 95: jingclaw.control.v1.SessionService.SubscribeEvents:output_type -> jingclaw.control.v1.SubscribeEventsResponse
+	12, // 96: jingclaw.control.v1.SessionService.InterruptRun:output_type -> jingclaw.control.v1.InterruptRunResponse
+	20, // 97: jingclaw.control.v1.SessionService.ListApprovals:output_type -> jingclaw.control.v1.ListApprovalsResponse
+	22, // 98: jingclaw.control.v1.SessionService.DecideApproval:output_type -> jingclaw.control.v1.DecideApprovalResponse
+	16, // 99: jingclaw.control.v1.SessionService.ListQuestions:output_type -> jingclaw.control.v1.ListQuestionsResponse
+	18, // 100: jingclaw.control.v1.SessionService.AnswerQuestion:output_type -> jingclaw.control.v1.AnswerQuestionResponse
+	42, // 101: jingclaw.control.v1.SessionService.ListModels:output_type -> jingclaw.control.v1.ListModelsResponse
+	45, // 102: jingclaw.control.v1.SessionService.SetSessionModel:output_type -> jingclaw.control.v1.SetSessionModelResponse
+	84, // [84:103] is the sub-list for method output_type
+	65, // [65:84] is the sub-list for method input_type
+	65, // [65:65] is the sub-list for extension type_name
+	65, // [65:65] is the sub-list for extension extendee
+	0,  // [0:65] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_session_proto_init() }
@@ -3640,7 +4014,7 @@ func file_jingclaw_control_v1_session_proto_init() {
 	}
 	file_jingclaw_control_v1_common_proto_init()
 	file_jingclaw_control_v1_event_proto_init()
-	file_jingclaw_control_v1_session_proto_msgTypes[31].OneofWrappers = []any{
+	file_jingclaw_control_v1_session_proto_msgTypes[36].OneofWrappers = []any{
 		(*SubscribeEventsResponse_Hello)(nil),
 		(*SubscribeEventsResponse_Event)(nil),
 		(*SubscribeEventsResponse_Heartbeat)(nil),
@@ -3652,7 +4026,7 @@ func file_jingclaw_control_v1_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jingclaw_control_v1_session_proto_rawDesc), len(file_jingclaw_control_v1_session_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   46,
+			NumMessages:   51,
 			NumExtensions: 0,
 			NumServices:   3,
 		},

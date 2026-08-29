@@ -365,6 +365,7 @@ func run() error {
 		NewEventID:      func() string { return id.WithPrefix("evt") },
 		NewApprovalID:   func() string { return id.WithPrefix("apr") },
 		NewPlanItemID:   planItemIDs(),
+		NewQuestionID:   func() string { return id.WithPrefix("qst") },
 		Now:             time.Now,
 		Logger:          logger,
 	})
@@ -372,7 +373,7 @@ func run() error {
 	// Registered after the runtime exists, because this is the one tool whose
 	// collaborator is the runtime itself. Before it is serving, so a run
 	// cannot start without the plan being reachable.
-	tools.MustRegister(&builtin.TodoUpdate{Planner: rt})
+	tools.MustRegister(&builtin.TodoUpdate{Planner: rt}, &builtin.AskUser{})
 
 	// Runs that were live when this process last stopped have nobody driving
 	// them. Resolving them before serving means clients never see a run that

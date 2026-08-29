@@ -48,6 +48,7 @@ func newHarness(t *testing.T, modelProvider provider.Provider) (*runtime.Runtime
 		NewEventID:    next("evt"),
 		NewApprovalID: next("apr"),
 		NewPlanItemID: next("todo"),
+		NewQuestionID: next("qst"),
 		Now:           clock,
 		Logger:        slog.New(slog.DiscardHandler),
 	})
@@ -453,7 +454,8 @@ func TestNewPanicsOnMissingCollaborators(t *testing.T) {
 			NewMessageID:  func() string { return "msg" },
 			NewEventID:    func() string { return "evt" },
 			NewApprovalID: func() string { return "apr" },
-			NewPlanItemID: func() string { return "apr" },
+			NewPlanItemID: func() string { return "todo" },
+			NewQuestionID: func() string { return "qst" },
 			Logger:        slog.New(slog.DiscardHandler),
 		}
 	}
