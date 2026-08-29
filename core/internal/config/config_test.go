@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
-	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
 func writeConfig(t *testing.T, contents string) string {
@@ -28,9 +27,6 @@ func writeConfig(t *testing.T, contents string) string {
 func TestMissingDefaultFileIsNotAnError(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
-	// Otherwise this finds whatever .JingClaw exists above the package it
-	// lives in, and passes or fails depending on the checkout it runs from.
-	t.Setenv(home.EnvVar, "none")
 
 	cfg, used, err := config.Load("")
 	if err != nil {
