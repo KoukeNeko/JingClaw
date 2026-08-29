@@ -201,7 +201,11 @@ backend = "browser"
 [workspace]
 # What the agent may touch. Every path is resolved inside it, symlinks
 # included, and anything outside is refused.
-root = "."
+#
+# Left unset it is the workspace folder inside .JingClaw, or the working
+# directory when there is no .JingClaw. Point it at your project to work on
+# that instead.
+# root = ""
 
 [server]
 # Loopback only. This API can run programs, so an address reachable from

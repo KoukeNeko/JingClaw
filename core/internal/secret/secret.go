@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+
+	"github.com/KoukeNeko/JingClaw/core/internal/home"
 	"strings"
 )
 
@@ -113,22 +116,33 @@ func Load(opts LoadOptions) (Value, error) {
 // that way, so ~/.config is also accepted. On Linux os.UserConfigDir already
 // resolves to ~/.config and the two collapse into one entry.
 func DefaultFiles(name string) ([]string, error) {
+	var files []string
+
+	// A .JingClaw directory is looked in first when there is one, so a
+	// credential lives beside the deployment that uses it rather than in a
+	// place shared with every other.
+	if dir, found := home.FromWorkingDirectory(); found {
+		files = append(files, dir.SecretFile(name))
+	}
+
 	base, err := os.UserConfigDir()
 	if err != nil {
+		if len(files) > 0 {
+			return files, nil
+		}
 		return nil, fmt.Errorf("secret: locate config dir: %w", err)
 	}
+	files = append(files, filepath.Join(base, appDir, name))
 
-	files := []string{filepath.Join(base, appDir, name)}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return files, nil
+	// Developer tools on macOS commonly follow the XDG convention even though
+	// os.UserConfigDir does not, so a file there is honoured too.
+	if userHome, err := os.UserHomeDir(); err == nil {
+		xdg := filepath.Join(userHome, ".config", appDir, name)
+		if !slices.Contains(files, xdg) {
+			files = append(files, xdg)
+		}
 	}
 
-	xdg := filepath.Join(home, ".config", appDir, name)
-	if xdg != files[0] {
-		files = append(files, xdg)
-	}
 	return files, nil
 }
 

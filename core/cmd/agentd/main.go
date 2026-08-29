@@ -31,6 +31,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
+	"github.com/KoukeNeko/JingClaw/core/internal/home"
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
 	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
 	"github.com/KoukeNeko/JingClaw/core/internal/permission"
@@ -66,6 +67,7 @@ func run() error {
 		printPrompt = flag.Bool("print-prompt", false, "print the assembled system prompt with its sources and exit")
 		printConfig = flag.Bool("print-config", false, "print an example configuration file and exit")
 		listModels  = flag.Bool("list-models", false, "print the provider's available models and exit")
+		initHere    = flag.Bool("init", false, "create a "+home.DirName+" directory here and exit")
 
 		// Every flag below has a setting of the same meaning in the
 		// configuration file, and exists only so one run can differ from it.
@@ -85,6 +87,10 @@ func run() error {
 	if *printConfig {
 		fmt.Print(config.Example)
 		return nil
+	}
+
+	if *initHere {
+		return initialise()
 	}
 
 	// Nothing to configure means nothing to read, and an operator asking "where
@@ -517,13 +523,55 @@ func run() error {
 
 // databasePath resolves where state is kept. An explicit --data-dir wins so a
 // test or a second instance can be fully isolated.
+// initialise creates a .JingClaw directory in the working directory.
+//
+// Explicit rather than automatic. A daemon that made one wherever it was
+// started would leave them scattered through a filesystem, which is the
+// problem this exists to solve rather than a way to solve it.
+func initialise() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	if existing, found := home.Find(cwd); found {
+		return fmt.Errorf("%s already covers this directory", existing.Root)
+	}
+
+	dir, err := home.Create(cwd)
+	if err != nil {
+		return err
+	}
+
+	// The configuration goes in with it, so the directory is usable rather
+	// than merely present.
+	if err := os.WriteFile(dir.ConfigFile(), []byte(config.Example), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", dir.ConfigFile(), err)
+	}
+
+	fmt.Printf("Created %s\n\n", dir.Root)
+	fmt.Printf("  %-12s the settings, all at their defaults\n", ConfigName())
+	fmt.Printf("  %-12s what the agent may read and change\n", home.WorkspaceName+"/")
+	fmt.Printf("  %-12s the database and stored output\n", home.DataName+"/")
+	fmt.Printf("  %-12s how clients find this daemon\n", home.RunName+"/")
+	fmt.Printf("\nCredentials go in beside them, mode 600.\n")
+	return nil
+}
+
+// ConfigName is the configuration file's name, for the notice above.
+func ConfigName() string { return home.ConfigName }
+
 func databasePath(dataDir string) (string, error) {
 	if dataDir == "" {
-		base, err := os.UserConfigDir()
-		if err != nil {
-			return "", fmt.Errorf("locate config dir: %w", err)
+		if dir, found := home.FromWorkingDirectory(); found {
+			dataDir = dir.Data()
+		} else {
+			base, err := os.UserConfigDir()
+			if err != nil {
+				return "", fmt.Errorf("locate config dir: %w", err)
+			}
+			dataDir = filepath.Join(base, "JingClaw")
 		}
-		dataDir = filepath.Join(base, "JingClaw")
 	}
 
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {

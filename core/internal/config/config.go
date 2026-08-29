@@ -27,6 +27,8 @@ import (
 	"github.com/knadh/koanf/providers/structs"
 	"github.com/knadh/koanf/v2"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/home"
+
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/openaicompat"
 )
 
@@ -589,7 +591,7 @@ func Defaults() Config {
 			UsageFlushInterval: 2 * time.Second,
 		},
 		Workspace: Workspace{
-			Root: ".",
+			Root: defaultWorkspace(),
 		},
 		Server: Server{
 			Addr:       "127.0.0.1:0",
@@ -1201,8 +1203,27 @@ func EnsureFile() (path string, created bool, err error) {
 	return path, true, nil
 }
 
+// defaultWorkspace is what the agent may touch when nothing says otherwise.
+//
+// Inside a .JingClaw directory when there is one, so that a deployment set up
+// to try the thing out cannot reach the project it was set up in. Without one
+// it is the working directory, as before.
+func defaultWorkspace() string {
+	if dir, found := home.FromWorkingDirectory(); found {
+		return dir.Workspace()
+	}
+	return "."
+}
+
 // DefaultPath is where the configuration lives when none is given.
+//
+// A .JingClaw directory decides it when there is one. Otherwise the platform's
+// own location, as before.
 func DefaultPath() (string, error) {
+	if dir, found := home.FromWorkingDirectory(); found {
+		return dir.ConfigFile(), nil
+	}
+
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("config: locate config dir: %w", err)
@@ -1436,7 +1457,11 @@ backend = "browser"
 [workspace]
 # What the agent may touch. Every path is resolved inside it, symlinks
 # included, and anything outside is refused.
-root = "."
+#
+# Left unset it is the workspace folder inside .JingClaw, or the working
+# directory when there is no .JingClaw. Point it at your project to work on
+# that instead.
+# root = ""
 
 [server]
 # Loopback only. This API can run programs, so an address reachable from

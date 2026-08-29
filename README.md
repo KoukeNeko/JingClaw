@@ -39,6 +39,33 @@ and every GUI.
 | M2 | SwiftUI, WinUI 3 and web clients at parity |
 | M3 | subagents, replay, sandboxing, remote fleet |
 
+### Where it keeps things
+
+```bash
+agentd --init      # creates .JingClaw/ here
+```
+
+```
+.JingClaw/
+  config.toml    the settings
+  workspace/     what the agent may read and change
+  data/          the database and stored output
+  run/           how clients find the daemon
+```
+
+Credentials go in beside them, mode 600. The directory is found by walking up
+from wherever the daemon or a client is started, so running one from a
+subdirectory reaches the same deployment rather than quietly becoming a second
+one with its own database.
+
+Without a `.JingClaw`, the platform's own config, data and runtime directories
+are used exactly as before, and the workspace is the working directory. An
+explicit setting always wins over both.
+
+The workspace defaults to *inside* the directory rather than beside it, so a
+deployment set up to try the thing out cannot reach the project it was set up
+in. Point `[workspace] root` at your code to work on that.
+
 ### What it can do
 
 | Tool | Gate |

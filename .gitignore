@@ -21,3 +21,6 @@ node_modules/
 # 本機執行期資料
 *.local.json
 *.log
+
+# A deployment's own directory: its database, credentials and workspace.
+.JingClaw/

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
 // ProtocolVersion identifies the RPC contract. A client that does not
@@ -28,6 +30,9 @@ type File struct {
 	ProtocolVersion string `json:"protocol_version"`
 }
 
+// discoveryFile is what the file is called wherever it is put.
+const discoveryFile = "daemon.json"
+
 // PathIn returns the discovery file's location, preferring an explicit
 // directory.
 //
@@ -36,20 +41,27 @@ type File struct {
 // every client from the first.
 func PathIn(dir string) (string, error) {
 	if dir != "" {
-		return filepath.Join(dir, "daemon.json"), nil
+		return filepath.Join(dir, discoveryFile), nil
 	}
 	return Path()
 }
 
-// Path returns the per-user location of the discovery file.
+// Path returns the location of the discovery file.
 func Path() (string, error) {
 	if dir := os.Getenv("JINGCLAW_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, "daemon.json"), nil
+		return filepath.Join(dir, discoveryFile), nil
+	}
+
+	// A .JingClaw directory decides this on every platform: a client and the
+	// daemon it is meant to find have to agree, and agreeing per-platform is
+	// how they stop agreeing.
+	if dir, found := home.FromWorkingDirectory(); found {
+		return filepath.Join(dir.Run(), discoveryFile), nil
 	}
 
 	if runtime.GOOS != "darwin" {
 		if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-			return filepath.Join(dir, "jingclaw", "daemon.json"), nil
+			return filepath.Join(dir, "jingclaw", discoveryFile), nil
 		}
 	}
 
@@ -57,7 +69,7 @@ func Path() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("discovery: locate runtime dir: %w", err)
 	}
-	return filepath.Join(base, "JingClaw", "run", "daemon.json"), nil
+	return filepath.Join(base, "JingClaw", "run", discoveryFile), nil
 }
 
 // WriteDiscovery persists the file with owner-only permissions. It holds the
