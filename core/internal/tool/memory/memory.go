@@ -68,13 +68,17 @@ type Options struct {
 	// nil, those go to the default logger.
 	Log *slog.Logger
 
-	// RetrievalTTL is how long a retrieval memory stays offered without
-	// being used. Zero means they never expire.
+	// Expander is asked for other words when a search finds nothing. Left
+	// nil, a search that finds nothing simply finds nothing.
+	Expander Expander
+
+	// ExpandTimeout bounds that. Zero uses a default.
 	//
-	// Inactivity rather than age: a convention this project has followed for
-	// a year is not stale, and a note about a branch that was merged last
-	// week is. Age cannot tell those apart and use can.
-	RetrievalTTL time.Duration
+	// It is bounded separately from the turn because the turn can afford to
+	// wait for an answer and this cannot: the agent already has its answer,
+	// "nothing", and this is a second chance at a better one. Making a run
+	// wait on it is a worse outcome than not broadening the search.
+	ExpandTimeout time.Duration
 }
 
 // scopesFor decides which memories a turn may see.
@@ -486,36 +490,90 @@ func (t *Recall) Execute(ctx context.Context, call tool.Call) (tool.Result, erro
 	query := storage.MemoryQuery{
 		Scopes: t.scopesFor(call.Context),
 		Limit:  limit,
-		// The tool's own clock, not the store's. Everything here takes its
-		// time from one place so that a memory's validity is judged against
-		// the same moment its expiry is.
+		// The tool's own clock, not the store's. Every memory in one answer
+		// is judged current against the same moment, rather than against
+		// whenever each read happened to reach the store.
 		At: t.Now(),
 	}
 
-	var (
-		found []domain.Memory
-		err   error
-	)
-	if strings.TrimSpace(args.Query) == "" {
-		found, err = t.Store.Memories(ctx, query)
-	} else {
-		found, err = t.Store.SearchMemories(ctx, args.Query, query)
-	}
+	found, broadened, err := t.lookUp(ctx, args.Query, query)
 	if err != nil {
 		return tool.Result{}, tool.Errorf(tool.CodeInternal, "", "%v", err)
 	}
 
 	if len(found) == 0 {
 		return tool.Result{
-			Content: "Nothing has been remembered that matches.",
+			Content: nothingFound(broadened),
 			Summary: "recall: nothing",
 		}, nil
 	}
 
-	return tool.Result{
-		Content: render(found),
-		Summary: fmt.Sprintf("recall: %d", len(found)),
-	}, nil
+	content := render(found)
+	summary := fmt.Sprintf("recall: %d", len(found))
+	if broadened {
+		content = broadenedNote + "\n\n" + content
+		summary += " (broadened)"
+	}
+
+	return tool.Result{Content: content, Summary: summary}, nil
+}
+
+// broadenedNote tells the model that its own words found nothing.
+//
+// Without it the agent cannot tell a memory that answered what it asked from
+// one that answered something adjacent, and would report the second with the
+// confidence of the first.
+const broadenedNote = "No memory matched those words, so related words were " +
+	"searched for as well. Some of these may be about something else."
+
+func nothingFound(broadened bool) string {
+	if broadened {
+		return "Nothing has been remembered that matches, including under related words."
+	}
+	return "Nothing has been remembered that matches."
+}
+
+// lookUp runs the search, and widens it once if the words the agent chose
+// matched nothing.
+//
+// The second return says whether it was widened, which the caller has to pass
+// on. A recall that quietly answers a near-enough question is the same failure
+// as one that quietly answers none.
+func (t *Recall) lookUp(
+	ctx context.Context,
+	text string,
+	query storage.MemoryQuery,
+) ([]domain.Memory, bool, error) {
+	if strings.TrimSpace(text) == "" {
+		found, err := t.Store.Memories(ctx, query)
+		return found, false, err
+	}
+
+	found, err := t.Store.SearchMemories(ctx, text, query)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(found) >= expandBelow {
+		return found, false, nil
+	}
+
+	broader, widened := t.broaden(ctx, text)
+	if !widened {
+		return found, false, nil
+	}
+
+	// Every term is ORed, so the wider query matches everything the original
+	// did. Its result replaces the first rather than being merged with it.
+	wider, err := t.Store.SearchMemories(ctx, broader, query)
+	if err != nil {
+		// The second search is the optional half. Failing it would turn a
+		// search that merely found nothing into a tool error, which is a
+		// worse answer than the one already in hand.
+		t.Logger().Warn("a broadened memory search failed", "error", err)
+		return found, false, nil
+	}
+
+	return wider, true, nil
 }
 
 func render(memories []domain.Memory) string {

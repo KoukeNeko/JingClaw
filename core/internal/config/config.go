@@ -329,6 +329,14 @@ type Memory struct {
 	// MaxInstructionBytes bounds the standing directions put in front of the
 	// model on every turn. Everything here is context the work does not get.
 	MaxInstructionBytes int `koanf:"max_instruction_bytes"`
+
+	// ExpandQueries lets a recall that matched nothing be tried once more
+	// with other words, asked of the model.
+	//
+	// It costs a small model call, and only on a search that failed. What it
+	// buys is the failure the index cannot report: the words did not
+	// overlap, so nothing came back, and nothing said anything was missed.
+	ExpandQueries bool `koanf:"expand_queries"`
 }
 
 // Web is whether and how the agent may read pages.
@@ -677,6 +685,7 @@ func Defaults() Config {
 		Memory: Memory{
 			Enabled:             true,
 			MaxInstructionBytes: 2000,
+			ExpandQueries:       true,
 		},
 		Web: Web{
 			Enabled:       false,
@@ -1543,6 +1552,20 @@ enabled = true
 
 # The ceiling on standing directions injected every turn.
 # max_instruction_bytes = 2000
+
+# Try other words when a lookup matches nothing.
+#
+# Memory is searched by word, and the way that fails is quiet: "do not build a
+# second component that already exists" and "should I add a new modal?" are the
+# same subject with no word in common, so the search returns nothing and says
+# nothing about what it did not look for. When a search comes back empty, the
+# model is asked for other words the same note might have been written in and
+# the search is run once more. Results found that way are labelled, because
+# they answer a question near the one that was asked rather than that one.
+#
+# The cost is one small model call, only ever on a search that already failed.
+# Turn it off to keep memory lookups from reaching the provider at all.
+# expand_queries = true
 
 # Nothing expires by being unused. A memory nobody has recalled for months is
 # not evidence of anything: the production namespace of a service nobody has

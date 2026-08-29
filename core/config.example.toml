@@ -151,6 +151,20 @@ enabled = true
 # The ceiling on standing directions injected every turn.
 # max_instruction_bytes = 2000
 
+# Try other words when a lookup matches nothing.
+#
+# Memory is searched by word, and the way that fails is quiet: "do not build a
+# second component that already exists" and "should I add a new modal?" are the
+# same subject with no word in common, so the search returns nothing and says
+# nothing about what it did not look for. When a search comes back empty, the
+# model is asked for other words the same note might have been written in and
+# the search is run once more. Results found that way are labelled, because
+# they answer a question near the one that was asked rather than that one.
+#
+# The cost is one small model call, only ever on a search that already failed.
+# Turn it off to keep memory lookups from reaching the provider at all.
+# expand_queries = true
+
 # Nothing expires by being unused. A memory nobody has recalled for months is
 # not evidence of anything: the production namespace of a service nobody has
 # deployed since spring is correct, important and cold. What ends a memory is

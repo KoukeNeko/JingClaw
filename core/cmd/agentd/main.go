@@ -287,6 +287,17 @@ func run() error {
 		Log:          logger,
 	}
 	if cfg.Memory.Enabled {
+		// A lookup that matched nothing may be tried once more with other
+		// words, and the model running the session is the one asked for
+		// them: it is already loaded, and it knows what the query was about
+		// in a way a word list never could.
+		if cfg.Memory.ExpandQueries {
+			memoryOptions.Expander = &modelExpander{
+				provider: modelProvider,
+				model:    selected.ID,
+			}
+		}
+
 		tools.MustRegister(
 			&memorytool.Remember{Options: memoryOptions},
 			&memorytool.Recall{Options: memoryOptions},
