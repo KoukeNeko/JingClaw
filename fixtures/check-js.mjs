@@ -37,6 +37,9 @@ const normalise = (state) => JSON.stringify({
   pending_approvals: state.pending_approvals || [],
   active_run: state.active_run || '',
   head_seq: Number(state.head_seq || 0),
+  plan: (state.plan || []).map((step) => ({
+    id: step.id, title: step.title, status: step.status,
+  })),
 });
 
 // The normaliser above names the fields it compares, so a field added to the
@@ -44,14 +47,18 @@ const normalise = (state) => JSON.stringify({
 // computing it. Checked rather than remembered: this is exactly the drift the
 // fixtures exist to catch, and it would be invisible in the one place looking
 // for drift.
-const KNOWN_STATE_KEYS = ['messages', 'pending_approvals', 'active_run', 'head_seq'];
+const KNOWN_STATE_KEYS = ['messages', 'pending_approvals', 'active_run', 'head_seq', 'plan'];
 const KNOWN_MESSAGE_KEYS = ['role', 'text', 'reasoning', 'tool_calls'];
 const KNOWN_CALL_KEYS = ['name', 'completed', 'is_error', 'artifact'];
+const KNOWN_PLAN_KEYS = ['id', 'title', 'status'];
 
 const unknownKeys = (object, known) => Object.keys(object || {}).filter((k) => !known.includes(k));
 
 const uncompared = (expected) => {
   const missed = unknownKeys(expected, KNOWN_STATE_KEYS);
+  for (const step of expected.plan || []) {
+    missed.push(...unknownKeys(step, KNOWN_PLAN_KEYS));
+  }
   for (const message of expected.messages || []) {
     missed.push(...unknownKeys(message, KNOWN_MESSAGE_KEYS));
     for (const call of message.tool_calls || []) {

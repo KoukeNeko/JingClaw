@@ -45,6 +45,16 @@ type SessionStore interface {
 	SetSessionModel(ctx context.Context, id domain.SessionID, model string, at time.Time) error
 }
 
+// PlanStore holds what the agent said it was going to do.
+//
+// Read back rather than kept in memory: a plan that did not survive a restart
+// would be one the agent forgot every time the daemon was updated, which is
+// exactly when somebody is most likely to be watching.
+type PlanStore interface {
+	Plan(ctx context.Context, session domain.SessionID) ([]domain.PlanItem, error)
+	SetPlan(ctx context.Context, session domain.SessionID, items []domain.PlanItem, at time.Time) error
+}
+
 type RunStore interface {
 	CreateRun(ctx context.Context, run domain.Run) error
 
@@ -171,6 +181,7 @@ type MemoryScopeRef struct {
 }
 
 type Store interface {
+	PlanStore
 	SessionStore
 	RunStore
 	ApprovalStore

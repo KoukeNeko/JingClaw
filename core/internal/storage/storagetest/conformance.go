@@ -51,6 +51,10 @@ func Run(t *testing.T, newStore Factory) {
 		"MemorySearchRespectsScope":   testMemorySearchRespectsScope,
 		"MemoryForgetActuallyRemoves": testMemoryForgetActuallyRemoves,
 		"MemoryProvenanceSurvives":    testMemoryProvenanceSurvives,
+		"PlanRoundTrip":               testPlanRoundTrip,
+		"PlanIsEmptyBeforeOneIsMade":  testPlanIsEmptyBeforeOneIsMade,
+		"PlanReplacesRatherThanAdds":  testPlanReplacesRatherThanAdds,
+		"PlansAreSeparatePerSession":  testPlansAreSeparatePerSession,
 	}
 
 	for name, fn := range tests {
@@ -872,5 +876,97 @@ func testMemoryProvenanceSurvives(t *testing.T, newStore Factory) {
 	}
 	if found.ApprovedBy != "operator" {
 		t.Errorf("who approved it came back as %q", found.ApprovedBy)
+	}
+}
+
+// A plan has to survive being written and read back, with every field. A
+// status that came back empty would make a finished step look pending.
+func testPlanRoundTrip(t *testing.T, newStore Factory) {
+	ctx, store := context.Background(), newStore(t)
+	session := mustCreateSession(t, store, "ses_plan")
+
+	want := []domain.PlanItem{
+		{ID: "todo_1", Title: "read the failing test", Status: domain.PlanCompleted},
+		{ID: "todo_2", Title: "fix it", Status: domain.PlanInProgress},
+		{ID: "todo_3", Title: "check the others still pass", Status: domain.PlanPending},
+		{ID: "todo_4", Title: "rewrite the module", Status: domain.PlanAbandoned,
+			Note: "not needed once the timeout was raised"},
+	}
+	if err := store.SetPlan(ctx, session.ID, want, time.Unix(1, 0)); err != nil {
+		t.Fatalf("set plan: %v", err)
+	}
+
+	got, err := store.Plan(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("read back %d items, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("item %d is %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// Most sessions never make a plan. That is an empty list, not an error.
+func testPlanIsEmptyBeforeOneIsMade(t *testing.T, newStore Factory) {
+	ctx, store := context.Background(), newStore(t)
+	session := mustCreateSession(t, store, "ses_noplan")
+
+	items, err := store.Plan(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("a session that made no plan has %d items", len(items))
+	}
+}
+
+// Writing a plan replaces the one before it. Appending would make a step
+// removed from the plan reappear in the next write.
+func testPlanReplacesRatherThanAdds(t *testing.T, newStore Factory) {
+	ctx, store := context.Background(), newStore(t)
+	session := mustCreateSession(t, store, "ses_changing")
+
+	first := []domain.PlanItem{{ID: "todo_1", Title: "one", Status: domain.PlanPending}}
+	if err := store.SetPlan(ctx, session.ID, first, time.Unix(1, 0)); err != nil {
+		t.Fatalf("set plan: %v", err)
+	}
+
+	second := []domain.PlanItem{{ID: "todo_2", Title: "two", Status: domain.PlanPending}}
+	if err := store.SetPlan(ctx, session.ID, second, time.Unix(2, 0)); err != nil {
+		t.Fatalf("set plan again: %v", err)
+	}
+
+	got, err := store.Plan(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "todo_2" {
+		t.Errorf("the second write did not replace the first: %+v", got)
+	}
+}
+
+// A plan belongs to its session. One that leaked would have the agent working
+// from another conversation's list.
+func testPlansAreSeparatePerSession(t *testing.T, newStore Factory) {
+	ctx, store := context.Background(), newStore(t)
+	mine := mustCreateSession(t, store, "ses_mine")
+	theirs := mustCreateSession(t, store, "ses_theirs")
+
+	if err := store.SetPlan(ctx, mine.ID,
+		[]domain.PlanItem{{ID: "todo_1", Title: "mine", Status: domain.PlanPending}},
+		time.Unix(1, 0)); err != nil {
+		t.Fatalf("set plan: %v", err)
+	}
+
+	other, err := store.Plan(ctx, theirs.ID)
+	if err != nil {
+		t.Fatalf("read the other plan: %v", err)
+	}
+	if len(other) != 0 {
+		t.Errorf("a plan leaked into another session: %+v", other)
 	}
 }

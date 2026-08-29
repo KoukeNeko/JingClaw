@@ -224,6 +224,7 @@ func newImageHarness(
 		NewMessageID:  next("msg"),
 		NewEventID:    next("evt"),
 		NewApprovalID: next("apr"),
+		NewPlanItemID: next("todo"),
 		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
 		Logger:        slog.New(slog.DiscardHandler),
 	})

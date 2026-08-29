@@ -184,6 +184,11 @@ type Options struct {
 	NewEventID    IDGenerator
 	NewApprovalID IDGenerator
 
+	// NewPlanItemID names a step in the plan. Its own generator because these
+	// ids are shown to the model and typed back by it, so they want to be
+	// short and readable rather than shaped like everything else.
+	NewPlanItemID IDGenerator
+
 	Now    func() time.Time
 	Logger *slog.Logger
 }
@@ -204,6 +209,10 @@ type Runtime struct {
 // activeRun tracks a run this process is currently driving. Runs that have
 // finished, or that belong to a previous process, live only in storage.
 type activeRun struct {
+	// session is which conversation this run belongs to, so a tool call can
+	// find the run it is inside without being handed it.
+	session domain.SessionID
+
 	cancel context.CancelCauseFunc
 	done   chan struct{}
 }
@@ -231,6 +240,7 @@ func New(ctx context.Context, opts Options) *Runtime {
 		"NewMessageID":  opts.NewMessageID,
 		"NewEventID":    opts.NewEventID,
 		"NewApprovalID": opts.NewApprovalID,
+		"NewPlanItemID": opts.NewPlanItemID,
 	}
 	for name, value := range required {
 		if isNilOption(value) {
@@ -434,7 +444,7 @@ func (r *Runtime) SendTurnTo(
 	// request, so the run outlives the RPC that started it.
 	runCtx, cancel := context.WithCancelCause(r.groupCtx)
 
-	tracked := &activeRun{cancel: cancel, done: make(chan struct{})}
+	tracked := &activeRun{session: sessionID, cancel: cancel, done: make(chan struct{})}
 
 	r.mu.Lock()
 	r.active[runID] = tracked
@@ -532,7 +542,7 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 
 		calls, err := r.generateTurn(ctx, run, provider.Request{
 			Model:    r.modelFor(ctx, run.SessionID),
-			System:   system,
+			System:   r.withPlan(ctx, run.SessionID, system),
 			Messages: messages,
 			Tools:    declarations,
 		})
@@ -1222,6 +1232,37 @@ func (r *Runtime) toolDeclarations() []provider.ToolDeclaration {
 		})
 	}
 	return declarations
+}
+
+// withPlan appends the current plan to the system prompt for one turn.
+//
+// Fresh each turn rather than pinned with the rest of the prompt, because the
+// plan is the one part of it the model itself changes: pinned, the model would
+// mark a step done and then be shown the old list on the next turn, which is
+// worse than having no plan at all.
+//
+// Not counted in the overhead estimate above, which is fixed for the run. The
+// plan is bounded at twenty short lines, so what it can add is bounded too;
+// history is what grows without limit, and that is what the estimate is
+// protecting against.
+func (r *Runtime) withPlan(
+	ctx context.Context,
+	session domain.SessionID,
+	system []provider.ContentBlock,
+) []provider.ContentBlock {
+	items, err := r.opts.Store.Plan(ctx, session)
+	if err != nil {
+		// A plan that cannot be read is a reason to answer without it, not a
+		// reason to fail the turn. The model still has its tools.
+		r.opts.Logger.Warn("could not read the plan", "session_id", string(session), "error", err)
+		return system
+	}
+
+	rendered := renderPlan(items)
+	if rendered == "" {
+		return system
+	}
+	return append(append([]provider.ContentBlock{}, system...), provider.Text(rendered)...)
 }
 
 func (r *Runtime) systemPrompt(ctx context.Context, run domain.Run) ([]provider.ContentBlock, error) {

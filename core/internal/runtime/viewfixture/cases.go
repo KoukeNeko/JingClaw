@@ -102,6 +102,35 @@ func Cases() []Case {
 			},
 		},
 		{
+			Name: "the plan is replaced, not accumulated",
+			Why: "The event carries the whole plan after each change. A " +
+				"client that appended would show every step twice and the " +
+				"finished ones as still pending.",
+			Events: []Event{
+				user(1, "msg_1", "fix the failing test"),
+				planned(2, [][3]string{
+					{"todo_1", "read the test", "pending"},
+					{"todo_2", "fix it", "pending"},
+				}),
+				planned(3, [][3]string{
+					{"todo_1", "read the test", "completed"},
+					{"todo_2", "fix it", "in_progress"},
+				}),
+				delta(4, "msg_2", "Working on it."),
+			},
+			Expected: State{
+				Messages: []Message{
+					{Role: RoleUser, Text: "fix the failing test"},
+					{Role: RoleAssistant, Text: "Working on it."},
+				},
+				Plan: []PlanStep{
+					{ID: "todo_1", Title: "read the test", Status: "completed"},
+					{ID: "todo_2", Title: "fix it", Status: "in_progress"},
+				},
+				HeadSeq: 4,
+			},
+		},
+		{
 			Name: "a failed call is not a finished one",
 			Why: "A client showing every completed call the same way tells " +
 				"somebody the work was done.",
@@ -272,6 +301,18 @@ func toolCompleted(seq uint64, call, name string, failed bool) Event {
 	return Event{Seq: seq, Kind: "tool.completed", Body: body(map[string]any{
 		"call_id": call, "name": name, "is_error": failed,
 	})}
+}
+
+// planned is one plan announcement. The steps are given as id, title and
+// status so a case reads as a plan rather than as a struct literal.
+func planned(seq uint64, steps [][3]string) Event {
+	items := make([]map[string]string, 0, len(steps))
+	for _, step := range steps {
+		items = append(items, map[string]string{
+			"id": step[0], "title": step[1], "status": step[2],
+		})
+	}
+	return Event{Seq: seq, Kind: "plan.changed", Body: body(map[string]any{"items": items})}
 }
 
 func toolStored(seq uint64, call, name, artifact string) Event {

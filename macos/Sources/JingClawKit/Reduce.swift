@@ -69,6 +69,14 @@ public enum Reducer {
             // draws is the notice and whatever follows.
             next.messages = [Message(role: .assistant, text: foldNotice)]
 
+        case "plan.changed":
+            // The whole plan, replacing whatever was there. The event carries
+            // the list rather than the change, so a client that joined late
+            // reads one entry and knows where things stand.
+            next.plan = (event.body.items ?? []).map {
+                PlanStep(id: $0.id, title: $0.title, status: $0.status, note: $0.note)
+            }
+
         case "run.state_changed":
             let run = event.body.runID ?? ""
             let status = event.body.status ?? ""

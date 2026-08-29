@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -363,9 +364,15 @@ func run() error {
 		NewMessageID:    func() string { return id.WithPrefix("msg") },
 		NewEventID:      func() string { return id.WithPrefix("evt") },
 		NewApprovalID:   func() string { return id.WithPrefix("apr") },
+		NewPlanItemID:   planItemIDs(),
 		Now:             time.Now,
 		Logger:          logger,
 	})
+
+	// Registered after the runtime exists, because this is the one tool whose
+	// collaborator is the runtime itself. Before it is serving, so a run
+	// cannot start without the plan being reachable.
+	tools.MustRegister(&builtin.TodoUpdate{Planner: rt})
 
 	// Runs that were live when this process last stopped have nobody driving
 	// them. Resolving them before serving means clients never see a run that
@@ -1066,4 +1073,17 @@ func applyFlagOverrides(cfg *config.Config, providerName, model, workspaceDir, d
 	if passed["max-iterations"] {
 		cfg.Agent.MaxIterations = *maxIters
 	}
+}
+
+// planItemIDs names the steps of a plan.
+//
+// Short and countable rather than shaped like every other id here. These are
+// put in front of the model and typed back by it, and a model asked to repeat
+// "todo_01M167Z4RHHNVESFHHM7H6VNZY" gets it wrong often enough to matter.
+//
+// Per process rather than per session, so two sessions planning at once
+// cannot be handed the same name for different steps.
+func planItemIDs() runtime.IDGenerator {
+	var counter atomic.Uint64
+	return func() string { return fmt.Sprintf("todo_%d", counter.Add(1)) }
 }

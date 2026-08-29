@@ -18,16 +18,64 @@ public struct SessionState: Equatable, Sendable {
     /// The last event accounted for, which is where a client resumes.
     public var headSeq: UInt64
 
+    /// What the agent said it was going to do. Empty for the sessions that
+    /// never said, which is most of them.
+    public var plan: [PlanStep]
+
     public init(
         messages: [Message] = [],
         pendingApprovals: [String] = [],
         activeRun: String = "",
-        headSeq: UInt64 = 0
+        headSeq: UInt64 = 0,
+        plan: [PlanStep] = []
     ) {
         self.messages = messages
         self.pendingApprovals = pendingApprovals
         self.activeRun = activeRun
         self.headSeq = headSeq
+        self.plan = plan
+    }
+}
+
+/// One step of the agent's plan as a client draws it.
+public struct PlanStep: Equatable, Sendable, Decodable {
+    public var id: String
+    public var title: String
+    public var status: String
+
+    /// Why a step was dropped. Worth showing: "rewrite the retry module:
+    /// dropped" without it looks like something that was forgotten.
+    public var note: String
+
+    public init(id: String, title: String = "", status: String = "", note: String = "") {
+        self.id = id
+        self.title = title
+        self.status = status
+        self.note = note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
+        note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, status, note
+    }
+
+    /// The short word shown against a step. The wire carries the enum's own
+    /// name where it came from an event and its lower-case form where it came
+    /// from the session view, so both are read here rather than in the view.
+    public var mark: String {
+        switch status.uppercased().replacingOccurrences(of: "PLAN_STATUS_", with: "") {
+        case "COMPLETED": return "done"
+        case "IN_PROGRESS": return "doing"
+        case "ABANDONED": return "dropped"
+        default: return "todo"
+        }
     }
 }
 
@@ -116,6 +164,9 @@ public struct EventBody: Sendable, Decodable {
     public var status: String?
     public var artifact: ArtifactRef?
 
+    /// The steps of a plan announcement. Named `items` on the wire.
+    public var items: [PlanStep]?
+
     public init(
         text: String? = nil,
         name: String? = nil,
@@ -123,7 +174,8 @@ public struct EventBody: Sendable, Decodable {
         approvalID: String? = nil,
         runID: String? = nil,
         status: String? = nil,
-        artifact: ArtifactRef? = nil
+        artifact: ArtifactRef? = nil,
+        items: [PlanStep]? = nil
     ) {
         self.text = text
         self.name = name
@@ -132,6 +184,7 @@ public struct EventBody: Sendable, Decodable {
         self.runID = runID
         self.status = status
         self.artifact = artifact
+        self.items = items
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -142,6 +195,7 @@ public struct EventBody: Sendable, Decodable {
         case runID = "run_id"
         case status
         case artifact
+        case items
     }
 }
 

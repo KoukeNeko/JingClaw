@@ -98,6 +98,25 @@ func Reduce(state State, event Event) State {
 		// is the notice and whatever follows.
 		state.Messages = []Message{{Role: RoleAssistant, Text: foldNotice}}
 
+	case "plan.changed":
+		// The whole plan, replacing whatever was there. The event carries the
+		// list rather than the change, so a client that joined late reads one
+		// entry and knows where things stand.
+		var payload struct {
+			Items []struct {
+				ID     string `json:"id"`
+				Title  string `json:"title"`
+				Status string `json:"status"`
+			} `json:"items"`
+		}
+		_ = json.Unmarshal(event.Body, &payload)
+		state.Plan = nil
+		for _, item := range payload.Items {
+			state.Plan = append(state.Plan, PlanStep{
+				ID: item.ID, Title: item.Title, Status: item.Status,
+			})
+		}
+
 	case "run.state_changed":
 		var payload struct {
 			RunID  string `json:"run_id"`

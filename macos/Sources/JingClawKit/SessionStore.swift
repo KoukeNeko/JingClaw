@@ -268,6 +268,10 @@ struct SessionListResponse: Decodable {
     var sessions: [SessionSummary]?
 }
 
+struct PlanResponse: Decodable {
+    var plan: [PlanStep]?
+}
+
 struct ModelListResponse: Decodable {
     struct Model: Decodable { var id: String }
 

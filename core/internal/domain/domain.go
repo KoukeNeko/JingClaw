@@ -267,6 +267,7 @@ const (
 	EventToolCallCompleted         EventKind = "tool.completed"
 	EventConversationCompacted     EventKind = "conversation.compacted"
 	EventRunDirections             EventKind = "run.directions"
+	EventPlanChanged               EventKind = "plan.changed"
 )
 
 // ToolCallID identifies one tool invocation within a run.
@@ -470,6 +471,7 @@ func AllEventKinds() []EventKind {
 		EventToolCallCompleted,
 		EventConversationCompacted,
 		EventRunDirections,
+		EventPlanChanged,
 		EventApprovalRequested,
 		EventApprovalResolved,
 	}
@@ -485,6 +487,7 @@ func (ToolCallRequested) isEventPayload()         {}
 func (ToolCallCompleted) isEventPayload()         {}
 func (ConversationCompacted) isEventPayload()     {}
 func (RunDirections) isEventPayload()             {}
+func (PlanChanged) isEventPayload()               {}
 
 // StopReason says why a generation ended. Providers spell this differently;
 // the runtime needs one vocabulary to decide whether a turn is genuinely
@@ -626,6 +629,112 @@ type ApprovalRequested struct {
 	// Preview is the call rendered for review, where the tool could render
 	// one. See Approval.Preview.
 	Preview string
+}
+
+// PlanItem is one step of what the agent says it is going to do.
+//
+// The plan is agent state rather than something written into an answer. A
+// model that describes its plan in prose has to find it again in its own
+// output next turn, and a person watching has to read a paragraph to learn
+// what is left — so it is neither reliable for the model nor legible for
+// anybody else.
+type PlanItem struct {
+	ID     string
+	Title  string
+	Status PlanStatus
+
+	// Note is why a step was abandoned, or anything the model wanted recorded
+	// against it. Optional, and usually empty.
+	Note string
+}
+
+// PlanStatus is where one step has got to.
+type PlanStatus string
+
+const (
+	PlanPending    PlanStatus = "pending"
+	PlanInProgress PlanStatus = "in_progress"
+	PlanCompleted  PlanStatus = "completed"
+
+	// PlanAbandoned is a step that will not be done, said rather than
+	// deleted. A step that disappears reads as one that was finished.
+	PlanAbandoned PlanStatus = "abandoned"
+)
+
+// IsTerminal reports whether a step is done with, either way.
+func (s PlanStatus) IsTerminal() bool {
+	return s == PlanCompleted || s == PlanAbandoned
+}
+
+// IsValid reports whether this is a state a step can actually be in.
+func (s PlanStatus) IsValid() bool {
+	switch s {
+	case PlanPending, PlanInProgress, PlanCompleted, PlanAbandoned:
+		return true
+	default:
+		return false
+	}
+}
+
+// Mark is the short word shown against a step.
+//
+// On the status rather than in each place that draws one: the plan is
+// rendered for the model, for a chat channel and for three clients, and four
+// copies of the same switch is four places for "dropped" to quietly become
+// "done".
+func (s PlanStatus) Mark() string {
+	switch s {
+	case PlanCompleted:
+		return "done"
+	case PlanInProgress:
+		return "doing"
+	case PlanAbandoned:
+		return "dropped"
+	default:
+		return "todo"
+	}
+}
+
+// PlanOpRequest is one change to the plan, as asked for.
+//
+// Operations rather than the whole list, which is the difference between a
+// plan that survives being edited and one that does not. Asked to rewrite the
+// list, a model drops ids it does not think matter, revives steps it already
+// finished, and reorders ones that were waiting on each other — and none of
+// that is visible as an error, because a list is a valid list whatever is in
+// it.
+type PlanOpRequest struct {
+	// Op is add, set_status or set_title.
+	Op string
+
+	// ID names an existing step, for everything but add.
+	ID string
+
+	// Title is the step's text, for add and set_title.
+	Title string
+
+	// Status is where it has got to, for set_status.
+	Status PlanStatus
+
+	// Note is why, usually only when abandoning something.
+	Note string
+}
+
+// Plan operation names, as the tool's schema spells them.
+const (
+	PlanOpAdd       = "add"
+	PlanOpSetStatus = "set_status"
+	PlanOpSetTitle  = "set_title"
+)
+
+// PlanChanged carries the whole plan after a change, not the change itself.
+//
+// Whole on purpose. A client that joined late, or one resuming after events
+// were pruned, reads one event and knows the plan; replaying a sequence of
+// operations to arrive at it would make the plan the one thing in this log
+// that cannot be understood from a single entry.
+type PlanChanged struct {
+	Items []PlanItem
 }
 
 // ApprovalResolved records the answer and who gave it.

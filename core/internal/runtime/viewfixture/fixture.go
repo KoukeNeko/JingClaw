@@ -57,6 +57,17 @@ type State struct {
 	// HeadSeq is the last event accounted for, which is where a client
 	// resumes.
 	HeadSeq uint64 `json:"head_seq"`
+
+	// Plan is what the agent said it was going to do. Empty for the sessions
+	// that never said, which is most of them.
+	Plan []PlanStep `json:"plan,omitempty"`
+}
+
+// PlanStep is one step of the agent's plan as a client draws it.
+type PlanStep struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
 }
 
 // Message is one turn as a client draws it.

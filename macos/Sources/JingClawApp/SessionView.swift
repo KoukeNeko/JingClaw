@@ -24,6 +24,13 @@ struct SessionView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
             VStack(spacing: 0) {
+                // Above the conversation: a plan is where the work is now,
+                // and drawn among the messages it would scroll away exactly
+                // when it became useful.
+                if !store.state.plan.isEmpty {
+                    PlanPanel(plan: store.state.plan)
+                }
+
                 Timeline(state: store.state, store: store)
 
                 if !store.state.pendingApprovals.isEmpty {
@@ -110,6 +117,54 @@ private struct SessionList: View {
             get: { store.selected },
             set: { id in if let id { Task { await store.open(id) } } }
         )
+    }
+}
+
+/// What the agent said it was going to do.
+private struct PlanPanel: View {
+    let plan: [PlanStep]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(plan, id: \.id) { step in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(step.mark)
+                            .font(.caption)
+                            .foregroundStyle(finished(step) ? .green : .secondary)
+                            .frame(width: 48, alignment: .trailing)
+
+                        Text(step.title)
+                            .font(.callout)
+                            .strikethrough(finished(step))
+                            .foregroundStyle(finished(step) ? .secondary : .primary)
+                            .fontWeight(step.mark == "doing" ? .semibold : .regular)
+
+                        // Why a step was dropped, which is the part worth
+                        // reading: without it, a dropped step looks like one
+                        // that was forgotten.
+                        if !step.note.isEmpty {
+                            Text("— \(step.note)")
+                                .font(.caption.italic())
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: 140)
+        .background(.quaternary.opacity(0.3))
+    }
+
+    /// Dropped and done are both finished, and both are struck through. A
+    /// step that was abandoned is still one nobody is waiting on.
+    private func finished(_ step: PlanStep) -> Bool {
+        step.mark == "done" || step.mark == "dropped"
     }
 }
 

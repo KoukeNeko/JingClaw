@@ -290,6 +290,11 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 			},
 		}
 
+	case domain.PlanChanged:
+		out.Payload = &controlv1.Event_PlanChanged{
+			PlanChanged: &controlv1.PlanChanged{Items: planItemsToProto(p.Items)},
+		}
+
 	case domain.ApprovalRequested:
 		out.Payload = &controlv1.Event_ApprovalRequested{
 			ApprovalRequested: &controlv1.ApprovalRequested{
@@ -352,6 +357,7 @@ func sessionViewToProto(view runtime.SessionView) *controlv1.GetSessionViewRespo
 		Session:   sessionToProto(view.Session),
 		HeadSeq:   uint64(view.HeadSeq),
 		Truncated: view.Truncated,
+		Plan:      planItemsToProto(view.Plan),
 	}
 
 	out.Messages = make([]*controlv1.ViewMessage, 0, len(view.Messages))
@@ -404,5 +410,33 @@ func messageRoleToProto(role domain.MessageRole) controlv1.MessageRole {
 		return controlv1.MessageRole_MESSAGE_ROLE_ASSISTANT
 	default:
 		return controlv1.MessageRole_MESSAGE_ROLE_UNSPECIFIED
+	}
+}
+
+func planItemsToProto(items []domain.PlanItem) []*controlv1.PlanItem {
+	out := make([]*controlv1.PlanItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, &controlv1.PlanItem{
+			Id:     item.ID,
+			Title:  item.Title,
+			Status: planStatusToProto(item.Status),
+			Note:   item.Note,
+		})
+	}
+	return out
+}
+
+func planStatusToProto(status domain.PlanStatus) controlv1.PlanStatus {
+	switch status {
+	case domain.PlanPending:
+		return controlv1.PlanStatus_PLAN_STATUS_PENDING
+	case domain.PlanInProgress:
+		return controlv1.PlanStatus_PLAN_STATUS_IN_PROGRESS
+	case domain.PlanCompleted:
+		return controlv1.PlanStatus_PLAN_STATUS_COMPLETED
+	case domain.PlanAbandoned:
+		return controlv1.PlanStatus_PLAN_STATUS_ABANDONED
+	default:
+		return controlv1.PlanStatus_PLAN_STATUS_UNSPECIFIED
 	}
 }

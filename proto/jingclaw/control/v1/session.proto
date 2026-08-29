@@ -466,6 +466,12 @@ message GetSessionViewResponse {
 
   // Truncated says older messages exist than the ones returned.
   bool truncated = 6;
+
+  // What the agent said it was going to do, if it said anything. Here as well
+  // as on the event because a client that opened a session rather than
+  // watching it happen would otherwise see a run working through a plan it
+  // cannot see.
+  repeated PlanItem plan = 7;
 }
 
 // ViewMessage is one turn as a client would draw it.

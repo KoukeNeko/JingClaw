@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,8 +23,9 @@ import (
 // is what would go over the wire to a real provider, and a test that asserts
 // on a call to its own code proves nothing about that.
 type watchingProvider struct {
-	mu    sync.Mutex
-	asked []string
+	mu       sync.Mutex
+	asked    []string
+	prompted []string
 }
 
 func (p *watchingProvider) Name() string { return "watching" }
@@ -38,6 +40,7 @@ func (p *watchingProvider) Generate(
 ) (provider.Stream, error) {
 	p.mu.Lock()
 	p.asked = append(p.asked, req.Model)
+	p.prompted = append(p.prompted, systemText(req))
 	p.mu.Unlock()
 
 	return &oneWord{}, nil
@@ -47,6 +50,24 @@ func (p *watchingProvider) models() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]string{}, p.asked...)
+}
+
+// prompts is what the model was actually told, per turn.
+func (p *watchingProvider) prompts() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string{}, p.prompted...)
+}
+
+func systemText(req provider.Request) string {
+	var out strings.Builder
+	for _, block := range req.System {
+		if text, ok := block.(provider.TextBlock); ok {
+			out.WriteString(text.Text)
+			out.WriteString("\n")
+		}
+	}
+	return out.String()
 }
 
 type oneWord struct{ done bool }
@@ -85,6 +106,7 @@ func newModelRuntime(t *testing.T) (*runtime.Runtime, *watchingProvider) {
 		NewMessageID:  next("msg"),
 		NewEventID:    next("evt"),
 		NewApprovalID: next("apr"),
+		NewPlanItemID: planSteps(),
 		Now:           time.Now,
 		Logger:        slog.New(slog.DiscardHandler),
 	}), watching
@@ -197,4 +219,12 @@ func TestAChoiceBelongsToItsSession(t *testing.T) {
 	if asked[0] != "small" {
 		t.Errorf("a session that never chose was asked for %q", asked[0])
 	}
+}
+
+// planSteps names plan items the way the daemon does: short, countable, and
+// separate from every other id, because these are shown to the model and
+// typed back by it.
+func planSteps() runtime.IDGenerator {
+	var counter atomic.Uint64
+	return func() string { return fmt.Sprintf("todo_%d", counter.Add(1)) }
 }

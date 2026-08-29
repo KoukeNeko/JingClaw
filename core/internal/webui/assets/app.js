@@ -31,6 +31,7 @@ const state = {
   // already on screen rather than each becoming one.
   openMessage: null,
   openReasoning: null,
+  plan: [],
 };
 
 // ---------------------------------------------------------------- transport
@@ -304,10 +305,12 @@ async function selectSession(id) {
   state.seq = 0;
   state.openMessage = null;
   state.approvals.clear();
+  state.plan = [];
   state.runId = null;
   setRunStatus('');
 
   el('timeline').replaceChildren();
+  renderPlan();
   el('session-title').textContent = titleOf(id);
   el('input').disabled = false;
   el('send').disabled = false;
@@ -397,6 +400,12 @@ async function openFromView(id) {
     // Everything, not a summary of it. A person opening a session where
     // something is already waiting is being asked to allow a call, and
     // narrowing this is what left them approving one they could not see.
+    // From the view as well as from events: a session opened rather than
+    // watched would otherwise show a run working through a plan nobody can
+    // see.
+    state.plan = view.plan || [];
+    renderPlan();
+
     state.approvals.clear();
     for (const approval of view.pendingApprovals || []) {
       remember(approval);
@@ -523,6 +532,11 @@ function applyEvent(event) {
   if (event.assistantTextDelta) {
     state.openReasoning = null;
     return appendAssistant(event.assistantTextDelta.text || '');
+  }
+
+  if (event.planChanged) {
+    state.plan = event.planChanged.items || [];
+    return renderPlan();
   }
 
   if (event.assistantReasoningDelta) {
@@ -791,6 +805,67 @@ function remember(source) {
   const approval = approvalFrom(source);
   if (!approval.approvalId) return;
   state.approvals.set(approval.approvalId, approval);
+}
+
+// renderPlan draws what the agent said it was going to do.
+//
+// Above the timeline rather than in it, because a plan is where the work is
+// now and not something that happened: drawn as a line among the messages, it
+// would scroll away exactly when it became useful.
+function renderPlan() {
+  const panel = el('plan');
+  panel.replaceChildren();
+  panel.hidden = !state.plan || state.plan.length === 0;
+  if (panel.hidden) return;
+
+  for (const step of state.plan) {
+    const row = document.createElement('div');
+    row.className = `step ${planClass(step.status)}`;
+
+    const mark = document.createElement('span');
+    mark.className = 'mark';
+    mark.textContent = planMark(step.status);
+
+    const title = document.createElement('span');
+    title.className = 'title';
+    title.textContent = step.title || '';
+
+    // The note is why a step was dropped, which is the part worth reading —
+    // "rewrite the retry module: dropped" without it looks like something
+    // that was forgotten.
+    if (step.note) {
+      const why = document.createElement('span');
+      why.className = 'why';
+      // A non-breaking space: inline-block collapses a leading one, and
+      // "module— because" reads as a typo rather than as a separator.
+      why.textContent = `\u00a0— ${step.note}`;
+      title.append(why);
+    }
+
+    row.append(mark, title);
+    panel.append(row);
+  }
+}
+
+// The wire spells a status two ways: the enum's own name on an event, and its
+// lower-case form in the session view. Both are read here rather than in two
+// places that will drift.
+function planStatus(status) {
+  return String(status || '').replace('PLAN_STATUS_', '').toLowerCase();
+}
+
+function planClass(status) {
+  const named = planStatus(status);
+  return named === 'completed' || named === 'abandoned' ? 'finished' : named;
+}
+
+function planMark(status) {
+  switch (planStatus(status)) {
+    case 'completed': return 'done';
+    case 'in_progress': return 'doing';
+    case 'abandoned': return 'dropped';
+    default: return 'todo';
+  }
 }
 
 function renderApprovals() {

@@ -515,6 +515,9 @@ func describe(ev *controlv1.Event, showOutput bool) (label, detail string) {
 	case *controlv1.Event_AssistantTextDelta:
 		return "assistant.delta", payload.AssistantTextDelta.GetText()
 
+	case *controlv1.Event_PlanChanged:
+		return "plan", renderPlanLine(payload.PlanChanged.GetItems())
+
 	case *controlv1.Event_AssistantReasoningDelta:
 		return "assistant.thinking", payload.AssistantReasoningDelta.GetText()
 
@@ -1022,4 +1025,35 @@ func compact(value string, limit int) string {
 		return value[:limit] + "…"
 	}
 	return value
+}
+
+// renderPlanLine is a plan on one line, for a stream of events.
+//
+// One line because this appears every time a step moves. The whole list every
+// time would bury everything else the run is doing, and the thing worth
+// knowing is how far along it is and what it is on.
+func renderPlanLine(items []*controlv1.PlanItem) string {
+	if len(items) == 0 {
+		return "(empty)"
+	}
+
+	var done int
+	current := ""
+	for _, item := range items {
+		switch item.GetStatus() {
+		case controlv1.PlanStatus_PLAN_STATUS_COMPLETED,
+			controlv1.PlanStatus_PLAN_STATUS_ABANDONED:
+			done++
+		case controlv1.PlanStatus_PLAN_STATUS_IN_PROGRESS:
+			if current == "" {
+				current = item.GetTitle()
+			}
+		}
+	}
+
+	line := fmt.Sprintf("%d/%d", done, len(items))
+	if current != "" {
+		line += "  " + current
+	}
+	return line
 }

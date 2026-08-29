@@ -202,6 +202,33 @@ button.danger { color: var(--error); }
   max-width: 16rem;
 }
 
+/* The plan sits above the conversation: it is where the work is now, and
+   drawn among the messages it would scroll away exactly when it mattered. */
+#plan {
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+#plan .step { display: grid; grid-template-columns: 3.5rem 1fr; gap: 0.6rem; font-size: 0.82rem; }
+#plan .mark { color: var(--ink-dim); text-align: right; }
+#plan .in_progress .title { font-weight: 600; }
+#plan .finished .title { color: var(--ink-dim); text-decoration: line-through; }
+#plan .finished .mark { color: var(--ok); }
+/* inline-block, not just text-decoration: none — a child cannot cancel a
+   line-through inherited from its parent, only a new decoration context can.
+   Without it the reason a step was dropped is struck through as well. */
+#plan .why {
+  display: inline-block;
+  color: var(--ink-dim);
+  text-decoration: none;
+  font-style: italic;
+}
+
 #timeline li { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.75rem; padding: 0.18rem 0; }
 
 .kind { color: var(--ink-dim); font-size: 0.76rem; text-align: right; padding-top: 0.25rem; }

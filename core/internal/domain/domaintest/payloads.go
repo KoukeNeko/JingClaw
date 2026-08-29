@@ -89,6 +89,13 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			Text: "Standing directions you were given in earlier sessions:\n\n" +
 				"- prefer table-driven tests",
 		},
+		domain.EventPlanChanged: domain.PlanChanged{
+			Items: []domain.PlanItem{
+				{ID: "todo_1", Title: "找出 failing test 的原因", Status: domain.PlanCompleted},
+				{ID: "todo_2", Title: "改掉 timeout", Status: domain.PlanInProgress},
+				{ID: "todo_3", Title: "跑一次測試確認", Status: domain.PlanPending},
+			},
+		},
 		domain.EventApprovalRequested: domain.ApprovalRequested{
 			ApprovalID: "apr_1",
 			CallID:     "call_2",

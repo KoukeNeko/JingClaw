@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -220,6 +221,22 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		return p.enqueue(ctx, run, target, DispatchMessage, MessagePayload{
 			Text:      p.peek(payload.MessageID),
 			MessageID: string(payload.MessageID),
+		})
+
+	case domain.PlanChanged:
+		// A channel is told what the agent is doing, not shown the list every
+		// time a step moves. A plan of six steps posted on each change is six
+		// messages saying almost the same thing, above the answer somebody is
+		// waiting for.
+		//
+		// The status line is where "what is it doing now" already lives, so
+		// that is where this goes.
+		if !p.shouldSayWorking(run.ID) {
+			return nil
+		}
+		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
+			State:  "working",
+			Detail: describePlan(payload.Items),
 		})
 
 	case domain.AssistantReasoningDelta:
@@ -653,4 +670,27 @@ func externalTarget(run domain.Run) (ConversationRef, bool) {
 		}
 	}
 	return ConversationRef{}, false
+}
+
+// describePlan is one line about where a plan has got to.
+//
+// A count and the step in hand. The titles of the others are not useful to
+// somebody watching a channel: what they want to know is whether it is
+// getting on with it and what it is on now.
+func describePlan(items []domain.PlanItem) string {
+	var done int
+	current := ""
+	for _, item := range items {
+		if item.Status.IsTerminal() {
+			done++
+		}
+		if item.Status == domain.PlanInProgress && current == "" {
+			current = item.Title
+		}
+	}
+
+	if current == "" {
+		return fmt.Sprintf("plan: %d of %d done", done, len(items))
+	}
+	return fmt.Sprintf("plan: %d of %d done — %s", done, len(items), current)
 }

@@ -15,7 +15,7 @@ export const ROLE_ASSISTANT = 'assistant';
 export const FOLD_NOTICE = '[earlier turns were folded into a summary]';
 
 export function emptyState() {
-  return { messages: [], pending_approvals: [], active_run: '', head_seq: 0 };
+  return { messages: [], pending_approvals: [], active_run: '', head_seq: 0, plan: [] };
 }
 
 // reduce applies one event and returns the new state.
@@ -25,6 +25,7 @@ export function reduce(state, event) {
     pending_approvals: [...state.pending_approvals],
     active_run: state.active_run,
     head_seq: Number(event.seq),
+    plan: (state.plan || []).map((step) => ({ ...step })),
   };
 
   const body = event.body || {};
@@ -87,6 +88,15 @@ export function reduce(state, event) {
       // Everything before the fold is a summary now, so what a client draws is
       // the notice and whatever follows.
       next.messages = [{ role: ROLE_ASSISTANT, text: FOLD_NOTICE }];
+      break;
+
+    case 'plan.changed':
+      // The whole plan, replacing whatever was there. The event carries the
+      // list rather than the change, so a client that joined late reads one
+      // entry and knows where things stand.
+      next.plan = (body.items || []).map((item) => ({
+        id: item.id || '', title: item.title || '', status: item.status || '',
+      }));
       break;
 
     case 'run.state_changed':

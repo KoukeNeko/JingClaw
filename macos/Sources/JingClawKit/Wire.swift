@@ -14,10 +14,12 @@ public struct SessionViewResponse: Decodable, Sendable {
     public var activeRun: WireRun?
     public var headSeq: String?
     public var truncated: Bool?
+    public var plan: [PlanStep]?
 
     public struct WireMessage: Decodable, Sendable {
         public var role: String?
         public var text: String?
+        public var reasoning: String?
         public var toolCalls: [WireToolCall]?
     }
 
@@ -26,6 +28,11 @@ public struct SessionViewResponse: Decodable, Sendable {
         public var summary: String?
         public var completed: Bool?
         public var isError: Bool?
+        public var artifact: WireArtifact?
+    }
+
+    public struct WireArtifact: Decodable, Sendable {
+        public var id: String?
     }
 
     public struct WireApproval: Decodable, Sendable {
@@ -50,16 +57,23 @@ public struct SessionViewResponse: Decodable, Sendable {
                 Message(
                     role: wire.role == "MESSAGE_ROLE_USER" ? .user : .assistant,
                     text: wire.text ?? "",
+                    // Narrowing this is how a client ends up showing a
+                    // session it watched and one it opened differently, and
+                    // losing the way to the build log that explains a
+                    // failure it is drawing.
+                    reasoning: wire.reasoning ?? "",
                     toolCalls: (wire.toolCalls ?? []).map {
                         ToolCall(
                             name: $0.name ?? "",
                             completed: $0.completed ?? false,
-                            isError: $0.isError ?? false)
+                            isError: $0.isError ?? false,
+                            artifact: $0.artifact?.id ?? "")
                     })
             },
             pendingApprovals: (pendingApprovals ?? []).compactMap(\.id),
             activeRun: activeRun?.id ?? "",
-            headSeq: UInt64(headSeq ?? "0") ?? 0
+            headSeq: UInt64(headSeq ?? "0") ?? 0,
+            plan: plan ?? []
         )
     }
 }

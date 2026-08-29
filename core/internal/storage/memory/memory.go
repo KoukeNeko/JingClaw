@@ -19,6 +19,7 @@ import (
 type Store struct {
 	mu       sync.RWMutex
 	sessions map[domain.SessionID]domain.Session
+	plans    map[domain.SessionID][]domain.PlanItem
 	runs     map[domain.RunID]domain.Run
 	events   map[domain.SessionID][]domain.Event
 
@@ -40,6 +41,7 @@ var _ storage.Store = (*Store)(nil)
 func New() *Store {
 	return &Store{
 		sessions:  make(map[domain.SessionID]domain.Session),
+		plans:     make(map[domain.SessionID][]domain.PlanItem),
 		runs:      make(map[domain.RunID]domain.Run),
 		events:    make(map[domain.SessionID][]domain.Event),
 		pruned:    make(map[domain.SessionID]domain.Seq),
@@ -98,6 +100,40 @@ func (s *Store) SetSessionModel(
 	session.Model = model
 	session.UpdatedAt = at
 	s.sessions[id] = session
+	return nil
+}
+
+func (s *Store) Plan(ctx context.Context, session domain.SessionID) ([]domain.PlanItem, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Copied out. A caller that mutated what it was handed would change the
+	// stored plan without going through SetPlan, and the event announcing the
+	// change would never be written.
+	return append([]domain.PlanItem{}, s.plans[session]...), nil
+}
+
+func (s *Store) SetPlan(
+	ctx context.Context,
+	session domain.SessionID,
+	items []domain.PlanItem,
+	_ time.Time,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.plans == nil {
+		s.plans = map[domain.SessionID][]domain.PlanItem{}
+	}
+	s.plans[session] = append([]domain.PlanItem{}, items...)
 	return nil
 }
 

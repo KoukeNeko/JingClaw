@@ -36,6 +36,11 @@ type SessionView struct {
 
 	// Truncated says older messages exist than the ones returned.
 	Truncated bool
+
+	// Plan is what the agent said it was going to do, if it said anything.
+	// Without it a client that opened a session rather than watching it
+	// happen sees a run working through a plan it cannot see.
+	Plan []domain.PlanItem
 }
 
 // ViewMessage is one turn as a client would draw it.
@@ -104,6 +109,10 @@ func (r *Runtime) SessionViewOf(
 		messages = messages[len(messages)-maxMessages:]
 	}
 	view.Messages = messages
+
+	if view.Plan, err = r.opts.Store.Plan(ctx, sessionID); err != nil {
+		return SessionView{}, err
+	}
 
 	pending, err := r.PendingApprovals(ctx, sessionID)
 	if err != nil {

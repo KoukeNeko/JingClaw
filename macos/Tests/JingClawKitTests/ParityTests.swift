@@ -24,12 +24,14 @@ private struct ExpectedState: Decodable {
     var pendingApprovals: [String]?
     var activeRun: String?
     var headSeq: UInt64?
+    var plan: [PlanStep]?
 
     private enum CodingKeys: String, CodingKey {
         case messages
         case pendingApprovals = "pending_approvals"
         case activeRun = "active_run"
         case headSeq = "head_seq"
+        case plan
     }
 
     var state: SessionState {
@@ -37,7 +39,8 @@ private struct ExpectedState: Decodable {
             messages: (messages ?? []).map(\.message),
             pendingApprovals: pendingApprovals ?? [],
             activeRun: activeRun ?? "",
-            headSeq: headSeq ?? 0
+            headSeq: headSeq ?? 0,
+            plan: plan ?? []
         )
     }
 }
@@ -73,8 +76,9 @@ private struct ExpectedMessage: Decodable {
 /// without computing it — silently exempt from the one check that exists to
 /// catch exactly that.
 private let comparedStateKeys: Set<String> = [
-    "messages", "pending_approvals", "active_run", "head_seq",
+    "messages", "pending_approvals", "active_run", "head_seq", "plan",
 ]
+private let comparedPlanKeys: Set<String> = ["id", "title", "status"]
 private let comparedMessageKeys: Set<String> = ["role", "text", "reasoning", "tool_calls"]
 private let comparedToolCallKeys: Set<String> = ["name", "completed", "is_error", "artifact"]
 
@@ -133,6 +137,11 @@ func noFieldGoesUnchecked() throws {
 
         let unknownState = Set(expected.keys).subtracting(comparedStateKeys)
         #expect(unknownState.isEmpty, "\(name): the fixture carries \(unknownState), which this client ignores")
+
+        for step in expected["plan"] as? [[String: Any]] ?? [] {
+            let unknown = Set(step.keys).subtracting(comparedPlanKeys)
+            #expect(unknown.isEmpty, "\(name): a plan step carries \(unknown), which this client ignores")
+        }
 
         for message in expected["messages"] as? [[String: Any]] ?? [] {
             let unknown = Set(message.keys).subtracting(comparedMessageKeys)

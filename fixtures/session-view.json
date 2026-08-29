@@ -263,6 +263,91 @@
       }
     },
     {
+      "name": "the plan is replaced, not accumulated",
+      "why": "The event carries the whole plan after each change. A client that appended would show every step twice and the finished ones as still pending.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "fix the failing test"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "plan.changed",
+          "body": {
+            "items": [
+              {
+                "id": "todo_1",
+                "status": "pending",
+                "title": "read the test"
+              },
+              {
+                "id": "todo_2",
+                "status": "pending",
+                "title": "fix it"
+              }
+            ]
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "plan.changed",
+          "body": {
+            "items": [
+              {
+                "id": "todo_1",
+                "status": "completed",
+                "title": "read the test"
+              },
+              {
+                "id": "todo_2",
+                "status": "in_progress",
+                "title": "fix it"
+              }
+            ]
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_2",
+            "text": "Working on it."
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "fix the failing test"
+          },
+          {
+            "role": "assistant",
+            "text": "Working on it."
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 4,
+        "plan": [
+          {
+            "id": "todo_1",
+            "title": "read the test",
+            "status": "completed"
+          },
+          {
+            "id": "todo_2",
+            "title": "fix it",
+            "status": "in_progress"
+          }
+        ]
+      }
+    },
+    {
       "name": "a failed call is not a finished one",
       "why": "A client showing every completed call the same way tells somebody the work was done.",
       "events": [

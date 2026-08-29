@@ -32,6 +32,7 @@ message Event {
     ConversationCompacted conversation_compacted = 19;
     RunDirections run_directions = 20;
     AssistantReasoningDelta assistant_reasoning_delta = 21;
+    PlanChanged plan_changed = 22;
   }
 }
 
@@ -143,6 +144,38 @@ message ToolCallCompleted {
 
 // A run has paused for a human. Every client sees this, so whoever is nearest
 // can answer.
+// PlanItem is one step of what the agent says it is going to do.
+message PlanItem {
+  string id = 1;
+  string title = 2;
+  PlanStatus status = 3;
+
+  // Why a step was abandoned, or anything else recorded against it. Usually
+  // empty.
+  string note = 4;
+}
+
+enum PlanStatus {
+  PLAN_STATUS_UNSPECIFIED = 0;
+  PLAN_STATUS_PENDING = 1;
+  PLAN_STATUS_IN_PROGRESS = 2;
+  PLAN_STATUS_COMPLETED = 3;
+
+  // A step that will not be done, said rather than deleted: one that
+  // disappears reads as one that was finished.
+  PLAN_STATUS_ABANDONED = 4;
+}
+
+// The whole plan after a change, not the change itself.
+//
+// Whole on purpose. A client that joined late, or one resuming after events
+// were pruned, reads one event and knows the plan; replaying a sequence of
+// operations to arrive at it would make the plan the one thing in this log
+// that cannot be understood from a single entry.
+message PlanChanged {
+  repeated PlanItem items = 1;
+}
+
 message ApprovalRequested {
   string approval_id = 1;
   string call_id = 2;

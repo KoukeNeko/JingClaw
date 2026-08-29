@@ -74,6 +74,17 @@ type artifactJSON struct {
 	MediaType string `json:"media_type,omitempty"`
 }
 
+type planItemJSON struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Note   string `json:"note,omitempty"`
+}
+
+type planChangedJSON struct {
+	Items []planItemJSON `json:"items"`
+}
+
 type approvalRequestedJSON struct {
 	ApprovalID string   `json:"approval_id"`
 	CallID     string   `json:"call_id"`
@@ -243,6 +254,16 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 	case domain.RunDirections:
 		return json.Marshal(runDirectionsJSON{Text: p.Text})
 
+	case domain.PlanChanged:
+		items := make([]planItemJSON, 0, len(p.Items))
+		for _, item := range p.Items {
+			items = append(items, planItemJSON{
+				ID: item.ID, Title: item.Title,
+				Status: string(item.Status), Note: item.Note,
+			})
+		}
+		return json.Marshal(planChangedJSON{Items: items})
+
 	case domain.ApprovalRequested:
 		return json.Marshal(approvalRequestedJSON{
 			ApprovalID: string(p.ApprovalID),
@@ -383,6 +404,20 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
 		}
 		return domain.RunDirections{Text: p.Text}, nil
+
+	case domain.EventPlanChanged:
+		var p planChangedJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		items := make([]domain.PlanItem, 0, len(p.Items))
+		for _, item := range p.Items {
+			items = append(items, domain.PlanItem{
+				ID: item.ID, Title: item.Title,
+				Status: domain.PlanStatus(item.Status), Note: item.Note,
+			})
+		}
+		return domain.PlanChanged{Items: items}, nil
 
 	case domain.EventApprovalRequested:
 		var p approvalRequestedJSON
