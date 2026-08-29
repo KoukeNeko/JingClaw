@@ -24,3 +24,7 @@ node_modules/
 
 # A deployment's own directory: its database, credentials and workspace.
 .JingClaw/
+
+# Swift build products.
+macos/.build/
+macos/.swiftpm/
