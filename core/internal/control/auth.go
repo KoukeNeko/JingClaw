@@ -88,7 +88,10 @@ func NewToken(scope Scope) (Token, error) {
 // The Host check defends against DNS rebinding: an attacker-controlled name
 // can resolve to 127.0.0.1, so the socket alone proves nothing about who is
 // calling.
-func AuthMiddleware(tokens []Token, allowedPort string, next http.Handler) http.Handler {
+// grants, when given, is the set of console credentials currently in force.
+// They are checked separately from the static tokens because they come and go
+// while the daemon runs: a browser pairs, and an operator revokes it.
+func AuthMiddleware(tokens []Token, grants *Grants, allowedPort string, next http.Handler) http.Handler {
 	byValue := make(map[string]Scope, len(tokens))
 	for _, token := range tokens {
 		byValue[token.Value] = token.Scope
@@ -103,6 +106,9 @@ func AuthMiddleware(tokens []Token, allowedPort string, next http.Handler) http.
 		}
 
 		scope, matched := lookupToken(byValue, provided)
+		if !matched && grants != nil && grants.Verify(provided) {
+			scope, matched = ScopeConsole, true
+		}
 		if !matched {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

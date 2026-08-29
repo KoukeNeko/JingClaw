@@ -36,6 +36,12 @@ const (
 	// ConsoleServiceIssuePairingCodeProcedure is the fully-qualified name of the ConsoleService's
 	// IssuePairingCode RPC.
 	ConsoleServiceIssuePairingCodeProcedure = "/jingclaw.control.v1.ConsoleService/IssuePairingCode"
+	// ConsoleServiceListConsoleGrantsProcedure is the fully-qualified name of the ConsoleService's
+	// ListConsoleGrants RPC.
+	ConsoleServiceListConsoleGrantsProcedure = "/jingclaw.control.v1.ConsoleService/ListConsoleGrants"
+	// ConsoleServiceRevokeConsoleGrantProcedure is the fully-qualified name of the ConsoleService's
+	// RevokeConsoleGrant RPC.
+	ConsoleServiceRevokeConsoleGrantProcedure = "/jingclaw.control.v1.ConsoleService/RevokeConsoleGrant"
 )
 
 // ConsoleServiceClient is a client for the jingclaw.control.v1.ConsoleService service.
@@ -47,6 +53,14 @@ type ConsoleServiceClient interface {
 	// that expires. The credential it buys never appears anywhere a person can
 	// read it by accident.
 	IssuePairingCode(context.Context, *connect.Request[v1.IssuePairingCodeRequest]) (*connect.Response[v1.IssuePairingCodeResponse], error)
+	// ListConsoleGrants is which browsers can currently reach this agent.
+	//
+	// Each pairing mints its own credential, so this is a real list rather than
+	// a count: without it, "a browser was paired at some point" is the most an
+	// operator could know, and revoking one would mean revoking all of them.
+	ListConsoleGrants(context.Context, *connect.Request[v1.ListConsoleGrantsRequest]) (*connect.Response[v1.ListConsoleGrantsResponse], error)
+	// RevokeConsoleGrant ends one, or every one.
+	RevokeConsoleGrant(context.Context, *connect.Request[v1.RevokeConsoleGrantRequest]) (*connect.Response[v1.RevokeConsoleGrantResponse], error)
 }
 
 // NewConsoleServiceClient constructs a client for the jingclaw.control.v1.ConsoleService service.
@@ -66,17 +80,41 @@ func NewConsoleServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(consoleServiceMethods.ByName("IssuePairingCode")),
 			connect.WithClientOptions(opts...),
 		),
+		listConsoleGrants: connect.NewClient[v1.ListConsoleGrantsRequest, v1.ListConsoleGrantsResponse](
+			httpClient,
+			baseURL+ConsoleServiceListConsoleGrantsProcedure,
+			connect.WithSchema(consoleServiceMethods.ByName("ListConsoleGrants")),
+			connect.WithClientOptions(opts...),
+		),
+		revokeConsoleGrant: connect.NewClient[v1.RevokeConsoleGrantRequest, v1.RevokeConsoleGrantResponse](
+			httpClient,
+			baseURL+ConsoleServiceRevokeConsoleGrantProcedure,
+			connect.WithSchema(consoleServiceMethods.ByName("RevokeConsoleGrant")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // consoleServiceClient implements ConsoleServiceClient.
 type consoleServiceClient struct {
-	issuePairingCode *connect.Client[v1.IssuePairingCodeRequest, v1.IssuePairingCodeResponse]
+	issuePairingCode   *connect.Client[v1.IssuePairingCodeRequest, v1.IssuePairingCodeResponse]
+	listConsoleGrants  *connect.Client[v1.ListConsoleGrantsRequest, v1.ListConsoleGrantsResponse]
+	revokeConsoleGrant *connect.Client[v1.RevokeConsoleGrantRequest, v1.RevokeConsoleGrantResponse]
 }
 
 // IssuePairingCode calls jingclaw.control.v1.ConsoleService.IssuePairingCode.
 func (c *consoleServiceClient) IssuePairingCode(ctx context.Context, req *connect.Request[v1.IssuePairingCodeRequest]) (*connect.Response[v1.IssuePairingCodeResponse], error) {
 	return c.issuePairingCode.CallUnary(ctx, req)
+}
+
+// ListConsoleGrants calls jingclaw.control.v1.ConsoleService.ListConsoleGrants.
+func (c *consoleServiceClient) ListConsoleGrants(ctx context.Context, req *connect.Request[v1.ListConsoleGrantsRequest]) (*connect.Response[v1.ListConsoleGrantsResponse], error) {
+	return c.listConsoleGrants.CallUnary(ctx, req)
+}
+
+// RevokeConsoleGrant calls jingclaw.control.v1.ConsoleService.RevokeConsoleGrant.
+func (c *consoleServiceClient) RevokeConsoleGrant(ctx context.Context, req *connect.Request[v1.RevokeConsoleGrantRequest]) (*connect.Response[v1.RevokeConsoleGrantResponse], error) {
+	return c.revokeConsoleGrant.CallUnary(ctx, req)
 }
 
 // ConsoleServiceHandler is an implementation of the jingclaw.control.v1.ConsoleService service.
@@ -88,6 +126,14 @@ type ConsoleServiceHandler interface {
 	// that expires. The credential it buys never appears anywhere a person can
 	// read it by accident.
 	IssuePairingCode(context.Context, *connect.Request[v1.IssuePairingCodeRequest]) (*connect.Response[v1.IssuePairingCodeResponse], error)
+	// ListConsoleGrants is which browsers can currently reach this agent.
+	//
+	// Each pairing mints its own credential, so this is a real list rather than
+	// a count: without it, "a browser was paired at some point" is the most an
+	// operator could know, and revoking one would mean revoking all of them.
+	ListConsoleGrants(context.Context, *connect.Request[v1.ListConsoleGrantsRequest]) (*connect.Response[v1.ListConsoleGrantsResponse], error)
+	// RevokeConsoleGrant ends one, or every one.
+	RevokeConsoleGrant(context.Context, *connect.Request[v1.RevokeConsoleGrantRequest]) (*connect.Response[v1.RevokeConsoleGrantResponse], error)
 }
 
 // NewConsoleServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -103,10 +149,26 @@ func NewConsoleServiceHandler(svc ConsoleServiceHandler, opts ...connect.Handler
 		connect.WithSchema(consoleServiceMethods.ByName("IssuePairingCode")),
 		connect.WithHandlerOptions(opts...),
 	)
+	consoleServiceListConsoleGrantsHandler := connect.NewUnaryHandler(
+		ConsoleServiceListConsoleGrantsProcedure,
+		svc.ListConsoleGrants,
+		connect.WithSchema(consoleServiceMethods.ByName("ListConsoleGrants")),
+		connect.WithHandlerOptions(opts...),
+	)
+	consoleServiceRevokeConsoleGrantHandler := connect.NewUnaryHandler(
+		ConsoleServiceRevokeConsoleGrantProcedure,
+		svc.RevokeConsoleGrant,
+		connect.WithSchema(consoleServiceMethods.ByName("RevokeConsoleGrant")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.ConsoleService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConsoleServiceIssuePairingCodeProcedure:
 			consoleServiceIssuePairingCodeHandler.ServeHTTP(w, r)
+		case ConsoleServiceListConsoleGrantsProcedure:
+			consoleServiceListConsoleGrantsHandler.ServeHTTP(w, r)
+		case ConsoleServiceRevokeConsoleGrantProcedure:
+			consoleServiceRevokeConsoleGrantHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -118,4 +180,12 @@ type UnimplementedConsoleServiceHandler struct{}
 
 func (UnimplementedConsoleServiceHandler) IssuePairingCode(context.Context, *connect.Request[v1.IssuePairingCodeRequest]) (*connect.Response[v1.IssuePairingCodeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConsoleService.IssuePairingCode is not implemented"))
+}
+
+func (UnimplementedConsoleServiceHandler) ListConsoleGrants(context.Context, *connect.Request[v1.ListConsoleGrantsRequest]) (*connect.Response[v1.ListConsoleGrantsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConsoleService.ListConsoleGrants is not implemented"))
+}
+
+func (UnimplementedConsoleServiceHandler) RevokeConsoleGrant(context.Context, *connect.Request[v1.RevokeConsoleGrantRequest]) (*connect.Response[v1.RevokeConsoleGrantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConsoleService.RevokeConsoleGrant is not implemented"))
 }

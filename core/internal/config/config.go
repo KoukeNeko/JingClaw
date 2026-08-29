@@ -584,6 +584,14 @@ type Server struct {
 	// stays good. It is short because the code is the part that ends up in a
 	// terminal's scrollback and in screenshots.
 	PairingTTL time.Duration `koanf:"pairing_ttl"`
+
+	// ConsoleTTL is how long a paired browser's credential lasts without
+	// being used. Zero means as long as the daemon runs.
+	//
+	// Counted from last use rather than from pairing: a console somebody
+	// works in all day should not stop halfway through the afternoon, and one
+	// nobody has touched since Tuesday should not still be open.
+	ConsoleTTL time.Duration `koanf:"console_ttl"`
 }
 
 // Defaults are what runs when nothing says otherwise.
@@ -667,6 +675,7 @@ func Defaults() Config {
 			LogLevel:   "info",
 			WebConsole: true,
 			PairingTTL: 10 * time.Minute,
+			ConsoleTTL: 7 * 24 * time.Hour,
 		},
 		Gateway: Gateway{
 			Platform:        "discord",
@@ -1579,6 +1588,11 @@ web_console = true
 
 # How long a printed pairing code stays valid.
 # pairing_ttl = "10m"
+
+# How long a paired browser stays paired without being used. Counted from last
+# use, so a console somebody works in all day does not stop in the afternoon.
+# Zero means as long as the daemon runs.
+# console_ttl = "168h"
 
 # Empty uses the platform's own locations.
 # data_dir = ""

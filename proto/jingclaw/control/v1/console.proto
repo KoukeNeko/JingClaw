@@ -17,6 +17,57 @@ service ConsoleService {
   // that expires. The credential it buys never appears anywhere a person can
   // read it by accident.
   rpc IssuePairingCode(IssuePairingCodeRequest) returns (IssuePairingCodeResponse);
+
+  // ListConsoleGrants is which browsers can currently reach this agent.
+  //
+  // Each pairing mints its own credential, so this is a real list rather than
+  // a count: without it, "a browser was paired at some point" is the most an
+  // operator could know, and revoking one would mean revoking all of them.
+  rpc ListConsoleGrants(ListConsoleGrantsRequest) returns (ListConsoleGrantsResponse);
+
+  // RevokeConsoleGrant ends one, or every one.
+  rpc RevokeConsoleGrant(RevokeConsoleGrantRequest) returns (RevokeConsoleGrantResponse);
+}
+
+message ListConsoleGrantsRequest {
+  RequestMeta meta = 1;
+}
+
+message ListConsoleGrantsResponse {
+  repeated ConsoleGrant grants = 1;
+}
+
+// ConsoleGrant is one paired browser.
+//
+// Without its credential, deliberately. The whole point of a credential here
+// is that it never appears anywhere a person can read it by accident, and a
+// listing is exactly the sort of thing that ends up in a screenshot.
+message ConsoleGrant {
+  string id = 1;
+
+  google.protobuf.Timestamp paired_at = 2;
+  google.protobuf.Timestamp last_used = 3;
+
+  // What the browser said about itself. Untrusted — it is a User-Agent header
+  // — and its only job is to help a person tell two rows apart.
+  string label = 4;
+}
+
+message RevokeConsoleGrantRequest {
+  RequestMeta meta = 1;
+
+  // The grant to end. Ignored when all is set.
+  string grant_id = 2;
+
+  // Ends every console session, for somebody who has decided that whatever is
+  // out there should not be.
+  bool all = 3;
+}
+
+message RevokeConsoleGrantResponse {
+  // How many were ended. Zero means the id named nothing, which is not the
+  // same as success and should not be reported as it.
+  int32 revoked = 1;
 }
 
 message IssuePairingCodeRequest {

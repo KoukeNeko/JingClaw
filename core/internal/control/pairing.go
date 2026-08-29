@@ -47,17 +47,24 @@ var (
 // is the thing worth having, and it never appears anywhere a person can read
 // it by accident.
 type Pairing struct {
-	token Token
-	ttl   time.Duration
-	now   func() time.Time
+	// grants mints and records a credential per pairing.
+	//
+	// Per pairing rather than one shared credential, which is what this used
+	// to hand out. Shared, a page paired last week still worked, there was no
+	// way to see what had been let in, and revoking one browser meant
+	// revoking all of them.
+	grants *Grants
+
+	ttl time.Duration
+	now func() time.Time
 
 	mu          sync.Mutex
 	outstanding map[string]time.Time
 }
 
-func NewPairing(token Token, ttl time.Duration, now func() time.Time) *Pairing {
+func NewPairing(grants *Grants, ttl time.Duration, now func() time.Time) *Pairing {
 	return &Pairing{
-		token:       token,
+		grants:      grants,
 		ttl:         ttl,
 		now:         now,
 		outstanding: make(map[string]time.Time),
@@ -87,7 +94,7 @@ func (p *Pairing) Issue() (code string, expires time.Time, err error) {
 }
 
 // Redeem exchanges a code for the console's credential, once.
-func (p *Pairing) Redeem(offered string) (Token, error) {
+func (p *Pairing) Redeem(offered, label string) (Token, error) {
 	normalised := normalise(offered)
 
 	p.mu.Lock()
@@ -111,7 +118,11 @@ func (p *Pairing) Redeem(offered string) (Token, error) {
 	// still worth stealing out of a screenshot an hour later.
 	delete(p.outstanding, matched)
 
-	return p.token, nil
+	token, _, err := p.grants.Issue(label)
+	if err != nil {
+		return Token{}, err
+	}
+	return token, nil
 }
 
 func (p *Pairing) pruneLocked() {
@@ -159,7 +170,10 @@ func (p *Pairing) RedeemHandler() http.Handler {
 			return
 		}
 
-		token, err := p.Redeem(request.Code)
+		// The browser's own description of itself, so an operator listing what
+		// is paired can tell two rows apart. Untrusted, and bounded before it
+		// is shown to anybody.
+		token, err := p.Redeem(request.Code, r.Header.Get("User-Agent"))
 		if err != nil {
 			// One answer for every way a code can fail to work, so a caller
 			// cannot learn whether it was close.

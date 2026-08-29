@@ -2,7 +2,9 @@ package control_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,39 +14,45 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 )
 
-func newPairing(t *testing.T, ttl time.Duration) (*control.Pairing, control.Token, *time.Time) {
+func newPairing(t *testing.T, ttl time.Duration) (*control.Pairing, *control.Grants, *time.Time) {
 	t.Helper()
 
-	token, err := control.NewToken(control.ScopeConsole)
-	if err != nil {
-		t.Fatalf("token: %v", err)
-	}
-
 	clock := time.Unix(1_700_000_000, 0).UTC()
-	return control.NewPairing(token, ttl, func() time.Time { return clock }), token, &clock
+	now := func() time.Time { return clock }
+
+	var minted int
+	grants := control.NewGrants(0, now, func() string {
+		minted++
+		return fmt.Sprintf("con_%d", minted)
+	})
+
+	return control.NewPairing(grants, ttl, now), grants, &clock
 }
 
 // The credential is the thing worth having; the code is what ends up in a
 // terminal's scrollback. So the code is the part that stops working.
 func TestACodeWorksOnce(t *testing.T) {
-	pairing, token, _ := newPairing(t, time.Minute)
+	pairing, grants, _ := newPairing(t, time.Minute)
 
 	code, _, err := pairing.Issue()
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
 
-	redeemed, err := pairing.Redeem(code)
+	redeemed, err := pairing.Redeem(code, "a browser")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
-	if redeemed.Value != token.Value {
-		t.Error("the wrong credential came back")
+	if redeemed.Scope != control.ScopeConsole {
+		t.Errorf("the credential has scope %q, want the console's", redeemed.Scope)
+	}
+	if !grants.Verify(redeemed.Value) {
+		t.Error("the credential it handed out is not one it recorded")
 	}
 
 	// A code that still works after it has been used is a code that is still
 	// worth stealing out of a screenshot an hour later.
-	if _, err := pairing.Redeem(code); !errors.Is(err, control.ErrNoSuchCode) {
+	if _, err := pairing.Redeem(code, "a browser"); !errors.Is(err, control.ErrNoSuchCode) {
 		t.Errorf("the code worked twice: %v", err)
 	}
 }
@@ -59,7 +67,7 @@ func TestACodeExpires(t *testing.T) {
 
 	*clock = expires.Add(time.Second)
 
-	if _, err := pairing.Redeem(code); !errors.Is(err, control.ErrNoSuchCode) {
+	if _, err := pairing.Redeem(code, "a browser"); !errors.Is(err, control.ErrNoSuchCode) {
 		t.Errorf("an expired code was accepted: %v", err)
 	}
 }
@@ -89,7 +97,7 @@ func TestACodeIsAcceptedTheWayAPersonTypesIt(t *testing.T) {
 		}
 		rewritten := rewrite(typed, code, fresh)
 
-		if _, err := pairing.Redeem(rewritten); err != nil {
+		if _, err := pairing.Redeem(rewritten, "a browser"); err != nil {
 			t.Errorf("%q was refused: %v", rewritten, err)
 		}
 	}
@@ -110,7 +118,7 @@ func rewrite(mangled, from, to string) string {
 func TestACodeNobodyIssuedIsRefused(t *testing.T) {
 	pairing, _, _ := newPairing(t, time.Minute)
 
-	if _, err := pairing.Redeem("AAAA-BBBB-CCCC-DDDD"); !errors.Is(err, control.ErrNoSuchCode) {
+	if _, err := pairing.Redeem("AAAA-BBBB-CCCC-DDDD", "a browser"); !errors.Is(err, control.ErrNoSuchCode) {
 		t.Errorf("an invented code was accepted: %v", err)
 	}
 }
@@ -129,10 +137,10 @@ func TestSeveralCodesCanBeOutstanding(t *testing.T) {
 		t.Fatalf("issue: %v", err)
 	}
 
-	if _, err := pairing.Redeem(second); err != nil {
+	if _, err := pairing.Redeem(second, "a browser"); err != nil {
 		t.Fatalf("the newer code was refused: %v", err)
 	}
-	if _, err := pairing.Redeem(first); err != nil {
+	if _, err := pairing.Redeem(first, "a browser"); err != nil {
 		t.Errorf("issuing a second code invalidated the first: %v", err)
 	}
 }
@@ -157,10 +165,10 @@ func TestOutstandingCodesAreBounded(t *testing.T) {
 	}
 
 	// The most recent still work; the oldest have been dropped.
-	if _, err := pairing.Redeem(codes[len(codes)-1]); err != nil {
+	if _, err := pairing.Redeem(codes[len(codes)-1], "a browser"); err != nil {
 		t.Errorf("the newest code was dropped: %v", err)
 	}
-	if _, err := pairing.Redeem(codes[0]); !errors.Is(err, control.ErrNoSuchCode) {
+	if _, err := pairing.Redeem(codes[0], "a browser"); !errors.Is(err, control.ErrNoSuchCode) {
 		t.Error("codes accumulate without bound")
 	}
 }
@@ -176,7 +184,7 @@ func redeemOverHTTP(t *testing.T, pairing *control.Pairing, body string) *httpte
 }
 
 func TestTheExchangeHandsBackACredential(t *testing.T) {
-	pairing, token, _ := newPairing(t, time.Minute)
+	pairing, grants, _ := newPairing(t, time.Minute)
 
 	code, _, err := pairing.Issue()
 	if err != nil {
@@ -188,8 +196,18 @@ func TestTheExchangeHandsBackACredential(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status is %d: %s", recorder.Code, recorder.Body)
 	}
-	if !strings.Contains(recorder.Body.String(), token.Value) {
-		t.Error("the credential did not come back")
+
+	var answered struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answered); err != nil {
+		t.Fatalf("the answer is not readable: %v", err)
+	}
+	if answered.Token == "" {
+		t.Fatal("the credential did not come back")
+	}
+	if !grants.Verify(answered.Token) {
+		t.Error("the credential handed out is not one the daemon recorded")
 	}
 	// It is a credential. It must not sit in a proxy or a browser cache.
 	if store := recorder.Header().Get("Cache-Control"); store != "no-store" {
@@ -206,7 +224,7 @@ func TestTheExchangeSaysNothingUseful(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	if _, err := pairing.Redeem(code); err != nil {
+	if _, err := pairing.Redeem(code, "a browser"); err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
@@ -254,7 +272,7 @@ func TestAConsoleCredentialCannotIssueCodes(t *testing.T) {
 		t.Fatalf("token: %v", err)
 	}
 
-	guarded := control.AuthMiddleware([]control.Token{consoleToken}, "7777",
+	guarded := control.AuthMiddleware([]control.Token{consoleToken}, nil, "7777",
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 
 	for path, want := range map[string]int{

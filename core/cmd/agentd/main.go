@@ -379,13 +379,12 @@ func run() error {
 		return err
 	}
 
-	// And one for browsers, so revoking a page does not change what the CLI
-	// and the gateway are holding.
-	consoleToken, err := control.NewToken(control.ScopeConsole)
-	if err != nil {
-		return err
-	}
-	pairing := control.NewPairing(consoleToken, cfg.Server.PairingTTL, time.Now)
+	// Browsers get one credential each, minted when they pair and recorded so
+	// an operator can see what has been let in and revoke one of them without
+	// revoking the rest — or the credential the CLI and the gateway hold.
+	grants := control.NewGrants(cfg.Server.ConsoleTTL, time.Now,
+		func() string { return id.WithPrefix("con") })
+	pairing := control.NewPairing(grants, cfg.Server.PairingTTL, time.Now)
 
 	listener, err := net.Listen("tcp", cfg.Server.Addr)
 	if err != nil {
@@ -421,7 +420,8 @@ func run() error {
 	api.Handle(controlv1connect.NewGatewayIngressServiceHandler(
 		control.NewGatewayServer(plane.Ingress, store, time.Now)))
 	api.Handle(controlv1connect.NewArtifactServiceHandler(control.NewArtifactServer(artifacts)))
-	api.Handle(controlv1connect.NewConsoleServiceHandler(control.NewConsoleServer(pairing, baseURL)))
+	api.Handle(controlv1connect.NewConsoleServiceHandler(
+		control.NewConsoleServer(pairing, grants, baseURL)))
 	api.Handle(controlv1connect.NewMemoryServiceHandler(control.NewMemoryServer(store)))
 	api.Handle(controlv1connect.NewChannelServiceHandler(
 		control.NewChannelServer(store, func() string { return id.WithPrefix("bnd") }, time.Now)))
@@ -431,7 +431,7 @@ func run() error {
 	// token on the request that fetches the page it would get one from, and
 	// those files are code rather than data.
 	guarded := control.AuthMiddleware(
-		[]control.Token{controlToken, gatewayToken, consoleToken}, port, api)
+		[]control.Token{controlToken, gatewayToken}, grants, port, api)
 
 	root := http.NewServeMux()
 	for _, service := range []string{

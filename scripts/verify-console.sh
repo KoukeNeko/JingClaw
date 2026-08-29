@@ -117,6 +117,55 @@ for FORBIDDEN in \
 done
 printf 'ok   and cannot mint another or rewrite bindings\n'
 
+# 5b. Each pairing is its own credential, listed and revocable. One shared
+#     credential meant a browser paired last week still worked, nobody could
+#     see what had been let in, and revoking one meant revoking all of them.
+GRANTS=$(curl -s -X POST -H 'content-type: application/json' \
+	-H "authorization: Bearer $TOKEN" -d '{}' \
+	"$BASE/jingclaw.control.v1.ConsoleService/ListConsoleGrants")
+[ "$(printf '%s' "$GRANTS" | grep -c forbidden)" = 1 ] ||
+	fail "a console credential can list what else is paired: $GRANTS"
+
+LOCAL=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["token"])' "$WORK/run/daemon.json")
+
+GRANTS=$(curl -s -X POST -H 'content-type: application/json' \
+	-H "authorization: Bearer $LOCAL" -d '{}' \
+	"$BASE/jingclaw.control.v1.ConsoleService/ListConsoleGrants")
+GRANT=$(printf '%s' "$GRANTS" | sed -n 's/.*"id":"\(con_[^"]*\)".*/\1/p')
+[ -n "$GRANT" ] || fail "the pairing was not recorded: $GRANTS"
+printf '%s' "$GRANTS" | grep -q "$TOKEN" &&
+	fail "the listing carries the credential itself"
+printf 'ok   the pairing is listed, without the credential itself\n'
+
+REVOKED=$(curl -s -X POST -H 'content-type: application/json' \
+	-H "authorization: Bearer $LOCAL" -d "{\"grantId\":\"$GRANT\"}" \
+	"$BASE/jingclaw.control.v1.ConsoleService/RevokeConsoleGrant")
+printf '%s' "$REVOKED" | grep -q '"revoked":1' ||
+	fail "revoking it did not report doing so: $REVOKED"
+
+AFTER=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+	-H 'content-type: application/json' -H "authorization: Bearer $TOKEN" \
+	-d '{}' "$BASE/jingclaw.control.v1.SessionService/ListSessions")
+[ "$AFTER" = 401 ] || fail "a revoked credential still works: $AFTER"
+printf 'ok   and revoking it stops that browser and nothing else\n'
+
+# The operator's own credential must still work. Revoking a page that was let
+# in must not lock out the person who let it in.
+STILL=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+	-H 'content-type: application/json' -H "authorization: Bearer $LOCAL" \
+	-d '{}' "$BASE/jingclaw.control.v1.SessionService/ListSessions")
+[ "$STILL" = 200 ] || fail "revoking a browser broke the operator's own credential: $STILL"
+printf 'ok   leaving the credential at the machine alone\n'
+
+# A second pairing, so the rest of the check has a working credential again.
+CODE2=$(curl -s -X POST -H 'content-type: application/json' -H "authorization: Bearer $LOCAL" \
+	-d '{}' "$BASE/jingclaw.control.v1.ConsoleService/IssuePairingCode" |
+	sed -n 's/.*"code":"\([^"]*\)".*/\1/p')
+TOKEN=$(curl -s -X POST -H 'content-type: application/json' \
+	-d "{\"code\":\"$CODE2\"}" "$BASE/pair" |
+	sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+[ -n "$TOKEN" ] || fail "could not pair again after revoking"
+
 # 6. The browser's own transport: a unary call is a POST with a JSON body.
 SESSION=$(curl -s -X POST \
 	-H 'content-type: application/json' \

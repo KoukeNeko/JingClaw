@@ -613,13 +613,18 @@ func newArtifactCommand() *cobra.Command {
 	return artifact
 }
 
-// newConsoleCommand mints a fresh code for the browser.
+// newConsoleCommand pairs a browser, and says which ones are paired.
 //
-// Without it, losing the line the daemon printed would mean restarting the
-// daemon — which would change the credential the CLI and the gateway are also
-// using. A code that expires needs a way to get another one, or it is just an
-// obstacle.
+// A code that expires needs a way to get another one, or it is just an
+// obstacle; and a credential that cannot be revoked is one that stays valid
+// long after somebody has stopped wanting it to.
 func newConsoleCommand() *cobra.Command {
+	console := newConsolePairCommand()
+	console.AddCommand(newConsoleListCommand(), newConsoleRevokeCommand())
+	return console
+}
+
+func newConsolePairCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "console",
 		Short: "Print an address for the web console, with a fresh code",
@@ -643,6 +648,97 @@ func newConsoleCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// newConsoleListCommand is which browsers can reach this agent.
+//
+// Each pairing mints its own credential, so this is a real list. Without it,
+// "a browser was paired at some point" would be the most anybody could know.
+func newConsoleListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List the browsers currently paired",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			httpClient, baseURL, err := authenticated()
+			if err != nil {
+				return err
+			}
+
+			client := controlv1connect.NewConsoleServiceClient(httpClient, baseURL)
+			resp, err := client.ListConsoleGrants(cmd.Context(),
+				connect.NewRequest(&controlv1.ListConsoleGrantsRequest{Meta: newMeta()}))
+			if err != nil {
+				return err
+			}
+
+			grants := resp.Msg.GetGrants()
+			if len(grants) == 0 {
+				fmt.Fprintln(cmd.ErrOrStderr(), "no browsers are paired")
+				return nil
+			}
+
+			for _, grant := range grants {
+				fmt.Printf("%s  paired %s  last used %s  %s\n",
+					grant.GetId(),
+					grant.GetPairedAt().AsTime().Local().Format("2006-01-02 15:04"),
+					grant.GetLastUsed().AsTime().Local().Format("2006-01-02 15:04"),
+					grant.GetLabel())
+			}
+			return nil
+		},
+	}
+}
+
+// newConsoleRevokeCommand ends one console session, or every one.
+func newConsoleRevokeCommand() *cobra.Command {
+	var all bool
+
+	revoke := &cobra.Command{
+		Use:   "revoke [grant-id]",
+		Short: "Stop a paired browser reaching this agent",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !all && len(args) == 0 {
+				return errors.New("name a grant to revoke, or pass --all")
+			}
+
+			httpClient, baseURL, err := authenticated()
+			if err != nil {
+				return err
+			}
+
+			id := ""
+			if len(args) == 1 {
+				id = args[0]
+			}
+
+			client := controlv1connect.NewConsoleServiceClient(httpClient, baseURL)
+			resp, err := client.RevokeConsoleGrant(cmd.Context(),
+				connect.NewRequest(&controlv1.RevokeConsoleGrantRequest{
+					Meta: newMeta(), GrantId: id, All: all,
+				}))
+			if err != nil {
+				return err
+			}
+
+			// The count rather than a bare "done": an id that names nothing is
+			// not the same as one that was revoked, and somebody shutting off
+			// access in a hurry needs to know which happened.
+			switch revoked := resp.Msg.GetRevoked(); revoked {
+			case 0:
+				fmt.Fprintln(cmd.ErrOrStderr(), "nothing was revoked; check the id with `agent console list`")
+			case 1:
+				fmt.Fprintln(cmd.ErrOrStderr(), "revoked 1 console session")
+			default:
+				fmt.Fprintf(cmd.ErrOrStderr(), "revoked %d console sessions\n", revoked)
+			}
+			return nil
+		},
+	}
+
+	revoke.Flags().BoolVar(&all, "all", false, "end every console session")
+	return revoke
 }
 
 // newMemoryCommand shows and removes what the agent believes.

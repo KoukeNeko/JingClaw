@@ -250,6 +250,11 @@ web_console = true
 # How long a printed pairing code stays valid.
 # pairing_ttl = "10m"
 
+# How long a paired browser stays paired without being used. Counted from last
+# use, so a console somebody works in all day does not stop in the afternoon.
+# Zero means as long as the daemon runs.
+# console_ttl = "168h"
+
 # Empty uses the platform's own locations.
 # data_dir = ""
 # runtime_dir = ""
