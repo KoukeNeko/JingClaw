@@ -88,6 +88,20 @@ type EventStore interface {
 	// Head is the highest sequence stored for the session, or zero if it has
 	// no events yet.
 	Head(ctx context.Context, id domain.SessionID) (domain.Seq, error)
+
+	// Oldest is the earliest event still kept for a session.
+	//
+	// Zero when nothing has been pruned. A client resuming from below this
+	// has to start again: what it asked for is gone, and handing it whatever
+	// survived would draw a conversation missing its middle.
+	Oldest(ctx context.Context, id domain.SessionID) (domain.Seq, error)
+
+	// PruneEvents discards events at or below through, for one session.
+	//
+	// Never called with a sequence past the last compaction: the conversation
+	// sent to the model is rebuilt from this log, and discarding an event the
+	// rebuild still needs makes the session unusable rather than smaller.
+	PruneEvents(ctx context.Context, id domain.SessionID, through domain.Seq) (int64, error)
 }
 
 // Store is the full persistence surface the runtime depends on.

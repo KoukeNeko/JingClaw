@@ -17,10 +17,16 @@ import (
 )
 
 type Store struct {
-	mu        sync.RWMutex
-	sessions  map[domain.SessionID]domain.Session
-	runs      map[domain.RunID]domain.Run
-	events    map[domain.SessionID][]domain.Event
+	mu       sync.RWMutex
+	sessions map[domain.SessionID]domain.Session
+	runs     map[domain.RunID]domain.Run
+	events   map[domain.SessionID][]domain.Event
+
+	// pruned is the highest sequence discarded per session, so numbering
+	// survives pruning: a sequence identifies an event for the life of a
+	// session, and reusing one after a prune would hand two different events
+	// the same name.
+	pruned    map[domain.SessionID]domain.Seq
 	approvals map[domain.ApprovalID]domain.Approval
 
 	// memoryOrder preserves insertion order, so a listing is stable when two
@@ -36,6 +42,7 @@ func New() *Store {
 		sessions:  make(map[domain.SessionID]domain.Session),
 		runs:      make(map[domain.RunID]domain.Run),
 		events:    make(map[domain.SessionID][]domain.Event),
+		pruned:    make(map[domain.SessionID]domain.Seq),
 		approvals: make(map[domain.ApprovalID]domain.Approval),
 		memories:  make(map[domain.MemoryID]domain.Memory),
 	}
@@ -189,7 +196,7 @@ func (s *Store) Append(ctx context.Context, event domain.Event) (domain.Seq, err
 	}
 
 	events := s.events[event.SessionID]
-	event.Seq = domain.Seq(len(events) + 1)
+	event.Seq = s.pruned[event.SessionID] + domain.Seq(len(events)) + 1
 	s.events[event.SessionID] = append(events, event)
 
 	return event.Seq, nil
@@ -234,7 +241,58 @@ func (s *Store) Head(ctx context.Context, id domain.SessionID) (domain.Seq, erro
 	if _, ok := s.sessions[id]; !ok {
 		return 0, storage.ErrSessionNotFound
 	}
-	return domain.Seq(len(s.events[id])), nil
+	return s.pruned[id] + domain.Seq(len(s.events[id])), nil
+}
+
+// Oldest is the earliest event still kept.
+func (s *Store) Oldest(ctx context.Context, id domain.SessionID) (domain.Seq, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	events := s.events[id]
+	if len(events) == 0 {
+		return 0, nil
+	}
+	return events[0].Seq, nil
+}
+
+// PruneEvents discards everything at or below through.
+func (s *Store) PruneEvents(
+	ctx context.Context, id domain.SessionID, through domain.Seq,
+) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if through <= 0 {
+		return 0, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	events := s.events[id]
+	kept := events[:0]
+	var removed int64
+	for _, event := range events {
+		if event.Seq <= through {
+			removed++
+			continue
+		}
+		kept = append(kept, event)
+	}
+
+	s.events[id] = kept
+	if removed > 0 && through > s.pruned[id] {
+		if s.pruned == nil {
+			s.pruned = make(map[domain.SessionID]domain.Seq)
+		}
+		s.pruned[id] = through
+	}
+	return removed, nil
 }
 
 func (s *Store) CreateApproval(ctx context.Context, approval domain.Approval) error {

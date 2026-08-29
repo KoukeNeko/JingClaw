@@ -129,3 +129,42 @@ func (s *Store) Head(ctx context.Context, id domain.SessionID) (domain.Seq, erro
 
 	return domain.Seq(head), nil
 }
+
+// Oldest is the earliest event still kept for a session.
+func (s *Store) Oldest(ctx context.Context, id domain.SessionID) (domain.Seq, error) {
+	var oldest sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MIN(seq) FROM events WHERE session_id = ?`, string(id)).Scan(&oldest)
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: oldest event: %w", err)
+	}
+	if !oldest.Valid {
+		return 0, nil
+	}
+	return domain.Seq(oldest.Int64), nil
+}
+
+// PruneEvents discards everything at or below through.
+//
+// The caller decides what is safe to discard; this only does it. The rule that
+// matters — never past the last compaction — belongs with the runtime, which
+// is what knows how a conversation is rebuilt.
+func (s *Store) PruneEvents(
+	ctx context.Context, id domain.SessionID, through domain.Seq,
+) (int64, error) {
+	if through <= 0 {
+		return 0, nil
+	}
+
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM events WHERE session_id = ? AND seq <= ?`, string(id), int64(through))
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: prune events: %w", err)
+	}
+
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: prune events: %w", err)
+	}
+	return removed, nil
+}

@@ -116,11 +116,19 @@ public final class SessionStore {
 
                     for try await frame in frames {
                         if Task.isCancelled { return }
-                        guard let event = try? JSONDecoder().decode(EventFrame.self, from: frame),
-                            let wire = event.event
+                        guard let decoded = try? JSONDecoder().decode(EventFrame.self, from: frame)
                         else { continue }
 
-                        if let applied = wire.asLogEvent {
+                        // The history this client was resuming from is gone.
+                        // Reopening from a view is the only way back to a
+                        // conversation without a hole in it.
+                        if decoded.resyncRequired != nil {
+                            self.status = "history was trimmed — reopening"
+                            await self.open(id)
+                            return
+                        }
+
+                        if let applied = decoded.event?.asLogEvent {
                             self.state = Reducer.reduce(self.state, applied)
                             resumeFrom = applied.seq
                         }

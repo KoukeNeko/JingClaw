@@ -334,6 +334,26 @@ func (s *Server) SubscribeEvents(
 
 	cursor := domain.Seq(req.Msg.GetAfterSeq())
 
+	// A client resuming from before what is kept is told so, rather than
+	// handed whatever survived. Sending the remainder would draw a
+	// conversation missing its middle with nothing marking the gap, and that
+	// reads as the agent having forgotten rather than as history discarded on
+	// purpose.
+	oldest, err := s.store.Oldest(ctx, sessionID)
+	if err != nil {
+		return toConnectError(err)
+	}
+	if oldest > 0 && cursor > 0 && cursor < oldest-1 {
+		return stream.Send(&controlv1.SubscribeEventsResponse{
+			Value: &controlv1.SubscribeEventsResponse_ResyncRequired{
+				ResyncRequired: &controlv1.ResyncRequired{
+					OldestSeq: uint64(oldest),
+					HeadSeq:   uint64(head),
+				},
+			},
+		})
+	}
+
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 

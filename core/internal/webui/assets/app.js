@@ -423,6 +423,15 @@ function attach() {
           'SubscribeEvents',
           { sessionId: forSession, afterSeq: String(state.seq) },
           (frame) => {
+            // History this client asked for has been discarded. Carrying on
+            // would draw a conversation missing its middle with nothing
+            // marking the gap, which reads as the agent forgetting.
+            if (frame.resyncRequired) {
+              controller.abort();
+              setDaemonStatus('history was trimmed — reopening');
+              Promise.resolve().then(() => selectSession(forSession));
+              return;
+            }
             if (frame.event) applyEvent(frame.event);
           },
           controller.signal,

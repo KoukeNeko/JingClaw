@@ -316,7 +316,25 @@ message SubscribeEventsResponse {
     StreamHello hello = 1;
     Event event = 2;
     StreamHeartbeat heartbeat = 3;
+    ResyncRequired resync_required = 4;
   }
+}
+
+// ResyncRequired says a client asked to resume from before what is kept.
+//
+// Sent instead of a partial stream. A client resuming from a sequence whose
+// events have been pruned would otherwise be handed whatever survived and
+// would draw a conversation missing its middle, with nothing to indicate the
+// gap — the failure looks like the agent forgetting rather than like history
+// being discarded on purpose.
+message ResyncRequired {
+  // OldestSeq is the earliest event still kept. A client asking from anything
+  // below it has to start again from a view.
+  uint64 oldest_seq = 1;
+
+  // HeadSeq is where the log is now, so a client can subscribe from a point
+  // it knows is whole.
+  uint64 head_seq = 2;
 }
 
 service SessionService {

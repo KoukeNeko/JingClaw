@@ -68,8 +68,18 @@ public struct SessionViewResponse: Decodable, Sendable {
 public struct EventFrame: Decodable, Sendable {
     public var event: WireEvent?
     public var hello: Hello?
+    public var resyncRequired: Resync?
 
     public struct Hello: Decodable, Sendable {
+        public var headSeq: String?
+    }
+
+    /// History this client asked for has been discarded.
+    ///
+    /// Carrying on with whatever survived would draw a conversation missing
+    /// its middle, with nothing marking the gap.
+    public struct Resync: Decodable, Sendable {
+        public var oldestSeq: String?
         public var headSeq: String?
     }
 }

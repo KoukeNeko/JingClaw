@@ -19,6 +19,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
@@ -30,7 +31,20 @@ const testToken = "test-token"
 // These tests drive the real Connect stack over a real socket rather than
 // calling handlers directly, because the things most likely to break — auth,
 // streaming, resume — only exist at that layer.
+// harness is a server with the pieces behind it reachable, for the checks
+// that have to arrange the store directly.
+type harness struct {
+	client  controlv1connect.SessionServiceClient
+	store   *memory.Store
+	runtime *runtime.Runtime
+}
+
 func newServer(t *testing.T, chunkDelay time.Duration) controlv1connect.SessionServiceClient {
+	t.Helper()
+	return newHarness(t, chunkDelay).client
+}
+
+func newHarness(t *testing.T, chunkDelay time.Duration) harness {
 	t.Helper()
 
 	var counter atomic.Uint64
@@ -85,7 +99,11 @@ func newServer(t *testing.T, chunkDelay time.Duration) controlv1connect.SessionS
 	})
 
 	httpClient := &http.Client{Transport: &bearerTransport{token: testToken, base: server.Client().Transport}}
-	return controlv1connect.NewSessionServiceClient(httpClient, server.URL)
+	return harness{
+		client:  controlv1connect.NewSessionServiceClient(httpClient, server.URL),
+		store:   store,
+		runtime: rt,
+	}
 }
 
 type bearerTransport struct {
@@ -387,4 +405,111 @@ func TestADecisionThatSaysNothingIsRefused(t *testing.T) {
 	if !strings.Contains(err.Error(), "APPROVAL_DECISION_ALLOW") {
 		t.Errorf("the error does not say what to send instead: %v", err)
 	}
+}
+
+// A client resuming from before what is kept is told to start again.
+//
+// Sending the remainder would draw a conversation missing its middle with
+// nothing marking the gap, and that reads as the agent having forgotten
+// rather than as history discarded on purpose.
+func TestResumingFromDiscardedHistoryAsksForAResync(t *testing.T) {
+	harness := newHarness(t, 0)
+
+	session, err := harness.runtime.CreateSession(context.Background(), "pruned")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	runID, _, err := harness.runtime.SendTurn(
+		context.Background(), session.ID, "hello", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if err := harness.runtime.Wait(context.Background(), runID); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	// Discard the early events the way retention does.
+	events, err := harness.store.ListAfter(context.Background(), session.ID, 0, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) < 3 {
+		t.Skipf("only %d events, too few to prune", len(events))
+	}
+	cut := events[len(events)-2].Seq
+	if _, err := harness.store.PruneEvents(context.Background(), session.ID, cut); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+
+	stream, err := harness.client.SubscribeEvents(context.Background(),
+		connect.NewRequest(&controlv1.SubscribeEventsRequest{
+			SessionId: string(session.ID),
+			AfterSeq:  1,
+		}))
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	var askedToResync bool
+	for stream.Receive() {
+		if resync := stream.Msg().GetResyncRequired(); resync != nil {
+			askedToResync = true
+			if resync.GetOldestSeq() == 0 {
+				t.Error("the resync does not say what the oldest kept event is")
+			}
+			if resync.GetHeadSeq() < resync.GetOldestSeq() {
+				t.Errorf("head %d is below oldest %d",
+					resync.GetHeadSeq(), resync.GetOldestSeq())
+			}
+			break
+		}
+		if stream.Msg().GetEvent() != nil {
+			t.Fatal("events were sent for a range that had been discarded")
+		}
+	}
+
+	if !askedToResync {
+		t.Error("a client resuming from discarded history was not asked to resync")
+	}
+}
+
+// A client resuming from inside what is kept is served normally: the resync is
+// for a gap, not for every reconnect.
+func TestResumingFromKeptHistoryStreamsNormally(t *testing.T) {
+	harness := newHarness(t, 0)
+
+	session, err := harness.runtime.CreateSession(context.Background(), "intact")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	runID, _, err := harness.runtime.SendTurn(
+		context.Background(), session.ID, "hello", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if err := harness.runtime.Wait(context.Background(), runID); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	stream, err := harness.client.SubscribeEvents(context.Background(),
+		connect.NewRequest(&controlv1.SubscribeEventsRequest{
+			SessionId: string(session.ID),
+			AfterSeq:  0,
+		}))
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	for stream.Receive() {
+		if stream.Msg().GetResyncRequired() != nil {
+			t.Fatal("a client with intact history was asked to resync")
+		}
+		if stream.Msg().GetEvent() != nil {
+			return
+		}
+	}
+	t.Error("no events arrived")
 }
