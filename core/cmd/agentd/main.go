@@ -304,8 +304,8 @@ func run() error {
 		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
 	plane.Projector.Provider = modelProvider.Name()
 	plane.Projector.Model = selected.ID
-	plane.Projector.WorkingInterval = cfg.Gateway.Discord.WorkingInterval
-	plane.Projector.StreamInterval = cfg.Gateway.Discord.StreamInterval
+	plane.Projector.WorkingInterval = cfg.Gateway.WorkingInterval
+	plane.Projector.StreamInterval = cfg.Gateway.StreamInterval
 
 	rt := runtime.New(rootCtx, runtime.Options{
 		Store:       store,

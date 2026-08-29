@@ -422,11 +422,25 @@ type Gateway struct {
 	// delivery queue can be scoped to it.
 	AccountID string `koanf:"account_id"`
 
-	// Discord is how that platform behaves. Its own section because these are
-	// facts about Discord — its upload ceiling, its rate limits, where its
-	// token lives — and a second platform would bring its own rather than
-	// competing for these names.
-	Discord Discord `koanf:"discord"`
+	// WorkingInterval is the least time between "what it is doing now" lines.
+	// A run that reads six files in a second would otherwise send six of them,
+	// which is more than a person can read and more than a platform will take.
+	//
+	// Here rather than under a platform: what paces these is the projector,
+	// which does not know which platform will carry them.
+	WorkingInterval time.Duration `koanf:"working_interval"`
+
+	// StreamInterval is the least time between versions of an answer that is
+	// still being written. An answer finished inside one interval never
+	// streams: it arrives whole, which is what it should do.
+	StreamInterval time.Duration `koanf:"stream_interval"`
+
+	// Discord and Telegram are how each platform behaves. Their own sections
+	// because these are facts about one service — its upload ceiling, where
+	// its token lives — and naming them separately is what stops a setting
+	// meant for one silently applying to the other.
+	Discord  Discord  `koanf:"discord"`
+	Telegram Telegram `koanf:"telegram"`
 
 	// Channels are rooms other people can type in. Reading runs unattended;
 	// changes, memory and web pages stop and ask; programs are refused.
@@ -468,16 +482,24 @@ type Discord struct {
 	// would accept: the point is to be readable, not to be as large as
 	// possible.
 	MaxAttachmentBytes int `koanf:"max_attachment_bytes"`
+}
 
-	// WorkingInterval is the least time between "what it is doing now" lines.
-	// A run that reads six files in a second would otherwise send six of them,
-	// which is more than a person can read and more than a platform will take.
-	WorkingInterval time.Duration `koanf:"working_interval"`
+// Telegram is what the Telegram adapter needs.
+//
+// Shorter than Discord's because Telegram decides less: one message limit,
+// no per-answer message budget worth setting, and no privileged intent to
+// negotiate for.
+type Telegram struct {
+	TokenEnv  []string `koanf:"token_env"`
+	TokenFile string   `koanf:"token_file"`
 
-	// StreamInterval is the least time between versions of an answer that is
-	// still being written. An answer finished inside one interval never
-	// streams: it arrives whole, which is what it should do.
-	StreamInterval time.Duration `koanf:"stream_interval"`
+	// MaxUploadBytes bounds what is uploaded, well under what the platform
+	// would accept.
+	MaxUploadBytes int `koanf:"max_upload_bytes"`
+
+	// APIBase is the API root. Configurable so a test, or a deployment behind
+	// a local proxy, can point it somewhere it controls. Empty uses Telegram.
+	APIBase string `koanf:"api_base"`
 }
 
 // Channel is a set of conversations sharing one set of rules.
@@ -610,15 +632,20 @@ func Defaults() Config {
 			PairingTTL: 10 * time.Minute,
 		},
 		Gateway: Gateway{
-			Platform:  "discord",
-			AccountID: "main",
+			Platform:        "discord",
+			AccountID:       "main",
+			WorkingInterval: 2 * time.Second,
+			StreamInterval:  1500 * time.Millisecond,
 			Discord: Discord{
 				TokenEnv:           []string{"DISCORD_BOT_TOKEN"},
 				TokenFile:          "discord.token",
 				MaxMessages:        3,
 				MaxAttachmentBytes: 4 << 20,
-				WorkingInterval:    2 * time.Second,
-				StreamInterval:     1500 * time.Millisecond,
+			},
+			Telegram: Telegram{
+				TokenEnv:       []string{"TELEGRAM_BOT_TOKEN"},
+				TokenFile:      "telegram.token",
+				MaxUploadBytes: 4 << 20,
 			},
 		},
 	}
@@ -926,7 +953,7 @@ func (c Config) choiceProblems() []Problem {
 		problems = append(problems, Problem{
 			Key: "gateway.platform", Value: quote(c.Gateway.Platform),
 			Why: "is not a platform that exists",
-			Fix: `Only "discord" is implemented.`,
+			Fix: `Choose "discord" or "telegram".`,
 		})
 	}
 
@@ -1009,8 +1036,8 @@ func (c Config) rangeProblems() []Problem {
 		{"artifacts.max_image_bytes", c.Artifacts.MaxImageBytes, "Zero would mean no image is ever shown to the model."},
 		{"gateway.max_messages", int64(c.Gateway.Discord.MaxMessages), "Zero would send every answer as a file."},
 		{"gateway.max_attachment_bytes", int64(c.Gateway.Discord.MaxAttachmentBytes), "Zero would make every attachment empty."},
-		{"gateway.working_interval", int64(c.Gateway.Discord.WorkingInterval), "Zero would say what it is doing on every tool call."},
-		{"gateway.stream_interval", int64(c.Gateway.Discord.StreamInterval), "Zero would send a version of the answer per chunk."},
+		{"gateway.working_interval", int64(c.Gateway.WorkingInterval), "Zero would say what it is doing on every tool call."},
+		{"gateway.stream_interval", int64(c.Gateway.StreamInterval), "Zero would send a version of the answer per chunk."},
 	}
 	for _, setting := range positive {
 		if setting.value <= 0 {
@@ -1130,7 +1157,7 @@ var (
 	providerNames = map[string]bool{
 		"fake": true, "gemini": true, "ollama": true, "openai_compat": true,
 	}
-	platformNames = map[string]bool{"discord": true}
+	platformNames = map[string]bool{"discord": true, "telegram": true}
 
 	thinkLevels = map[string]bool{
 		"": true, "off": true, "on": true,
@@ -1503,12 +1530,19 @@ web_console = true
 # runtime_dir = ""
 
 [gateway]
-# Read by gatewayd. Only "discord" is implemented.
+# Read by gatewayd. One of "discord" or "telegram"; the section below matching
+# the one chosen is the one that is read.
 platform = "discord"
 
 # Names this bot within JingClaw, so bindings and the delivery queue belong to
 # it. A second bot means a second account_id.
 account_id = "main"
+
+# The least time between "what it is doing now" lines, and between versions of
+# an answer still being written. Here rather than under a platform: what these
+# pace is the projector, which does not know which platform will carry them.
+# working_interval = "2s"
+# stream_interval = "1.5s"
 
 # The channels this agent answers in, applied when the daemon starts.
 # Declaring one that exists updates it.
@@ -1555,8 +1589,15 @@ token_file = "discord.token"
 # The upload ceiling, well under what Discord accepts.
 # max_attachment_bytes = 4194304
 
-# The least time between "what it is doing now" lines, and between versions of
-# an answer still being written.
-# working_interval = "2s"
-# stream_interval = "1.5s"
+[gateway.telegram]
+# Where the bot token comes from. The file must be mode 600, and the value
+# never reaches a log.
+token_env = ["TELEGRAM_BOT_TOKEN"]
+token_file = "telegram.token"
+
+# The upload ceiling, well under what Telegram accepts.
+# max_upload_bytes = 4194304
+
+# The API root. Empty is Telegram itself; set it to reach a local proxy.
+# api_base = ""
 `

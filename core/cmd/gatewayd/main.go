@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -26,11 +25,9 @@ import (
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
-	"github.com/KoukeNeko/JingClaw/core/internal/adapter/discord"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
-	"github.com/KoukeNeko/JingClaw/core/internal/secret"
 )
 
 const clientName = "jingclaw-gatewayd"
@@ -85,25 +82,17 @@ func run() error {
 		return err
 	}
 
-	botToken, err := loadBotToken(cfg)
-	if err != nil {
-		return err
-	}
-
 	relay := &relay{
 		client:    client,
 		accountID: cfg.Gateway.AccountID,
 		logger:    logger,
 	}
 
-	adapter := discord.New(discord.Config{
-		Token:              botToken.Reveal(),
-		AccountID:          cfg.Gateway.AccountID,
-		MaxMessages:        cfg.Gateway.Discord.MaxMessages,
-		MaxAttachmentBytes: cfg.Gateway.Discord.MaxAttachmentBytes,
-		Logger:             logger,
-	}, relay)
-	relay.poster = adapter
+	platformAdapter, err := newAdapter(cfg, relay, logger)
+	if err != nil {
+		return err
+	}
+	relay.poster = platformAdapter
 
 	logger.Info("gateway starting",
 		"platform", cfg.Gateway.Platform, "account_id", cfg.Gateway.AccountID)
@@ -115,7 +104,7 @@ func run() error {
 	// The connection and the delivery loop are independent: an outage in one
 	// must not silently stop the other, and errgroup makes either failing
 	// bring the process down rather than leaving it half working.
-	group.Go(func() error { return adapter.Run(ctx) })
+	group.Go(func() error { return platformAdapter.Run(ctx) })
 	group.Go(func() error { return relay.deliver(ctx) })
 
 	if err := group.Wait(); err != nil && !errors.Is(err, context.Canceled) {
@@ -129,7 +118,7 @@ func run() error {
 // relay moves messages inward and dispatches outward.
 type relay struct {
 	client    controlv1connect.GatewayIngressServiceClient
-	poster    *discord.Adapter
+	poster    adapter
 	accountID string
 	logger    *slog.Logger
 }
@@ -262,28 +251,6 @@ func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient,
 		Transport: &bearerTransport{token: found.GatewayToken, base: http.DefaultTransport},
 	}
 	return controlv1connect.NewGatewayIngressServiceClient(httpClient, found.BaseURL), nil
-}
-
-func loadBotToken(cfg config.Config) (secret.Value, error) {
-	files, err := secret.DefaultFiles(cfg.Gateway.Discord.TokenFile)
-	if err != nil {
-		return secret.Value{}, err
-	}
-
-	token, err := secret.Load(secret.LoadOptions{
-		EnvVars: cfg.Gateway.Discord.TokenEnv,
-		Files:   files,
-	})
-	if err != nil {
-		return secret.Value{}, err
-	}
-	if !token.IsSet() {
-		return secret.Value{}, fmt.Errorf(
-			"no bot token: set %s, or write it with mode 600 to one of: %v",
-			strings.Join(cfg.Gateway.Discord.TokenEnv, " or "), files)
-	}
-
-	return token, nil
 }
 
 type bearerTransport struct {

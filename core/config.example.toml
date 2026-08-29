@@ -237,12 +237,19 @@ web_console = true
 # runtime_dir = ""
 
 [gateway]
-# Read by gatewayd. Only "discord" is implemented.
+# Read by gatewayd. One of "discord" or "telegram"; the section below matching
+# the one chosen is the one that is read.
 platform = "discord"
 
 # Names this bot within JingClaw, so bindings and the delivery queue belong to
 # it. A second bot means a second account_id.
 account_id = "main"
+
+# The least time between "what it is doing now" lines, and between versions of
+# an answer still being written. Here rather than under a platform: what these
+# pace is the projector, which does not know which platform will carry them.
+# working_interval = "2s"
+# stream_interval = "1.5s"
 
 # The channels this agent answers in, applied when the daemon starts.
 # Declaring one that exists updates it.
@@ -289,7 +296,14 @@ token_file = "discord.token"
 # The upload ceiling, well under what Discord accepts.
 # max_attachment_bytes = 4194304
 
-# The least time between "what it is doing now" lines, and between versions of
-# an answer still being written.
-# working_interval = "2s"
-# stream_interval = "1.5s"
+[gateway.telegram]
+# Where the bot token comes from. The file must be mode 600, and the value
+# never reaches a log.
+token_env = ["TELEGRAM_BOT_TOKEN"]
+token_file = "telegram.token"
+
+# The upload ceiling, well under what Telegram accepts.
+# max_upload_bytes = 4194304
+
+# The API root. Empty is Telegram itself; set it to reach a local proxy.
+# api_base = ""

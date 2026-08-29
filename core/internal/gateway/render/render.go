@@ -28,6 +28,12 @@ type Style struct {
 	// continuation marker or a reopened code fence still fits.
 	SoftLength int
 
+	// WorkingLine says whether this platform shows "what it is doing now" as
+	// text. Discord does not: it puts a reaction on the message that asked,
+	// which says the same thing without a line per tool call. Telegram's bots
+	// may only react with a fixed set of emoji, so there it has to be text.
+	WorkingLine bool
+
 	// SubduedPrefix marks a line that is context rather than the answer —
 	// Discord's small text, nothing at all where the platform has no such
 	// thing.
@@ -228,7 +234,10 @@ func renderStatus(payload jcgateway.StatusPayload, style Style) string {
 	case "running":
 		return "👀"
 	case "working":
-		return ""
+		if !style.WorkingLine || payload.Detail == "" {
+			return ""
+		}
+		return style.SubduedPrefix + "⋯ " + payload.Detail
 	case "completed":
 		return renderCompletionStatus(payload, style)
 	case "cancelled":
