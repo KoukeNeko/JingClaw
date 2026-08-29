@@ -268,3 +268,35 @@ func writePrefixed(out *strings.Builder, prefix, text string) {
 		fmt.Fprintf(out, "%s%s\n", prefix, line)
 	}
 }
+
+// Preview is the change this call would make, as a diff.
+//
+// The arguments carry the old and new text in full, so nothing needs to be
+// read from disk and nothing is: this runs before anybody has decided, and a
+// preview that touched the workspace would be the edit happening without
+// approval. What it therefore cannot show is context around the change, or
+// whether the target is even present — those are the edit's own job, and it
+// refuses on both counts.
+func (t *EditFile) Preview(arguments json.RawMessage) string {
+	var args editFileArgs
+	if err := json.Unmarshal(arguments, &args); err != nil {
+		return ""
+	}
+	if len(args.Edits) == 0 {
+		return ""
+	}
+
+	var out strings.Builder
+	fmt.Fprintf(&out, "--- %s\n+++ %s\n", args.Path, args.Path)
+
+	for i, edit := range args.Edits {
+		if i > 0 {
+			out.WriteString("\n")
+		}
+		fmt.Fprintf(&out, "@@ change %d @@\n", i+1)
+		writePrefixed(&out, "-", edit.OldText)
+		writePrefixed(&out, "+", edit.NewText)
+	}
+
+	return out.String()
+}

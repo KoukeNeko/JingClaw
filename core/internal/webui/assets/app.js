@@ -708,11 +708,20 @@ function renderApprovals() {
     tool.className = 'tool mono';
     tool.textContent = approval.toolName;
 
-    const args = document.createElement('div');
-    args.className = 'args mono';
-    args.textContent = compact(approval.arguments || '', 240);
+    what.append(tool);
 
-    what.append(tool, args);
+    // The call as the daemon rendered it for review — a diff for an edit, the
+    // command line for an execution. The arguments are what will actually
+    // run, so they stay reachable rather than being replaced by a rendering
+    // somebody might be deciding against instead.
+    if (approval.preview) {
+        what.append(previewBlock(approval.preview), argumentsToggle(approval));
+    } else {
+        const args = document.createElement('div');
+        args.className = 'args mono';
+        args.textContent = compact(approval.arguments || '', 240);
+        what.append(args);
+    }
 
     if (approval.effects?.length) {
       const effects = document.createElement('div');
@@ -728,6 +737,57 @@ function renderApprovals() {
 
     panel.append(row);
   }
+}
+
+// previewBlock draws the rendered call, colouring a diff by line.
+//
+// Line by line rather than as one block of text: a change is the thing a
+// person most often has to review before allowing it, and a wall of one colour
+// is a wall nobody reads.
+function previewBlock(preview) {
+  const block = document.createElement('pre');
+  block.className = 'preview';
+
+  for (const line of preview.split('\n')) {
+    const row = document.createElement('span');
+    if (line.startsWith('+')) row.className = 'added';
+    else if (line.startsWith('-')) row.className = 'removed';
+    else if (line.startsWith('@@')) row.className = 'where';
+    row.textContent = line + '\n';
+    block.append(row);
+  }
+
+  return block;
+}
+
+// argumentsToggle keeps the real arguments one click away from a preview.
+//
+// A preview is a rendering, and a person approving one is approving the call
+// underneath it. Hidden by default because the whole point of the preview is
+// that the arguments are unreadable; reachable because a rendering that
+// disagreed with them is exactly what somebody would want to catch.
+function argumentsToggle(approval) {
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'artifact';
+  toggle.textContent = 'show the exact arguments';
+
+  let shown = null;
+  toggle.addEventListener('click', () => {
+    if (shown) {
+      shown.remove();
+      shown = null;
+      toggle.textContent = 'show the exact arguments';
+      return;
+    }
+    shown = document.createElement('pre');
+    shown.className = 'artifact-body';
+    shown.textContent = approval.arguments || '';
+    toggle.after(shown);
+    toggle.textContent = 'hide the arguments';
+  });
+
+  return toggle;
 }
 
 function decideButton(approval, decision, remember, label, className) {

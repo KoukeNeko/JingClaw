@@ -81,6 +81,7 @@ type approvalRequestedJSON struct {
 	Arguments  string   `json:"arguments"`
 	Summary    string   `json:"summary,omitempty"`
 	Effects    []string `json:"effects,omitempty"`
+	Preview    string   `json:"preview,omitempty"`
 }
 
 type approvalResolvedJSON struct {
@@ -250,6 +251,7 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			Arguments:  p.Arguments,
 			Summary:    p.Summary,
 			Effects:    p.Effects,
+			Preview:    p.Preview,
 		})
 
 	case domain.ApprovalResolved:
@@ -394,6 +396,7 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			Arguments:  p.Arguments,
 			Summary:    p.Summary,
 			Effects:    p.Effects,
+			Preview:    p.Preview,
 		}, nil
 
 	case domain.EventApprovalResolved:

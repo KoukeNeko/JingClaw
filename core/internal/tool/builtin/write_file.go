@@ -274,3 +274,42 @@ func atomicWrite(path string, content []byte) error {
 
 	return nil
 }
+
+// Preview is what would be written.
+//
+// A whole file rather than a diff, because this tool replaces rather than
+// edits and the thing to review is what will be there afterwards. Nothing is
+// read from disk: this runs before a decision, and a preview with a side
+// effect is the write happening without approval — which also means it cannot
+// say whether the file already exists.
+func (t *WriteFile) Preview(arguments json.RawMessage) string {
+	var args writeFileArgs
+	if err := json.Unmarshal(arguments, &args); err != nil {
+		return ""
+	}
+	if args.Content == "" {
+		return ""
+	}
+
+	var out strings.Builder
+	fmt.Fprintf(&out, "+++ %s\n", args.Path)
+	writePrefixed(&out, "+", boundPreview(args.Content))
+	return out.String()
+}
+
+// maxPreviewBytes is where a preview stops being something a person reads
+// before deciding and starts being a file they scroll past. Somebody who wants
+// the whole of it can read the file after approving.
+const maxPreviewBytes = 8 << 10
+
+func boundPreview(text string) string {
+	if len(text) <= maxPreviewBytes {
+		return text
+	}
+
+	runes := []rune(text)
+	if len(runes) > maxPreviewBytes {
+		runes = runes[:maxPreviewBytes]
+	}
+	return string(runes) + "\n… (the rest is not shown)"
+}

@@ -159,6 +159,27 @@ button.danger { color: var(--error); }
 .approval { display: flex; gap: 0.75rem; align-items: flex-start; padding: 0.35rem 0; }
 .approval .what { flex: 1 1 auto; min-width: 0; }
 .approval .tool { font-weight: 600; }
+
+/* The call as it will happen, for somebody about to allow it. Diff colouring
+   because a change is the thing a person most often has to review, and a wall
+   of one colour is a wall nobody reads. */
+.approval .preview {
+  margin: 0.4rem 0;
+  padding: 0.5rem 0.7rem;
+  max-height: 18rem;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.approval .preview .added { color: var(--ok); }
+.approval .preview .removed { color: var(--error); }
+.approval .preview .where { color: var(--ink-dim); }
 .approval .args { color: var(--ink-dim); word-break: break-all; }
 .approval .effects { font-size: 0.78rem; color: var(--error); }
 

@@ -145,6 +145,57 @@ public struct EventBody: Sendable, Decodable {
     }
 }
 
+/// An approval waiting on somebody, with the call rendered for review.
+///
+/// More than the id, because approving a call whose contents you cannot see is
+/// not a decision. The preview comes from the daemon rather than being built
+/// here: a client would have to know the argument schema of every tool, which
+/// means three implementations that drift and none at all for a tool server's
+/// own tools.
+public struct PendingApproval: Equatable, Sendable, Decodable {
+    public var id: String
+    public var toolName: String
+    public var arguments: String
+    public var summary: String
+    public var effects: [String]
+    public var preview: String
+
+    public init(
+        id: String,
+        toolName: String = "",
+        arguments: String = "",
+        summary: String = "",
+        effects: [String] = [],
+        preview: String = ""
+    ) {
+        self.id = id
+        self.toolName = toolName
+        self.arguments = arguments
+        self.summary = summary
+        self.effects = effects
+        self.preview = preview
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        toolName = try container.decodeIfPresent(String.self, forKey: .toolName) ?? ""
+        arguments = try container.decodeIfPresent(String.self, forKey: .arguments) ?? ""
+        summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        effects = try container.decodeIfPresent([String].self, forKey: .effects) ?? []
+        preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case toolName
+        case arguments
+        case summary
+        case effects
+        case preview
+    }
+}
+
 /// Stored output named on an event, without its bytes.
 public struct ArtifactRef: Sendable, Decodable, Equatable {
     public var id: String

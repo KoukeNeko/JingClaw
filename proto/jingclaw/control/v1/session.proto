@@ -103,6 +103,9 @@ message Approval {
 
   ApprovalStatus status = 9;
   google.protobuf.Timestamp created_at = 10;
+
+  // The call rendered for whoever is deciding. See ApprovalRequested.preview.
+  string preview = 11;
 }
 
 message ListApprovalsRequest {

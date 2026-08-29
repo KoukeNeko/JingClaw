@@ -568,6 +568,15 @@ type Approval struct {
 	Summary string
 	Effects []string
 
+	// Preview is the call rendered for somebody deciding — a diff for an
+	// edit, the command line for an execution. Empty when the arguments are
+	// already the clearest thing to show.
+	//
+	// Alongside Arguments rather than replacing them: the arguments are what
+	// will actually run, and a decision made against a rendering that
+	// disagreed with them would be a decision about something else.
+	Preview string
+
 	Status ApprovalStatus
 	Scope  RememberScope
 
@@ -595,6 +604,10 @@ type ApprovalRequested struct {
 	Arguments  string
 	Summary    string
 	Effects    []string
+
+	// Preview is the call rendered for review, where the tool could render
+	// one. See Approval.Preview.
+	Preview string
 }
 
 // ApprovalResolved records the answer and who gave it.

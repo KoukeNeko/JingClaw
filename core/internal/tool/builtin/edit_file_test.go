@@ -453,3 +453,64 @@ func TestWritePreservesCRLFAndBOM(t *testing.T) {
 		t.Errorf("line endings were not preserved: %q", string(after))
 	}
 }
+
+// A person asked to approve an edit cannot review nine hundred characters of
+// old_text against nine hundred and fifty of new_text. The diff between them
+// is what a review actually is.
+func TestAnEditPreviewsAsADiff(t *testing.T) {
+	edit := builtin.NewEditFile(nil, nil, nil)
+
+	preview := edit.Preview(json.RawMessage(`{
+		"path": "internal/runtime/runtime.go",
+		"edits": [{"old_text": "timeout := 30", "new_text": "timeout := 120"}]
+	}`))
+
+	for _, want := range []string{"internal/runtime/runtime.go", "-timeout := 30", "+timeout := 120"} {
+		if !strings.Contains(preview, want) {
+			t.Errorf("the preview does not show %q:\n%s", want, preview)
+		}
+	}
+}
+
+// A preview runs before anybody has decided. One that read or wrote anything
+// would be the edit happening without approval, so it is given a workspace it
+// could not use even if it tried.
+func TestAPreviewTouchesNothing(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	if err := os.WriteFile(path, []byte("original\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	edit := builtin.NewEditFile(ws, builtin.NewObserver(), builtin.NewFileLocks())
+
+	_ = edit.Preview(json.RawMessage(`{
+		"path": "notes.txt",
+		"edits": [{"old_text": "original", "new_text": "replaced"}]
+	}`))
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(after) != "original\n" {
+		t.Errorf("the preview changed the file: %q", after)
+	}
+}
+
+// Arguments that do not parse must produce no preview rather than a panic or a
+// misleading one. This runs on whatever a model produced.
+func TestUnreadableArgumentsPreviewAsNothing(t *testing.T) {
+	edit := builtin.NewEditFile(nil, nil, nil)
+
+	if preview := edit.Preview(json.RawMessage(`{"path":`)); preview != "" {
+		t.Errorf("unparseable arguments produced a preview: %q", preview)
+	}
+	if preview := edit.Preview(json.RawMessage(`{"path": "x.txt"}`)); preview != "" {
+		t.Errorf("an edit with no changes produced a preview: %q", preview)
+	}
+}

@@ -330,6 +330,17 @@ func newApprovalsCommand() *cobra.Command {
 				for _, effect := range approval.GetEffects() {
 					fmt.Printf("    - %s\n", effect)
 				}
+
+				// The call as the daemon rendered it: a diff for an edit, the
+				// command line for an execution. Indented rather than shown
+				// raw so that a diff does not run into the next approval, and
+				// only where there is one — most tools have nothing clearer
+				// to show than their arguments.
+				if preview := approval.GetPreview(); preview != "" {
+					for line := range strings.SplitSeq(strings.TrimRight(preview, "\n"), "\n") {
+						fmt.Printf("    %s\n", line)
+					}
+				}
 			}
 			return nil
 		},

@@ -141,6 +141,7 @@ func approvalToProto(a domain.Approval) *controlv1.Approval {
 		Arguments:  a.Arguments,
 		Summary:    a.Summary,
 		Effects:    a.Effects,
+		Preview:    a.Preview,
 		Status:     approvalStatusToProto(a.Status),
 		CreatedAt:  timestamppb.New(a.CreatedAt),
 	}
@@ -297,6 +298,7 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 				Arguments:  p.Arguments,
 				Summary:    p.Summary,
 				Effects:    p.Effects,
+				Preview:    p.Preview,
 			},
 		}
 

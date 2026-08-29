@@ -326,3 +326,24 @@ func ShellFor() (program string, prefix []string, ok bool) {
 	}
 	return "", nil, false
 }
+
+// Preview is the command line this call would run.
+//
+// The arguments are a program and a list, which is the safe way to pass them
+// and the hard way to read them. What somebody deciding wants to see is the
+// line as a shell would have written it.
+func (t *ExecCommand) Preview(arguments json.RawMessage) string {
+	var args execArgs
+	if err := json.Unmarshal(arguments, &args); err != nil {
+		return ""
+	}
+	if args.Program == "" {
+		return ""
+	}
+
+	line := commandLine(args)
+	if args.Cwd != "" {
+		return fmt.Sprintf("in %s:\n%s", args.Cwd, line)
+	}
+	return line
+}

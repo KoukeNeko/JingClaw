@@ -1122,7 +1122,7 @@ func (r *Runtime) settleCall(ctx context.Context, run domain.Run, call tool.Call
 		return deniedResult(call, outcome.outcome.Reason), false, nil
 
 	default:
-		if err := r.requestApproval(ctx, run, call, outcome.outcome); err != nil {
+		if err := r.requestApproval(ctx, run, registered, call, outcome.outcome); err != nil {
 			return tool.Result{}, false, err
 		}
 		return tool.Result{}, true, nil

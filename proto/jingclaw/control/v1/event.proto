@@ -156,6 +156,15 @@ message ApprovalRequested {
 
   // Consequences a reader might not infer from the arguments alone.
   repeated string effects = 6;
+
+  // The call rendered for whoever is deciding — a diff for an edit, the
+  // command line for an execution. Empty when the arguments are already the
+  // clearest thing to show, and for a tool that cannot render itself.
+  //
+  // Alongside arguments rather than replacing them: the arguments are what
+  // will actually run, and a decision made against a rendering that disagreed
+  // with them would be a decision about something else.
+  string preview = 7;
 }
 
 message ApprovalResolved {

@@ -96,6 +96,7 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			Arguments:  `{"program":"git","args":["push"]}`,
 			Summary:    "git push",
 			Effects:    []string{"network", "destructive"},
+			Preview:    "git push",
 		},
 		domain.EventApprovalResolved: domain.ApprovalResolved{
 			ApprovalID: "apr_1",

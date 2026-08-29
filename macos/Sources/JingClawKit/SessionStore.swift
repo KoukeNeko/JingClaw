@@ -15,6 +15,13 @@ public final class SessionStore {
     public private(set) var status: String = ""
     public private(set) var selected: String?
 
+    /// What each waiting approval is actually asking for.
+    ///
+    /// The reducer keeps the ids, because that is what three clients have to
+    /// agree about; the rest is fetched, because approving a call whose
+    /// contents you cannot see is not a decision.
+    public private(set) var waiting: [PendingApproval] = []
+
     /// Stored output somebody asked to look at, by artifact id.
     ///
     /// Kept here rather than fetched by the view so that opening the same one
@@ -70,6 +77,7 @@ public final class SessionStore {
             status = "\(error)"
         }
 
+        await loadApprovals()
         follow(id, after: state.headSeq)
     }
 
@@ -91,8 +99,27 @@ public final class SessionStore {
                     "approvalId": approvalID,
                     "decision": allow ? "APPROVAL_DECISION_ALLOW" : "APPROVAL_DECISION_DENY",
                 ])
+            // Removed here rather than waiting for the event, so the button
+            // somebody just pressed stops being pressable.
+            waiting.removeAll { $0.id == approvalID }
         } catch {
             status = "\(error)"
+        }
+    }
+
+    /// Fetches what each waiting approval is asking for.
+    ///
+    /// Called on open and whenever the reducer sees a new one, rather than
+    /// read off the event: a session opened rather than watched has approvals
+    /// raised before this client was looking, and they need reviewing too.
+    public func loadApprovals() async {
+        guard let id = selected else { return }
+        do {
+            let listed: ApprovalListResponse = try await client.call(
+                "SessionService", "ListApprovals", ["sessionId": id])
+            waiting = listed.approvals ?? []
+        } catch {
+            status = "could not read what is waiting: \(error)"
         }
     }
 
@@ -166,8 +193,13 @@ public final class SessionStore {
                         }
 
                         if let applied = decoded.event?.asLogEvent {
+                            let before = self.state.pendingApprovals
                             self.state = Reducer.reduce(self.state, applied)
                             resumeFrom = applied.seq
+
+                            if self.state.pendingApprovals != before {
+                                await self.loadApprovals()
+                            }
                         }
                     }
                 } catch {
@@ -189,6 +221,10 @@ public struct SessionSummary: Decodable, Identifiable, Sendable {
 
 struct SessionListResponse: Decodable {
     var sessions: [SessionSummary]?
+}
+
+struct ApprovalListResponse: Decodable {
+    var approvals: [PendingApproval]?
 }
 
 struct CreateSessionResponse: Decodable {

@@ -56,6 +56,7 @@ func (r *Runtime) evaluate(ctx context.Context, run domain.Run, spec tool.Spec, 
 func (r *Runtime) requestApproval(
 	ctx context.Context,
 	run domain.Run,
+	registered tool.Tool,
 	call tool.Call,
 	outcome permission.Outcome,
 ) error {
@@ -68,6 +69,7 @@ func (r *Runtime) requestApproval(
 		Arguments:  string(call.Arguments),
 		Summary:    outcome.Summary,
 		Effects:    outcome.Effects,
+		Preview:    previewOf(registered, call),
 		Status:     domain.ApprovalPending,
 		Scope:      domain.RememberOnce,
 		CreatedAt:  r.opts.Now(),
@@ -85,6 +87,7 @@ func (r *Runtime) requestApproval(
 			Arguments:  approval.Arguments,
 			Summary:    approval.Summary,
 			Effects:    approval.Effects,
+			Preview:    approval.Preview,
 		})
 }
 
@@ -235,4 +238,30 @@ func (r *Runtime) SetPermissions(engine *permission.Engine) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.opts.Permissions = engine
+}
+
+// previewOf asks a tool to render its own call for review.
+//
+// Optional, so most tools have nothing to say and their arguments are what a
+// reviewer sees. The ones that do implement it are the ones whose arguments
+// are unreadable as they stand: nobody reviews nine hundred characters of
+// old_text, but everybody can read the diff between it and the new.
+//
+// A tool that panics rendering a preview must not take the run with it. It is
+// asked for a string before anybody has decided anything, which is the least
+// important moment in the call and the one where a crash would be the most
+// confusing.
+func previewOf(registered tool.Tool, call tool.Call) (preview string) {
+	previewer, ok := registered.(tool.Previewer)
+	if !ok {
+		return ""
+	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			preview = ""
+		}
+	}()
+
+	return previewer.Preview(call.Arguments)
 }

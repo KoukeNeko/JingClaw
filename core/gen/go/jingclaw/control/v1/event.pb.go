@@ -937,7 +937,15 @@ type ApprovalRequested struct {
 	Arguments string `protobuf:"bytes,4,opt,name=arguments,proto3" json:"arguments,omitempty"`
 	Summary   string `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
 	// Consequences a reader might not infer from the arguments alone.
-	Effects       []string `protobuf:"bytes,6,rep,name=effects,proto3" json:"effects,omitempty"`
+	Effects []string `protobuf:"bytes,6,rep,name=effects,proto3" json:"effects,omitempty"`
+	// The call rendered for whoever is deciding — a diff for an edit, the
+	// command line for an execution. Empty when the arguments are already the
+	// clearest thing to show, and for a tool that cannot render itself.
+	//
+	// Alongside arguments rather than replacing them: the arguments are what
+	// will actually run, and a decision made against a rendering that disagreed
+	// with them would be a decision about something else.
+	Preview       string `protobuf:"bytes,7,opt,name=preview,proto3" json:"preview,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1012,6 +1020,13 @@ func (x *ApprovalRequested) GetEffects() []string {
 		return x.Effects
 	}
 	return nil
+}
+
+func (x *ApprovalRequested) GetPreview() string {
+	if x != nil {
+		return x.Preview
+	}
+	return ""
 }
 
 type ApprovalResolved struct {
@@ -1448,7 +1463,7 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\ttruncated\x18\x06 \x01(\bR\ttruncated\x12\x1f\n" +
 	"\vduration_ms\x18\a \x01(\x03R\n" +
 	"durationMs\x129\n" +
-	"\bartifact\x18\b \x01(\v2\x1d.jingclaw.control.v1.ArtifactR\bartifact\"\xbc\x01\n" +
+	"\bartifact\x18\b \x01(\v2\x1d.jingclaw.control.v1.ArtifactR\bartifact\"\xd6\x01\n" +
 	"\x11ApprovalRequested\x12\x1f\n" +
 	"\vapproval_id\x18\x01 \x01(\tR\n" +
 	"approvalId\x12\x17\n" +
@@ -1456,7 +1471,8 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\ttool_name\x18\x03 \x01(\tR\btoolName\x12\x1c\n" +
 	"\targuments\x18\x04 \x01(\tR\targuments\x12\x18\n" +
 	"\asummary\x18\x05 \x01(\tR\asummary\x12\x18\n" +
-	"\aeffects\x18\x06 \x03(\tR\aeffects\"\xff\x01\n" +
+	"\aeffects\x18\x06 \x03(\tR\aeffects\x12\x18\n" +
+	"\apreview\x18\a \x01(\tR\apreview\"\xff\x01\n" +
 	"\x10ApprovalResolved\x12\x1f\n" +
 	"\vapproval_id\x18\x01 \x01(\tR\n" +
 	"approvalId\x12\x17\n" +

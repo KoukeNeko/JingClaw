@@ -794,17 +794,19 @@ func (x *InterruptRunResponse) GetStatus() RunStatus {
 }
 
 type Approval struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	RunId         string                 `protobuf:"bytes,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	ToolCallId    string                 `protobuf:"bytes,4,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
-	ToolName      string                 `protobuf:"bytes,5,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
-	Arguments     string                 `protobuf:"bytes,6,opt,name=arguments,proto3" json:"arguments,omitempty"`
-	Summary       string                 `protobuf:"bytes,7,opt,name=summary,proto3" json:"summary,omitempty"`
-	Effects       []string               `protobuf:"bytes,8,rep,name=effects,proto3" json:"effects,omitempty"`
-	Status        ApprovalStatus         `protobuf:"varint,9,opt,name=status,proto3,enum=jingclaw.control.v1.ApprovalStatus" json:"status,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Id         string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	SessionId  string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	RunId      string                 `protobuf:"bytes,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	ToolCallId string                 `protobuf:"bytes,4,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
+	ToolName   string                 `protobuf:"bytes,5,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
+	Arguments  string                 `protobuf:"bytes,6,opt,name=arguments,proto3" json:"arguments,omitempty"`
+	Summary    string                 `protobuf:"bytes,7,opt,name=summary,proto3" json:"summary,omitempty"`
+	Effects    []string               `protobuf:"bytes,8,rep,name=effects,proto3" json:"effects,omitempty"`
+	Status     ApprovalStatus         `protobuf:"varint,9,opt,name=status,proto3,enum=jingclaw.control.v1.ApprovalStatus" json:"status,omitempty"`
+	CreatedAt  *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// The call rendered for whoever is deciding. See ApprovalRequested.preview.
+	Preview       string `protobuf:"bytes,11,opt,name=preview,proto3" json:"preview,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -907,6 +909,13 @@ func (x *Approval) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *Approval) GetPreview() string {
+	if x != nil {
+		return x.Preview
+	}
+	return ""
 }
 
 type ListApprovalsRequest struct {
@@ -2881,7 +2890,7 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\"N\n" +
 	"\x14InterruptRunResponse\x126\n" +
-	"\x06status\x18\x01 \x01(\x0e2\x1e.jingclaw.control.v1.RunStatusR\x06status\"\xd9\x02\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1e.jingclaw.control.v1.RunStatusR\x06status\"\xf3\x02\n" +
 	"\bApproval\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -2896,7 +2905,8 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\x06status\x18\t \x01(\x0e2#.jingclaw.control.v1.ApprovalStatusR\x06status\x129\n" +
 	"\n" +
 	"created_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"5\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x18\n" +
+	"\apreview\x18\v \x01(\tR\apreview\"5\n" +
 	"\x14ListApprovalsRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"T\n" +

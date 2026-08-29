@@ -210,21 +210,97 @@ private struct Approvals: View {
     @Bindable var store: SessionStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(store.state.pendingApprovals, id: \.self) { id in
-                HStack {
-                    Text("Waiting for a decision").font(.callout)
-                    Text(id).font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Deny") { Task { await store.decide(id, allow: false) } }
-                    Button("Allow") { Task { await store.decide(id, allow: true) } }
-                        .keyboardShortcut(.defaultAction)
-                }
+                ApprovalRow(id: id, asking: asking(id), store: store)
             }
         }
         .padding(12)
         .background(.quaternary)
+    }
+
+    /// What this approval is asking for, once the details have arrived.
+    ///
+    /// The id comes from the reducer and the rest is fetched, so for a moment
+    /// there is an id and nothing else. Shown as an id rather than withheld:
+    /// a run is paused, and saying so late is worse than saying so plainly.
+    private func asking(_ id: String) -> PendingApproval? {
+        store.waiting.first { $0.id == id }
+    }
+}
+
+private struct ApprovalRow: View {
+    let id: String
+    let asking: PendingApproval?
+    @Bindable var store: SessionStore
+
+    @State private var showingArguments = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(asking?.toolName.isEmpty == false ? asking!.toolName : "Waiting for a decision")
+                    .font(.system(.callout, design: .monospaced)).bold()
+                Spacer()
+                Button("Deny") { Task { await store.decide(id, allow: false) } }
+                Button("Allow") { Task { await store.decide(id, allow: true) } }
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            if let effects = asking?.effects, !effects.isEmpty {
+                Text(effects.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // The call as the daemon rendered it: a diff for an edit, the
+            // command line for an execution. Coloured by line, because a
+            // change is what a person most often has to review and a wall of
+            // one colour is a wall nobody reads.
+            if let preview = asking?.preview, !preview.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(preview.split(separator: "\n", omittingEmptySubsequences: false)
+                            .enumerated()), id: \.offset) { _, line in
+                            Text(String(line))
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(colour(of: String(line)))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(8)
+                    .textSelection(.enabled)
+                }
+                .frame(maxHeight: 220)
+                .background(.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+
+                // A preview is a rendering, and whoever allows it is allowing
+                // the call underneath. Hidden by default because the point of
+                // the preview is that the arguments are unreadable; reachable
+                // because a rendering that disagreed with them is exactly what
+                // somebody would want to catch.
+                Button(showingArguments ? "Hide the exact arguments" : "Show the exact arguments") {
+                    showingArguments.toggle()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+
+            if showingArguments || (asking?.preview.isEmpty ?? true) {
+                Text(asking?.arguments ?? id)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func colour(of line: String) -> Color {
+        if line.hasPrefix("+") { return .green }
+        if line.hasPrefix("-") { return .red }
+        if line.hasPrefix("@@") { return .secondary }
+        return .primary
     }
 }
 

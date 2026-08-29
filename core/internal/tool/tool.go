@@ -150,6 +150,27 @@ type Call struct {
 	Context CallContext
 }
 
+// Previewer renders what a call will do, for somebody deciding whether to
+// allow it.
+//
+// Optional, and implemented by the tools whose arguments a person cannot
+// review as they stand. "edit_file with these 900 characters of old_text and
+// these 950 of new_text" is not a thing anybody reads; the diff between them
+// is, and it is the same review whichever client is showing it.
+//
+// Rendered in the daemon rather than by each client on purpose. A client would
+// have to know the argument schema of every tool to do it, which means three
+// implementations that drift, and a tool server's own tools would have none at
+// all. Here the tool that defined the arguments is the one that explains them.
+//
+// An empty string means there is nothing better to show than the arguments.
+type Previewer interface {
+	// Preview must not touch anything. It runs before a decision has been
+	// made, and a preview with a side effect is the call happening without
+	// approval.
+	Preview(arguments json.RawMessage) string
+}
+
 // CallContext is who and what a call belongs to.
 type CallContext struct {
 	SessionID string
