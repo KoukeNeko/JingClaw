@@ -182,4 +182,11 @@ STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d '{}' "$BASE/pair")
 grep -q Console "$WORK/off.out" && fail "the banner still advertises a console that is off"
 printf 'ok   turning it off turns it off\n'
 
+# The console opens a session from the view rather than replaying its log. A
+# conversation somebody has used for a week is otherwise a visible wait, and
+# the wait grows with every turn.
+grep -q 'GetSessionView' internal/webui/assets/app.js ||
+	fail "the console does not ask for the view, so it still replays"
+printf 'ok   the console draws a session without replaying its log\n'
+
 printf '\nall checks passed\n'

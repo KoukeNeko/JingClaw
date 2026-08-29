@@ -312,8 +312,71 @@ async function selectSession(id) {
   renderSessions();
   renderApprovals();
 
-  await loadApprovals();
+  await openFromView(id);
   attach();
+}
+
+// openFromView draws the session as it is now, and says where to resume.
+//
+// Replaying every event to work out what is on the screen is correct and gets
+// slower with each turn, until opening a conversation somebody has used for a
+// week is a visible wait. The daemon assembles the same answer once.
+//
+// A failure here falls back to the replay rather than showing nothing: an
+// older daemon has no such method, and a console that refuses to open a
+// session because an optimisation is missing is worse than a slow one.
+async function openFromView(id) {
+  try {
+    const view = await call('SessionService', 'GetSessionView', {
+      sessionId: id,
+      maxMessages: 200,
+    });
+
+    if (view.truncated) {
+      addLine('meta', 'earlier', 'older turns are not shown');
+    }
+    for (const message of view.messages || []) {
+      drawViewMessage(message);
+    }
+
+    // Resume exactly where the view stops, so nothing between the two is
+    // missed or drawn twice.
+    state.seq = Number(view.headSeq || 0);
+    state.runId = view.activeRun?.id || null;
+    setRunStatus(view.activeRun ? statusText(view.activeRun.status) : '');
+
+    state.approvals.clear();
+    for (const approval of view.pendingApprovals || []) {
+      state.approvals.set(approval.id, {
+        approvalId: approval.id,
+        toolName: approval.toolName,
+        summary: approval.summary,
+      });
+    }
+    renderApprovals();
+    scrollToEnd();
+    return;
+  } catch (err) {
+    setDaemonStatus(`view unavailable, replaying — ${err.message}`);
+  }
+
+  state.seq = 0;
+  await loadApprovals();
+}
+
+// drawViewMessage renders one assembled turn.
+function drawViewMessage(message) {
+  const role = message.role === 'MESSAGE_ROLE_USER' ? 'user' : 'assistant';
+  if (message.text) {
+    addLine(role, role === 'user' ? 'you' : 'agent', message.text);
+  }
+  for (const call of message.toolCalls || []) {
+    addLine(call.isError ? 'error' : 'tool', call.name, call.summary || '');
+  }
+}
+
+function statusText(status) {
+  return String(status || '').replace('RUN_STATUS_', '').toLowerCase();
 }
 
 function titleOf(id) {
