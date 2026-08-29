@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
@@ -86,11 +85,8 @@ func (t *EditFile) Spec() tool.Spec {
 }
 
 type editFileArgs struct {
-	Path  string `json:"path"`
-	Edits []struct {
-		OldText string `json:"old_text"`
-		NewText string `json:"new_text"`
-	} `json:"edits"`
+	Path  string     `json:"path"`
+	Edits []textEdit `json:"edits"`
 }
 
 func (t *EditFile) Execute(_ context.Context, call tool.Call) (tool.Result, error) {
@@ -98,6 +94,8 @@ func (t *EditFile) Execute(_ context.Context, call tool.Call) (tool.Result, erro
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return tool.Result{}, tool.Errorf(tool.CodeInvalidArguments, "", "%v", err)
 	}
+
+	engine := t.engine()
 
 	absolute, err := t.Workspace.Resolve(args.Path)
 	if err != nil {
@@ -109,88 +107,30 @@ func (t *EditFile) Execute(_ context.Context, call tool.Call) (tool.Result, erro
 	release := t.Locks.Lock(absolute)
 	defer release()
 
-	raw, err := os.ReadFile(absolute)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return tool.Result{}, tool.Errorf(tool.CodeNotFound,
-				"Use write_file to create a new file.",
-				"%s does not exist", args.Path)
-		}
-		return tool.Result{}, tool.Errorf(tool.CodeInternal, "", "%v", err)
+	planned, problem := engine.prepareEdit(args.Path, args.Edits)
+	if problem != nil {
+		return tool.Result{}, problem
 	}
 
-	if err := t.verifyObserved(args.Path, absolute, raw); err != nil {
-		return tool.Result{}, err
-	}
-
-	file, ok := parseTextFile(raw)
-	if !ok {
-		return tool.Result{}, tool.Errorf(tool.CodeUnsupported,
-			"This file is not UTF-8 text and cannot be edited as text.",
-			"%s is not valid UTF-8", args.Path)
-	}
-
-	body := file.Body
-	changes := make([]changedRegion, 0, len(args.Edits))
-
-	for index, edit := range args.Edits {
-		// Newlines are normalised on both sides. A model working from
-		// read_file output cannot tell whether the file uses CRLF, so
-		// requiring it to guess would make every edit to a Windows file fail
-		// for a reason it cannot see or fix.
-		oldText := strings.ReplaceAll(edit.OldText, "\r\n", "\n")
-		newText := strings.ReplaceAll(edit.NewText, "\r\n", "\n")
-
-		applied, err := applyEdit(args.Path, index, body, oldText, newText)
-		if err != nil {
-			return tool.Result{}, err
-		}
-
-		changes = append(changes, applied.region)
-		body = applied.body
-	}
-
-	if body == file.Body {
+	if len(planned.changes) == 0 {
 		return tool.Result{
 			Content: fmt.Sprintf("%s is unchanged: every replacement produced identical text.", args.Path),
 			Summary: fmt.Sprintf("edit %s (no change)", args.Path),
 		}, nil
 	}
 
-	rendered := file.Render(body)
-	if err := atomicWrite(absolute, []byte(rendered)); err != nil {
+	if _, err := engine.commit([]plannedWrite{planned}); err != nil {
 		return tool.Result{}, tool.Errorf(tool.CodeInternal, "", "%v", err)
 	}
 
-	// What was read is no longer what is on disk.
-	t.Observer.Observe(absolute, hashBytes([]byte(rendered)))
-
 	return tool.Result{
-		Content: renderDiff(args.Path, changes),
-		Summary: fmt.Sprintf("edit %s (%d change(s))", args.Path, len(changes)),
+		Content: renderDiff(args.Path, planned.changes),
+		Summary: fmt.Sprintf("edit %s (%d change(s))", args.Path, len(planned.changes)),
 	}, nil
 }
 
-// verifyObserved enforces that the agent has seen the file, and seen it as it
-// currently is.
-func (t *EditFile) verifyObserved(relative, absolute string, raw []byte) *tool.Error {
-	observed, seen := t.Observer.Seen(absolute)
-	if !seen {
-		return tool.Errorf(tool.CodePermissionDenied,
-			"Read the file first, then edit it.",
-			"%s has not been read in this session", relative)
-	}
-
-	if current := hashBytes(raw); current != observed {
-		// A human, an editor, or another agent changed the file after it was
-		// read. Editing now would apply a change reasoned about against
-		// content that no longer exists.
-		return tool.Errorf(tool.CodeInvalidArguments,
-			"Read the file again to see the current contents, then edit it.",
-			"%s changed on disk since it was read", relative)
-	}
-
-	return nil
+func (t *EditFile) engine() *editEngine {
+	return &editEngine{workspace: t.Workspace, observer: t.Observer, locks: t.Locks}
 }
 
 type appliedEdit struct {

@@ -234,6 +234,7 @@ func run() error {
 		&builtin.Grep{Workspace: ws, Limits: limits},
 		writeFile,
 		editFile,
+		builtin.NewApplyPatch(ws, observed, locks),
 		&builtin.ExecCommand{Workspace: ws, Limits: limits, Artifacts: artifacts},
 		&builtin.ReadArtifact{Artifacts: artifacts, Limits: limits},
 	)
