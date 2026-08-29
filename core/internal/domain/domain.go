@@ -241,17 +241,78 @@ type Memory struct {
 	// without a person, which is the whole design.
 	ApprovedBy string
 
+	// Two timelines, and conflating them is the mistake this exists to avoid.
+	//
+	// CreatedAt and InvalidatedAt are record time: when this agent learned
+	// something and when it stopped believing it. ValidFrom and ValidUntil
+	// are valid time: when the thing was true in the world.
+	//
+	// They come apart constantly. "The API was v1 until March" is a fact
+	// learned in June about a period that ended in March, and a store with
+	// one timeline has to pick which of those two dates to lose.
 	CreatedAt time.Time
 
-	// InvalidatedAt and SupersededBy record a fact that stopped being true.
-	// It is not deleted: "what is true now" and "what was true then" are
-	// different questions and both have answers.
+	// InvalidatedAt and SupersededBy record the moment this agent stopped
+	// believing something. It is not deleted: "what is true now" and "what
+	// was true then" are different questions and both have answers.
 	InvalidatedAt *time.Time
 	SupersededBy  MemoryID
+
+	// ValidFrom is when the thing became true. Defaults to when it was
+	// learned, which is the honest answer when nobody said otherwise.
+	ValidFrom time.Time
+
+	// ValidUntil is when it stopped being true, where that is known in
+	// advance — a freeze that ends on a date, a version supported until a
+	// release. Nil means it is still true, or nobody said.
+	//
+	// Distinct from InvalidatedAt: a fact that expires on Friday is not one
+	// this agent was wrong about, and a correction is not a thing that was
+	// scheduled.
+	ValidUntil *time.Time
+
+	// ExpiresAt is when this stops being offered unless something uses it
+	// again. Nil means it does not expire.
+	//
+	// Record hygiene rather than truth: a fact nobody has wanted for two
+	// months is probably not wrong, it is probably noise, and the cost of
+	// noise is a retrieval corpus that gets worse as it grows. Reaching it
+	// invalidates rather than deletes, for the same reason a correction
+	// does.
+	ExpiresAt *time.Time
+
+	// LastUsedAt is when something last recalled this. Nil means never since
+	// it was written.
+	LastUsedAt *time.Time
 }
 
 // IsCurrent reports whether a memory is still believed.
-func (m Memory) IsCurrent() bool { return m.InvalidatedAt == nil }
+//
+// Believed, not merely present: a memory that was superseded, that expired,
+// or whose validity has run out is all still in the store, and none of them
+// should be put in front of a model as though it were true now.
+func (m Memory) IsCurrent() bool { return m.CurrentAt(time.Now()) }
+
+// CurrentAt reports whether a memory was believed at a moment.
+//
+// Takes the time rather than reading the clock, because "was this true when
+// that run happened" is a question worth being able to ask, and a function
+// that reads the clock cannot answer it.
+func (m Memory) CurrentAt(at time.Time) bool {
+	if m.InvalidatedAt != nil && !at.Before(*m.InvalidatedAt) {
+		return false
+	}
+	if m.ExpiresAt != nil && !at.Before(*m.ExpiresAt) {
+		return false
+	}
+	if !m.ValidFrom.IsZero() && at.Before(m.ValidFrom) {
+		return false
+	}
+	if m.ValidUntil != nil && !at.Before(*m.ValidUntil) {
+		return false
+	}
+	return true
+}
 
 // EventKind discriminates Event.Payload.
 type EventKind string

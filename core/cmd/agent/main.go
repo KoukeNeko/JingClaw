@@ -988,13 +988,9 @@ func newMemoryCommand() *cobra.Command {
 // person can act on; "the agent believes X because somebody on Discord said so
 // in this session" is.
 func printMemory(memory *controlv1.Memory) {
-	state := ""
-	if memory.GetInvalidatedAt() != nil {
-		state = " (superseded)"
-	}
-
 	fmt.Printf("%s  [%s · %s · %s]%s\n",
-		memory.GetId(), memory.GetActivation(), memory.GetScope(), memory.GetScopeRef(), state)
+		memory.GetId(), memory.GetActivation(), memory.GetScope(), memory.GetScopeRef(),
+		memoryState(memory))
 	fmt.Printf("    %s\n", memory.GetText())
 
 	from := "typed here"
@@ -1004,8 +1000,48 @@ func printMemory(memory *controlv1.Memory) {
 			principal.GetPlatform(), principal.GetPrincipalId())
 	}
 
-	fmt.Printf("    %s · session %s at seq %d · approved by %s\n\n",
+	fmt.Printf("    %s · session %s at seq %d · approved by %s\n",
 		from, memory.GetSourceSessionId(), memory.GetSourceSeq(), memory.GetApprovedBy())
+
+	if until := memory.GetValidUntil(); until != nil {
+		fmt.Printf("    %s\n", renderValidUntil(until.AsTime().Local()))
+	}
+	if used := memory.GetLastUsedAt(); used != nil {
+		fmt.Printf("    last wanted %s\n", used.AsTime().Local().Format("2006-01-02"))
+	}
+	fmt.Println()
+}
+
+// renderValidUntil says when a fact stops holding, in the terms it was given.
+//
+// The stored instant is exclusive: a freeze that lifts on the fifteenth is in
+// force through the fifteenth, so it is recorded as midnight on the
+// sixteenth. Printing that instant back is correct and reads as though the
+// person got the date wrong, so a whole-day window is shown as the last day
+// it holds.
+func renderValidUntil(at time.Time) string {
+	if at.Hour() == 0 && at.Minute() == 0 && at.Second() == 0 {
+		return "in force through " + at.AddDate(0, 0, -1).Format("2006-01-02")
+	}
+	return "stops being true at " + at.Format("2006-01-02 15:04")
+}
+
+// memoryState says why a memory is no longer believed.
+//
+// Corrected and expired are different things, and calling both "superseded"
+// would have a person reading "somebody replaced this" when what happened is
+// "nobody wanted it for three months". One of those is worth looking into.
+func memoryState(memory *controlv1.Memory) string {
+	if memory.GetInvalidatedAt() == nil {
+		return ""
+	}
+	if memory.GetSupersededBy() != "" {
+		return " (superseded by " + memory.GetSupersededBy() + ")"
+	}
+	if until := memory.GetValidUntil(); until != nil && !until.AsTime().After(time.Now()) {
+		return " (stopped being true)"
+	}
+	return " (expired, unused)"
 }
 
 func dialMemory() (controlv1connect.MemoryServiceClient, error) {

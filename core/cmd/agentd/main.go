@@ -283,7 +283,9 @@ func run() error {
 		Store:        store,
 		WorkspaceRef: ws.Root(),
 		NewID:        func() string { return id.WithPrefix("mem") },
-		Now:          time.Now,
+		Clock:        time.Now,
+		Log:          logger,
+		RetrievalTTL: cfg.Memory.RetrievalTTL,
 	}
 	if cfg.Memory.Enabled {
 		tools.MustRegister(
@@ -391,6 +393,19 @@ func run() error {
 	// collaborator is the runtime itself. Before it is serving, so a run
 	// cannot start without the plan being reachable.
 	tools.MustRegister(&builtin.TodoUpdate{Planner: rt}, &builtin.AskUser{})
+
+	// What nobody has wanted in a long time stops being offered. Swept at
+	// startup rather than on a timer: every query already filters on expiry,
+	// so this exists to make a listing tell the truth, and a daemon that has
+	// just started is exactly when somebody looks.
+	if cfg.Memory.Enabled && cfg.Memory.RetrievalTTL > 0 {
+		if expired, err := store.ExpireMemories(rootCtx, time.Now()); err != nil {
+			logger.Warn("could not expire memories", "error", err)
+		} else if expired > 0 {
+			logger.Info("memories expired", "count", expired,
+				"unused_for", cfg.Memory.RetrievalTTL.String())
+		}
+	}
 
 	// Runs that were live when this process last stopped have nobody driving
 	// them. Resolving them before serving means clients never see a run that

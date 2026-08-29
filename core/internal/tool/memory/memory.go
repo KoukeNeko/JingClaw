@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -41,6 +42,7 @@ const (
 // Store is what these tools need from storage.
 type Store interface {
 	Remember(ctx context.Context, memory domain.Memory, supersedes domain.MemoryID) error
+	TouchMemories(ctx context.Context, ids []domain.MemoryID, at time.Time) error
 	Memories(ctx context.Context, query storage.MemoryQuery) ([]domain.Memory, error)
 	SearchMemories(ctx context.Context, text string, query storage.MemoryQuery) ([]domain.Memory, error)
 	Memory(ctx context.Context, id domain.MemoryID) (domain.Memory, error)
@@ -54,7 +56,26 @@ type Options struct {
 	WorkspaceRef string
 
 	NewID func() string
-	Now   func() time.Time
+
+	// Clock is what these tools read the time from. Left nil, the wall
+	// clock is used.
+	//
+	// One field read through one accessor: a memory's validity has to be
+	// judged against the same moment as its expiry, and two places reading
+	// two clocks is how those come apart.
+	Clock func() time.Time
+
+	// Log is where a failure that must not stop the work is reported. Left
+	// nil, those go to the default logger.
+	Log *slog.Logger
+
+	// RetrievalTTL is how long a retrieval memory stays offered without
+	// being used. Zero means they never expire.
+	//
+	// Inactivity rather than age: a convention this project has followed for
+	// a year is not stale, and a note about a branch that was merged last
+	// week is. Age cannot tell those apart and use can.
+	RetrievalTTL time.Duration
 }
 
 // scopesFor decides which memories a turn may see.
@@ -68,6 +89,26 @@ func (o Options) scopesFor(call tool.CallContext) []storage.MemoryScopeRef {
 		{Scope: domain.ScopeWorkspace, Ref: o.WorkspaceRef},
 		{Scope: domain.ScopePrincipal, Ref: call.PrincipalKey()},
 	}
+}
+
+// Now is the clock these tools read.
+//
+// One accessor rather than each caller checking for nil: a memory's validity
+// has to be judged against the same moment as its expiry, and two places
+// reading two clocks is how those come apart.
+func (o Options) Now() time.Time {
+	if o.Clock != nil {
+		return o.Clock()
+	}
+	return time.Now()
+}
+
+// Logger is where a best-effort failure goes.
+func (o Options) Logger() *slog.Logger {
+	if o.Log != nil {
+		return o.Log
+	}
+	return slog.Default()
 }
 
 // Remember writes something down for later sessions.
@@ -103,6 +144,10 @@ func (t *Remember) Spec() tool.Spec {
     "supersedes": {
       "type": "string",
       "description": "The id of a memory this corrects. Use it instead of writing a second, contradictory memory."
+    },
+    "valid_until": {
+      "type": "string",
+      "description": "When this stops being true, as a date (2026-09-15) or an RFC 3339 time. Only for something you already know has an end — a freeze that lifts, a version supported until a release. Leave it out for anything that is simply true."
     }
   },
   "required": ["text"],
@@ -127,6 +172,7 @@ type rememberArgs struct {
 	Activation string `json:"activation"`
 	Scope      string `json:"scope"`
 	Supersedes string `json:"supersedes"`
+	ValidUntil string `json:"valid_until"`
 }
 
 // LevelFor separates writing something down from giving it authority.
@@ -184,6 +230,13 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 		return tool.Result{}, err
 	}
 
+	now := t.Now()
+
+	validUntil, err := parseValidUntil(args.ValidUntil, now)
+	if err != nil {
+		return tool.Result{}, err
+	}
+
 	written := domain.Memory{
 		ID:         domain.MemoryID(t.NewID()),
 		Scope:      scope,
@@ -198,7 +251,14 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 		SourceSession: domain.SessionID(call.Context.SessionID),
 		SourceSeq:     call.Context.Seq,
 		ApprovedBy:    approverOf(call.Context),
-		CreatedAt:     t.Now(),
+		CreatedAt:     now,
+
+		// Valid from when it was learned unless somebody said otherwise,
+		// which is the honest default: a fact stated now with no history
+		// attached is a fact about now.
+		ValidFrom:  now,
+		ValidUntil: validUntil,
+		ExpiresAt:  t.expiryFor(activation, now),
 	}
 
 	if err := t.Store.Remember(ctx, written, supersedes); err != nil {
@@ -210,10 +270,77 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 		summary = fmt.Sprintf("replaced %s with %s", supersedes, written.ID)
 	}
 
-	return tool.Result{
-		Content: fmt.Sprintf("%s (%s, %s)\n%s", summary, activation, scope, text),
-		Summary: summary,
-	}, nil
+	content := fmt.Sprintf("%s (%s, %s)\n%s", summary, activation, scope, text)
+	if validUntil != nil {
+		content += fmt.Sprintf("\nStops being true on %s.", validUntil.Format("2006-01-02"))
+	}
+
+	return tool.Result{Content: content, Summary: summary}, nil
+}
+
+// expiryFor is when a memory stops being offered unless something uses it.
+//
+// Retrieval memories only. A standing direction was approved by a person and
+// is put in front of the model every turn — expiring one silently would
+// remove an instruction somebody deliberately gave, which is worse than the
+// bloat it would save. They are also few, and bounded by their own byte
+// limit.
+//
+// Retrieval memories are neither: nobody approved them individually, there is
+// no ceiling on how many accumulate, and the cost of the ones nobody wants is
+// a corpus that answers worse as it grows.
+func (t *Remember) expiryFor(activation domain.MemoryActivation, now time.Time) *time.Time {
+	if t.RetrievalTTL <= 0 || activation != domain.MemoryRetrieval {
+		return nil
+	}
+	at := now.Add(t.RetrievalTTL)
+	return &at
+}
+
+// parseValidUntil reads a date or a timestamp.
+//
+// A plain date is the common case — "until the fifteenth" — and it means the
+// end of that day rather than its start: a freeze that lifts on the fifteenth
+// is in force on the fifteenth.
+// Returns a plain error rather than *tool.Error: assigned into an error
+// variable, a typed nil pointer is not nil, and the caller would report every
+// success as a failure with no message.
+func parseValidUntil(text string, now time.Time) (*time.Time, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, nil
+	}
+
+	if at, err := time.Parse(time.RFC3339, text); err == nil {
+		return checkFuture(at, now)
+	}
+	// In this machine's zone, not UTC. Somebody writing "the fifteenth"
+	// means their own fifteenth, and parsing it as UTC moves the end of the
+	// window by the offset — which for anywhere east of London means the
+	// freeze lifts on the wrong day.
+	if day, err := time.ParseInLocation("2006-01-02", text, time.Local); err == nil {
+		at := day.AddDate(0, 0, 1)
+		return checkFuture(at, now)
+	}
+
+	return nil, tool.Errorf(tool.CodeInvalidArguments,
+		"Use a date like 2026-09-15, or an RFC 3339 time.",
+		"%q is not a date this understands", text)
+}
+
+// checkFuture refuses an end that has already passed.
+//
+// Writing a memory that is not true when it is written is a model working
+// from a wrong idea of the date, and storing it would mean a memory that can
+// never be recalled and nobody can explain.
+func checkFuture(at, now time.Time) (*time.Time, error) {
+	if !at.After(now) {
+		return nil, tool.Errorf(tool.CodeInvalidArguments,
+			"Record what is true now, or supersede the memory this replaces.",
+			"%s has already passed, so this would be remembered as already untrue",
+			at.Format("2006-01-02"))
+	}
+	return &at, nil
 }
 
 // checkSupersedes refuses a correction to something the caller cannot see.
@@ -386,6 +513,10 @@ func (t *Recall) Execute(ctx context.Context, call tool.Call) (tool.Result, erro
 	query := storage.MemoryQuery{
 		Scopes: t.scopesFor(call.Context),
 		Limit:  limit,
+		// The tool's own clock, not the store's. Everything here takes its
+		// time from one place so that a memory's validity is judged against
+		// the same moment its expiry is.
+		At: t.Now(),
 	}
 
 	var (
@@ -408,10 +539,31 @@ func (t *Recall) Execute(ctx context.Context, call tool.Call) (tool.Result, erro
 		}, nil
 	}
 
+	t.touch(ctx, found)
+
 	return tool.Result{
 		Content: render(found),
 		Summary: fmt.Sprintf("recall: %d", len(found)),
 	}, nil
+}
+
+// touch records that these were wanted, which is what keeps them alive.
+//
+// Without it the expiry is a countdown from the moment a memory was written,
+// and the thing the agent reaches for constantly dies on the same schedule as
+// the thing nobody has ever wanted.
+//
+// Best-effort: a recall that answered is a recall that worked, and failing it
+// because the bookkeeping did not land would trade something a person asked
+// for against something nobody did.
+func (t *Recall) touch(ctx context.Context, found []domain.Memory) {
+	ids := make([]domain.MemoryID, 0, len(found))
+	for _, memory := range found {
+		ids = append(ids, memory.ID)
+	}
+	if err := t.Store.TouchMemories(ctx, ids, t.Now()); err != nil {
+		t.Logger().Warn("could not record that memories were used", "error", err)
+	}
 }
 
 // render lists memories with where each came from.
@@ -458,6 +610,7 @@ func Instructions(
 		Scopes:     options.scopesFor(contextForRun(run)),
 		Activation: domain.MemoryStanding,
 		Limit:      maxRecallLimit,
+		At:         options.Now(),
 	})
 	if err != nil {
 		return "", err

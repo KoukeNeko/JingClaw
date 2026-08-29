@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
@@ -101,6 +102,11 @@ func (s *Store) selectMemories(
 	query storage.MemoryQuery,
 	matches func(domain.Memory) bool,
 ) []domain.Memory {
+	at := query.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -110,7 +116,10 @@ func (s *Store) selectMemories(
 		if !ok {
 			continue
 		}
-		if !query.IncludeInvalidated && candidate.InvalidatedAt != nil {
+		// Believed at that moment, on both timelines — the same rule the
+		// database applies, expressed the same way, because two stores that
+		// disagree about what is current is a bug nothing else can catch.
+		if !query.IncludeInvalidated && !candidate.CurrentAt(at) {
 			continue
 		}
 		if query.Activation != "" && candidate.Activation != query.Activation {
@@ -140,4 +149,56 @@ func inScope(candidate domain.Memory, scopes []storage.MemoryScopeRef) bool {
 	return slices.ContainsFunc(scopes, func(scope storage.MemoryScopeRef) bool {
 		return candidate.Scope == scope.Scope && candidate.ScopeRef == scope.Ref
 	})
+}
+
+// ExpireMemories stops believing what has gone unused past its expiry.
+func (s *Store) ExpireMemories(_ context.Context, at time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	expired := 0
+	for id, memory := range s.memories {
+		if memory.InvalidatedAt != nil || memory.ExpiresAt == nil {
+			continue
+		}
+		if at.Before(*memory.ExpiresAt) {
+			continue
+		}
+		when := at
+		memory.InvalidatedAt = &when
+		s.memories[id] = memory
+		expired++
+	}
+	return expired, nil
+}
+
+// TouchMemories records that these were used, and pushes their expiry out by
+// the lifetime they were given.
+func (s *Store) TouchMemories(_ context.Context, ids []domain.MemoryID, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, id := range ids {
+		memory, ok := s.memories[id]
+		if !ok || memory.InvalidatedAt != nil {
+			continue
+		}
+
+		if memory.ExpiresAt != nil {
+			// The lifetime it was given, measured from whenever it was last
+			// used. A memory written without one is not given one by being
+			// read.
+			since := memory.CreatedAt
+			if memory.LastUsedAt != nil {
+				since = *memory.LastUsedAt
+			}
+			extended := at.Add(memory.ExpiresAt.Sub(since))
+			memory.ExpiresAt = &extended
+		}
+
+		used := at
+		memory.LastUsedAt = &used
+		s.memories[id] = memory
+	}
+	return nil
 }

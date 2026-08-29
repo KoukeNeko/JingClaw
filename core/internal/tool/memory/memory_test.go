@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,7 +29,7 @@ func newTools(t *testing.T) (*memorytool.Remember, *memorytool.Recall, *memory.S
 		Store:        store,
 		WorkspaceRef: workspace,
 		NewID:        func() string { return fmt.Sprintf("mem_%d", counter.Add(1)) },
-		Now:          func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+		Clock:        func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
 	}
 
 	return &memorytool.Remember{Options: options}, &memorytool.Recall{Options: options}, store
@@ -527,5 +528,147 @@ func localRun() domain.Run {
 		ID:        "run_1",
 		SessionID: "ses_1",
 		Origin:    domain.RunOrigin{Kind: domain.OriginLocalClient, ClientID: "jingclaw-cli"},
+	}
+}
+
+// newTimedTools is a pair of tools whose clock a test can move, and whose
+// retrieval memories expire.
+func newTimedTools(t *testing.T, ttl time.Duration) (
+	*memorytool.Remember, *memorytool.Recall, *memory.Store, *time.Time,
+) {
+	t.Helper()
+
+	store := memory.New()
+	clock := time.Unix(1_700_000_000, 0).UTC()
+
+	var counter atomic.Uint64
+	options := memorytool.Options{
+		Store:        store,
+		WorkspaceRef: workspace,
+		NewID:        func() string { return fmt.Sprintf("mem_%d", counter.Add(1)) },
+		Clock:        func() time.Time { return clock },
+		Log:          slog.New(slog.DiscardHandler),
+		RetrievalTTL: ttl,
+	}
+
+	return &memorytool.Remember{Options: options},
+		&memorytool.Recall{Options: options},
+		store, &clock
+}
+
+// A note nobody has wanted stops being offered. This is the whole point: a
+// retrieval corpus that only grows answers worse as it does.
+func TestAMemoryNobodyWantsStopsBeingOffered(t *testing.T) {
+	write, read, _, clock := newTimedTools(t, 30*24*time.Hour)
+
+	remember(t, write, localTurn(), map[string]any{
+		"text": "the spike branch uses the old client",
+	})
+
+	if got := recall(t, read, localTurn(), map[string]any{}); !strings.Contains(got, "spike branch") {
+		t.Fatalf("it was not remembered at all: %s", got)
+	}
+
+	*clock = clock.Add(60 * 24 * time.Hour)
+
+	if got := recall(t, read, localTurn(), map[string]any{}); strings.Contains(got, "spike branch") {
+		t.Errorf("a memory nobody wanted for two months is still offered: %s", got)
+	}
+}
+
+// Using it is what keeps it. Otherwise the expiry counts down from when it
+// was written, and what the agent reaches for constantly dies on the same
+// schedule as what nobody has ever wanted.
+func TestUsingAMemoryKeepsIt(t *testing.T) {
+	write, read, _, clock := newTimedTools(t, 30*24*time.Hour)
+
+	remember(t, write, localTurn(), map[string]any{
+		"text": "the deploy script needs sudo",
+	})
+
+	// Wanted every three weeks for four months.
+	for i := 0; i < 6; i++ {
+		*clock = clock.Add(21 * 24 * time.Hour)
+		if got := recall(t, read, localTurn(), map[string]any{}); !strings.Contains(got, "needs sudo") {
+			t.Fatalf("a memory in regular use was dropped after %d uses: %s", i, got)
+		}
+	}
+}
+
+// A standing direction was approved by a person and shapes every run.
+// Expiring one quietly would remove an instruction somebody deliberately
+// gave, which is worse than the bloat it saves.
+func TestStandingDirectionsDoNotExpire(t *testing.T) {
+	write, _, store, clock := newTimedTools(t, 30*24*time.Hour)
+
+	remember(t, write, localTurn(), map[string]any{
+		"text":       "always run gofmt before committing",
+		"activation": "standing",
+	})
+
+	*clock = clock.Add(365 * 24 * time.Hour)
+
+	found, err := store.Memories(context2(), storage.MemoryQuery{At: *clock})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("a standing direction expired after a year: %d", len(found))
+	}
+	if found[0].ExpiresAt != nil {
+		t.Errorf("a standing direction was given an expiry: %v", found[0].ExpiresAt)
+	}
+}
+
+// A fact with a known end stops being true on its own, without anybody
+// correcting it. That is different from being wrong.
+func TestAFactWithAKnownEndStopsBeingTrue(t *testing.T) {
+	write, read, _, clock := newTimedTools(t, 0)
+
+	remember(t, write, localTurn(), map[string]any{
+		"text":        "the deploy freeze is on",
+		"valid_until": clock.Add(48 * time.Hour).Format("2006-01-02"),
+	})
+
+	if got := recall(t, read, localTurn(), map[string]any{}); !strings.Contains(got, "deploy freeze") {
+		t.Fatalf("it was not offered while it held: %s", got)
+	}
+
+	*clock = clock.Add(96 * time.Hour)
+
+	if got := recall(t, read, localTurn(), map[string]any{}); strings.Contains(got, "deploy freeze") {
+		t.Errorf("a fact past its end is still offered: %s", got)
+	}
+}
+
+// An end that has already passed is a model working from a wrong idea of the
+// date. Storing it would mean a memory that can never be recalled and nobody
+// can explain.
+func TestAnEndThatHasPassedIsRefused(t *testing.T) {
+	write, _, _, clock := newTimedTools(t, 0)
+
+	_, err := write.Execute(context2(), call(t, localTurn(), map[string]any{
+		"text":        "the freeze was on",
+		"valid_until": clock.Add(-48 * time.Hour).Format("2006-01-02"),
+	}))
+	if err == nil {
+		t.Fatal("a memory that was already untrue was accepted")
+	}
+	if !strings.Contains(err.Error(), "already passed") {
+		t.Errorf("the reason is unclear: %v", err)
+	}
+}
+
+// A date nobody can parse must be refused rather than silently ignored: a
+// memory the model believes will expire, and which never does, is worse than
+// one it knows is permanent.
+func TestAnUnreadableEndIsRefused(t *testing.T) {
+	write, _, _, _ := newTimedTools(t, 0)
+
+	if _, err := write.Execute(context2(), call(t, localTurn(), map[string]any{
+		"text":        "something",
+		"valid_until": "next Tuesday",
+	})); err == nil {
+		t.Error("an unreadable date was accepted")
 	}
 }

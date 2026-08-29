@@ -234,9 +234,20 @@ type Memory struct {
 	SourceSeq       uint64                 `protobuf:"varint,9,opt,name=source_seq,json=sourceSeq,proto3" json:"source_seq,omitempty"`
 	ApprovedBy      string                 `protobuf:"bytes,10,opt,name=approved_by,json=approvedBy,proto3" json:"approved_by,omitempty"`
 	CreatedAt       *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	// Set when this stopped being believed.
+	// Set when this stopped being believed. superseded_by names the memory
+	// that replaced it — empty means nothing did, which is how a correction is
+	// told from an expiry.
 	InvalidatedAt *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=invalidated_at,json=invalidatedAt,proto3" json:"invalidated_at,omitempty"`
 	SupersededBy  string                 `protobuf:"bytes,13,opt,name=superseded_by,json=supersededBy,proto3" json:"superseded_by,omitempty"`
+	// When the thing became true, and when it stops. valid_until unset means
+	// it is still true, or nobody said.
+	ValidFrom  *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=valid_from,json=validFrom,proto3" json:"valid_from,omitempty"`
+	ValidUntil *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	// When this stops being offered unless something uses it again, and when
+	// something last did. Record hygiene rather than truth: a memory nobody
+	// has wanted is probably not wrong, it is probably noise.
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	LastUsedAt    *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=last_used_at,json=lastUsedAt,proto3" json:"last_used_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -362,6 +373,34 @@ func (x *Memory) GetSupersededBy() string {
 	return ""
 }
 
+func (x *Memory) GetValidFrom() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ValidFrom
+	}
+	return nil
+}
+
+func (x *Memory) GetValidUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ValidUntil
+	}
+	return nil
+}
+
+func (x *Memory) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+func (x *Memory) GetLastUsedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastUsedAt
+	}
+	return nil
+}
+
 var File_jingclaw_control_v1_memory_proto protoreflect.FileDescriptor
 
 const file_jingclaw_control_v1_memory_proto_rawDesc = "" +
@@ -376,7 +415,7 @@ const file_jingclaw_control_v1_memory_proto_rawDesc = "" +
 	"\x13ForgetMemoryRequest\x124\n" +
 	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\"\x16\n" +
-	"\x14ForgetMemoryResponse\"\xfd\x03\n" +
+	"\x14ForgetMemoryResponse\"\xee\x05\n" +
 	"\x06Memory\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05scope\x18\x02 \x01(\tR\x05scope\x12\x1b\n" +
@@ -396,7 +435,15 @@ const file_jingclaw_control_v1_memory_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12A\n" +
 	"\x0einvalidated_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\rinvalidatedAt\x12#\n" +
-	"\rsuperseded_by\x18\r \x01(\tR\fsupersededBy2\xd9\x01\n" +
+	"\rsuperseded_by\x18\r \x01(\tR\fsupersededBy\x129\n" +
+	"\n" +
+	"valid_from\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tvalidFrom\x12;\n" +
+	"\vvalid_until\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"validUntil\x129\n" +
+	"\n" +
+	"expires_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12<\n" +
+	"\flast_used_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"lastUsedAt2\xd9\x01\n" +
 	"\rMemoryService\x12c\n" +
 	"\fListMemories\x12(.jingclaw.control.v1.ListMemoriesRequest\x1a).jingclaw.control.v1.ListMemoriesResponse\x12c\n" +
 	"\fForgetMemory\x12(.jingclaw.control.v1.ForgetMemoryRequest\x1a).jingclaw.control.v1.ForgetMemoryResponseB\xdd\x01\n" +
@@ -427,22 +474,26 @@ var file_jingclaw_control_v1_memory_proto_goTypes = []any{
 	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
 }
 var file_jingclaw_control_v1_memory_proto_depIdxs = []int32{
-	5, // 0: jingclaw.control.v1.ListMemoriesRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	4, // 1: jingclaw.control.v1.ListMemoriesResponse.memories:type_name -> jingclaw.control.v1.Memory
-	5, // 2: jingclaw.control.v1.ForgetMemoryRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	6, // 3: jingclaw.control.v1.Memory.trust:type_name -> jingclaw.control.v1.TrustLevel
-	7, // 4: jingclaw.control.v1.Memory.origin:type_name -> jingclaw.control.v1.RunOrigin
-	8, // 5: jingclaw.control.v1.Memory.created_at:type_name -> google.protobuf.Timestamp
-	8, // 6: jingclaw.control.v1.Memory.invalidated_at:type_name -> google.protobuf.Timestamp
-	0, // 7: jingclaw.control.v1.MemoryService.ListMemories:input_type -> jingclaw.control.v1.ListMemoriesRequest
-	2, // 8: jingclaw.control.v1.MemoryService.ForgetMemory:input_type -> jingclaw.control.v1.ForgetMemoryRequest
-	1, // 9: jingclaw.control.v1.MemoryService.ListMemories:output_type -> jingclaw.control.v1.ListMemoriesResponse
-	3, // 10: jingclaw.control.v1.MemoryService.ForgetMemory:output_type -> jingclaw.control.v1.ForgetMemoryResponse
-	9, // [9:11] is the sub-list for method output_type
-	7, // [7:9] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5,  // 0: jingclaw.control.v1.ListMemoriesRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	4,  // 1: jingclaw.control.v1.ListMemoriesResponse.memories:type_name -> jingclaw.control.v1.Memory
+	5,  // 2: jingclaw.control.v1.ForgetMemoryRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	6,  // 3: jingclaw.control.v1.Memory.trust:type_name -> jingclaw.control.v1.TrustLevel
+	7,  // 4: jingclaw.control.v1.Memory.origin:type_name -> jingclaw.control.v1.RunOrigin
+	8,  // 5: jingclaw.control.v1.Memory.created_at:type_name -> google.protobuf.Timestamp
+	8,  // 6: jingclaw.control.v1.Memory.invalidated_at:type_name -> google.protobuf.Timestamp
+	8,  // 7: jingclaw.control.v1.Memory.valid_from:type_name -> google.protobuf.Timestamp
+	8,  // 8: jingclaw.control.v1.Memory.valid_until:type_name -> google.protobuf.Timestamp
+	8,  // 9: jingclaw.control.v1.Memory.expires_at:type_name -> google.protobuf.Timestamp
+	8,  // 10: jingclaw.control.v1.Memory.last_used_at:type_name -> google.protobuf.Timestamp
+	0,  // 11: jingclaw.control.v1.MemoryService.ListMemories:input_type -> jingclaw.control.v1.ListMemoriesRequest
+	2,  // 12: jingclaw.control.v1.MemoryService.ForgetMemory:input_type -> jingclaw.control.v1.ForgetMemoryRequest
+	1,  // 13: jingclaw.control.v1.MemoryService.ListMemories:output_type -> jingclaw.control.v1.ListMemoriesResponse
+	3,  // 14: jingclaw.control.v1.MemoryService.ForgetMemory:output_type -> jingclaw.control.v1.ForgetMemoryResponse
+	13, // [13:15] is the sub-list for method output_type
+	11, // [11:13] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_memory_proto_init() }

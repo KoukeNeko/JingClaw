@@ -89,9 +89,19 @@ func memoryToProto(memory domain.Memory) *controlv1.Memory {
 		ApprovedBy:      memory.ApprovedBy,
 		CreatedAt:       timestamppb.New(memory.CreatedAt),
 		SupersededBy:    string(memory.SupersededBy),
+		ValidFrom:       timestamppb.New(memory.ValidFrom),
 	}
 	if memory.InvalidatedAt != nil {
 		converted.InvalidatedAt = timestamppb.New(*memory.InvalidatedAt)
+	}
+	if memory.ValidUntil != nil {
+		converted.ValidUntil = timestamppb.New(*memory.ValidUntil)
+	}
+	if memory.ExpiresAt != nil {
+		converted.ExpiresAt = timestamppb.New(*memory.ExpiresAt)
+	}
+	if memory.LastUsedAt != nil {
+		converted.LastUsedAt = timestamppb.New(*memory.LastUsedAt)
 	}
 	return converted
 }

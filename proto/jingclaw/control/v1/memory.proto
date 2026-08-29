@@ -73,7 +73,29 @@ message Memory {
 
   google.protobuf.Timestamp created_at = 11;
 
-  // Set when this stopped being believed.
+  // Two timelines, and telling them apart is the point.
+  //
+  // created_at and invalidated_at are record time: when this agent learned
+  // something and when it stopped believing it. valid_from and valid_until
+  // are valid time: when the thing was true in the world.
+  //
+  // "The API was v1 until March" is learned in June about a period that ended
+  // in March, and one timeline has to lose one of those dates.
+
+  // Set when this stopped being believed. superseded_by names the memory
+  // that replaced it — empty means nothing did, which is how a correction is
+  // told from an expiry.
   google.protobuf.Timestamp invalidated_at = 12;
   string superseded_by = 13;
+
+  // When the thing became true, and when it stops. valid_until unset means
+  // it is still true, or nobody said.
+  google.protobuf.Timestamp valid_from = 14;
+  google.protobuf.Timestamp valid_until = 15;
+
+  // When this stops being offered unless something uses it again, and when
+  // something last did. Record hygiene rather than truth: a memory nobody
+  // has wanted is probably not wrong, it is probably noise.
+  google.protobuf.Timestamp expires_at = 16;
+  google.protobuf.Timestamp last_used_at = 17;
 }
