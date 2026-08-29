@@ -27,25 +27,11 @@ type Layer struct {
 	// Name identifies the layer for a reader.
 	Name string
 
-	// Source says where the text came from: built in, a config file, a file in
-	// the workspace.
+	// Source says where the text came from: built in, the runtime, or the name
+	// of a standing-instruction file.
 	Source string
 
 	Text string
-}
-
-// Config is the part an operator controls.
-type Config struct {
-	// AgentName is what the agent calls itself. Empty leaves it unnamed rather
-	// than inventing one, which is better than insisting on a name that
-	// contradicts what the account is called wherever it is deployed.
-	AgentName string
-
-	// Persona is additional identity: tone, stance, what it is for.
-	Persona string
-
-	// Instructions are the operator's standing directions.
-	Instructions string
 }
 
 // Environment is what the runtime knows about where it is running.
@@ -59,36 +45,33 @@ type Environment struct {
 	ToolNames []string
 }
 
-// WorkspaceInstructions is a file of directions found in the workspace.
-type WorkspaceInstructions struct {
-	// Path is relative to the workspace, and is shown to the model so it can
-	// say which file told it something.
+// StandingInstructions is a file of directions the deployment carries.
+type StandingInstructions struct {
+	// Path is the file's name, shown to the model so it can say which file
+	// told it something.
 	Path string
 	Text string
 }
 
 // Build assembles the prompt.
-func Build(cfg Config, env Environment, workspace []WorkspaceInstructions) []Layer {
+//
+// Nothing an operator wrote arrives through an argument. Who the agent is and
+// how it works come from the standing-instruction files below, which are the
+// only place they are said: a settings-shaped copy of the same thing is one
+// somebody edits while the file is what runs.
+func Build(env Environment, standing []StandingInstructions) []Layer {
 	layers := []Layer{
-		{Name: "identity", Source: "config", Text: identity(cfg)},
+		{Name: "identity", Source: "built-in", Text: identity},
 		{Name: "environment", Source: "runtime", Text: environment(env)},
 		{Name: "contract", Source: "built-in", Text: contract},
 	}
 
-	if instructions := strings.TrimSpace(cfg.Instructions); instructions != "" {
-		layers = append(layers, Layer{
-			Name:   "operator instructions",
-			Source: "config",
-			Text:   instructions,
-		})
-	}
-
-	for _, file := range workspace {
+	for _, file := range standing {
 		if strings.TrimSpace(file.Text) == "" {
 			continue
 		}
 		layers = append(layers, Layer{
-			Name:   "workspace instructions",
+			Name:   "standing instructions",
 			Source: file.Path,
 			// Attributed so the model can say which file asked for something,
 			// and so a reader of the assembled prompt can find it.
@@ -125,22 +108,10 @@ func Describe(layers []Layer) string {
 	return out.String()
 }
 
-func identity(cfg Config) string {
-	var out strings.Builder
-
-	if cfg.AgentName != "" {
-		fmt.Fprintf(&out, "You are %s, a coding agent working in a local workspace.", cfg.AgentName)
-	} else {
-		out.WriteString("You are a coding agent working in a local workspace.")
-	}
-
-	if persona := strings.TrimSpace(cfg.Persona); persona != "" {
-		out.WriteString("\n\n")
-		out.WriteString(persona)
-	}
-
-	return out.String()
-}
+// identity is the one sentence that is true of every deployment. Anything
+// more specific is a workspace file, where the person it describes can edit
+// it without restarting anything.
+const identity = "You are a coding agent working in a local workspace."
 
 func environment(env Environment) string {
 	var out strings.Builder

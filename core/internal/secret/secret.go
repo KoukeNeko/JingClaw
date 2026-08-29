@@ -8,8 +8,6 @@ package secret
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"slices"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 	"strings"
@@ -116,37 +114,27 @@ func Load(opts LoadOptions) (Value, error) {
 // that way, so ~/.config is also accepted. On Linux os.UserConfigDir already
 // resolves to ~/.config and the two collapse into one entry.
 func DefaultFiles(name string) ([]string, error) {
+	// No name is no file, not the directory the files live in. A backend that
+	// needs no credential leaves this empty, and joining "" onto each location
+	// would hand back the directories themselves — which read as a file only
+	// far enough to fail with "is a directory".
+	if strings.TrimSpace(name) == "" {
+		return nil, nil
+	}
+
 	var files []string
 
-	// A .JingClaw directory is looked in first when there is one, so a
-	// credential lives beside the deployment that uses it rather than in a
-	// place shared with every other.
-	if dir, found := home.FromWorkingDirectory(); found {
-		files = append(files, dir.SecretFile(name))
+	// Beside the deployment that uses it, and nowhere else. A credential found
+	// in a second location belongs to a second deployment, and reading it here
+	// is how one agent ends up authenticating as another.
+	dir, found := home.Resolve()
+	if !found {
+		return nil, nil
 	}
-
-	base, err := os.UserConfigDir()
-	if err != nil {
-		if len(files) > 0 {
-			return files, nil
-		}
-		return nil, fmt.Errorf("secret: locate config dir: %w", err)
-	}
-	files = append(files, filepath.Join(base, appDir, name))
-
-	// Developer tools on macOS commonly follow the XDG convention even though
-	// os.UserConfigDir does not, so a file there is honoured too.
-	if userHome, err := os.UserHomeDir(); err == nil {
-		xdg := filepath.Join(userHome, ".config", appDir, name)
-		if !slices.Contains(files, xdg) {
-			files = append(files, xdg)
-		}
-	}
+	files = append(files, dir.SecretFile(name))
 
 	return files, nil
 }
-
-const appDir = "JingClaw"
 
 // Find is the whole of "where does this credential come from".
 //

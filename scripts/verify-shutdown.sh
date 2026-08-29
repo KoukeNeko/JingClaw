@@ -33,9 +33,9 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 # Slow enough that a run is genuinely in flight when the signal arrives.
 fake_delay = "1s"
 [workspace]

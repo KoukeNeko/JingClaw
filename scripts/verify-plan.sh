@@ -30,22 +30,22 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Here is what I will do."
 tool = "todo_update"
 args = '{"operations":[{"op":"add","title":"read the failing test"},{"op":"add","title":"fix the timeout"},{"op":"add","title":"run the suite"}]}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Starting on the first."
 tool = "todo_update"
 args = '{"operations":[{"op":"set_status","id":"todo_1","status":"completed"},{"op":"set_status","id":"todo_2","status":"in_progress"}]}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Done for now."
 
 [workspace]

@@ -8,6 +8,7 @@ GO_BIN=${GO_BIN:-go}
 AGENTD_BIN=${AGENTD_BIN:-$PROJECT_DIR/core/bin/agentd}
 AGENTD_LOG=${AGENTD_LOG:-$PROJECT_DIR/agentd.log}
 GATEWAYD_BIN=${GATEWAYD_BIN:-$PROJECT_DIR/core/bin/gatewayd}
+AGENT_BIN=${AGENT_BIN:-$PROJECT_DIR/core/bin/agent}
 GATEWAYD_LOG=${GATEWAYD_LOG:-$PROJECT_DIR/gatewayd.log}
 POLL_SECONDS=0.5
 START_TIMEOUT=60
@@ -111,6 +112,9 @@ printf 'Building agentd and gatewayd from current source\n'
 	cd "$CORE_DIR"
 	"$GO_BIN" build -o "$AGENTD_BIN" ./cmd/agentd
 	"$GO_BIN" build -o "$GATEWAYD_BIN" ./cmd/gatewayd
+	# The CLI too. Left behind, it resolves paths the way it did when it was
+	# last built, and reports the daemon as not running while it is.
+	"$GO_BIN" build -o "$AGENT_BIN" ./cmd/agent
 )
 
 printf 'Starting new agentd: %s\n' "$AGENTD_BIN"

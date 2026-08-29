@@ -148,3 +148,27 @@ func writeKeyFile(t *testing.T, contents string, mode os.FileMode) string {
 	}
 	return path
 }
+
+// A backend that needs no credential leaves its file name empty. Joining an
+// empty name onto each search location hands back the directories themselves,
+// which read as a file just far enough to fail with "is a directory" — and
+// that failure stops the daemon before it has said anything useful.
+func TestNoFileNameIsNoFile(t *testing.T) {
+	files, err := secret.DefaultFiles("")
+	if err != nil {
+		t.Fatalf("DefaultFiles(\"\"): %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("an empty name searched %d places: %v", len(files), files)
+	}
+
+	// The control: a name still resolves, so this is not passing because
+	// DefaultFiles stopped working.
+	named, err := secret.DefaultFiles("gemini.key")
+	if err != nil {
+		t.Fatalf("DefaultFiles(\"gemini.key\"): %v", err)
+	}
+	if len(named) == 0 {
+		t.Error("a named credential resolved to nowhere, so the test proves nothing")
+	}
+}

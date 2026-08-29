@@ -3,22 +3,24 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	goruntime "runtime"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
+	"github.com/KoukeNeko/JingClaw/core/internal/home"
 	"github.com/KoukeNeko/JingClaw/core/internal/prompt"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
-// buildPrompt assembles what the agent is told, from configuration, the
-// environment, and any instructions the workspace carries.
+// buildPrompt assembles what the agent is told, from the environment and the
+// standing-instruction files the deployment carries.
 func buildPrompt(
 	cfg config.Config,
 	ws *workspace.Workspace,
 	tools *tool.Registry,
 ) ([]prompt.Layer, error) {
-	instructions, err := readWorkspaceInstructions(ws, cfg.Agent.InstructionFiles)
+	instructions, err := readStandingInstructions()
 	if err != nil {
 		return nil, err
 	}
@@ -30,11 +32,6 @@ func buildPrompt(
 	}
 
 	return prompt.Build(
-		prompt.Config{
-			AgentName:    cfg.Agent.Name,
-			Persona:      cfg.Agent.Persona,
-			Instructions: cfg.Agent.Instructions,
-		},
 		prompt.Environment{
 			WorkspaceRoot: ws.Root(),
 			OS:            goruntime.GOOS,
@@ -45,27 +42,32 @@ func buildPrompt(
 	), nil
 }
 
-// readWorkspaceInstructions loads instruction files a project carries.
+// readStandingInstructions loads instruction files a project carries.
 //
 // A project saying how it wants to be worked on is ordinary and useful, and
 // AGENTS.md is a convention several tools already share. What such a file
 // cannot do is grant permissions: it is read as directions, and the policy
 // engine never sees it.
-func readWorkspaceInstructions(
-	ws *workspace.Workspace,
-	names []string,
-) ([]prompt.WorkspaceInstructions, error) {
-	var found []prompt.WorkspaceInstructions
+// readStandingInstructions reads the files that say who the agent is and how
+// it works.
+//
+// From the deployment directory, not the workspace. They describe the agent
+// rather than the work, and the workspace is what the agent may change: kept
+// in there, the agent's own instructions are a file it can edit while doing a
+// job, and they sit among a project's files as though they were part of it.
+//
+// A missing one is not an error. The pair is created by --init and either may
+// be emptied or removed by somebody who does not want it.
+func readStandingInstructions() ([]prompt.StandingInstructions, error) {
+	dir, found := home.Resolve()
+	if !found {
+		return nil, nil
+	}
 
-	for _, name := range names {
-		absolute, err := ws.Resolve(name)
-		if err != nil {
-			// A configured name that escapes the workspace is a mistake worth
-			// reporting rather than quietly skipping.
-			return nil, fmt.Errorf("instruction file %s: %w", name, err)
-		}
+	var carried []prompt.StandingInstructions
 
-		content, err := os.ReadFile(absolute)
+	for _, name := range config.InstructionFiles() {
+		content, err := os.ReadFile(filepath.Join(dir.Root, name))
 		if os.IsNotExist(err) {
 			continue
 		}
@@ -73,8 +75,11 @@ func readWorkspaceInstructions(
 			return nil, fmt.Errorf("read %s: %w", name, err)
 		}
 
-		found = append(found, prompt.WorkspaceInstructions{Path: name, Text: string(content)})
+		carried = append(carried, prompt.StandingInstructions{
+			Path: name,
+			Text: string(content),
+		})
 	}
 
-	return found, nil
+	return carried, nil
 }

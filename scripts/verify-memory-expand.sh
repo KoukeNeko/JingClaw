@@ -42,22 +42,22 @@ mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 # whatever turn the run itself is on. That is what makes "component reuse" the
 # vocabulary offered here while the run walks through the rest of the script.
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "component reuse"
 tool = "remember"
 args = '{"text":"prefer reusing an existing component over building a second one","scope":"workspace"}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Let me check what I know."
 tool = "recall"
 args = '{"query":"modal"}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Checked."
 
 [memory]

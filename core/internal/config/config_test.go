@@ -62,11 +62,12 @@ func TestUnparseableFileIsAnError(t *testing.T) {
 func TestFileOverridesDefaults(t *testing.T) {
 	path := writeConfig(t, `
 [agent]
-name = "江委員"
 max_iterations = 3
 
-[model]
-provider = "gemini"
+[provider]
+backend = "gemini"
+
+[provider.gemini]
 model = "gemma-4-31b-it"
 `)
 
@@ -78,18 +79,15 @@ model = "gemma-4-31b-it"
 		t.Errorf("reported reading %q, want %q", used, path)
 	}
 
-	if cfg.Agent.Name != "江委員" {
-		t.Errorf("name is %q", cfg.Agent.Name)
-	}
 	if cfg.Agent.MaxIterations != 3 {
 		t.Errorf("max_iterations is %d", cfg.Agent.MaxIterations)
 	}
-	if cfg.Model.Model != "gemma-4-31b-it" {
-		t.Errorf("model is %q", cfg.Model.Model)
+	if cfg.Provider.Model() != "gemma-4-31b-it" {
+		t.Errorf("model is %q", cfg.Provider.Model())
 	}
 
 	// Anything the file did not mention keeps its default.
-	if len(cfg.Agent.InstructionFiles) == 0 {
+	if len(config.InstructionFiles()) == 0 {
 		t.Error("instruction_files lost its default")
 	}
 	if cfg.Server.Addr != config.Defaults().Server.Addr {
@@ -100,29 +98,15 @@ model = "gemma-4-31b-it"
 // The environment sits between the file and flags, so a shell or a service
 // definition can override a checked-in file without editing it.
 func TestEnvironmentOverridesFile(t *testing.T) {
-	path := writeConfig(t, "[agent]\nname = \"from file\"\n")
-	t.Setenv("JINGCLAW_AGENT_NAME", "from env")
+	path := writeConfig(t, "[agent]\nmax_iterations = 3\n")
+	t.Setenv("JINGCLAW_AGENT_MAX_ITERATIONS", "9")
 
 	cfg, _, err := config.Load(path)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Agent.Name != "from env" {
-		t.Errorf("name is %q, want the environment value", cfg.Agent.Name)
-	}
-}
-
-// An empty name is a real choice: not claiming one is honest when the account
-// the agent speaks through is called something else.
-func TestNameCanBeCleared(t *testing.T) {
-	path := writeConfig(t, "[agent]\nname = \"\"\n")
-
-	cfg, _, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Agent.Name != "" {
-		t.Errorf("name is %q, want it cleared", cfg.Agent.Name)
+	if cfg.Agent.MaxIterations != 9 {
+		t.Errorf("max_iterations is %d, want the environment value", cfg.Agent.MaxIterations)
 	}
 }
 
@@ -137,7 +121,8 @@ func TestExampleParsesAndChangesNothing(t *testing.T) {
 	}
 
 	defaults := config.Defaults()
-	if cfg.Agent.Name != defaults.Agent.Name || cfg.Model.Provider != defaults.Model.Provider {
+	if cfg.Agent.MaxIterations != defaults.Agent.MaxIterations ||
+		cfg.Provider.Backend != defaults.Provider.Backend {
 		t.Errorf("the example changes behaviour despite being fully commented:\n%+v", cfg)
 	}
 
@@ -150,8 +135,26 @@ func TestExampleParsesAndChangesNothing(t *testing.T) {
 // A hand-written list has to be updated in two places whenever a field is
 // added, and the failure mode is silent: the check passes while the new
 // setting is undocumented.
+// harnessOnly are the settings a starter deliberately does not show.
+//
+// They drive the offline provider, which exists so the end-to-end checks can
+// walk a tool call and an approval without a model. Nobody configuring a real
+// deployment sets them, and a starter that advertises the test double teaches
+// the wrong thing. They are documented in docs/configuration.md instead.
+var harnessOnly = map[string]bool{
+	"fake_model":     true,
+	"fake_delay":     true,
+	"fake_reasoning": true,
+	"fake_script":    true,
+	"text":           true,
+	"tool":           true,
+}
+
 func TestExampleDocumentsEverySetting(t *testing.T) {
 	for _, key := range koanfKeys(reflect.TypeOf(config.Config{})) {
+		if harnessOnly[key] {
+			continue
+		}
 		if !strings.Contains(config.Example, key) {
 			t.Errorf("the example does not document %q; add it, commented out", key)
 		}
@@ -217,7 +220,7 @@ func TestDurationsAreReadAsText(t *testing.T) {
 [tools]
 command_timeout = "45s"
 
-[model.retry]
+[provider.retry]
 base_delay = "1500ms"
 `)
 
@@ -228,8 +231,8 @@ base_delay = "1500ms"
 	if cfg.Tools.CommandTimeout != 45*time.Second {
 		t.Errorf("command_timeout is %s, want 45s", cfg.Tools.CommandTimeout)
 	}
-	if cfg.Model.Retry.BaseDelay != 1500*time.Millisecond {
-		t.Errorf("base_delay is %s, want 1.5s", cfg.Model.Retry.BaseDelay)
+	if cfg.Provider.Retry.BaseDelay != 1500*time.Millisecond {
+		t.Errorf("base_delay is %s, want 1.5s", cfg.Provider.Retry.BaseDelay)
 	}
 }
 
@@ -279,14 +282,14 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		{
 			name: "a retry that starts slower than it is allowed to get",
 			mutate: func(c *config.Config) {
-				c.Model.Retry.BaseDelay = time.Minute
-				c.Model.Retry.MaxDelay = time.Second
+				c.Provider.Retry.BaseDelay = time.Minute
+				c.Provider.Retry.MaxDelay = time.Second
 			},
 			mention: "base_delay",
 		},
 		{
 			name:    "jitter outside the fraction it is",
-			mutate:  func(c *config.Config) { c.Model.Retry.Jitter = 2 },
+			mutate:  func(c *config.Config) { c.Provider.Retry.Jitter = 2 },
 			mention: "jitter",
 		},
 	}
@@ -342,7 +345,7 @@ func TestValidateReportsEveryProblemTogether(t *testing.T) {
 func TestReportNamesTheFileAndEachSetting(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Server.Addr = "0.0.0.0:8080"
-	cfg.Model.Provider = "openai"
+	cfg.Provider.Backend = "openai"
 
 	var out strings.Builder
 	if !config.Report(&out, cfg.Validate(), "/etc/jingclaw/config.toml") {
@@ -353,7 +356,7 @@ func TestReportNamesTheFileAndEachSetting(t *testing.T) {
 		"/etc/jingclaw/config.toml", // which file
 		`server.addr = "0.0.0.0:8080"`,
 		"loopback",
-		`model.provider = "openai"`,
+		`provider.backend = "openai"`,
 		`Use "gemini"`, // what to write instead
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -379,9 +382,9 @@ func TestReportIgnoresOtherErrors(t *testing.T) {
 // an ordinary way to work.
 func TestOnlyTheChosenProviderIsValidated(t *testing.T) {
 	cfg := config.Defaults()
-	cfg.Model.Provider = "gemini"
-	cfg.Model.OpenAICompat.BaseURL = "" // meaningless here, and not an error
-	cfg.Model.OpenAICompat.Profile = "nonsense"
+	cfg.Provider.Backend = "gemini"
+	cfg.Provider.OpenAICompat.BaseURL = "" // meaningless here, and not an error
+	cfg.Provider.OpenAICompat.Profile = "nonsense"
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("a section for a provider nobody chose was rejected: %v", err)
@@ -398,7 +401,7 @@ func TestAnOpenAICompatibleEndpointNeedsAnAddressAndAKnownProfile(t *testing.T) 
 	}{
 		{
 			name:    "no address",
-			mutate:  func(c *config.Config) { c.Model.OpenAICompat.BaseURL = "" },
+			mutate:  func(c *config.Config) { c.Provider.OpenAICompat.BaseURL = "" },
 			mention: "base_url",
 		},
 		{
@@ -406,8 +409,8 @@ func TestAnOpenAICompatibleEndpointNeedsAnAddressAndAKnownProfile(t *testing.T) 
 			// about how this server reports being out of credit.
 			name: "a misspelled profile",
 			mutate: func(c *config.Config) {
-				c.Model.OpenAICompat.BaseURL = "http://localhost:8000/v1"
-				c.Model.OpenAICompat.Profile = "vlm"
+				c.Provider.OpenAICompat.BaseURL = "http://localhost:8000/v1"
+				c.Provider.OpenAICompat.Profile = "vlm"
 			},
 			mention: "profile",
 		},
@@ -416,8 +419,8 @@ func TestAnOpenAICompatibleEndpointNeedsAnAddressAndAKnownProfile(t *testing.T) 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := config.Defaults()
-			cfg.Model.Provider = "openai_compat"
-			cfg.Model.OpenAICompat.BaseURL = "http://localhost:8000/v1"
+			cfg.Provider.Backend = "openai_compat"
+			cfg.Provider.OpenAICompat.BaseURL = "http://localhost:8000/v1"
 			test.mutate(&cfg)
 
 			err := cfg.Validate()
@@ -433,8 +436,8 @@ func TestAnOpenAICompatibleEndpointNeedsAnAddressAndAKnownProfile(t *testing.T) 
 
 func TestOllamaSettingsAreChecked(t *testing.T) {
 	cfg := config.Defaults()
-	cfg.Model.Provider = "ollama"
-	cfg.Model.Ollama.KeepAlive = "half an hour"
+	cfg.Provider.Backend = "ollama"
+	cfg.Provider.Ollama.KeepAlive = "half an hour"
 
 	err := cfg.Validate()
 	if err == nil {
@@ -446,7 +449,7 @@ func TestOllamaSettingsAreChecked(t *testing.T) {
 
 	// The defaults for a provider must survive being selected.
 	valid := config.Defaults()
-	valid.Model.Provider = "ollama"
+	valid.Provider.Backend = "ollama"
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("the ollama defaults do not validate: %v", err)
 	}

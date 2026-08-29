@@ -40,17 +40,17 @@ STRANGER=900000000000000015
 mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Writing it."
 tool = "write_file"
 args = '{"path":"notes.md","content":"written"}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Done."
 
 [workspace]

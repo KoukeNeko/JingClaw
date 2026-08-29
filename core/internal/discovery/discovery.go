@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
@@ -52,24 +51,14 @@ func Path() (string, error) {
 		return filepath.Join(dir, discoveryFile), nil
 	}
 
-	// A .JingClaw directory decides this on every platform: a client and the
-	// daemon it is meant to find have to agree, and agreeing per-platform is
-	// how they stop agreeing.
-	if dir, found := home.FromWorkingDirectory(); found {
-		return filepath.Join(dir.Run(), discoveryFile), nil
+	// The deployment decides this on every platform: a client and the daemon
+	// it is meant to find have to agree, and agreeing per-platform is how they
+	// stop agreeing.
+	dir, found := home.Resolve()
+	if !found {
+		return "", fmt.Errorf("discovery: %s is set to none", home.EnvVar)
 	}
-
-	if runtime.GOOS != "darwin" {
-		if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-			return filepath.Join(dir, "jingclaw", discoveryFile), nil
-		}
-	}
-
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("discovery: locate runtime dir: %w", err)
-	}
-	return filepath.Join(base, "JingClaw", "run", discoveryFile), nil
+	return filepath.Join(dir.Run(), discoveryFile), nil
 }
 
 // WriteDiscovery persists the file with owner-only permissions. It holds the

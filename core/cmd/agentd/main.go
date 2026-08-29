@@ -129,7 +129,7 @@ func run() error {
 	// does not overwrite a configured value with a default.
 	applyFlagOverrides(&cfg, providerName, model, workspaceDir, dataDir, addr, maxIters)
 	if *devFake {
-		cfg.Model.Provider = "fake"
+		cfg.Provider.Backend = "fake"
 	}
 
 	// Settings are checked once, here. Making something configurable is
@@ -190,7 +190,7 @@ func run() error {
 		return printModels(rootCtx, modelProvider)
 	}
 
-	selected, err := resolveModel(rootCtx, modelProvider, cfg.Model.Model)
+	selected, err := resolveModel(rootCtx, modelProvider, cfg.Provider.Model())
 	if err != nil {
 		return err
 	}
@@ -626,7 +626,7 @@ func reportPaths(cfg config.Config, configFile string) error {
 	}
 
 	root := "(none)"
-	if dir, found := home.FromWorkingDirectory(); found {
+	if dir, found := home.Resolve(); found {
 		root = dir.Root
 	}
 
@@ -656,16 +656,15 @@ func orNone(path string) string {
 // started would leave them scattered through a filesystem, which is the
 // problem this exists to solve rather than a way to solve it.
 func initialise() error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
+	// Where a deployment lives is not a question about this directory, so
+	// neither is creating one. The environment can name somewhere else; the
+	// working directory cannot.
+	at, found := home.Resolve()
+	if !found {
+		return fmt.Errorf("%s is set to none, so there is nowhere to create", home.EnvVar)
 	}
 
-	if existing, found := home.Find(cwd); found {
-		return fmt.Errorf("%s already covers this directory", existing.Root)
-	}
-
-	dir, err := home.Create(cwd)
+	dir, err := home.Create(at.Root)
 	if err != nil {
 		return err
 	}
@@ -676,12 +675,56 @@ func initialise() error {
 		return fmt.Errorf("write %s: %w", dir.ConfigFile(), err)
 	}
 
+	if err := writeInstructionFiles(dir.Root); err != nil {
+		return err
+	}
+
 	fmt.Printf("Created %s\n\n", dir.Root)
 	fmt.Printf("  %-12s the settings, all at their defaults\n", ConfigName())
+	for _, name := range config.InstructionFiles() {
+		fmt.Printf("  %-12s %s\n", name, instructionPurpose[name])
+	}
 	fmt.Printf("  %-12s what the agent may read and change\n", home.WorkspaceName+"/")
 	fmt.Printf("  %-12s the database and stored output\n", home.DataName+"/")
 	fmt.Printf("  %-12s how clients find this daemon\n", home.RunName+"/")
 	fmt.Printf("\nCredentials go in beside them, mode 600.\n")
+	return nil
+}
+
+// instructionPurpose is the one line each starter file says about itself,
+// used both as its own first line and in what --init prints.
+var instructionPurpose = map[string]string{
+	config.InstructionsFile: "how work is done here",
+	config.PersonaFile:      "who this agent is, and what it is for",
+}
+
+// writeInstructionFiles puts the standing-instruction files in the deployment
+// directory.
+//
+// Beside the settings rather than inside the workspace. They describe the
+// agent, and the workspace is what the agent may change: in there, its own
+// instructions are a file it can edit while doing a job, and they sit among a
+// project's files as though they were part of it.
+//
+// Created rather than documented. A file that exists is a file somebody edits;
+// one they have to know to create is one that stays absent.
+//
+// Each is a heading and its purpose, and nothing else. Filling them with
+// suggested content would mean every deployment starts with instructions
+// nobody wrote and few will read.
+func writeInstructionFiles(at string) error {
+	for _, name := range config.InstructionFiles() {
+		path := filepath.Join(at, name)
+		if _, err := os.Stat(path); err == nil {
+			continue
+		}
+
+		heading := strings.TrimSuffix(name, filepath.Ext(name))
+		body := fmt.Sprintf("# %s\n\n<!-- %s -->\n", heading, instructionPurpose[name])
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+	}
 	return nil
 }
 
@@ -707,15 +750,11 @@ func databasePath(dataDir string) (string, error) {
 // behind is one nobody can run to find out.
 func resolveDatabase(dataDir string) (string, error) {
 	if dataDir == "" {
-		if dir, found := home.FromWorkingDirectory(); found {
-			dataDir = dir.Data()
-		} else {
-			base, err := os.UserConfigDir()
-			if err != nil {
-				return "", fmt.Errorf("locate config dir: %w", err)
-			}
-			dataDir = filepath.Join(base, "JingClaw")
+		dir, found := home.Resolve()
+		if !found {
+			return "", fmt.Errorf("%s is set to none, so there is no database", home.EnvVar)
 		}
+		dataDir = dir.Data()
 	}
 	return filepath.Join(dataDir, "jingclaw.db"), nil
 }
@@ -933,11 +972,11 @@ func describeConfigFile(path string, created bool) string {
 }
 
 func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, error) {
-	switch cfg.Model.Provider {
+	switch cfg.Provider.Backend {
 	case "fake":
-		offline := fake.New(cfg.Model.FakeDelay)
-		offline.Reasoning = cfg.Model.FakeReasoning
-		for _, turn := range cfg.Model.FakeScript {
+		offline := fake.New(cfg.Provider.FakeDelay)
+		offline.Reasoning = cfg.Provider.FakeReasoning
+		for _, turn := range cfg.Provider.FakeScript {
 			offline.Script = append(offline.Script, fake.Turn{
 				Text: turn.Text, Tool: turn.Tool, Args: turn.Args,
 			})
@@ -945,13 +984,13 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 		return offline, nil
 
 	case "gemini":
-		keyFiles, err := secret.DefaultFiles(cfg.Model.APIKeyFile)
+		keyFiles, err := secret.DefaultFiles(cfg.Provider.Gemini.APIKeyFile)
 		if err != nil {
 			return nil, err
 		}
 
 		apiKey, err := secret.Load(secret.LoadOptions{
-			EnvVars: cfg.Model.APIKeyEnv,
+			EnvVars: cfg.Provider.Gemini.APIKeyEnv,
 			Files:   keyFiles,
 		})
 		if err != nil {
@@ -960,7 +999,7 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 		if !apiKey.IsSet() {
 			return nil, fmt.Errorf(
 				"no Gemini API key: set %s, or write it with mode 600 to one of: %s",
-				strings.Join(cfg.Model.APIKeyEnv, " or "), strings.Join(keyFiles, ", "))
+				strings.Join(cfg.Provider.Gemini.APIKeyEnv, " or "), strings.Join(keyFiles, ", "))
 		}
 
 		p, err := gemini.New(ctx, gemini.Config{APIKey: apiKey.Reveal()})
@@ -973,17 +1012,17 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 	case "ollama":
 		// A credential only if one was supplied: the hosted service needs one
 		// and a local daemon has nothing to check it against.
-		key, err := optionalKey(cfg)
+		key, err := optionalKey(cfg.Provider.Ollama.APIKeyEnv, cfg.Provider.Ollama.APIKeyFile)
 		if err != nil {
 			return nil, err
 		}
 
 		p, err := ollama.New(ollama.Config{
-			BaseURL:   cfg.Model.Ollama.BaseURL,
+			BaseURL:   cfg.Provider.Ollama.BaseURL,
 			APIKey:    key,
-			KeepAlive: cfg.Model.Ollama.KeepAlive,
-			NumCtx:    cfg.Model.Ollama.NumCtx,
-			Think:     cfg.Model.Ollama.Think,
+			KeepAlive: cfg.Provider.Ollama.KeepAlive,
+			NumCtx:    cfg.Provider.Ollama.NumCtx,
+			Think:     cfg.Provider.Ollama.Think,
 		})
 		if err != nil {
 			return nil, err
@@ -991,16 +1030,17 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 		return provider.WithRetry(p, retryPolicy(cfg)), nil
 
 	case "openai_compat":
-		key, err := optionalKey(cfg)
+		key, err := optionalKey(
+			cfg.Provider.OpenAICompat.APIKeyEnv, cfg.Provider.OpenAICompat.APIKeyFile)
 		if err != nil {
 			return nil, err
 		}
 
 		p, err := openaicompat.New(openaicompat.Config{
-			BaseURL: cfg.Model.OpenAICompat.BaseURL,
+			BaseURL: cfg.Provider.OpenAICompat.BaseURL,
 			APIKey:  key,
-			Profile: cfg.Model.OpenAICompat.Profile,
-			Name:    cfg.Model.OpenAICompat.Name,
+			Profile: cfg.Provider.OpenAICompat.Profile,
+			Name:    cfg.Provider.OpenAICompat.Name,
 		})
 		if err != nil {
 			return nil, err
@@ -1009,7 +1049,7 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 
 	default:
 		return nil, fmt.Errorf(
-			"unknown provider %q; use gemini, ollama, openai_compat, or fake", cfg.Model.Provider)
+			"unknown provider %q; use gemini, ollama, openai_compat, or fake", cfg.Provider.Backend)
 	}
 }
 
@@ -1018,11 +1058,11 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 // the rest.
 func retryPolicy(cfg config.Config) provider.RetryPolicy {
 	return provider.RetryPolicy{
-		MaxAttempts: cfg.Model.Retry.MaxAttempts,
-		BaseDelay:   cfg.Model.Retry.BaseDelay,
-		MaxDelay:    cfg.Model.Retry.MaxDelay,
-		Jitter:      cfg.Model.Retry.Jitter,
-		Budget:      cfg.Model.Retry.Budget,
+		MaxAttempts: cfg.Provider.Retry.MaxAttempts,
+		BaseDelay:   cfg.Provider.Retry.BaseDelay,
+		MaxDelay:    cfg.Provider.Retry.MaxDelay,
+		Jitter:      cfg.Provider.Retry.Jitter,
+		Budget:      cfg.Provider.Retry.Budget,
 	}
 }
 
@@ -1032,13 +1072,13 @@ func retryPolicy(cfg config.Config) provider.RetryPolicy {
 // A local model server usually has no credential at all, so a missing one is
 // an ordinary state here rather than the startup failure it is for a hosted
 // provider.
-func optionalKey(cfg config.Config) (string, error) {
-	files, err := secret.DefaultFiles(cfg.Model.APIKeyFile)
+func optionalKey(envVars []string, keyFile string) (string, error) {
+	files, err := secret.DefaultFiles(keyFile)
 	if err != nil {
 		return "", err
 	}
 
-	key, err := secret.Load(secret.LoadOptions{EnvVars: cfg.Model.APIKeyEnv, Files: files})
+	key, err := secret.Load(secret.LoadOptions{EnvVars: envVars, Files: files})
 	if err != nil {
 		return "", err
 	}
@@ -1112,10 +1152,10 @@ func applyFlagOverrides(cfg *config.Config, providerName, model, workspaceDir, d
 	flag.Visit(func(f *flag.Flag) { passed[f.Name] = true })
 
 	if passed["provider"] {
-		cfg.Model.Provider = *providerName
+		cfg.Provider.Backend = *providerName
 	}
 	if passed["model"] {
-		cfg.Model.Model = *model
+		cfg.Provider.SetModel(*model)
 	}
 	if passed["workspace"] {
 		cfg.Workspace.Root = *workspaceDir

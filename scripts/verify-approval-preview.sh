@@ -30,24 +30,24 @@ mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 printf 'timeout := 30\n' > "$WORK/ws/settings.go"
 
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
 
 # Read first: an edit refuses a file this session has not looked at, which is
 # a rule worth keeping and not worth working around here.
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Looking at it."
 tool = "read_file"
 args = '{"path":"settings.go"}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Raising it."
 tool = "edit_file"
 args = '{"path":"settings.go","edits":[{"old_text":"timeout := 30","new_text":"timeout := 120"}]}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Done."
 
 [workspace]

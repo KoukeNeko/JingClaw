@@ -33,8 +33,6 @@ import (
 )
 
 const (
-	appDir   = "JingClaw"
-	fileName = "config.toml"
 
 	// envPrefix keeps JingClaw's variables from colliding with anything else
 	// in a shell.
@@ -44,7 +42,7 @@ const (
 // Config is the whole of the daemon's settings.
 type Config struct {
 	Agent     Agent     `koanf:"agent"`
-	Model     Model     `koanf:"model"`
+	Provider  Provider  `koanf:"provider"`
 	Context   Context   `koanf:"context"`
 	Tools     Tools     `koanf:"tools"`
 	Artifacts Artifacts `koanf:"artifacts"`
@@ -63,23 +61,29 @@ type Config struct {
 // None of this is a security control. It shapes how the agent presents itself
 // and what it tries; what it is permitted to do is settled by the policy
 // engine, which does not read any of these fields.
+// Who the agent is and how it works are files in the workspace, not settings.
+//
+// AGENTS.md and PERSONA.md sit beside the settings, are created by --init,
+// and are read on every run in that order. Beside rather than in the
+// workspace: they describe the agent, and the workspace is what the agent may
+// change. There is deliberately no name, persona, instructions or
+// instruction_files setting: each was a second place to say the same thing,
+// and a second place is one somebody edits while the first is what runs.
+//
+// Fixed names rather than configurable ones for the same reason. AGENTS.md is
+// a convention other tools already read, so a project that has one gets it
+// free; PERSONA.md is this deployment's own. A setting naming them could only
+// point at a file that does not exist.
+const (
+	InstructionsFile = "AGENTS.md"
+	PersonaFile      = "PERSONA.md"
+)
+
+// InstructionFiles are read from the deployment directory when present, in
+// the order returned.
+func InstructionFiles() []string { return []string{InstructionsFile, PersonaFile} }
+
 type Agent struct {
-	// Name is what the agent calls itself. Empty leaves it unnamed, which is
-	// better than insisting on one that contradicts whatever the account is
-	// called wherever it is deployed.
-	Name string `koanf:"name"`
-
-	// Persona is extra identity: tone, stance, what this deployment is for.
-	Persona string `koanf:"persona"`
-
-	// Instructions are the operator's standing directions.
-	Instructions string `koanf:"instructions"`
-
-	// InstructionFiles are read from the workspace when present. AGENTS.md is
-	// a convention several tools already share; adding a private filename as
-	// well is cheap, inventing a new one and ignoring the shared one is not.
-	InstructionFiles []string `koanf:"instruction_files"`
-
 	// MaxIterations bounds the tool loop per run.
 	MaxIterations int `koanf:"max_iterations"`
 
@@ -89,15 +93,12 @@ type Agent struct {
 	PermissionProfile string `koanf:"permission_profile"`
 }
 
-type Model struct {
-	Provider string `koanf:"provider"`
-	Model    string `koanf:"model"`
+type Provider struct {
+	Backend string `koanf:"backend"`
 
-	// APIKeyEnv and APIKeyFile say where the credential comes from. They are
-	// settings because deployments differ: a service manager supplies one
-	// through the environment, a workstation through a file.
-	APIKeyEnv  []string `koanf:"api_key_env"`
-	APIKeyFile string   `koanf:"api_key_file"`
+	// FakeModel is what the offline stand-in calls itself. Empty uses its own
+	// name, which is what every check wants.
+	FakeModel string `koanf:"fake_model"`
 
 	// FakeDelay paces the offline provider, so streaming and interruption can
 	// be watched at human speed.
@@ -118,8 +119,74 @@ type Model struct {
 
 	Retry Retry `koanf:"retry"`
 
+	Gemini       Gemini       `koanf:"gemini"`
 	Ollama       Ollama       `koanf:"ollama"`
 	OpenAICompat OpenAICompat `koanf:"openai_compat"`
+}
+
+// Model is what the selected backend will answer with.
+//
+// Read through here rather than from a field, because each backend names its
+// own: switching between them is one line, and the model each was set up with
+// is still there when you switch back.
+func (p Provider) Model() string {
+	switch p.Backend {
+	case "gemini":
+		return p.Gemini.Model
+	case "ollama":
+		return p.Ollama.Model
+	case "openai_compat":
+		return p.OpenAICompat.Model
+	case "fake":
+		return p.FakeModel
+	}
+	return ""
+}
+
+// SetModel overrides the selected backend's model, for the flag that does
+// that. It has to land where the daemon will read it rather than beside it.
+func (p *Provider) SetModel(model string) {
+	switch p.Backend {
+	case "gemini":
+		p.Gemini.Model = model
+	case "ollama":
+		p.Ollama.Model = model
+	case "openai_compat":
+		p.OpenAICompat.Model = model
+	case "fake":
+		p.FakeModel = model
+	}
+}
+
+// Each backend says where its own key comes from, rather than sharing one
+// pair of settings.
+//
+// Shared, only one backend can be configured at a time: switching from a
+// hosted model to a local one would mean editing the key settings as well as
+// the name of the backend, and switching back would mean editing them again
+// from memory. Declared per backend, everything stays set up and only
+// `backend` changes.
+//
+// Two places because deployments differ: a service manager supplies a
+// credential through the environment, a workstation through a file. The
+// environment is read first, and neither value ever reaches a log.
+//
+// Written out on each backend rather than embedded from one shared struct.
+// Defaults are seeded by walking this config, and that walk does not honour
+// an embedded squash: the keys come out as provider.gemini.Credential.api_key_env
+// and every default inside is silently lost.
+
+// Gemini is what that backend needs, which is only a credential: it has one
+// endpoint and no local variant.
+type Gemini struct {
+	// Model is what this backend answers with. Per backend, like the
+	// credential above and for the same reason: a model name means nothing
+	// outside the service that serves it, and one shared slot would have to
+	// be retyped on every switch.
+	Model string `koanf:"model"`
+
+	APIKeyEnv  []string `koanf:"api_key_env"`
+	APIKeyFile string   `koanf:"api_key_file"`
 }
 
 // Ollama configures a local Ollama daemon or the hosted service.
@@ -127,6 +194,17 @@ type Model struct {
 // One section for both: they are the same API at different addresses, and the
 // hosted one wants a credential.
 type Ollama struct {
+	// Model is what this backend answers with. Per backend, like the
+	// credential above and for the same reason: a model name means nothing
+	// outside the service that serves it, and one shared slot would have to
+	// be retyped on every switch.
+	Model string `koanf:"model"`
+
+	// Where this backend's key comes from, when it needs one: the hosted
+	// service does and a local daemon has nothing to check it against.
+	APIKeyEnv  []string `koanf:"api_key_env"`
+	APIKeyFile string   `koanf:"api_key_file"`
+
 	// BaseURL defaults to a daemon on this machine. Point it at
 	// https://ollama.com for the hosted service.
 	BaseURL string `koanf:"base_url"`
@@ -153,6 +231,17 @@ type Ollama struct {
 
 // OpenAICompat configures an endpoint that speaks the OpenAI chat protocol.
 type OpenAICompat struct {
+	// Model is what this backend answers with. Per backend, like the
+	// credential above and for the same reason: a model name means nothing
+	// outside the service that serves it, and one shared slot would have to
+	// be retyped on every switch.
+	Model string `koanf:"model"`
+
+	// Where this backend's key comes from, when it needs one: the hosted
+	// service does and a local daemon has nothing to check it against.
+	APIKeyEnv  []string `koanf:"api_key_env"`
+	APIKeyFile string   `koanf:"api_key_file"`
+
 	// BaseURL is the root the chat path hangs off, usually ending in /v1.
 	BaseURL string `koanf:"base_url"`
 
@@ -709,16 +798,16 @@ type Server struct {
 func Defaults() Config {
 	return Config{
 		Agent: Agent{
-			Name:              "JingClaw",
-			InstructionFiles:  []string{"AGENTS.md", "JINGCLAW.md"},
 			MaxIterations:     12,
 			PermissionProfile: "local",
 		},
-		Model: Model{
-			Provider:   "fake",
-			APIKeyEnv:  []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
-			APIKeyFile: "gemini.key",
-			FakeDelay:  150 * time.Millisecond,
+		Provider: Provider{
+			Backend: "fake",
+			Gemini: Gemini{
+				APIKeyEnv:  []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+				APIKeyFile: "gemini.key",
+			},
+			FakeDelay: 150 * time.Millisecond,
 			Retry: Retry{
 				MaxAttempts: 4,
 				BaseDelay:   500 * time.Millisecond,
@@ -1013,9 +1102,9 @@ func (c Config) choiceProblems() []Problem {
 			Fix: "Use debug, info, warn or error.",
 		})
 	}
-	if !providerNames[c.Model.Provider] {
+	if !providerNames[c.Provider.Backend] {
 		problems = append(problems, Problem{
-			Key: "model.provider", Value: quote(c.Model.Provider),
+			Key: "provider.backend", Value: quote(c.Provider.Backend),
 			Why: "is not a provider that exists",
 			Fix: `Use "gemini", "ollama", "openai_compat", or "fake" for the offline provider.`,
 		})
@@ -1023,26 +1112,26 @@ func (c Config) choiceProblems() []Problem {
 	// Each provider is checked only when it is the one selected. Refusing a
 	// half-filled section for a provider nobody chose would make the file
 	// impossible to keep several options in.
-	switch c.Model.Provider {
+	switch c.Provider.Backend {
 	case "ollama":
-		if !thinkLevels[strings.ToLower(strings.TrimSpace(c.Model.Ollama.Think))] {
+		if !thinkLevels[strings.ToLower(strings.TrimSpace(c.Provider.Ollama.Think))] {
 			problems = append(problems, Problem{
-				Key: "model.ollama.think", Value: quote(c.Model.Ollama.Think),
+				Key: "provider.ollama.think", Value: quote(c.Provider.Ollama.Think),
 				Why: "is not a thinking setting",
 				Fix: `Leave it empty to follow the model, or use "off", "on", "low", "medium", "high" or "max".`,
 			})
 		}
-		if c.Model.Ollama.NumCtx < 0 {
+		if c.Provider.Ollama.NumCtx < 0 {
 			problems = append(problems, Problem{
-				Key: "model.ollama.num_ctx", Value: fmt.Sprint(c.Model.Ollama.NumCtx),
+				Key: "provider.ollama.num_ctx", Value: fmt.Sprint(c.Provider.Ollama.NumCtx),
 				Why: "is negative",
 				Fix: "Leave it at 0 to let the server size the context itself.",
 			})
 		}
-		if c.Model.Ollama.KeepAlive != "" {
-			if _, err := time.ParseDuration(c.Model.Ollama.KeepAlive); err != nil {
+		if c.Provider.Ollama.KeepAlive != "" {
+			if _, err := time.ParseDuration(c.Provider.Ollama.KeepAlive); err != nil {
 				problems = append(problems, Problem{
-					Key: "model.ollama.keep_alive", Value: quote(c.Model.Ollama.KeepAlive),
+					Key: "provider.ollama.keep_alive", Value: quote(c.Provider.Ollama.KeepAlive),
 					Why: "is not a duration",
 					Fix: `Write it as "30m" or "1h". Leave it empty for the server's own default.`,
 				})
@@ -1050,16 +1139,16 @@ func (c Config) choiceProblems() []Problem {
 		}
 
 	case "openai_compat":
-		if strings.TrimSpace(c.Model.OpenAICompat.BaseURL) == "" {
+		if strings.TrimSpace(c.Provider.OpenAICompat.BaseURL) == "" {
 			problems = append(problems, Problem{
-				Key: "model.openai_compat.base_url", Value: `""`,
+				Key: "provider.openai_compat.base_url", Value: `""`,
 				Why: "is empty, and there is no default endpoint to fall back to",
 				Fix: `Give the address the chat path hangs off, e.g. "http://localhost:8000/v1".`,
 			})
 		}
-		if _, ok := openaicompat.ProfileByName(c.Model.OpenAICompat.Profile); !ok {
+		if _, ok := openaicompat.ProfileByName(c.Provider.OpenAICompat.Profile); !ok {
 			problems = append(problems, Problem{
-				Key: "model.openai_compat.profile", Value: quote(c.Model.OpenAICompat.Profile),
+				Key: "provider.openai_compat.profile", Value: quote(c.Provider.OpenAICompat.Profile),
 				Why: "is not a profile that exists",
 				Fix: "Known profiles: " + strings.Join(openaicompat.ProfileNames(), ", ") + ".",
 			})
@@ -1189,7 +1278,7 @@ func (c Config) rangeProblems() []Problem {
 		fix   string
 	}{
 		{"agent.max_iterations", int64(c.Agent.MaxIterations), "A run needs at least one model turn to do anything."},
-		{"model.retry.max_attempts", int64(c.Model.Retry.MaxAttempts), "One attempt means no retry; zero means no request."},
+		{"provider.retry.max_attempts", int64(c.Provider.Retry.MaxAttempts), "One attempt means no retry; zero means no request."},
 		{"tools.read_limit", c.Tools.ReadLimit, "This is how much of a file one read returns."},
 		{"tools.max_readable_file", c.Tools.MaxReadableFile, "Zero would make every file too large to read."},
 		{"tools.max_overwrite_bytes", c.Tools.MaxOverwriteBytes, "Zero would refuse every whole-file write."},
@@ -1224,10 +1313,10 @@ func (c Config) rangeProblems() []Problem {
 			Fix: "The default a program gets cannot exceed the most it may ask for.",
 		})
 	}
-	if c.Model.Retry.BaseDelay > c.Model.Retry.MaxDelay {
+	if c.Provider.Retry.BaseDelay > c.Provider.Retry.MaxDelay {
 		problems = append(problems, Problem{
-			Key: "model.retry.base_delay", Value: quote(c.Model.Retry.BaseDelay.String()),
-			Why: fmt.Sprintf("is above model.retry.max_delay (%s)", c.Model.Retry.MaxDelay),
+			Key: "provider.retry.base_delay", Value: quote(c.Provider.Retry.BaseDelay.String()),
+			Why: fmt.Sprintf("is above model.retry.max_delay (%s)", c.Provider.Retry.MaxDelay),
 			Fix: "The first wait cannot be longer than the longest wait.",
 		})
 	}
@@ -1319,16 +1408,16 @@ func (c Config) rangeProblems() []Problem {
 		})
 	}
 
-	if c.Model.Retry.Budget < 0 {
+	if c.Provider.Retry.Budget < 0 {
 		problems = append(problems, Problem{
-			Key: "model.retry.budget", Value: quote(c.Model.Retry.Budget.String()),
+			Key: "provider.retry.budget", Value: quote(c.Provider.Retry.Budget.String()),
 			Why: "is negative",
 			Fix: "Use 0 to bound retries by attempts alone.",
 		})
 	}
-	if c.Model.Retry.Jitter < 0 || c.Model.Retry.Jitter > 1 {
+	if c.Provider.Retry.Jitter < 0 || c.Provider.Retry.Jitter > 1 {
 		problems = append(problems, Problem{
-			Key: "model.retry.jitter", Value: fmt.Sprint(c.Model.Retry.Jitter),
+			Key: "provider.retry.jitter", Value: fmt.Sprint(c.Provider.Retry.Jitter),
 			Why: "is not between 0 and 1",
 			Fix: "It is the fraction of a delay that is randomised: 0.3 spreads retries by up to 30%.",
 		})
@@ -1427,269 +1516,154 @@ func EnsureFile() (path string, created bool, err error) {
 
 // defaultWorkspace is what the agent may touch when nothing says otherwise.
 //
-// Inside a .JingClaw directory when there is one, so that a deployment set up
-// to try the thing out cannot reach the project it was set up in. Without one
-// it is the working directory, as before.
+// Inside the deployment's own directory, so that an agent set up to try the
+// thing out cannot reach the project it was set up in. Never the working
+// directory: "whatever you happened to be standing in" is not a setting, and
+// as a default it hands a fresh install the contents of the first project
+// somebody starts it from.
 func defaultWorkspace() string {
-	if dir, found := home.FromWorkingDirectory(); found {
+	if dir, found := home.Resolve(); found {
 		return dir.Workspace()
 	}
-	return "."
+	return ""
 }
 
 // DefaultPath is where the configuration lives when none is given.
 //
-// A .JingClaw directory decides it when there is one. Otherwise the platform's
-// own location, as before.
+// One answer, from one place. The platform-native directory, the XDG
+// convention and an existence check used to decide between them, which meant
+// three rules produced one path and nobody could say which had applied.
 func DefaultPath() (string, error) {
-	if dir, found := home.FromWorkingDirectory(); found {
-		return dir.ConfigFile(), nil
+	dir, found := home.Resolve()
+	if !found {
+		return "", fmt.Errorf("config: %s is set to none, so there is no default", home.EnvVar)
 	}
-
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("config: locate config dir: %w", err)
-	}
-
-	platform := filepath.Join(base, appDir, fileName)
-	if _, err := os.Stat(platform); err == nil {
-		return platform, nil
-	}
-
-	// Developer tools on macOS commonly follow the XDG convention even though
-	// os.UserConfigDir does not, and a headless machine is usually set up that
-	// way, so an existing file there is honoured.
-	if home, err := os.UserHomeDir(); err == nil {
-		xdg := filepath.Join(home, ".config", appDir, fileName)
-		if _, err := os.Stat(xdg); err == nil {
-			return xdg, nil
-		}
-	}
-
-	return platform, nil
+	return dir.ConfigFile(), nil
 }
 
-// Example is a starting configuration, written with everything commented so
-// that copying it changes nothing until a line is deliberately uncommented.
+// Example is a starting configuration.
 //
-// It documents every setting rather than the interesting few. A setting an
-// operator can only find by reading the source is, in practice, not
-// configurable; TestExampleDocumentsEverySetting keeps this honest by taking
-// the list of settings from the struct itself.
-const Example = `# JingClaw configuration.
-#
-# Settings are shown at their defaults. Uncommenting one and leaving the value
-# alone changes nothing; the point is that the value is visible. The commented
-# ones are the rarer knobs.
-#
-# Precedence: flags beat the environment, which beats this file. Every setting
-# has a JINGCLAW_ environment variable: JINGCLAW_MODEL_PROVIDER, and so on.
+// A starter, not a reference. Every setting appears — a setting an operator
+// can only find by reading the source is, in practice, not configurable, and
+// TestExampleDocumentsEverySetting keeps that honest — but a setting only
+// carries a comment when one of these is true:
+//
+//   - the value shown is deliberately not the default
+//   - it has a safety or exposure consequence
+//   - it constrains, or is constrained by, another setting
+//   - its syntax cannot be guessed from its name
+//   - the line exists to show a workflow rather than to be edited
+//
+// Everything else that was here is in docs/configuration.md. The test for a
+// comment is not "is this worth knowing" — nearly all of it is — but "would
+// deleting it make somebody editing this line more likely to get it wrong".
+//
+// Everything is commented out, so copying this file changes nothing until a
+// line is deliberately uncommented. `agentd` reports every unusable setting
+// at startup by name, value and fix, which is where a wrong value gets
+// explained rather than here.
+const Example = `# JingClaw configuration. Every setting is shown at its default.
+# Reference: docs/configuration.md
+
+# ── Agent and provider ─────────────────────────────────────────
 
 [agent]
-name = "JingClaw"
+# Who this agent is and how it works are AGENTS.md and PERSONA.md, beside
+# this file and created with it. They are not settings: a second place to say
+# the same thing is one somebody edits while the first is what runs.
 
-# What runs may do without asking. "local" is for somebody at this machine.
-# Channels get their own, which is not settable here.
-permission_profile = "local"
+# Tool calls one turn may make before the run is stopped.
+# max_iterations = 12
 
-# Read from the workspace root and put in front of the model. Missing files
-# are skipped.
-instruction_files = ["AGENTS.md", "JINGCLAW.md"]
+# "local" stops for a person on changes and commands. "gateway" is stricter
+# and is what a channel gets; naming it here applies it to this machine too.
+# permission_profile = "local"
 
-# How many model turns one run may take before it gives up.
-max_iterations = 12
+[provider]
+# "gemini", "ollama" or "openai_compat". Left as it is, an offline stand-in
+# answers instead of a model, so a fresh install starts and does nothing
+# surprising; set this before expecting real work.
+backend = "fake"
 
-# Extra standing text. persona shapes how it writes; instructions are added to
-# every prompt. Neither is a permission: what the agent may do is decided by
-# the policy engine, which reads none of this.
-# persona = ""
-# instructions = ""
+# Each backend names its own model and credential below, so switching between
+# them is this one line and nothing else.
 
-[model]
-# Which model server to talk to.
-#
-#   "gemini"         Google's API. Needs a key.
-#   "ollama"         A daemon on this machine, or Ollama Cloud. See below.
-#   "openai_compat"  vLLM, LM Studio, llama.cpp, OpenRouter, Groq, Together.
-#   "fake"           No network, no credential. What proves a problem is not
-#                    the model.
-provider = "fake"
-
-# Named as the chosen provider names it: "gemma-4-31b-it", "qwen3:8b",
-# whatever /v1/models lists. Empty is allowed only when the provider serves
-# exactly one model; otherwise the daemon names them and stops.
-# model = ""
-
-# Where the credential comes from, environment first. Never logged, never
-# passed to a program the agent runs. A model server on this machine usually
-# needs none, and having none is not an error.
-api_key_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
-api_key_file = "gemini.key"
-
-# How fast the offline provider pretends to think.
-# fake_delay = "150ms"
-
-# Working-out the offline provider emits before its answer, so the path a
-# thinking model takes can be driven without one. Empty means none.
-# fake_reasoning = ""
-
-# What the offline provider does turn by turn instead of echoing, so the paths
-# only a model takes — a tool call, an approval — can be checked without one.
-# Each entry is one turn; omitting tool ends the conversation.
-# [[model.fake_script]]
-# text = "Looking."
-# tool = "read_file"
-# args = '{"path": "README.md"}'
-
-[model.retry]
-# A server's own Retry-After is honoured exactly, never shortened: asking again
-# early earns the same refusal. These bound what this code invents when the
-# server said nothing.
+[provider.retry]
 # max_attempts = 4
 # base_delay = "500ms"
 # max_delay = "30s"
 # jitter = 0.3
-
-# The most time one request may spend waiting across all its attempts. A server
-# asking for longer than this ends the request with a reason instead.
+# Total time across all attempts. Reached first, the attempts stop.
 # budget = "1m30s"
 
-[model.ollama]
-base_url = "http://localhost:11434"
+[provider.gemini]
+# model = ""
+# The environment is read first, then the file, which must be mode 600.
+# Neither value ever reaches a log.
+# api_key_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+# api_key_file = "gemini.key"
 
-# For Ollama Cloud, set base_url to "https://ollama.com" and supply a
-# credential above. A local daemon needs none, including for cloud models it
-# proxies.
-
-# How long a model stays resident after a request. Empty leaves the server's
-# default. "30m", "1h", or "0" to unload at once.
+[provider.ollama]
+# model = ""
+# Only the hosted service needs one; a local daemon has nothing to check it
+# against.
+# api_key_env = []
+# api_key_file = ""
+# base_url = "http://localhost:11434"
+# How long a model stays loaded after a request. Empty uses Ollama's own.
 # keep_alive = ""
-
-# Load the model with this much context. Worth setting: Ollama otherwise sizes
-# it against free memory, and a model trained for 128k is commonly given 4k —
-# which is then what the whole session is planned against.
+# Context the server loads the model with. Zero uses whatever it decides,
+# which is routinely far less than the model was trained for.
 # num_ctx = 0
+# "" leaves the model's own setting alone; "true" or "false" overrides it.
+# think = ""
 
-# Ask for the model's reasoning separately. Empty follows the model, asking
-# only when it reports being able to, because asking one that cannot is an
-# error rather than something ignored. "off", "on", "low", "medium", "high",
-# "max". Reasoning never reaches a chat channel either way.
-think = ""
-
-[model.openai_compat]
-# The address the chat path hangs off, usually ending in /v1. No default.
+[provider.openai_compat]
+# model = ""
+# api_key_env = []
+# api_key_file = ""
+# Required for this backend: there is no default endpoint.
 # base_url = ""
-
-# What this server does differently from the protocol it claims. Named rather
-# than guessed, because a proxy makes the address say nothing.
-# generic, vllm, lmstudio, llamacpp, openrouter, groq, together.
-profile = "generic"
-
-# What to call this endpoint in logs. Empty uses the profile name.
+# "generic", or a name where a server needs its own handling.
+# profile = "generic"
 # name = ""
 
 [context]
-# The model's window, in tokens. Zero asks the provider, which is right
-# whenever it knows; set it for a server that does not say.
-window = 0
-
-# When to fold older turns into a summary, and how much to keep as it was.
+# Tokens to plan against. Zero asks the provider, which is usually right.
+# window = 0
+# Fraction of the window at which the conversation is folded into a summary.
 # compact_at = 0.7
 # keep_fraction = 0.3
 # summary_tokens = 1024
-
-# How many events before a summary are kept anyway.
-#
-# Once turns are folded, the conversation sent to the model reads the summary
-# and not the turns behind it, so they are discarded — that is what stops the
-# log growing forever. This margin keeps the tail of what was folded readable
-# for somebody asking what actually happened.
-#
-# A negative number keeps everything, for a deployment that wants a complete
-# audit log and will manage the size itself.
+# Events kept behind a fold. Below zero keeps everything and grows forever.
 # keep_after_fold = 200
 
+# ── Workspace and durable state ─────────────────────────────
+
+[workspace]
+# What the agent may read and write. Nothing outside it is reachable.
+# root = "."
+
+[artifacts]
+# Empty puts them beside the database.
+# dir = ""
+# max_bytes = 67108864
+# max_image_bytes = 8388608
+
 [memory]
-# What the agent carries between sessions.
-#
-# On. What is gated is authority, not writing: a retrieval memory is written
-# without asking, because it changes nothing until something looks it up, and
-# an approval that fires on every note is one people learn to click through. A
-# standing memory goes in front of the model on every future turn, and that
-# one stops for a person in every profile.
-#
-# What arrived from outside this machine stays marked as such, is labelled
-# when it is recalled, and never becomes a standing instruction however it was
-# approved.
-#
-# "agent memory list" is how you see everything it believes and where each
-# belief came from; "agent memory forget" removes one.
+# What the agent carries between sessions. A retrieval memory is written
+# unattended; a standing one goes in front of the model every turn and stops
+# for a person in every profile. What arrived from outside this machine is
+# marked, and never becomes a standing instruction.
 enabled = true
-
-# The ceiling on standing directions injected every turn.
 # max_instruction_bytes = 2000
-
-# Try other words when a lookup matches nothing.
-#
-# Memory is searched by word, and the way that fails is quiet: "do not build a
-# second component that already exists" and "should I add a new modal?" are the
-# same subject with no word in common, so the search returns nothing and says
-# nothing about what it did not look for. When a search comes back empty, the
-# model is asked for other words the same note might have been written in and
-# the search is run once more. Results found that way are labelled, because
-# they answer a question near the one that was asked rather than that one.
-#
-# The cost is one small model call, only ever on a search that already failed.
-# Turn it off to keep memory lookups from reaching the provider at all.
+# Ask the model for other words when a lookup matches nothing. Costs one
+# small call, only on a search that already failed.
 # expand_queries = true
 
-# Nothing expires by being unused. A memory nobody has recalled for months is
-# not evidence of anything: the production namespace of a service nobody has
-# deployed since spring is correct, important and cold. What ends a memory is
-# a correction, an end date it was given, or somebody removing it.
-
-[web]
-# Whether the agent may read web pages. Reading only: no clicking, typing,
-# signing in or submitting.
-#
-# Local sessions fetch unattended. Channels stop for the operator, because
-# there the address is chosen by somebody else.
-enabled = false
-
-# "browser" drives a real browser, which reaches the growing number of sites
-# that answer anything else with a challenge page. Needs Python and the
-# cloakbrowser package. "none" disables fetching.
-backend = "browser"
-
-# python = ""
-# timeout = "45s"
-# max_characters = 40000
-# max_links = 50
-
-[web.search]
-# Finding an address rather than reading one somebody named. Its own switch,
-# because it is a different thing to be trusted with: reading fetches what
-# somebody chose, and searching lets the agent choose.
-#
-# "brave" or "none". One backend is implemented rather than four written from
-# four sets of documentation; the next is added when somebody has a key to try
-# it with.
-# backend = "none"
-
-# Where the subscription token comes from. The file must be mode 600, and the
-# value never reaches a log.
-# key_env = ["BRAVE_SEARCH_TOKEN"]
-# key_file = "brave-search.token"
-
-# The API root, for a deployment behind a proxy. Empty uses the service's own.
-# endpoint = ""
-
-# How many results one search returns by default.
-# max_results = 8
+# ── Capabilities ────────────────────────────────────────────
 
 [tools]
-# Bounds on what one tool call may read, write or return. A tool that can fill
-# the context window in one call can end a session in one call.
 # read_limit = 65536
 # max_readable_file = 8388608
 # max_overwrite_bytes = 131072
@@ -1697,188 +1671,119 @@ backend = "browser"
 # glob_results = 200
 # grep_results = 100
 # command_timeout = "2m"
+# What a call may ask for, above which it is refused rather than granted.
 # max_command_timeout = "10m"
+# Output past this is stored as an artifact and named in the result.
 # max_command_output = 32768
 
-[artifacts]
-# Where output too large to show is kept, content-addressed. Empty uses the
-# data directory.
-# dir = ""
-# max_bytes = 67108864
-# max_image_bytes = 8388608
+[process]
+# Output kept per long-running program, oldest discarded first.
+# buffer_bytes = 262144
+
+[web]
+# Off by default: reading pages gives an agent somebody else's words.
+enabled = false
+# "browser" drives a real browser and needs python3 with cloakbrowser.
+# backend = "browser"
+# python = ""
+# timeout = "45s"
+# max_characters = 40000
+# max_links = 50
+
+[web.search]
+# "brave", or "none" to leave the section configured and switched off.
+# backend = "none"
+# key_env = ["BRAVE_SEARCH_TOKEN"]
+# key_file = "brave-search.token"
+# endpoint = ""
+# max_results = 8
 
 [mcp]
-# Tool servers speaking the Model Context Protocol, run as child processes.
-#
-# What a server says about itself decides what the model is told a tool does.
-# It does not decide what the tool may do: that is the level below, and it
-# lives here rather than in the server.
 # start_timeout = "30s"
 # call_timeout = "2m"
 # max_output = 32768
 
+# A server is a child process (command) or an endpoint (url), never both.
 # [[mcp.servers]]
-# Prefixes this server's tools, so installing one cannot shadow a built-in.
-# name = "fs"
+# name = "files"
+# command = "mcp-server-filesystem"
+# args = ["--root", "."]
+# url = ""
+# headers = { authorization = "Bearer ..." }
+# env = { LOG_LEVEL = "info" }
+# Names variables passed through from this daemon's own environment.
+# pass_env = ["HOME"]
 
-# Either a command run as a child of this daemon, or a Streamable HTTP url
-# reaching one already running. Never both.
-#
-# A url server is not started, stopped or killed by this daemon, and every
-# tool call is a network hop to that address.
-# command = "npx"
-# args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
-# url = "http://localhost:9000/mcp"
-# headers = { Authorization = "Bearer ..." }
-
-# The child gets nothing from this daemon's environment except what is named
-# here. The daemon holds the provider credentials.
-# env = { EXAMPLE = "value" }
-# pass_env = ["PATH", "HOME"]
-
-# What its tools are gated at: internal, workspace_read, network_read,
-# workspace_write, remember, execute, high_impact. Anything a server can do to
-# a machine deserves execute unless somebody has read it.
-# level = "execute"
-
-[process]
-# How much output is kept per long-running process, oldest first to go. A dev
-# server left running overnight would otherwise be a program whose log is the
-# whole of memory.
-# buffer_bytes = 262144
-
-[delivery]
-# How often a streaming answer is flushed onward. Every delta becoming a
-# message is a rate limit rather than a feature.
-# text_flush_bytes = 240
-# text_flush_interval = "200ms"
-# usage_flush_interval = "2s"
-
-[workspace]
-# What the agent may touch. Every path is resolved inside it, symlinks
-# included, and anything outside is refused.
-#
-# Left unset it is the workspace folder inside .JingClaw, or the working
-# directory when there is no .JingClaw. Point it at your project to work on
-# that instead.
-# root = ""
+# ── Interfaces ──────────────────────────────────────────────
 
 [server]
-# Loopback only. This API can run programs, so an address reachable from
-# elsewhere is refused however it is written. Port 0 takes a free one and
-# publishes it in the discovery file.
-addr = "127.0.0.1:0"
-
-log_level = "info"
-
-# The embedded console, served from this same address.
-web_console = true
-
-# How long a printed pairing code stays valid.
+# 127.0.0.1 only. A LAN address exposes the daemon to the network.
+# addr = "127.0.0.1:0"
+# log_level = "info"
+# web_console = true
 # pairing_ttl = "10m"
-
-# How long a paired browser stays paired without being used. Counted from last
-# use, so a console somebody works in all day does not stop in the afternoon.
-# Zero means as long as the daemon runs.
+# Counted from last use. Zero is as long as the daemon runs.
 # console_ttl = "168h"
-
 # Empty uses the platform's own locations.
 # data_dir = ""
 # runtime_dir = ""
 
 [gateway]
-# Read by gatewayd. One of "discord" or "telegram"; the section below matching
-# the one chosen is the one that is read.
+# Read by gatewayd. The section below matching this is the one that is read.
 platform = "discord"
-
-# The least time between "what it is doing now" lines, and between versions of
-# an answer still being written. Here rather than under a platform: what these
-# pace is the projector, which does not know which platform will carry them.
 # working_interval = "2s"
 # stream_interval = "1.5s"
 
-# Everything else about a platform lives in that platform's own section,
-# including which rooms it serves. A channel id, a guild id, a user id and a
-# role id all belong to one service, and a single shared list would let a file
-# written for Discord be read by a Telegram daemon.
-
 [gateway.discord]
-# Where the bot token comes from. The file must be mode 600, and the value
-# never reaches a log.
+# The file must be mode 600. Neither value reaches a log.
 token_env = ["DISCORD_BOT_TOKEN"]
 token_file = "discord.token"
-
-# Names this bot within JingClaw, so bindings and the delivery queue belong to
-# it. A second bot means a second account_id.
+# A second bot needs a second account_id.
 account_id = "main"
-
-# How many messages one answer may become before it goes as a file instead.
+# Past this many, an answer is sent as a file instead.
 # max_messages = 3
-
-# The upload ceiling, well under what Discord accepts.
 # max_attachment_bytes = 4194304
 
-# The channels this agent answers in, applied when the daemon starts.
-# Declaring one that exists updates it.
-#
-# Removing one does not unbind it: a daemon started once against an incomplete
-# file would take away the thing that decides who can reach the agent. The
-# startup log names every bound channel this file does not.
-#
-# Which list a channel is in decides its powers. Neither can run programs.
-# Channel permissions settle who is in the room, which is what makes the rest
-# reasonable; they cannot settle whether an account still belongs to its owner,
-# and a stolen one holds the request and the approval both.
-
-# Rooms other people can type in. Reading is unattended; changes, memory and
-# web pages stop and ask.
+# Rooms other people can type in. Applied at startup; removing one does not
+# unbind it, and the startup log names any binding this file does not.
 # [[gateway.discord.channels]]
-# Several channels may share an entry when they share their rules.
 # channel_ids = ["111111111111111111"]
 # tenant_id = "222222222222222222"
 # workspace_id = "default"
-# Both empty permits nobody, which is the right default for a room.
+# Who may ask. Both empty is nobody, which is the right default for a room.
 # users = ["333333333333333333"]
 # roles = []
-# Who may answer an approval here, by pressing a button on the message.
-# A separate list because asking for something and permitting it are
-# different powers. Both empty means nobody, and the message then says to go
-# and decide it elsewhere. Typing is never enough in a shared room however
-# these are set: a message says which account posted it, and a button press
-# is delivered with the presser's own identity attached.
+# Who may approve, by pressing a button on the message. A separate list:
+# asking for something and permitting it are different powers. Both empty is
+# nobody, and the message then says to decide it elsewhere.
 # approvers = ["333333333333333333"]
 # approver_roles = []
 
-# Private channels you control. As above, and additionally: pages are fetched
-# unattended, and an approval can be answered by replying "approve <id>" or
-# "deny <id>". The channel is told what it is the first time it is used.
+# Private rooms you control. As above, and additionally: pages are fetched
+# unattended, and an approval is answered by replying "approve <id>".
 # [[gateway.discord.consoles]]
 # channel_ids = ["111111111111111112"]
 # tenant_id = "222222222222222222"
 # workspace_id = "default"
 # users = ["333333333333333333"]
 # roles = []
+# approvers = []
+# approver_roles = []
 
 [gateway.telegram]
-# Where the bot token comes from. The file must be mode 600, and the value
-# never reaches a log.
 token_env = ["TELEGRAM_BOT_TOKEN"]
 token_file = "telegram.token"
-
-# The upload ceiling, well under what Telegram accepts.
+# account_id = "main"
 # max_upload_bytes = 4194304
-
-# The API root. Empty is Telegram itself; set it to reach a local proxy.
+# Empty is Telegram itself; set it to reach a local proxy.
 # api_base = ""
 
-# The same three settings Discord has, because they name Telegram's own ids.
-# account_id = "main"
-# [[gateway.telegram.channels]]
-# channel_ids = ["-1001111111111"]
-# workspace_id = "default"
-# users = ["333333333"]
-# [[gateway.telegram.consoles]]
-# channel_ids = ["-1001111111112"]
-# workspace_id = "default"
-# users = ["333333333"]
+# [[gateway.telegram.channels]] and [[gateway.telegram.consoles]] take the
+# same fields as Discord's above, naming Telegram's own ids.
+
+[delivery]
+# How text is batched on its way to a channel.
+# text_flush_bytes = 240
+# text_flush_interval = "200ms"
+# usage_flush_interval = "2s"
 `

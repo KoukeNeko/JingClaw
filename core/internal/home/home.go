@@ -19,11 +19,11 @@ import (
 	"strings"
 )
 
-// DirName is what the directory is called.
+// DirName is what the directory is called, under the user's home.
 //
-// Dotted and capitalised the way the project is: it sits beside .git and is
-// meant to be as easy to ignore and as obvious when listed.
-const DirName = ".JingClaw"
+// Lower case because it is a private state tree rather than a document: it is
+// typed at a shell far more often than it is read in a file listing.
+const DirName = ".jingclaw"
 
 // Names of what lives inside it.
 const (
@@ -39,42 +39,27 @@ type Dir struct {
 	Root string
 }
 
-// Find looks for a .JingClaw directory at start and in each directory above
-// it.
+// Default is the one place a deployment lives, unless the environment names
+// another.
 //
-// Walking up rather than checking only the current directory, because a daemon
-// started from a subdirectory of a project should be the same daemon as one
-// started from its top. Not doing so means two of them, with separate
-// databases, differing by which directory somebody happened to be in.
-func Find(start string) (Dir, bool) {
-	current, err := filepath.Abs(start)
+// Under the user's home and the same on every platform. The platform-native
+// location is not used: this is a daemon's private state, not a document
+// somebody opens in Finder, and an operator has to be able to predict where it
+// is without knowing which of three conventions applied.
+func Default() (Dir, error) {
+	userHome, err := os.UserHomeDir()
 	if err != nil {
-		return Dir{}, false
+		return Dir{}, fmt.Errorf("home: locate user home: %w", err)
 	}
-
-	for {
-		candidate := filepath.Join(current, DirName)
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return Dir{Root: candidate}, true
-		}
-
-		parent := filepath.Dir(current)
-		if parent == current {
-			// The filesystem root, reached without finding one.
-			return Dir{}, false
-		}
-		current = parent
-	}
+	return Dir{Root: filepath.Join(userHome, DirName)}, nil
 }
 
-// Create makes a .JingClaw directory in at, with the places things go.
+// Create makes the directory at root, with the places things go.
 //
 // Refuses an existing one rather than merging into it: "create" that quietly
 // adopts whatever was already there is how somebody ends up pointing a fresh
 // deployment at another one's database.
-func Create(at string) (Dir, error) {
-	root := filepath.Join(at, DirName)
-
+func Create(root string) (Dir, error) {
 	if _, err := os.Stat(root); err == nil {
 		return Dir{}, fmt.Errorf("home: %s already exists", root)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -121,11 +106,16 @@ func (d Dir) SecretFile(name string) string { return filepath.Join(d.Root, name)
 // asserts the behaviour of a machine that has never had one.
 const EnvVar = "JINGCLAW_HOME"
 
-// FromWorkingDirectory finds the directory for the process's own location.
+// Resolve settles which deployment this process belongs to.
 //
-// The environment wins over the search, so a process can be pointed at a
-// deployment rather than having to be started inside it.
-func FromWorkingDirectory() (Dir, bool) {
+// The environment names one, or it is the default. The working directory does
+// not take part, and that is the point: a daemon whose database depended on
+// where somebody happened to type its name is one that quietly becomes two,
+// and then the settings you edited are not the settings that ran.
+//
+// The directory need not exist. Whether to create one is the caller's
+// decision, and asking where a deployment lives must not make it.
+func Resolve() (Dir, bool) {
 	switch named := strings.TrimSpace(os.Getenv(EnvVar)); named {
 	case "":
 	case "none":
@@ -138,9 +128,9 @@ func FromWorkingDirectory() (Dir, bool) {
 		return Dir{Root: absolute}, true
 	}
 
-	cwd, err := os.Getwd()
+	dir, err := Default()
 	if err != nil {
 		return Dir{}, false
 	}
-	return Find(cwd)
+	return dir, true
 }

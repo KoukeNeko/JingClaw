@@ -30,17 +30,17 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "I need to know something first."
 tool = "ask_user"
 args = '{"prompt":"Which migration strategy?","kind":"choice","options":[{"id":"a","label":"keep the schema compatible"},{"id":"b","label":"upgrade in place"}]}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Right, doing that."
 
 [workspace]

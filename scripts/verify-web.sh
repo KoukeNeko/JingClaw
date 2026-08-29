@@ -75,9 +75,9 @@ done
 PORT=$(cat "$WORK/victim.port")
 
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
 
 [web]

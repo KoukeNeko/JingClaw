@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,39 +11,49 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
+// isolated is the throwaway deployment these tests resolve to.
+var isolated string
+
 // TestMain keeps this package's tests away from any real deployment.
 //
-// These tests resolve the default configuration path and write to it. Once a
-// .JingClaw directory decides that path, "the default location" became
-// whatever exists above the checkout — and one of these tests overwrote a
-// running deployment's configuration with its own fixture, and passed, because
-// writing the fixture is what it was for.
+// These tests resolve the default configuration path and write to it, and the
+// default is now always inside a deployment directory. Pointed at the real
+// one, writing the fixture — which is what these tests are for — overwrites a
+// running deployment's settings, and passes.
 //
 // Set here rather than in each test. Remembering to isolate is exactly what
-// the test that did the damage had not done, and a rule that has to be
-// remembered per test is one that will be missed by the next one added.
+// the test that once did that damage had not done, and a rule that has to be
+// remembered per test is one the next test added will miss.
 func TestMain(m *testing.M) {
-	if err := os.Setenv(home.EnvVar, "none"); err != nil {
+	dir, err := os.MkdirTemp("", "jingclaw-config-test")
+	if err != nil {
 		panic(err)
 	}
-	os.Exit(m.Run())
+	isolated = filepath.Join(dir, home.DirName)
+
+	if err := os.Setenv(home.EnvVar, isolated); err != nil {
+		panic(err)
+	}
+
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // The guard, asserted rather than assumed.
 //
 // The damage it prevents was done by a test that passed: writing its fixture
 // to the default path was the point, and the path had quietly become a real
-// deployment's. So this checks that the default path cannot be one, which is
-// the property that was violated, rather than checking that somebody set an
-// environment variable.
+// deployment's. So this checks where the default actually leads, rather than
+// checking that somebody set an environment variable.
 func TestTheseTestsCannotReachARealDeployment(t *testing.T) {
 	path, err := config.DefaultPath()
 	if err != nil {
 		t.Fatalf("default path: %v", err)
 	}
 
-	if strings.Contains(path, home.DirName) {
-		t.Fatalf("the default path is %s, inside a %s directory: a test writing "+
-			"there would overwrite somebody's running deployment", path, home.DirName)
+	if !strings.HasPrefix(path, isolated) {
+		t.Fatalf("the default path is %s, outside the throwaway deployment at %s: "+
+			"a test writing there could overwrite somebody's running one", path, isolated)
 	}
 }

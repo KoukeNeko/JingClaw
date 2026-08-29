@@ -31,10 +31,15 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
+
+# Configured but not selected. Each backend keeps its own model, so the
+# switch below is one line and this is still here when it happens.
+[provider.gemini]
+model = "gemma-4-31b-it"
 
 [memory]
 enabled = true
@@ -99,11 +104,25 @@ printf 'ok   the store survives a restart\n'
 # 5. The headline claim, against a real model: something learned in one
 #    session is there in the next. Only a model calls tools, so this half
 #    cannot be checked without one.
+# Finds the operator's own credential and puts it in the environment.
+#
+# The environment rather than a file, because a daemon looks for a credential
+# file inside its own deployment and this check runs in a throwaway one. Where
+# the operator keeps theirs is not where this daemon will look.
 have_credential() {
 	[ -n "${GEMINI_API_KEY:-}" ] && return 0
 	[ -n "${GOOGLE_API_KEY:-}" ] && return 0
-	[ -f "$HOME/.config/JingClaw/gemini.key" ] && return 0
-	[ -f "$HOME/Library/Application Support/JingClaw/gemini.key" ] && return 0
+
+	for CANDIDATE in \
+		"$HOME/.jingclaw/gemini.key" \
+		"$HOME/.config/JingClaw/gemini.key" \
+		"$HOME/Library/Application Support/JingClaw/gemini.key"; do
+		if [ -f "$CANDIDATE" ]; then
+			GEMINI_API_KEY=$(tr -d '\r\n' < "$CANDIDATE")
+			export GEMINI_API_KEY
+			return 0
+		fi
+	done
 	return 1
 }
 
@@ -116,8 +135,8 @@ fi
 kill "$DAEMON"; wait "$DAEMON" 2>/dev/null || true
 DAEMON=""
 
-sed -e 's|^provider = "fake"|provider = "gemini"|' \
-	-e 's|^model = "fake-echo"|model = "gemma-4-31b-it"|' \
+# One line: the model gemini answers with is already configured above.
+sed -e 's|^backend = "fake"|backend = "gemini"|' \
 	"$WORK/config.toml" > "$WORK/real.toml"
 mv "$WORK/real.toml" "$WORK/config.toml"
 start

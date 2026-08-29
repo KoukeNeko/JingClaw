@@ -35,12 +35,12 @@ mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 # again, then answer. Written here rather than driven turn by turn because a
 # scripted provider is only interesting if the whole exchange is one run.
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Starting it."
 tool = "start_process"
 args = '{"program":"sh","args":["-c","echo listening on 3000; (while true; do touch still-running; sleep 0.1; done) & wait"]}'
@@ -49,7 +49,7 @@ args = '{"program":"sh","args":["-c","echo listening on 3000; (while true; do to
 # scripted turn is fixed before the daemon starts. Reading is checked in
 # internal/tool/builtin instead, where the id can be threaded; what only this
 # check can show is that the program is still there once the run has ended.
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "It is up."
 
 [workspace]

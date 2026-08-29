@@ -31,22 +31,22 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Writing that down."
 tool = "remember"
 args = '{"text":"the deploy freeze is on","valid_until":"2099-01-01"}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "And this one."
 tool = "remember"
 args = '{"text":"the release branch is cut on Fridays"}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Noted."
 
 [memory]

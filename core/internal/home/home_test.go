@@ -8,40 +8,64 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
-// A daemon started from a subdirectory must be the same daemon as one started
-// from the top. Otherwise there are two, with separate databases, differing by
-// which directory somebody happened to be in.
-func TestItIsFoundFromAnywhereBelowIt(t *testing.T) {
-	root := t.TempDir()
-	dir, err := home.Create(root)
-	if err != nil {
-		t.Fatalf("create: %v", err)
+// Where a deployment lives must not depend on where somebody typed the
+// daemon's name. This is the whole point of the resolver, and the failure it
+// prevents had happened three times in one day: settings edited in one place,
+// a daemon reading another, and no sign that the two were different.
+func TestTheWorkingDirectoryDoesNotDecide(t *testing.T) {
+	t.Setenv(home.EnvVar, "")
+
+	first, ok := home.Resolve()
+	if !ok {
+		t.Fatal("nothing resolved")
 	}
 
-	deep := filepath.Join(root, "core", "internal", "gateway")
+	deep := filepath.Join(t.TempDir(), "some", "project")
 	if err := os.MkdirAll(deep, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A directory that looks exactly like a deployment, in the place the old
+	// resolver would have walked up to and adopted.
+	if _, err := home.Create(filepath.Join(deep, home.DirName)); err != nil {
+		t.Fatal(err)
+	}
 
-	for _, from := range []string{root, filepath.Join(root, "core"), deep} {
-		found, ok := home.Find(from)
-		if !ok {
-			t.Errorf("not found from %s", from)
-			continue
-		}
-		if found.Root != dir.Root {
-			t.Errorf("from %s found %s, want %s", from, found.Root, dir.Root)
-		}
+	restore, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(restore) })
+	if err := os.Chdir(deep); err != nil {
+		t.Fatal(err)
+	}
+
+	second, ok := home.Resolve()
+	if !ok {
+		t.Fatal("nothing resolved from the other directory")
+	}
+	if second.Root != first.Root {
+		t.Errorf("standing in %s changed the deployment to %s, want %s",
+			deep, second.Root, first.Root)
 	}
 }
 
-// Nothing above it either: a directory with none must fall through to the
-// platform locations rather than adopting somebody else's.
-func TestNothingIsFoundWhenThereIsNone(t *testing.T) {
-	// t.TempDir is under the system temp directory, which has no .JingClaw
-	// above it unless somebody put one there.
-	if found, ok := home.Find(t.TempDir()); ok {
-		t.Errorf("found %s where there should be none", found.Root)
+// The default is under the user's home and the same on every platform: an
+// operator has to be able to say where it is without knowing which of three
+// conventions applied.
+func TestTheDefaultIsUnderTheUsersHome(t *testing.T) {
+	dir, err := home.Default()
+	if err != nil {
+		t.Fatalf("default: %v", err)
+	}
+
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("user home: %v", err)
+	}
+
+	want := filepath.Join(userHome, home.DirName)
+	if dir.Root != want {
+		t.Errorf("default is %s, want %s", dir.Root, want)
 	}
 }
 
@@ -50,7 +74,7 @@ func TestNothingIsFoundWhenThereIsNone(t *testing.T) {
 // up in.
 func TestEverythingIsInsideIt(t *testing.T) {
 	root := t.TempDir()
-	dir, err := home.Create(root)
+	dir, err := home.Create(filepath.Join(root, home.DirName))
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -84,7 +108,7 @@ func TestEverythingIsInsideIt(t *testing.T) {
 
 // Owner-only, because it holds every conversation and the credentials.
 func TestItIsNotReadableByAnybodyElse(t *testing.T) {
-	dir, err := home.Create(t.TempDir())
+	dir, err := home.Create(filepath.Join(t.TempDir(), home.DirName))
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -103,10 +127,10 @@ func TestItIsNotReadableByAnybodyElse(t *testing.T) {
 // database.
 func TestCreatingTwiceIsRefused(t *testing.T) {
 	root := t.TempDir()
-	if _, err := home.Create(root); err != nil {
+	if _, err := home.Create(filepath.Join(root, home.DirName)); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	if _, err := home.Create(root); err == nil {
+	if _, err := home.Create(filepath.Join(root, home.DirName)); err == nil {
 		t.Fatal("creating over an existing directory was allowed")
 	}
 }
@@ -116,15 +140,16 @@ func TestCreatingTwiceIsRefused(t *testing.T) {
 func TestTheEnvironmentCanNameIt(t *testing.T) {
 	elsewhere := filepath.Join(t.TempDir(), "somewhere", home.DirName)
 	t.Setenv(home.EnvVar, elsewhere)
-	// From a directory that has its own, to prove the environment wins rather
-	// than merely filling a gap.
+	// From a directory that has one of its own, to prove the environment wins
+	// rather than merely filling a gap — and that the directory somebody is
+	// standing in is not consulted at all.
 	inside := t.TempDir()
-	if _, err := home.Create(inside); err != nil {
+	if _, err := home.Create(filepath.Join(inside, home.DirName)); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	t.Chdir(inside)
 
-	found, ok := home.FromWorkingDirectory()
+	found, ok := home.Resolve()
 	if !ok {
 		t.Fatal("a named directory was not used")
 	}
@@ -138,13 +163,13 @@ func TestTheEnvironmentCanNameIt(t *testing.T) {
 // happens to exist above the package it lives in.
 func TestTheEnvironmentCanSayThereIsNone(t *testing.T) {
 	inside := t.TempDir()
-	if _, err := home.Create(inside); err != nil {
+	if _, err := home.Create(filepath.Join(inside, home.DirName)); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	t.Chdir(inside)
 
 	t.Setenv(home.EnvVar, "none")
-	if found, ok := home.FromWorkingDirectory(); ok {
+	if found, ok := home.Resolve(); ok {
 		t.Errorf("found %s despite being told there is none", found.Root)
 	}
 }

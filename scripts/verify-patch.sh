@@ -34,29 +34,29 @@ printf 'x := oldName()\n' > "$WORK/ws/caller.go"
 printf 'func oldName() int { return 1 }\n' > "$WORK/ws/defn.go"
 
 cat > "$WORK/config.toml" <<EOF
-[model]
-provider = "fake"
-model = "fake-echo"
+[provider]
+backend = "fake"
+fake_model = "fake-echo"
 fake_delay = "0s"
 
 # Read both first: a patch refuses a file this session has not looked at, and
 # that rule is worth keeping rather than working around here.
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Looking at the caller."
 tool = "read_file"
 args = '{"path":"caller.go"}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "And the definition."
 tool = "read_file"
 args = '{"path":"defn.go"}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Renaming it everywhere."
 tool = "apply_patch"
 args = '{"operations":[{"op":"update","path":"caller.go","edits":[{"old_text":"oldName()","new_text":"newName()"}]},{"op":"update","path":"defn.go","edits":[{"old_text":"func oldName()","new_text":"func newName()"}]},{"op":"create","path":"notes/why.md","content":"renamed for clarity\\n"}]}'
 
-[[model.fake_script]]
+[[provider.fake_script]]
 text = "Renamed."
 
 [workspace]

@@ -35,10 +35,20 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 have_credential() {
 	[ -n "${GEMINI_API_KEY:-}" ] && return 0
 	[ -n "${GOOGLE_API_KEY:-}" ] && return 0
-	# The same two places the daemon looks. Existence only; nothing here reads
-	# the file, and nothing prints it.
-	[ -f "$HOME/.config/JingClaw/gemini.key" ] && return 0
-	[ -f "$HOME/Library/Application Support/JingClaw/gemini.key" ] && return 0
+
+	# Into the environment, because a daemon looks for a credential file inside
+	# its own deployment and this runs in a throwaway one. The value is never
+	# printed.
+	for CANDIDATE in \
+		"$HOME/.jingclaw/gemini.key" \
+		"$HOME/.config/JingClaw/gemini.key" \
+		"$HOME/Library/Application Support/JingClaw/gemini.key"; do
+		if [ -f "$CANDIDATE" ]; then
+			GEMINI_API_KEY=$(tr -d '\r\n' < "$CANDIDATE")
+			export GEMINI_API_KEY
+			return 0
+		fi
+	done
 	return 1
 }
 
@@ -62,8 +72,10 @@ cat > "$WORK/config.toml" <<EOF
 max_iterations = 10
 permission_profile = "local"
 
-[model]
-provider = "gemini"
+[provider]
+backend = "gemini"
+
+[provider.gemini]
 model = "gemma-4-31b-it"
 
 [tools]
@@ -177,3 +189,4 @@ printf 'ok   the middle the excerpt cut is in the artifact\n'
 printf 'ok   a window of it can be asked for\n'
 
 printf '\nall checks passed\n'
+

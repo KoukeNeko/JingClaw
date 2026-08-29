@@ -9,14 +9,14 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
-// With a .JingClaw directory, everything a deployment owns is inside it.
+// Everything a deployment owns is inside its own directory.
 func TestTheDirectoryDecidesEveryPath(t *testing.T) {
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), home.DirName)
 	dir, err := home.Create(root)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	t.Chdir(root)
+	t.Setenv(home.EnvVar, root)
 
 	database, err := databasePath("")
 	if err != nil {
@@ -39,32 +39,58 @@ func TestTheDirectoryDecidesEveryPath(t *testing.T) {
 	}
 }
 
-// Without one, nothing changes: the platform locations are used exactly as
-// they were, so a deployment that already works keeps working.
-func TestWithoutOneThePlatformLocationsAreUsed(t *testing.T) {
-	// Somewhere with no .JingClaw above it.
-	t.Chdir(t.TempDir())
+// The working directory decides nothing. Standing inside something that looks
+// exactly like a deployment must not make it the one that answers: that is how
+// the settings somebody edits stop being the settings that run.
+func TestTheWorkingDirectoryDecidesNothing(t *testing.T) {
+	named := filepath.Join(t.TempDir(), home.DirName)
+	if _, err := home.Create(named); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Setenv(home.EnvVar, named)
+
+	decoy := t.TempDir()
+	if _, err := home.Create(filepath.Join(decoy, home.DirName)); err != nil {
+		t.Fatalf("create decoy: %v", err)
+	}
+	t.Chdir(decoy)
 
 	database, err := databasePath("")
 	if err != nil {
 		t.Fatalf("database: %v", err)
 	}
-	if filepath.Base(filepath.Dir(database)) == home.DirName {
-		t.Errorf("a directory was invented at %s", database)
+	if want := filepath.Join(named, "data", "jingclaw.db"); database != want {
+		t.Errorf("standing in %s put the database at %s, want %s", decoy, database, want)
 	}
+}
 
-	if got := config.Defaults().Workspace.Root; got != "." {
-		t.Errorf("the workspace is %q, want the working directory", got)
+// The workspace is never the working directory. "Whatever you happened to be
+// standing in" is not a setting, and as a default it hands a fresh install the
+// contents of the first project somebody starts it from.
+func TestTheWorkspaceIsNeverTheWorkingDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), home.DirName)
+	if _, err := home.Create(root); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Setenv(home.EnvVar, root)
+	t.Chdir(t.TempDir())
+
+	got := config.Defaults().Workspace.Root
+	if got == "." {
+		t.Fatal("the workspace defaulted to the working directory")
+	}
+	if want := filepath.Join(root, "workspace"); got != want {
+		t.Errorf("the workspace is %q, want %q", got, want)
 	}
 }
 
 // An explicit setting still wins. The directory is a default, not a rule.
 func TestAnExplicitPathStillWins(t *testing.T) {
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), home.DirName)
 	if _, err := home.Create(root); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	t.Chdir(root)
+	t.Setenv(home.EnvVar, root)
 
 	elsewhere := filepath.Join(t.TempDir(), "somewhere-else")
 	if err := os.MkdirAll(elsewhere, 0o700); err != nil {

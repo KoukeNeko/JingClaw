@@ -127,11 +127,11 @@ $(cat "$WORK/$NAME.err")"
 }
 
 cat > "$WORK/ollama.toml" <<EOF
-[model]
-provider = "ollama"
-model = "qwen3:8b"
+[provider]
+backend = "ollama"
 
-[model.ollama]
+[provider.ollama]
+model = "qwen3:8b"
 base_url = "http://127.0.0.1:$PORT"
 keep_alive = "30m"
 
@@ -145,11 +145,10 @@ web_console = false
 EOF
 
 cat > "$WORK/compat.toml" <<EOF
-[model]
-provider = "openai_compat"
-model = "local-model"
+[provider]
+backend = "openai_compat"
 
-[model.openai_compat]
+[provider.openai_compat]
 base_url = "http://127.0.0.1:$PORT/v1"
 profile = "vllm"
 name = "stand-in"
@@ -199,3 +198,4 @@ $(cat "$WORK/typo.out")"
 printf 'ok   a misspelled profile is refused, and says which setting\n'
 
 printf '\nall checks passed\n'
+
