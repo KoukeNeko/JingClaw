@@ -42,7 +42,6 @@ const (
 // Store is what these tools need from storage.
 type Store interface {
 	Remember(ctx context.Context, memory domain.Memory, supersedes domain.MemoryID) error
-	TouchMemories(ctx context.Context, ids []domain.MemoryID, at time.Time) error
 	Memories(ctx context.Context, query storage.MemoryQuery) ([]domain.Memory, error)
 	SearchMemories(ctx context.Context, text string, query storage.MemoryQuery) ([]domain.Memory, error)
 	Memory(ctx context.Context, id domain.MemoryID) (domain.Memory, error)
@@ -259,7 +258,6 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 		// attached is a fact about now.
 		ValidFrom:  now,
 		ValidUntil: validUntil,
-		ExpiresAt:  t.expiryFor(activation, now),
 	}
 
 	if err := t.Store.Remember(ctx, written, supersedes); err != nil {
@@ -277,25 +275,6 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 	}
 
 	return tool.Result{Content: content, Summary: summary}, nil
-}
-
-// expiryFor is when a memory stops being offered unless something uses it.
-//
-// Retrieval memories only. A standing direction was approved by a person and
-// is put in front of the model every turn — expiring one silently would
-// remove an instruction somebody deliberately gave, which is worse than the
-// bloat it would save. They are also few, and bounded by their own byte
-// limit.
-//
-// Retrieval memories are neither: nobody approved them individually, there is
-// no ceiling on how many accumulate, and the cost of the ones nobody wants is
-// a corpus that answers worse as it grows.
-func (t *Remember) expiryFor(activation domain.MemoryActivation, now time.Time) *time.Time {
-	if t.RetrievalTTL <= 0 || activation != domain.MemoryRetrieval {
-		return nil
-	}
-	at := now.Add(t.RetrievalTTL)
-	return &at
 }
 
 // parseValidUntil reads a date or a timestamp.
@@ -533,38 +512,12 @@ func (t *Recall) Execute(ctx context.Context, call tool.Call) (tool.Result, erro
 		}, nil
 	}
 
-	t.touch(ctx, found)
-
 	return tool.Result{
 		Content: render(found),
 		Summary: fmt.Sprintf("recall: %d", len(found)),
 	}, nil
 }
 
-// touch records that these were wanted, which is what keeps them alive.
-//
-// Without it the expiry is a countdown from the moment a memory was written,
-// and the thing the agent reaches for constantly dies on the same schedule as
-// the thing nobody has ever wanted.
-//
-// Best-effort: a recall that answered is a recall that worked, and failing it
-// because the bookkeeping did not land would trade something a person asked
-// for against something nobody did.
-func (t *Recall) touch(ctx context.Context, found []domain.Memory) {
-	ids := make([]domain.MemoryID, 0, len(found))
-	for _, memory := range found {
-		ids = append(ids, memory.ID)
-	}
-	if err := t.Store.TouchMemories(ctx, ids, t.Now()); err != nil {
-		t.Logger().Warn("could not record that memories were used", "error", err)
-	}
-}
-
-// render lists memories with where each came from.
-//
-// The provenance is shown rather than kept for auditing alone: a model reading
-// "somebody on Discord said this" should weigh it differently from something
-// the operator wrote, and it can only do that if it is told.
 func render(memories []domain.Memory) string {
 	var out strings.Builder
 

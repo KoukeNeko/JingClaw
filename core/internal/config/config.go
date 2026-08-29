@@ -329,21 +329,6 @@ type Memory struct {
 	// MaxInstructionBytes bounds the standing directions put in front of the
 	// model on every turn. Everything here is context the work does not get.
 	MaxInstructionBytes int `koanf:"max_instruction_bytes"`
-
-	// RetrievalTTL is how long a looked-up memory stays offered without
-	// being used. Zero means they never expire.
-	//
-	// Inactivity rather than age: a convention this project has followed for
-	// a year is not stale, and a note about a branch merged last week is. Age
-	// cannot tell those apart and use can.
-	//
-	// Only retrieval memories. A standing direction was approved by a person
-	// and shapes every run; expiring one quietly would remove an instruction
-	// somebody deliberately gave.
-	//
-	// Reaching it invalidates rather than deletes. An expiry is not evidence
-	// a memory was wrong, and "agent memory list --history" still shows it.
-	RetrievalTTL time.Duration `koanf:"retrieval_ttl"`
 }
 
 // Web is whether and how the agent may read pages.
@@ -692,12 +677,6 @@ func Defaults() Config {
 		Memory: Memory{
 			Enabled:             true,
 			MaxInstructionBytes: 2000,
-
-			// Ninety days without being wanted. Long enough that a fact
-			// about a project somebody works on monthly survives; short
-			// enough that a note about a branch merged in spring is not
-			// still being offered in autumn.
-			RetrievalTTL: 90 * 24 * time.Hour,
 		},
 		Web: Web{
 			Enabled:       false,
@@ -1565,16 +1544,10 @@ enabled = true
 # The ceiling on standing directions injected every turn.
 # max_instruction_bytes = 2000
 
-# How long a looked-up memory stays offered without being used. Inactivity
-# rather than age: a convention this project has followed for a year is not
-# stale, and a note about a branch merged last week is.
-#
-# Standing directions never expire — a person approved each one, and removing
-# an instruction somebody deliberately gave is worse than the bloat it saves.
-#
-# Reaching it stops the memory being believed; it is not deleted, and
-# "agent memory list --history" still shows it. Set 0 to switch it off.
-# retrieval_ttl = "2160h"
+# Nothing expires by being unused. A memory nobody has recalled for months is
+# not evidence of anything: the production namespace of a service nobody has
+# deployed since spring is correct, important and cold. What ends a memory is
+# a correction, an end date it was given, or somebody removing it.
 
 [web]
 # Whether the agent may read web pages. Reading only: no clicking, typing,

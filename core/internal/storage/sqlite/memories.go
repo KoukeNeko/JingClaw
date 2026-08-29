@@ -15,7 +15,7 @@ const memoryColumns = `id, scope, scope_ref, activation, text, trust,
 	origin_kind, origin_client, origin_platform, origin_principal,
 	source_session, source_seq, approved_by,
 	created_at, invalidated_at, superseded_by,
-	valid_from, valid_until, expires_at, last_used_at`
+	valid_from, valid_until`
 
 // The search joins the table to its index, where "text" names a column in
 // both, so the same list has to be qualified there.
@@ -25,8 +25,7 @@ const memoryColumnsQualified = `memories.id, memories.scope, memories.scope_ref,
 	memories.origin_platform, memories.origin_principal,
 	memories.source_session, memories.source_seq, memories.approved_by,
 	memories.created_at, memories.invalidated_at, memories.superseded_by,
-	memories.valid_from, memories.valid_until,
-	memories.expires_at, memories.last_used_at`
+	memories.valid_from, memories.valid_until`
 
 // Remember stores a memory, and invalidates the one it corrects.
 //
@@ -40,7 +39,7 @@ func (s *Store) Remember(
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO memories (`+memoryColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			string(memory.ID),
 			string(memory.Scope),
 			memory.ScopeRef,
@@ -59,8 +58,6 @@ func (s *Store) Remember(
 			nullableID(memory.SupersededBy),
 			memory.ValidFrom.UnixNano(),
 			nullableTime(memory.ValidUntil),
-			nullableTime(memory.ExpiresAt),
-			nullableTime(memory.LastUsedAt),
 		); err != nil {
 			return fmt.Errorf("sqlite: remember: %w", err)
 		}
@@ -69,12 +66,28 @@ func (s *Store) Remember(
 			return nil
 		}
 
+		// Two different facts, both recorded. invalidated_at is when this
+		// agent stopped carrying the old memory; valid_until is when the
+		// thing it described stopped being true, which is where the
+		// replacement's own validity begins.
+		//
+		// They are rarely the same moment. "The API was v1 until March",
+		// learned in June, is a correction made in June about a change that
+		// happened in March — and a store that recorded only June could not
+		// answer what was true in April.
+		//
+		// Only set where the old memory did not already state its own end: a
+		// model that said when something stopped being true knows better
+		// than this inference does.
 		result, err := tx.ExecContext(ctx, `
 			UPDATE memories
-			   SET invalidated_at = ?, superseded_by = ?
+			   SET invalidated_at = ?,
+			       superseded_by = ?,
+			       valid_until = COALESCE(valid_until, ?)
 			 WHERE id = ? AND invalidated_at IS NULL`,
 			memory.CreatedAt.UnixNano(),
 			string(memory.ID),
+			memory.ValidFrom.UnixNano(),
 			string(supersedes),
 		)
 		if err != nil {
@@ -204,15 +217,11 @@ func memoryFilter(query storage.MemoryQuery) (string, []any) {
 		// Believed at that moment, on both timelines. Record time says this
 		// agent had not retracted it; valid time says the thing was true.
 		//
-		// Expiry is folded in here rather than swept separately, so that a
-		// memory past its expiry stops being offered the moment it is, not
-		// whenever a sweep next runs.
 		clauses = append(clauses,
 			"(memories.invalidated_at IS NULL OR memories.invalidated_at > ?)",
-			"(memories.expires_at IS NULL OR memories.expires_at > ?)",
 			"(memories.valid_from = 0 OR memories.valid_from <= ?)",
 			"(memories.valid_until IS NULL OR memories.valid_until > ?)")
-		args = append(args, moment, moment, moment, moment)
+		args = append(args, moment, moment, moment)
 	}
 
 	if len(clauses) == 0 {
@@ -275,8 +284,6 @@ func (s *Store) queryMemories(ctx context.Context, query string, args ...any) ([
 			sourceSeq    int64
 			validFrom    int64
 			validUntil   sql.NullInt64
-			expiresAt    sql.NullInt64
-			lastUsedAt   sql.NullInt64
 		)
 
 		if err := rows.Scan(
@@ -284,7 +291,7 @@ func (s *Store) queryMemories(ctx context.Context, query string, args ...any) ([
 			&originKind, &memory.Origin.ClientID, &platform, &principal,
 			&memory.SourceSession, &sourceSeq, &memory.ApprovedBy,
 			&createdAt, &invalidated, &supersededBy,
-			&validFrom, &validUntil, &expiresAt, &lastUsedAt,
+			&validFrom, &validUntil,
 		); err != nil {
 			return nil, fmt.Errorf("sqlite: scan memory: %w", err)
 		}
@@ -321,14 +328,6 @@ func (s *Store) queryMemories(ctx context.Context, query string, args ...any) ([
 			at := timeFromNanos(validUntil.Int64)
 			memory.ValidUntil = &at
 		}
-		if expiresAt.Valid {
-			at := timeFromNanos(expiresAt.Int64)
-			memory.ExpiresAt = &at
-		}
-		if lastUsedAt.Valid {
-			at := timeFromNanos(lastUsedAt.Int64)
-			memory.LastUsedAt = &at
-		}
 
 		memories = append(memories, memory)
 	}
@@ -355,68 +354,4 @@ func nullableID(id domain.MemoryID) any {
 		return nil
 	}
 	return string(id)
-}
-
-// ExpireMemories stops believing what has gone unused past its expiry.
-//
-// Invalidated rather than deleted, and with no superseding memory: reaching an
-// expiry is not evidence anything was wrong, and the record of having once
-// believed it is the thing that makes "why did it do that in June" answerable.
-//
-// A sweep as well as the filter in every query, because the two answer
-// different needs: the filter is what stops an expired memory being used, and
-// this is what makes "agent memory list" tell the truth without every reader
-// re-deriving it.
-func (s *Store) ExpireMemories(ctx context.Context, at time.Time) (int, error) {
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE memories
-		   SET invalidated_at = ?
-		 WHERE invalidated_at IS NULL
-		   AND expires_at IS NOT NULL
-		   AND expires_at <= ?`,
-		at.UnixNano(), at.UnixNano())
-	if err != nil {
-		return 0, fmt.Errorf("sqlite: expire memories: %w", err)
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("sqlite: expire memories: %w", err)
-	}
-	return int(affected), nil
-}
-
-// TouchMemories records that these were used, and pushes their expiry out.
-//
-// Both together: recording the use without moving the expiry would make the
-// timestamp decoration, and moving the expiry without recording the use would
-// leave nothing to explain why it moved.
-//
-// Only memories that already have an expiry are moved. One written without a
-// lifetime is not given one by being read.
-func (s *Store) TouchMemories(ctx context.Context, ids []domain.MemoryID, at time.Time) error {
-	if len(ids) == 0 {
-		return nil
-	}
-
-	placeholders := make([]string, 0, len(ids))
-	args := []any{at.UnixNano(), at.UnixNano()}
-	for _, id := range ids {
-		placeholders = append(placeholders, "?")
-		args = append(args, string(id))
-	}
-
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE memories
-		   SET last_used_at = ?,
-		       expires_at = CASE
-		           WHEN expires_at IS NULL THEN NULL
-		           ELSE ? + (expires_at - COALESCE(last_used_at, created_at))
-		       END
-		 WHERE id IN (`+strings.Join(placeholders, ", ")+`)
-		   AND invalidated_at IS NULL`, args...)
-	if err != nil {
-		return fmt.Errorf("sqlite: touch memories: %w", err)
-	}
-	return nil
 }

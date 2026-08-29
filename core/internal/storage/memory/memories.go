@@ -31,9 +31,21 @@ func (s *Store) Remember(
 			return fmt.Errorf("memory: %s is not a memory that can be superseded", supersedes)
 		}
 
+		// Two different facts, both recorded, the same as the database does:
+		// InvalidatedAt is when this agent stopped carrying it, ValidUntil is
+		// when the thing it described stopped being true — which is where
+		// the replacement's validity begins.
+		//
+		// Left alone where the old memory already stated its own end: a
+		// model that said when something stopped being true knows better
+		// than this inference does.
 		at := memory.CreatedAt
 		existing.InvalidatedAt = &at
 		existing.SupersededBy = memory.ID
+		if existing.ValidUntil == nil {
+			until := memory.ValidFrom
+			existing.ValidUntil = &until
+		}
 		s.memories[supersedes] = existing
 	}
 
@@ -149,56 +161,4 @@ func inScope(candidate domain.Memory, scopes []storage.MemoryScopeRef) bool {
 	return slices.ContainsFunc(scopes, func(scope storage.MemoryScopeRef) bool {
 		return candidate.Scope == scope.Scope && candidate.ScopeRef == scope.Ref
 	})
-}
-
-// ExpireMemories stops believing what has gone unused past its expiry.
-func (s *Store) ExpireMemories(_ context.Context, at time.Time) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	expired := 0
-	for id, memory := range s.memories {
-		if memory.InvalidatedAt != nil || memory.ExpiresAt == nil {
-			continue
-		}
-		if at.Before(*memory.ExpiresAt) {
-			continue
-		}
-		when := at
-		memory.InvalidatedAt = &when
-		s.memories[id] = memory
-		expired++
-	}
-	return expired, nil
-}
-
-// TouchMemories records that these were used, and pushes their expiry out by
-// the lifetime they were given.
-func (s *Store) TouchMemories(_ context.Context, ids []domain.MemoryID, at time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, id := range ids {
-		memory, ok := s.memories[id]
-		if !ok || memory.InvalidatedAt != nil {
-			continue
-		}
-
-		if memory.ExpiresAt != nil {
-			// The lifetime it was given, measured from whenever it was last
-			// used. A memory written without one is not given one by being
-			// read.
-			since := memory.CreatedAt
-			if memory.LastUsedAt != nil {
-				since = *memory.LastUsedAt
-			}
-			extended := at.Add(memory.ExpiresAt.Sub(since))
-			memory.ExpiresAt = &extended
-		}
-
-		used := at
-		memory.LastUsedAt = &used
-		s.memories[id] = memory
-	}
-	return nil
 }

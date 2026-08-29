@@ -270,20 +270,6 @@ type Memory struct {
 	// this agent was wrong about, and a correction is not a thing that was
 	// scheduled.
 	ValidUntil *time.Time
-
-	// ExpiresAt is when this stops being offered unless something uses it
-	// again. Nil means it does not expire.
-	//
-	// Record hygiene rather than truth: a fact nobody has wanted for two
-	// months is probably not wrong, it is probably noise, and the cost of
-	// noise is a retrieval corpus that gets worse as it grows. Reaching it
-	// invalidates rather than deletes, for the same reason a correction
-	// does.
-	ExpiresAt *time.Time
-
-	// LastUsedAt is when something last recalled this. Nil means never since
-	// it was written.
-	LastUsedAt *time.Time
 }
 
 // IsCurrent reports whether a memory is still believed.
@@ -300,9 +286,6 @@ func (m Memory) IsCurrent() bool { return m.CurrentAt(time.Now()) }
 // that reads the clock cannot answer it.
 func (m Memory) CurrentAt(at time.Time) bool {
 	if m.InvalidatedAt != nil && !at.Before(*m.InvalidatedAt) {
-		return false
-	}
-	if m.ExpiresAt != nil && !at.Before(*m.ExpiresAt) {
 		return false
 	}
 	if !m.ValidFrom.IsZero() && at.Before(m.ValidFrom) {

@@ -57,9 +57,7 @@ func Run(t *testing.T, newStore Factory) {
 		"PlansAreSeparatePerSession":  testPlansAreSeparatePerSession,
 
 		"MemoryValidityIsSeparateFromBelief": testMemoryValidityIsSeparateFromBelief,
-		"MemoryExpiresWithoutBeingDeleted":   testMemoryExpiresWithoutBeingDeleted,
-		"UsingAMemoryPostponesItsExpiry":     testUsingAMemoryPostponesItsExpiry,
-		"UsingAMemoryDoesNotGiveItAnExpiry":  testUsingAMemoryDoesNotGiveItAnExpiry,
+		"SupersedingClosesTheOldValidity":    testSupersedingClosesTheOldValidity,
 	}
 
 	for name, fn := range tests {
@@ -1035,118 +1033,74 @@ func testMemoryValidityIsSeparateFromBelief(t *testing.T, newStore Factory) {
 	}
 }
 
-// A memory nobody has wanted stops being offered, and reaching that is not
-// evidence it was wrong: it is still there to explain an old run.
-func testMemoryExpiresWithoutBeingDeleted(t *testing.T, newStore Factory) {
+// A correction records two different facts, and losing either one loses an
+// answer somebody will want.
+//
+// invalidated_at is when this agent stopped carrying the old memory.
+// valid_until is when the thing it described stopped being true — which is
+// where the replacement's validity begins, and is rarely the same moment.
+func testSupersedingClosesTheOldValidity(t *testing.T, newStore Factory) {
 	ctx, store := context.Background(), newStore(t)
 
-	written := fixedTime()
-	expires := written.Add(24 * time.Hour)
-
-	memory := newMemory("mem_stale", "a note nobody wants", domain.ScopeWorkspace, "/ws")
-	memory.CreatedAt = written
-	memory.ValidFrom = written
-	memory.ExpiresAt = &expires
-
-	if err := store.Remember(ctx, memory, ""); err != nil {
+	// Learned in January, true since January.
+	learnedInJanuary := fixedTime()
+	old := newMemory("mem_v1", "the project is on Go 1.24", domain.ScopeWorkspace, "/ws")
+	old.CreatedAt = learnedInJanuary
+	old.ValidFrom = learnedInJanuary
+	if err := store.Remember(ctx, old, ""); err != nil {
 		t.Fatalf("remember: %v", err)
 	}
 
-	expired, err := store.ExpireMemories(ctx, expires.Add(time.Hour))
-	if err != nil {
-		t.Fatalf("expire: %v", err)
-	}
-	if expired != 1 {
-		t.Fatalf("expired %d memories, want 1", expired)
+	// Learned in June, about a change that happened in May.
+	changedInMay := learnedInJanuary.AddDate(0, 4, 0)
+	learnedInJune := learnedInJanuary.AddDate(0, 5, 0)
+
+	replacement := newMemory("mem_v2", "the project is on Go 1.25", domain.ScopeWorkspace, "/ws")
+	replacement.CreatedAt = learnedInJune
+	replacement.ValidFrom = changedInMay
+	if err := store.Remember(ctx, replacement, "mem_v1"); err != nil {
+		t.Fatalf("supersede: %v", err)
 	}
 
-	current, err := store.Memories(ctx, storage.MemoryQuery{At: expires.Add(2 * time.Hour)})
+	history, err := store.Memories(ctx, storage.MemoryQuery{IncludeInvalidated: true})
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if len(current) != 0 {
-		t.Errorf("an expired memory is still offered: %+v", current)
+
+	var corrected *domain.Memory
+	for i := range history {
+		if history[i].ID == "mem_v1" {
+			corrected = &history[i]
+		}
+	}
+	if corrected == nil {
+		t.Fatal("the superseded memory is gone")
 	}
 
-	kept, err := store.Memories(ctx, storage.MemoryQuery{
-		At: expires.Add(2 * time.Hour), IncludeInvalidated: true,
+	if corrected.InvalidatedAt == nil || !corrected.InvalidatedAt.Equal(learnedInJune) {
+		t.Errorf("stopped being carried at %v, want when the correction was made", corrected.InvalidatedAt)
+	}
+	if corrected.ValidUntil == nil || !corrected.ValidUntil.Equal(changedInMay) {
+		t.Errorf("stopped being true at %v, want when the world changed", corrected.ValidUntil)
+	}
+
+	// The question the two timelines exist to answer: what was true in April,
+	// which is after the old fact was learned and before it stopped holding.
+	inApril := learnedInJanuary.AddDate(0, 3, 0)
+	then, err := store.Memories(ctx, storage.MemoryQuery{
+		At: inApril, IncludeInvalidated: true,
 	})
 	if err != nil {
 		t.Fatalf("read history: %v", err)
 	}
-	if len(kept) != 1 {
-		t.Errorf("an expired memory was deleted rather than retired: %d", len(kept))
-	}
-}
 
-// Using a memory is what keeps it alive. Without this the expiry counts down
-// from when it was written, and the thing the agent reaches for constantly
-// dies on the same schedule as the thing nobody has ever wanted.
-func testUsingAMemoryPostponesItsExpiry(t *testing.T, newStore Factory) {
-	ctx, store := context.Background(), newStore(t)
-
-	written := fixedTime()
-	expires := written.Add(24 * time.Hour)
-
-	memory := newMemory("mem_used", "a note in constant use", domain.ScopeWorkspace, "/ws")
-	memory.CreatedAt = written
-	memory.ValidFrom = written
-	memory.ExpiresAt = &expires
-
-	if err := store.Remember(ctx, memory, ""); err != nil {
-		t.Fatalf("remember: %v", err)
+	var held bool
+	for _, memory := range then {
+		if memory.ID == "mem_v1" && memory.CurrentAt(inApril) {
+			held = true
+		}
 	}
-
-	// Wanted just before it would have gone.
-	used := written.Add(23 * time.Hour)
-	if err := store.TouchMemories(ctx, []domain.MemoryID{"mem_used"}, used); err != nil {
-		t.Fatalf("touch: %v", err)
-	}
-
-	// The sweep that would have taken it now finds nothing.
-	expired, err := store.ExpireMemories(ctx, expires.Add(time.Hour))
-	if err != nil {
-		t.Fatalf("expire: %v", err)
-	}
-	if expired != 0 {
-		t.Errorf("a memory used an hour ago was expired anyway")
-	}
-
-	still, err := store.Memories(ctx, storage.MemoryQuery{At: expires.Add(time.Hour)})
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if len(still) != 1 {
-		t.Errorf("a memory that was just used is no longer offered")
-	}
-}
-
-// A memory written without a lifetime is not given one by being read.
-func testUsingAMemoryDoesNotGiveItAnExpiry(t *testing.T, newStore Factory) {
-	ctx, store := context.Background(), newStore(t)
-
-	memory := newMemory("mem_forever", "a note with no lifetime", domain.ScopeWorkspace, "/ws")
-	memory.CreatedAt = fixedTime()
-	memory.ValidFrom = fixedTime()
-
-	if err := store.Remember(ctx, memory, ""); err != nil {
-		t.Fatalf("remember: %v", err)
-	}
-	if err := store.TouchMemories(ctx, []domain.MemoryID{"mem_forever"}, fixedTime()); err != nil {
-		t.Fatalf("touch: %v", err)
-	}
-
-	found, err := store.Memories(ctx, storage.MemoryQuery{IncludeInvalidated: true})
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if len(found) != 1 {
-		t.Fatalf("read back %d memories", len(found))
-	}
-	if found[0].ExpiresAt != nil {
-		t.Errorf("reading a memory gave it an expiry it never had: %v", found[0].ExpiresAt)
-	}
-	if found[0].LastUsedAt == nil {
-		t.Error("using a memory was not recorded")
+	if !held {
+		t.Error("the old fact does not read as true in April, when it was")
 	}
 }

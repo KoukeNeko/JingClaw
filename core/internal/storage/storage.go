@@ -158,16 +158,6 @@ type EventStore interface {
 // believed then". Forget is the exception, and exists because a person asking
 // the agent to forget something has to be answered by it actually being gone.
 type MemoryStore interface {
-	// ExpireMemories stops believing what has gone unused past its expiry,
-	// and returns how many. Invalidated rather than deleted: reaching an
-	// expiry is not evidence a memory was wrong.
-	ExpireMemories(ctx context.Context, at time.Time) (int, error)
-
-	// TouchMemories records that these were used, which is what keeps them
-	// from expiring. Best-effort by design: a failure here must not fail the
-	// recall it belongs to.
-	TouchMemories(ctx context.Context, ids []domain.MemoryID, at time.Time) error
-
 	// Remember stores a memory. When supersedes names an existing one, both
 	// happen together: a correction that half applied would leave the agent
 	// believing two contradictory things.
