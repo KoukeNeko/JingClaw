@@ -237,6 +237,8 @@ func run() error {
 		builtin.NewApplyPatch(ws, observed, locks),
 		&builtin.ExecCommand{Workspace: ws, Limits: limits, Artifacts: artifacts},
 		&builtin.ReadArtifact{Artifacts: artifacts, Limits: limits},
+		&builtin.GitStatus{Workspace: ws},
+		&builtin.GitDiff{Workspace: ws, Artifacts: artifacts},
 	)
 
 	// Long-running programs belong to the daemon rather than to a run, which
