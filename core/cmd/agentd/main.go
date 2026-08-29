@@ -35,6 +35,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
 	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
 	"github.com/KoukeNeko/JingClaw/core/internal/permission"
+	"github.com/KoukeNeko/JingClaw/core/internal/process"
 	"github.com/KoukeNeko/JingClaw/core/internal/prompt"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
@@ -223,6 +224,20 @@ func run() error {
 		editFile,
 		&builtin.ExecCommand{Workspace: ws, Limits: limits, Artifacts: artifacts},
 		&builtin.ReadArtifact{Artifacts: artifacts, Limits: limits},
+	)
+
+	// Long-running programs belong to the daemon rather than to a run, which
+	// is the point of them: a run that starts a dev server and then ends must
+	// not take the server with it. Nothing else would end them, so stopping
+	// the daemon does.
+	processes := process.NewManager()
+	processes.BufferBytes = cfg.Process.BufferBytes
+	defer processes.CloseAll()
+
+	tools.MustRegister(
+		&builtin.StartProcess{Workspace: ws, Processes: processes},
+		&builtin.ProcessIO{Processes: processes},
+		&builtin.StopProcess{Processes: processes},
 	)
 
 	// Tool servers are started before the prompt is assembled, because what
@@ -831,6 +846,11 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 	case "fake":
 		offline := fake.New(cfg.Model.FakeDelay)
 		offline.Reasoning = cfg.Model.FakeReasoning
+		for _, turn := range cfg.Model.FakeScript {
+			offline.Script = append(offline.Script, fake.Turn{
+				Text: turn.Text, Tool: turn.Tool, Args: turn.Args,
+			})
+		}
 		return offline, nil
 
 	case "gemini":

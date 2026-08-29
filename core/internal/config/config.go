@@ -51,6 +51,7 @@ type Config struct {
 	Memory    Memory    `koanf:"memory"`
 	Web       Web       `koanf:"web"`
 	MCP       MCP       `koanf:"mcp"`
+	Process   Process   `koanf:"process"`
 	Delivery  Delivery  `koanf:"delivery"`
 	Workspace Workspace `koanf:"workspace"`
 	Server    Server    `koanf:"server"`
@@ -109,6 +110,11 @@ type Model struct {
 	// recorded under its own kind, refused by the projector, shown only on the
 	// control plane.
 	FakeReasoning string `koanf:"fake_reasoning"`
+
+	// FakeScript is what the offline provider does turn by turn instead of
+	// echoing, so the paths only a model takes — a tool call, an approval —
+	// can be checked without one.
+	FakeScript []FakeTurn `koanf:"fake_script"`
 
 	Retry Retry `koanf:"retry"`
 
@@ -411,6 +417,26 @@ type MCPServer struct {
 	Level string `koanf:"level"`
 }
 
+// Process bounds what long-running programs may keep.
+type Process struct {
+	// BufferBytes is how much output is kept per process, oldest first to go.
+	//
+	// A dev server left running overnight would otherwise be a program whose
+	// log is the whole of memory. The end to lose is the beginning: what a
+	// caller wants is what it said a moment ago, and the start of a server's
+	// log is a banner.
+	BufferBytes int `koanf:"buffer_bytes"`
+}
+
+// FakeTurn is one scripted answer from the offline provider.
+type FakeTurn struct {
+	Text string `koanf:"text"`
+
+	// Tool and Args are a call it makes. Empty Tool means it calls nothing.
+	Tool string `koanf:"tool"`
+	Args string `koanf:"args"`
+}
+
 // Delivery paces how provider output becomes events.
 //
 // Providers stream in whatever granularity suits them. These bound the log by
@@ -624,6 +650,9 @@ func Defaults() Config {
 			StartTimeout: 30 * time.Second,
 			CallTimeout:  2 * time.Minute,
 			MaxOutput:    32 * 1024,
+		},
+		Process: Process{
+			BufferBytes: 256 << 10,
 		},
 		Delivery: Delivery{
 			TextFlushBytes:     240,
@@ -1356,6 +1385,14 @@ api_key_file = "gemini.key"
 # thinking model takes can be driven without one. Empty means none.
 # fake_reasoning = ""
 
+# What the offline provider does turn by turn instead of echoing, so the paths
+# only a model takes — a tool call, an approval — can be checked without one.
+# Each entry is one turn; omitting tool ends the conversation.
+# [[model.fake_script]]
+# text = "Looking."
+# tool = "read_file"
+# args = '{"path": "README.md"}'
+
 [model.retry]
 # A server's own Retry-After is honoured exactly, never shortened: asking again
 # early earns the same refusal. These bound what this code invents when the
@@ -1506,6 +1543,12 @@ backend = "browser"
 # workspace_write, remember, execute, high_impact. Anything a server can do to
 # a machine deserves execute unless somebody has read it.
 # level = "execute"
+
+[process]
+# How much output is kept per long-running process, oldest first to go. A dev
+# server left running overnight would otherwise be a program whose log is the
+# whole of memory.
+# buffer_bytes = 262144
 
 [delivery]
 # How often a streaming answer is flushed onward. Every delta becoming a

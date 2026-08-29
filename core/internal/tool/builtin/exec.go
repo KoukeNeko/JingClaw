@@ -232,21 +232,40 @@ func (t *ExecCommand) environment() []string {
 	if len(t.Env) > 0 {
 		return t.Env
 	}
+	return minimalEnvironment(false)
+}
 
+// minimalEnvironment is what a child process is given.
+//
+// Derived rather than inherited: the daemon's own environment carries the API
+// keys, and handing them to every program a model asks for would make one
+// careless command an exfiltration.
+//
+// interactive says whether the program has a terminal. It changes what to
+// claim: a program told TERM=dumb will not draw a prompt, which is exactly
+// what a caller asking for a terminal wanted it to do.
+func minimalEnvironment(interactive bool) []string {
 	keep := []string{"PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP",
 		"LANG", "LC_ALL", "SystemRoot", "ComSpec", "PATHEXT"}
 
-	env := make([]string, 0, len(keep))
+	env := make([]string, 0, len(keep)+5)
 	for _, name := range keep {
 		if value, ok := os.LookupEnv(name); ok {
 			env = append(env, name+"="+value)
 		}
 	}
 
+	if interactive {
+		// A real terminal, so a program may draw prompts and colour. CI is
+		// deliberately not set: the tools that read it are the ones that stop
+		// asking questions, which is the opposite of why a terminal was asked
+		// for.
+		return append(env, "TERM=xterm-256color")
+	}
+
 	// Tools that phone home or open a pager are a poor fit for a
 	// non-interactive caller with no terminal.
-	env = append(env, "CI=1", "TERM=dumb", "NO_COLOR=1", "PAGER=cat", "GIT_PAGER=cat")
-	return env
+	return append(env, "CI=1", "TERM=dumb", "NO_COLOR=1", "PAGER=cat", "GIT_PAGER=cat")
 }
 
 // boundOutput trims the middle of long output.

@@ -55,6 +55,14 @@ api_key_file = "gemini.key"
 # thinking model takes can be driven without one. Empty means none.
 # fake_reasoning = ""
 
+# What the offline provider does turn by turn instead of echoing, so the paths
+# only a model takes — a tool call, an approval — can be checked without one.
+# Each entry is one turn; omitting tool ends the conversation.
+# [[model.fake_script]]
+# text = "Looking."
+# tool = "read_file"
+# args = '{"path": "README.md"}'
+
 [model.retry]
 # A server's own Retry-After is honoured exactly, never shortened: asking again
 # early earns the same refusal. These bound what this code invents when the
@@ -205,6 +213,12 @@ backend = "browser"
 # workspace_write, remember, execute, high_impact. Anything a server can do to
 # a machine deserves execute unless somebody has read it.
 # level = "execute"
+
+[process]
+# How much output is kept per long-running process, oldest first to go. A dev
+# server left running overnight would otherwise be a program whose log is the
+# whole of memory.
+# buffer_bytes = 262144
 
 [delivery]
 # How often a streaming answer is flushed onward. Every delta becoming a

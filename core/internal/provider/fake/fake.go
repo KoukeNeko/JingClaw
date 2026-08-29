@@ -8,6 +8,8 @@ package fake
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"time"
 
@@ -32,6 +34,18 @@ type Provider struct {
 
 	// ChunkDelay is applied before every chunk after the first.
 	ChunkDelay time.Duration
+
+	// Script is what to do turn by turn instead of echoing.
+	//
+	// It exists because tool calls are a path only a model takes, and until
+	// now checking that path end to end needed a real model — which makes a
+	// check slow, needs a key or a local server, and fails for reasons that
+	// have nothing to do with what is being checked.
+	//
+	// The turn is worked out from the conversation rather than kept here: one
+	// provider serves every session, and a counter would make two sessions
+	// running at once read each other's place in the script.
+	Script []Turn
 
 	// Reasoning is emitted as working-out before the answer, where set.
 	//
@@ -63,9 +77,24 @@ func (p *Provider) Models(context.Context) ([]provider.ModelInfo, error) {
 	}}, nil
 }
 
+// Turn is one scripted answer.
+type Turn struct {
+	// Text is what it says. May be empty when it only calls a tool.
+	Text string
+
+	// Tool and Args are a call it makes. Empty Tool means it calls nothing,
+	// which is how a script ends the turn.
+	Tool string
+	Args string
+}
+
 func (p *Provider) Generate(ctx context.Context, req provider.Request) (provider.Stream, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+
+	if len(p.Script) > 0 {
+		return p.scripted(req), nil
 	}
 
 	prefix := p.Prefix
@@ -81,13 +110,51 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request) (provider
 	return &stream{chunks: chunks, reasoning: p.Reasoning, delay: p.ChunkDelay}, nil
 }
 
+// scripted answers according to the script, by counting how far through it
+// this conversation already is.
+func (p *Provider) scripted(req provider.Request) provider.Stream {
+	// Each scripted turn that made a call left a tool observation behind, so
+	// counting those is counting turns already taken. Counting assistant
+	// messages instead would also count the one being written.
+	taken := 0
+	for _, message := range req.Messages {
+		if message.Role == provider.RoleTool {
+			taken++
+		}
+	}
+
+	if taken >= len(p.Script) {
+		// Past the end of the script, so it answers and stops. A script that
+		// ran out mid-conversation would otherwise loop.
+		return &stream{chunks: []string{p.Script[len(p.Script)-1].Text}, delay: p.ChunkDelay}
+	}
+
+	turn := p.Script[taken]
+	chunks := []string{}
+	if turn.Text != "" {
+		chunks = append(chunks, turn.Text)
+	}
+
+	return &stream{
+		chunks:    chunks,
+		reasoning: p.Reasoning,
+		delay:     p.ChunkDelay,
+		call:      turn,
+		callIndex: taken,
+	}
+}
+
 type stream struct {
 	chunks    []string
 	reasoning string
 	delay     time.Duration
 
+	call      Turn
+	callIndex int
+
 	next          int
 	reasoningSent bool
+	callSent      bool
 	usageSent     bool
 	done          bool
 }
@@ -122,6 +189,20 @@ func (s *stream) Recv(ctx context.Context) (provider.Event, error) {
 		return provider.TextDelta{Text: text}, nil
 	}
 
+	// The call comes after whatever the turn said, as a real model's does.
+	if s.call.Tool != "" && !s.callSent {
+		s.callSent = true
+		args := s.call.Args
+		if args == "" {
+			args = "{}"
+		}
+		return provider.ToolCallRequested{
+			ID:   fmt.Sprintf("call_%d", s.callIndex+1),
+			Name: s.call.Tool,
+			Args: json.RawMessage(args),
+		}, nil
+	}
+
 	// A real provider reports usage, so the fake does too; otherwise the
 	// accounting path would only ever be exercised against the network.
 	if !s.usageSent {
@@ -131,14 +212,23 @@ func (s *stream) Recv(ctx context.Context) (provider.Event, error) {
 		for _, chunk := range s.chunks {
 			output += int64(len([]rune(chunk)))
 		}
+		input := int64(0)
+		if len(s.chunks) > 0 {
+			input = int64(len([]rune(s.chunks[len(s.chunks)-1])))
+		}
 		return provider.UsageDelta{Usage: domain.Usage{
-			InputTokens:  int64(len([]rune(s.chunks[len(s.chunks)-1]))),
+			InputTokens:  input,
 			OutputTokens: output,
 		}}, nil
 	}
 
 	if !s.done {
 		s.done = true
+		if s.call.Tool != "" {
+			// A turn that asked for a tool did not end; saying it did is how
+			// a runtime stops before running the call.
+			return provider.Completed{StopReason: domain.StopToolUse}, nil
+		}
 		return provider.Completed{StopReason: domain.StopEndTurn}, nil
 	}
 
