@@ -1,11 +1,26 @@
 package discord
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	jcgateway "github.com/KoukeNeko/JingClaw/core/internal/gateway"
+	"github.com/KoukeNeko/JingClaw/core/internal/gateway/render"
 )
+
+// statusDispatch is one terminal status as the outbox would carry it.
+func statusDispatch(t *testing.T, state string) jcgateway.Dispatch {
+	t.Helper()
+	payload, err := json.Marshal(jcgateway.StatusPayload{
+		State:  state,
+		Detail: "the model gave up",
+	})
+	if err != nil {
+		t.Fatalf("encode status: %v", err)
+	}
+	return jcgateway.Dispatch{Kind: jcgateway.DispatchStatus, Payload: string(payload)}
+}
 
 // The reaction and the text must not disagree.
 //
@@ -17,7 +32,10 @@ import (
 func TestTheReactionAgreesWithTheText(t *testing.T) {
 	for _, state := range []string{"completed", "failed", "cancelled"} {
 		emoji, _ := reactionForStatus(state)
-		text := renderStatus(jcgateway.StatusPayload{State: state, Detail: "the model gave up"})
+		text, err := render.Dispatch(statusDispatch(t, state), discordStyle)
+		if err != nil {
+			t.Fatalf("render %s: %v", state, err)
+		}
 
 		saysItWorked := emoji == "✅"
 		textSaysItWorked := !strings.Contains(text, "did not work") &&
