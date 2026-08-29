@@ -190,7 +190,10 @@ func newSendCommand() *cobra.Command {
 }
 
 func newAttachCommand() *cobra.Command {
-	var afterSeq uint64
+	var (
+		afterSeq   uint64
+		showOutput bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "attach <session-id>",
@@ -219,7 +222,7 @@ func newAttachCommand() *cobra.Command {
 			defer func() { _ = stream.Close() }()
 
 			for stream.Receive() {
-				printFrame(stream.Msg())
+				printFrame(stream.Msg(), showOutput)
 			}
 
 			if err := stream.Err(); err != nil {
@@ -233,6 +236,8 @@ func newAttachCommand() *cobra.Command {
 	}
 
 	cmd.Flags().Uint64Var(&afterSeq, "after", 0, "resume after this sequence number")
+	cmd.Flags().BoolVar(&showOutput, "output", false,
+		"print what every tool returned, not only the ones that failed")
 	return cmd
 }
 
@@ -390,7 +395,7 @@ func decide(cmd *cobra.Command, approvalID string, allow, forSession bool) error
 	return nil
 }
 
-func printFrame(frame *controlv1.SubscribeEventsResponse) {
+func printFrame(frame *controlv1.SubscribeEventsResponse, showOutput bool) {
 	switch value := frame.GetValue().(type) {
 	case *controlv1.SubscribeEventsResponse_Hello:
 		fmt.Fprintf(os.Stderr, "attached at seq %d\n", value.Hello.GetHeadSeq())
@@ -399,16 +404,16 @@ func printFrame(frame *controlv1.SubscribeEventsResponse) {
 		// Liveness only; nothing for a human to read.
 
 	case *controlv1.SubscribeEventsResponse_Event:
-		printEvent(value.Event)
+		printEvent(value.Event, showOutput)
 	}
 }
 
-func printEvent(ev *controlv1.Event) {
-	label, detail := describe(ev)
+func printEvent(ev *controlv1.Event, showOutput bool) {
+	label, detail := describe(ev, showOutput)
 	fmt.Printf("%06d %-22s %s\n", ev.GetSeq(), label, detail)
 }
 
-func describe(ev *controlv1.Event) (label, detail string) {
+func describe(ev *controlv1.Event, showOutput bool) (label, detail string) {
 	switch payload := ev.GetPayload().(type) {
 	case *controlv1.Event_UserMessageAdded:
 		return "user.message", payload.UserMessageAdded.GetText()
@@ -437,14 +442,26 @@ func describe(ev *controlv1.Event) (label, detail string) {
 		done := payload.ToolCallCompleted
 		status := done.GetSummary()
 		if done.GetIsError() {
-			status = "error: " + compact(done.GetContent(), 160)
+			status = "error"
 		}
 		// Naming the artifact is what makes a truncated line something a
 		// person can follow up on rather than a note that output was lost.
 		if stored := done.GetArtifact(); stored != nil {
 			status += fmt.Sprintf(" [%d bytes kept as %s]", stored.GetSize(), stored.GetId())
 		}
-		return "tool.completed", fmt.Sprintf("%s (%dms) %s", done.GetName(), done.GetDurationMs(), status)
+		line := fmt.Sprintf("%s (%dms) %s", done.GetName(), done.GetDurationMs(), status)
+
+		// What it printed, below the line and indented.
+		//
+		// A failure is shown without being asked for, because a compiler
+		// error compacted onto one line is a note that something went wrong
+		// rather than something anybody can act on. A success is shown when
+		// asked, since most of them are a file the caller already knows the
+		// contents of.
+		if output := toolOutput(done, showOutput); output != "" {
+			line += "\n" + output
+		}
+		return "tool.completed", line
 
 	case *controlv1.Event_ApprovalRequested:
 		request := payload.ApprovalRequested
@@ -775,6 +792,41 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // compact renders a value on one line, bounded, so a tool argument or error
 // cannot flood the terminal.
+// toolOutput renders what a tool printed, indented under its line.
+func toolOutput(done *controlv1.ToolCallCompleted, always bool) string {
+	if !always && !done.GetIsError() {
+		return ""
+	}
+
+	content := strings.TrimRight(done.GetContent(), "\n")
+	if strings.TrimSpace(content) == "" {
+		return ""
+	}
+
+	const maxLines = 40
+
+	lines := strings.Split(content, "\n")
+	// The end rather than the start: a command that failed says why on its
+	// last lines, and a build log opens with the compiler announcing itself.
+	cut := false
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+		cut = true
+	}
+
+	var out strings.Builder
+	if cut {
+		out.WriteString("       …\n")
+	}
+	for index, line := range lines {
+		if index > 0 {
+			out.WriteString("\n")
+		}
+		out.WriteString("       " + line)
+	}
+	return out.String()
+}
+
 func compact(value string, limit int) string {
 	value = strings.Join(strings.Fields(value), " ")
 	if len(value) > limit {

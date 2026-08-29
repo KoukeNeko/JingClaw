@@ -58,7 +58,11 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	// A log line accumulates rather than replacing what came before it, which
 	// is the whole difference between it and a status line.
 	if dispatch.Kind == jcgateway.DispatchLog {
-		return a.finishAsMessages(channelID, dispatch, []string{body})
+		// Split like any other message. A log line carries whatever a command
+		// printed, and the platform's limit is counted in characters while
+		// the bound on the output is in runes — one line of CJK output is
+		// three times the bytes of the same length in English.
+		return a.finishAsMessages(channelID, dispatch, splitForDiscord(body))
 	}
 
 	// Something asked for by name, handed over as a file rather than pasted
@@ -788,6 +792,15 @@ func renderCompletionStatus(payload jcgateway.StatusPayload) string {
 		return ""
 	}
 	status := strings.Join(parts, " · ")
+
+	// A run that produced no answer and asked for no tool is otherwise
+	// indistinguishable from success: it completes, the tokens are spent, and
+	// the line says how long it took. A model that thought and then said
+	// nothing happens, and nobody should have to work out that nothing came.
+	if payload.Summary.Silent {
+		status = "⚠ returned nothing · " + status
+	}
+
 	if tools := renderToolList(payload.Summary.Tools); tools != "" {
 		return tools + "\n-# " + status
 	}
@@ -869,9 +882,20 @@ func renderLog(payload jcgateway.LogPayload) string {
 		fmt.Fprintf(&out, " — %s", summary)
 	}
 	if payload.Artifact != "" {
-		// Named so it can be asked for, which is the only way it reaches the
-		// channel.
+		// Named so it can be asked for, which is the only way the whole of it
+		// reaches the channel.
 		fmt.Fprintf(&out, "\n-#   stored as `%s`", payload.Artifact)
+	}
+
+	// What it printed, in a code block rather than as subtext: this is output
+	// meant to be read as output, and the alignment of a test failure is the
+	// information.
+	if output := strings.TrimSpace(payload.Output); output != "" {
+		lead := ""
+		if payload.OutputTruncated {
+			lead = "…\n"
+		}
+		fmt.Fprintf(&out, "\n```\n%s%s\n```", lead, output)
 	}
 
 	return out.String()

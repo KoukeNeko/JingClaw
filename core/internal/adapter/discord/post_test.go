@@ -949,3 +949,90 @@ func TestTheSummarySaysWhoAnswered(t *testing.T) {
 		t.Errorf("the completion status does not list its tools:\n%s", rendered)
 	}
 }
+
+// A summary says a command exited zero. The output says which test failed and
+// on what line, which is what somebody watching a console is watching for.
+func TestALogLineCarriesWhatTheToolPrinted(t *testing.T) {
+	rendered := renderLog(jcgateway.LogPayload{
+		Tool:       "exec_command",
+		Summary:    "go test ./...: exit 1",
+		DurationMS: 4200,
+		IsError:    true,
+		Output:     "--- FAIL: TestThing (0.01s)\n    thing_test.go:42: got 3, want 4\nFAIL",
+	})
+
+	for _, want := range []string{"exec_command", "4.2s", "✗", "thing_test.go:42", "want 4"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("the log line does not carry %q:\n%s", want, rendered)
+		}
+	}
+	// In a code block, because the alignment of a failure is the information.
+	if !strings.Contains(rendered, "```") {
+		t.Errorf("output is not shown as output:\n%s", rendered)
+	}
+}
+
+// Cut output says it was cut, so nobody reads a partial log as a whole one.
+func TestCutOutputSaysSo(t *testing.T) {
+	rendered := renderLog(jcgateway.LogPayload{
+		Tool:            "exec_command",
+		Output:          "the last of it",
+		OutputTruncated: true,
+	})
+	if !strings.Contains(rendered, "…") {
+		t.Errorf("cut output does not say it was cut:\n%s", rendered)
+	}
+}
+
+// A tool that printed nothing adds no empty block.
+func TestNoOutputAddsNoBlock(t *testing.T) {
+	rendered := renderLog(jcgateway.LogPayload{Tool: "read_file", Summary: "read a.go"})
+	if strings.Contains(rendered, "```") {
+		t.Errorf("an empty code block was added:\n%s", rendered)
+	}
+}
+
+// A log line is not exempt from the platform's limit. The bound on captured
+// output is in runes and the limit is in characters, so output that is all
+// multi-byte would otherwise be refused outright and the line lost.
+func TestALogLineOfWideCharactersIsStillPostable(t *testing.T) {
+	// The bound the projector applies, in characters that are three bytes
+	// each.
+	wide := strings.Repeat("測", 1200)
+
+	body := renderLog(jcgateway.LogPayload{
+		Tool:   "exec_command",
+		Output: wide,
+	})
+
+	for _, segment := range splitForDiscord(body) {
+		if len(segment) > maxMessageLength {
+			t.Errorf("a segment is %d bytes, over the %d limit", len(segment), maxMessageLength)
+		}
+	}
+	if len(splitForDiscord(body)) == 0 {
+		t.Error("the line was lost entirely")
+	}
+}
+
+// The channel is told, rather than being shown a normal completion for a run
+// that did nothing.
+func TestASilentRunIsCalledOut(t *testing.T) {
+	rendered := renderStatus(jcgateway.StatusPayload{
+		State:  "completed",
+		Detail: "3s",
+		Summary: &jcgateway.RunSummary{
+			Provider: "ollama", Model: "gemma4:31b-cloud",
+			Silent:      true,
+			InputTokens: 2991, OutputTokens: 69,
+		},
+	})
+
+	if !strings.Contains(rendered, "returned nothing") {
+		t.Errorf("a run that did nothing reads as an ordinary success:\n%s", rendered)
+	}
+	// And still says what it cost, because it was paid for.
+	if !strings.Contains(rendered, "2991") {
+		t.Errorf("the cost of a silent run is not reported:\n%s", rendered)
+	}
+}

@@ -36,6 +36,16 @@ type RunSummary struct {
 	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"`
 	OutputTokens      int64 `json:"output_tokens,omitempty"`
 
+	// Silent says the run ended having produced no answer and asked for no
+	// tool.
+	//
+	// Worth saying because it is otherwise indistinguishable from success: the
+	// run completes, the tokens are spent, and the channel is told how long it
+	// took. A model that thought and then said nothing is a thing that
+	// happens, and somebody watching should not have to work out that nothing
+	// arrived.
+	Silent bool `json:"silent,omitempty"`
+
 	// Partial says this run began before the process did, so the tool and
 	// source lists are known to be incomplete. Token counts are cumulative and
 	// stay correct regardless.
@@ -107,6 +117,9 @@ type runRecord struct {
 	pending map[domain.ToolCallID]pendingCall
 
 	sources []recordedSource
+
+	// said records whether the run produced any answer text at all.
+	said bool
 
 	// compactedThrough is the last event folded into a summary. A source
 	// recorded at or before it is no longer in front of the model as itself.
@@ -188,6 +201,7 @@ func (r *runRecord) summarise(provider, model string) RunSummary {
 		CachedInputTokens: r.usage.CachedInputTokens,
 		OutputTokens:      r.usage.OutputTokens,
 		Partial:           !r.seen,
+		Silent:            r.seen && !r.said && len(r.tools) == 0,
 	}
 
 	for _, use := range r.tools {

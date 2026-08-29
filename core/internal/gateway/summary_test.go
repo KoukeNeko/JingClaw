@@ -280,3 +280,33 @@ func TestToolTimeIsAccountedFor(t *testing.T) {
 		t.Errorf("who answered is not recorded: %+v", summary)
 	}
 }
+
+// A run that produced no answer and asked for no tool is otherwise
+// indistinguishable from success: it completes, the tokens are spent, and the
+// channel is told how long it took.
+func TestARunThatSaidNothingSaysSo(t *testing.T) {
+	silent := newRunRecord()
+	silent.seen = true
+	silent.usage = domain.Usage{InputTokens: 2991, OutputTokens: 69}
+
+	if !silent.summarise("ollama", "gemma4:31b-cloud").Silent {
+		t.Error("a run that produced nothing is reported as an ordinary success")
+	}
+
+	// A run that answered is not silent.
+	spoke := newRunRecord()
+	spoke.seen = true
+	spoke.said = true
+	if spoke.summarise("ollama", "m").Silent {
+		t.Error("a run that answered is reported as silent")
+	}
+
+	// Nor is one that only used tools: the tools are the visible thing it did.
+	worked := newRunRecord()
+	worked.seen = true
+	requested(worked, "1", "read_file", `{"path":"a.go"}`)
+	completed(worked, "1", "read_file", 10, false)
+	if worked.summarise("ollama", "m").Silent {
+		t.Error("a run that used tools is reported as silent")
+	}
+}

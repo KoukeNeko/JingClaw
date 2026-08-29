@@ -136,9 +136,28 @@ type LogPayload struct {
 	DurationMS int64 `json:"duration_ms,omitempty"`
 	IsError    bool  `json:"is_error,omitempty"`
 
+	// Output is what the tool actually printed, bounded.
+	//
+	// Only a console gets this. A summary says a command exited zero; the
+	// output says which test failed and on what line, and that is the thing
+	// somebody watching a console is watching for. Bounded here rather than
+	// where it is rendered, so a build log does not travel through the
+	// dispatch queue to be thrown away at the far end.
+	Output string `json:"output,omitempty"`
+
+	// OutputTruncated says the tool printed more than was carried.
+	OutputTruncated bool `json:"output_truncated,omitempty"`
+
 	// Artifact names stored output, so somebody can ask for it by name.
 	Artifact string `json:"artifact,omitempty"`
 }
+
+// maxLoggedOutput bounds what one log line carries.
+//
+// Enough for a failing test's output and the line above it, and well short of
+// what a platform accepts: a console is a place to notice things, and the
+// whole of a build log belongs in the artifact it is already stored as.
+const maxLoggedOutput = 1200
 
 // ApprovalPayload asks a conversation to decide about a tool call.
 type ApprovalPayload struct {
@@ -200,6 +219,9 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 
 	case domain.AssistantMessageCompleted:
 		text := p.take(payload.MessageID)
+		if strings.TrimSpace(text) != "" {
+			p.record(run.ID).said = true
+		}
 		if strings.TrimSpace(text) == "" {
 			// A turn that only asked for tools has nothing to say yet.
 			return nil
@@ -246,12 +268,15 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		if !p.isConsole(ctx, target) {
 			return nil
 		}
+		output, cut := boundOutput(payload.Content, maxLoggedOutput)
 		return p.enqueue(ctx, run, target, DispatchLog, LogPayload{
-			Tool:       payload.Name,
-			Summary:    payload.Summary,
-			DurationMS: payload.DurationMS,
-			IsError:    payload.IsError,
-			Artifact:   artifactID(payload.Artifact),
+			Tool:            payload.Name,
+			Summary:         payload.Summary,
+			Output:          output,
+			OutputTruncated: cut || payload.Truncated,
+			DurationMS:      payload.DurationMS,
+			IsError:         payload.IsError,
+			Artifact:        artifactID(payload.Artifact),
 		})
 
 	case domain.UsageChanged:
@@ -357,6 +382,24 @@ func (p *Projector) shouldSayWorking(run domain.RunID) bool {
 
 	p.lastWorking[run] = now
 	return true
+}
+
+// boundOutput keeps the end of what a tool printed.
+//
+// The end rather than the start: a command that failed says why on its last
+// lines, and a build log's first thousand characters are the compiler
+// announcing itself.
+func boundOutput(content string, limit int) (string, bool) {
+	trimmed := strings.TrimRight(content, "\n")
+	if trimmed == "" {
+		return "", false
+	}
+
+	runes := []rune(trimmed)
+	if len(runes) <= limit {
+		return trimmed, false
+	}
+	return string(runes[len(runes)-limit:]), true
 }
 
 func artifactID(ref *domain.Artifact) string {

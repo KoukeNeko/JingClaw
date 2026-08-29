@@ -442,3 +442,136 @@ func explainFailureFor(t *testing.T) string {
 	t.Helper()
 	return "something went wrong at the model"
 }
+
+// What somebody watching a console is watching for: not that a tool ran, but
+// what it actually said.
+//
+// Shown with read_file rather than a command, because a console denies
+// execution outright — the output a console can ever see is the output of the
+// tools it is allowed.
+func TestAConsoleSeesWhatAToolPrinted(t *testing.T) {
+	arguments, err := json.Marshal(map[string]any{"path": "notes.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newSummaryHarness(t, [][]provider.Event{
+		{
+			provider.ToolCallRequested{ID: "call_1", Name: "read_file", Args: arguments},
+			provider.Completed{StopReason: domain.StopToolUse},
+		},
+		{
+			provider.TextDelta{Text: "Read it."},
+			provider.Completed{StopReason: domain.StopEndTurn},
+		},
+	})
+	h.bind(t, "console", "user_1")
+
+	accepted, err := h.ingress.Accept(context.Background(),
+		message("m1", "read notes.md", discordPrincipal("user_1")))
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if err := h.runtime.Wait(context.Background(), accepted.RunID); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	var log *gateway.LogPayload
+	for _, dispatch := range h.dispatches(t) {
+		if dispatch.Kind != gateway.DispatchLog {
+			continue
+		}
+		var payload gateway.LogPayload
+		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if payload.Tool == "read_file" {
+			log = &payload
+		}
+	}
+
+	if log == nil {
+		t.Fatal("the console was told nothing about the tool call")
+	}
+	// The file's own words, not a summary saying a file was read.
+	if !strings.Contains(log.Output, "what the file says") {
+		t.Errorf("the output does not carry what the tool returned:\n%s", log.Output)
+	}
+}
+
+// A console denies execution outright, so a run from one never produces
+// command output at all. Worth asserting: the line between what a console may
+// see and what it may do is the whole design.
+func TestAConsoleStillCannotRunACommand(t *testing.T) {
+	arguments, err := json.Marshal(map[string]any{"program": "echo", "args": []string{"hello"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newSummaryHarness(t, [][]provider.Event{
+		{
+			provider.ToolCallRequested{ID: "call_1", Name: "exec_command", Args: arguments},
+			provider.Completed{StopReason: domain.StopToolUse},
+		},
+		{
+			provider.TextDelta{Text: "I could not."},
+			provider.Completed{StopReason: domain.StopEndTurn},
+		},
+	})
+	h.bind(t, "console", "user_1")
+
+	accepted, err := h.ingress.Accept(context.Background(),
+		message("m1", "run echo", discordPrincipal("user_1")))
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if err := h.runtime.Wait(context.Background(), accepted.RunID); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	for _, dispatch := range h.dispatches(t) {
+		if dispatch.Kind == gateway.DispatchApproval {
+			t.Error("a console was offered the chance to approve running a program")
+		}
+		if strings.Contains(dispatch.Payload, "hello") {
+			t.Errorf("a command ran from a console: %s", dispatch.Payload)
+		}
+	}
+}
+
+// A room other people can type in gets none of it. Command output is the most
+// revealing thing a run produces.
+func TestAnOrdinaryChannelNeverSeesCommandOutput(t *testing.T) {
+	arguments, err := json.Marshal(map[string]any{
+		"program": "sh",
+		"args":    []string{"-c", "echo SECRET-BUILD-DETAIL"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newSummaryHarness(t, [][]provider.Event{
+		{
+			provider.ToolCallRequested{ID: "call_1", Name: "exec_command", Args: arguments},
+			provider.Completed{StopReason: domain.StopToolUse},
+		},
+		{
+			provider.TextDelta{Text: "Done."},
+			provider.Completed{StopReason: domain.StopEndTurn},
+		},
+	})
+	h.bind(t, "gateway", "user_1")
+
+	accepted, err := h.ingress.Accept(context.Background(),
+		message("m1", "run it", discordPrincipal("user_1")))
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	_ = h.runtime.Wait(context.Background(), accepted.RunID)
+
+	for _, dispatch := range h.dispatches(t) {
+		if strings.Contains(dispatch.Payload, "SECRET-BUILD-DETAIL") {
+			t.Errorf("command output reached a room other people can type in: %s", dispatch.Payload)
+		}
+	}
+}
