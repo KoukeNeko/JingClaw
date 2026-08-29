@@ -54,14 +54,30 @@ stop_new_process() {
 	fi
 }
 
+# gatewayd_pids finds every gatewayd, however it was started.
+#
+# Matched on the name of the executable rather than on a list of the paths it
+# has been launched from. Two of those were listed here and a third — the one
+# an operator actually types, ./core/bin/gatewayd — was not, so a restart said
+# it was ready while the previous gateway kept running: two processes holding
+# the same bot token, and every message answered twice.
+#
+# This process is excluded by pid, not by name, because the script's own
+# children are exactly what it is about to start.
 gatewayd_pids() {
-	ps -ax -o pid= -o command= | awk -v binary="$GATEWAYD_BIN" \
-		'$2 == binary || $2 == "./bin/gatewayd" { print $1 }'
+	ps -ax -o pid= -o command= | awk -v self="$$" '
+		{
+			path = $2
+			sub(/.*\//, "", path)
+			if (path == "gatewayd" && $1 != self) print $1
+		}
+	'
 }
 
 stop_gatewayd() {
 	for gatewayd_pid in $(gatewayd_pids); do
-		printf 'Stopping previous gatewayd (PID %s)\n' "$gatewayd_pid"
+		printf 'Stopping previous gatewayd (PID %s: %s)\n' "$gatewayd_pid" \
+			"$(ps -p "$gatewayd_pid" -o command= 2>/dev/null || echo gone)"
 		kill -TERM "$gatewayd_pid" 2>/dev/null || true
 	done
 
