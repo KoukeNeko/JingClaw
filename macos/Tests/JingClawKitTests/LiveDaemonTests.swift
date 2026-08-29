@@ -207,3 +207,30 @@ func tellsRefusedPermissionFromNoDaemon() throws {
         }
     }
 }
+
+@Test("the client can read what may reach the agent from a chat platform")
+func readsTheBindings() async throws {
+    guard let client = try liveClient() else {
+        print("skipped: no daemon is running")
+        return
+    }
+
+    let gateway = await GatewayStore(client: client)
+    await gateway.load()
+
+    // Not an assertion about how many: a deployment may have none bound, and
+    // that is a legitimate answer. What must not happen is the call failing
+    // and the window then showing an empty list, which reads as "nobody can
+    // reach this agent" when the truth is "I could not ask".
+    let loaded = await gateway.loaded
+    let status = await gateway.status
+    #expect(loaded, "could not read the bindings: \(status)")
+
+    for binding in await gateway.bindings {
+        #expect(!binding.id.isEmpty, "a binding with no id cannot be unbound")
+        #expect(
+            binding.permissionProfile == "gateway" || binding.permissionProfile == "console",
+            "unexpected profile \(binding.permissionProfile); the window explains only these two"
+        )
+    }
+}

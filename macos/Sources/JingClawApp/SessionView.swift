@@ -4,7 +4,10 @@ import SwiftUI
 /// The window: sessions on the left, the conversation on the right.
 struct SessionView: View {
     @Bindable var store: SessionStore
+    @Bindable var gateway: GatewayStore
+
     @State private var draft = ""
+    @State private var showingGateway = false
 
     var body: some View {
         NavigationSplitView {
@@ -29,6 +32,18 @@ struct SessionView: View {
                         }
                     }
                 }
+
+                ToolbarItem {
+                    Button {
+                        showingGateway = true
+                    } label: {
+                        Label("Channels", systemImage: "bubble.left.and.bubble.right")
+                    }
+                    .help("Which chat channels may reach this agent")
+                }
+            }
+            .sheet(isPresented: $showingGateway) {
+                GatewayPane(gateway: gateway)
             }
         }
         .overlay(alignment: .bottom) {
@@ -327,5 +342,116 @@ private struct Composer: View {
         guard !text.isEmpty else { return }
         draft = ""
         Task { await store.send(text) }
+    }
+}
+
+/// What can reach this agent from a chat platform, and what it may do there.
+///
+/// Read-only apart from unbinding. Adding a binding means choosing a workspace
+/// and a set of people, which the configuration file describes better than a
+/// dialog can and which is applied when the daemon starts; what this is for is
+/// seeing what is in force right now, and being able to take one away without
+/// editing a file and restarting.
+private struct GatewayPane: View {
+    @Bindable var gateway: GatewayStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Channels").font(.title3).bold()
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+
+            if !gateway.loaded {
+                // An empty list when the daemon could not be asked would say
+                // "nobody can reach this agent" when the truth is "I do not
+                // know", which is the more dangerous of the two to believe.
+                Text(gateway.status.isEmpty ? "Reading…" : gateway.status)
+                    .foregroundStyle(.secondary)
+            } else if gateway.bindings.isEmpty {
+                Text("Nothing is bound, so no channel can reach this agent.")
+                    .foregroundStyle(.secondary)
+            } else {
+                List(gateway.bindings) { binding in
+                    BindingRow(binding: binding, gateway: gateway)
+                }
+                .listStyle(.inset)
+            }
+
+            if gateway.loaded && !gateway.status.isEmpty {
+                Text(gateway.status).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 560, minHeight: 360)
+        .task { await gateway.load() }
+    }
+}
+
+private struct BindingRow: View {
+    let binding: ChannelBinding
+    @Bindable var gateway: GatewayStore
+
+    @State private var confirming = false
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(binding.platform).font(.caption).foregroundStyle(.secondary)
+                    Text(binding.channelID).font(.system(.body, design: .monospaced))
+                }
+
+                // The profile is the whole of what this channel may do, so it
+                // is said in words rather than left as a name somebody has to
+                // remember the meaning of.
+                Text(explain(binding.permissionProfile))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(who).font(.caption).foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button("Unbind", role: .destructive) { confirming = true }
+                .confirmationDialog(
+                    "Stop this channel reaching the agent?",
+                    isPresented: $confirming
+                ) {
+                    Button("Unbind", role: .destructive) {
+                        Task { await gateway.unbind(binding.id) }
+                    }
+                } message: {
+                    Text("The configuration file will bind it again when the daemon restarts, "
+                         + "unless you remove it there too.")
+                }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// Who may trigger work here. Empty means nobody, which is worth saying
+    /// rather than leaving as a blank line somebody reads as "everybody".
+    private var who: String {
+        if binding.allowedPrincipals.isEmpty {
+            return "nobody is permitted to trigger work here"
+        }
+        return "\(binding.allowedPrincipals.count) permitted"
+            + (binding.workspaceID.isEmpty ? "" : " · workspace \(binding.workspaceID)")
+    }
+
+    private func explain(_ profile: String) -> String {
+        switch profile {
+        case "console":
+            return "a private console: reads and fetches unattended, answers its own approvals, "
+                + "cannot run programs"
+        case "gateway":
+            return "a room other people can type in: reading is unattended, changes stop and ask, "
+                + "cannot run programs"
+        default:
+            return profile.isEmpty ? "no profile named" : profile
+        }
     }
 }

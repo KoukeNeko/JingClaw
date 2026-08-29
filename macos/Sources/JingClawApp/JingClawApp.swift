@@ -14,8 +14,8 @@ struct JingClawApp: App {
                     .frame(minWidth: 720, minHeight: 480)
                     .task { await launch.connect() }
 
-            case .connected(let store):
-                SessionView(store: store)
+            case .connected(let store, let gateway):
+                SessionView(store: store, gateway: gateway)
                     .frame(minWidth: 820, minHeight: 520)
 
             case .failed(let reason):
@@ -38,7 +38,7 @@ struct JingClawApp: App {
 final class Launch {
     enum Phase {
         case looking
-        case connected(SessionStore)
+        case connected(SessionStore, GatewayStore)
         case failed(String)
     }
 
@@ -89,9 +89,11 @@ final class Launch {
         do {
             let from = project ?? URL(fileURLWithPath: NSHomeDirectory())
             let discovery = try Discovery.locate(from: from)
-            let store = SessionStore(client: try DaemonClient(discovery: discovery))
+            let client = try DaemonClient(discovery: discovery)
+            let store = SessionStore(client: client)
+            let gateway = GatewayStore(client: client)
             await store.loadSessions()
-            phase = .connected(store)
+            phase = .connected(store, gateway)
         } catch {
             phase = .failed("\(error)")
         }
