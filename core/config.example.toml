@@ -134,9 +134,18 @@ window = 0
 [memory]
 # What the agent carries between sessions.
 #
-# On. What makes that safe is that nothing is ever written unattended: writing
-# a memory stops for a person in every profile. What arrived from outside this
-# machine stays marked as such and never becomes a standing instruction.
+# On. What is gated is authority, not writing: a retrieval memory is written
+# without asking, because it changes nothing until something looks it up, and
+# an approval that fires on every note is one people learn to click through. A
+# standing memory goes in front of the model on every future turn, and that
+# one stops for a person in every profile.
+#
+# What arrived from outside this machine stays marked as such, is labelled
+# when it is recalled, and never becomes a standing instruction however it was
+# approved.
+#
+# "agent memory list" is how you see everything it believes and where each
+# belief came from; "agent memory forget" removes one.
 enabled = true
 
 # The ceiling on standing directions injected every turn.
