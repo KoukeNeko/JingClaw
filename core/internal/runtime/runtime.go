@@ -1102,6 +1102,14 @@ func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingC
 			return false, err
 		}
 
+		// Worked out per call rather than once for the batch: the answer
+		// depends on where the call sits, and results landing between them
+		// change it.
+		trust, err := r.conversationTrust(ctx, run, pending.Seq)
+		if err != nil {
+			return false, err
+		}
+
 		call := tool.Call{
 			ID:        string(pending.CallID),
 			Name:      pending.Name,
@@ -1111,6 +1119,7 @@ func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingC
 				RunID:     string(run.ID),
 				Origin:    run.Origin,
 				Seq:       pending.Seq,
+				Trust:     trust,
 			},
 		}
 
@@ -1216,9 +1225,27 @@ func (r *Runtime) recordToolResult(
 			Content:    result.Content,
 			IsError:    result.IsError,
 			Truncated:  result.Truncated,
+			Foreign:    r.returnsForeignContent(call.Name),
 			Artifact:   artifactOf(result),
 			DurationMS: r.opts.Now().Sub(started).Milliseconds(),
 		})
+}
+
+// returnsForeignContent asks whether a tool's results carry somebody else's
+// words.
+//
+// Read from the tool now and written onto the event, so the question is
+// answerable later from history alone. A tool removed from the configuration
+// would otherwise make an old event unclassifiable.
+func (r *Runtime) returnsForeignContent(name string) bool {
+	if r.opts.Tools == nil {
+		return false
+	}
+	registered, known := r.opts.Tools.Lookup(name)
+	if !known {
+		return false
+	}
+	return registered.Spec().Capabilities.ForeignContent
 }
 
 // artifactOf carries a tool's artifact reference into the log.

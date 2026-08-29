@@ -64,6 +64,7 @@ type toolCallCompletedJSON struct {
 	Content    string        `json:"content"`
 	IsError    bool          `json:"is_error,omitempty"`
 	Truncated  bool          `json:"truncated,omitempty"`
+	Foreign    bool          `json:"foreign,omitempty"`
 	Artifact   *artifactJSON `json:"artifact,omitempty"`
 	DurationMS int64         `json:"duration_ms,omitempty"`
 }
@@ -260,6 +261,7 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			Content:    p.Content,
 			IsError:    p.IsError,
 			Truncated:  p.Truncated,
+			Foreign:    p.Foreign,
 			Artifact:   encodeArtifact(p.Artifact),
 			DurationMS: p.DurationMS,
 		})
@@ -427,6 +429,7 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			Content:    p.Content,
 			IsError:    p.IsError,
 			Truncated:  p.Truncated,
+			Foreign:    p.Foreign,
 			Artifact:   decodeArtifact(p.Artifact),
 			DurationMS: p.DurationMS,
 		}, nil

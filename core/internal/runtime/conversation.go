@@ -398,3 +398,48 @@ func (r *Runtime) modelTurns(ctx context.Context, run domain.Run) (int, error) {
 	}
 	return turns, nil
 }
+
+// conversationTrust is the least trusted thing that has reached the model in
+// this run before a given point.
+//
+// This is what makes Memory.Trust mean what its comment has always said. A
+// turn typed at this machine starts trusted; the moment the model reads
+// somebody else's words — a page, a tool server's output — everything it
+// writes afterwards may be its own conclusion or may be that content talking,
+// and nothing at the tool boundary can tell them apart.
+//
+// Bounded by the call's own position, because ordering is the whole argument:
+// a memory written before a page was fetched cannot have come from it, and
+// calls requested in the same turn were written before any of their results
+// existed.
+//
+// Derived from the log rather than tracked in memory, like everything else
+// here, so a run resumed in another process reaches the same answer.
+func (r *Runtime) conversationTrust(
+	ctx context.Context,
+	run domain.Run,
+	before domain.Seq,
+) (domain.TrustLevel, error) {
+	// Where the turn came from is the floor. A gateway run is untrusted
+	// however little it has read.
+	trust := trustForOrigin(run.Origin)
+	if trust == domain.TrustUntrusted {
+		return trust, nil
+	}
+
+	events, err := r.opts.Store.ListAfter(ctx, run.SessionID, 0, 0)
+	if err != nil {
+		return trust, err
+	}
+
+	for _, event := range events {
+		if event.RunID != run.ID || event.Seq >= before {
+			continue
+		}
+		if completed, ok := event.Payload.(domain.ToolCallCompleted); ok && completed.Foreign {
+			return domain.TrustUntrusted, nil
+		}
+	}
+
+	return trust, nil
+}

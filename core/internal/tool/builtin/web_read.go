@@ -62,6 +62,11 @@ func (t *WebRead) Spec() tool.Spec {
 		Level: tool.LevelNetworkRead,
 		Capabilities: tool.Capabilities{
 			Network: true,
+
+			// The whole point of the tool: what comes back is written by
+			// whoever runs the site. Everything the model does afterwards in
+			// this run is downstream of somebody else's words.
+			ForeignContent: true,
 			// Reading the same page twice gives the same answer often enough
 			// to be worth retrying, and changes nothing either way.
 			Idempotent:   true,

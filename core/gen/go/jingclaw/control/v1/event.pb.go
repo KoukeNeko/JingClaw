@@ -1044,7 +1044,12 @@ type ToolCallCompleted struct {
 	DurationMs int64  `protobuf:"varint,7,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
 	// The whole of what content is an excerpt of, when the tool stored one. A
 	// truncated result with no artifact is output that is gone.
-	Artifact      *Artifact `protobuf:"bytes,8,opt,name=artifact,proto3" json:"artifact,omitempty"`
+	Artifact *Artifact `protobuf:"bytes,8,opt,name=artifact,proto3" json:"artifact,omitempty"`
+	// Whether the result carried text somebody else wrote — a page, a tool
+	// server's output. What the model writes after reading one of these may be
+	// its own conclusion or may be the page talking, and a client showing the
+	// difference is showing something worth knowing.
+	Foreign       bool `protobuf:"varint,9,opt,name=foreign,proto3" json:"foreign,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1133,6 +1138,13 @@ func (x *ToolCallCompleted) GetArtifact() *Artifact {
 		return x.Artifact
 	}
 	return nil
+}
+
+func (x *ToolCallCompleted) GetForeign() bool {
+	if x != nil {
+		return x.Foreign
+	}
+	return false
 }
 
 // A run has paused for a human. Every client sees this, so whoever is nearest
@@ -2011,7 +2023,7 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\x89\x02\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\xa3\x02\n" +
 	"\x11ToolCallCompleted\x12\x17\n" +
 	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -2021,7 +2033,8 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\ttruncated\x18\x06 \x01(\bR\ttruncated\x12\x1f\n" +
 	"\vduration_ms\x18\a \x01(\x03R\n" +
 	"durationMs\x129\n" +
-	"\bartifact\x18\b \x01(\v2\x1d.jingclaw.control.v1.ArtifactR\bartifact\"}\n" +
+	"\bartifact\x18\b \x01(\v2\x1d.jingclaw.control.v1.ArtifactR\bartifact\x12\x18\n" +
+	"\aforeign\x18\t \x01(\bR\aforeign\"}\n" +
 	"\bPlanItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x127\n" +

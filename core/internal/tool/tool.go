@@ -115,6 +115,21 @@ type Capabilities struct {
 	// ParallelSafe means concurrent invocations do not contend for the same
 	// resource.
 	ParallelSafe bool
+
+	// ForeignContent means the result carries text somebody else wrote.
+	//
+	// Not the same as Network, and the two must not be merged. Network says
+	// where a tool reaches, which is a fact about its power; this says whose
+	// words come back, which is a fact about the answer. exec_command reaches
+	// the network and returns the output of a program the operator chose to
+	// run; web_read returns a page written by whoever owns the address.
+	//
+	// It exists so that trust can be a property of what the model has read
+	// rather than only of where the turn came from. A model that reads a
+	// hostile page and then writes down what it says has laundered an
+	// instruction into durable memory, and nothing that looks only at the
+	// turn's origin can see it happen.
+	ForeignContent bool
 }
 
 // Spec is everything the runtime and the model need to know about a tool.
@@ -176,6 +191,23 @@ type CallContext struct {
 	SessionID string
 	RunID     string
 
+	// Trust is the least trusted thing that has reached the model in this run
+	// before this call, and it only ever travels downwards.
+	//
+	// A turn typed here starts trusted and stops being so the moment the
+	// model reads somebody else's words — a page, a tool server's output.
+	// What the model writes after that may be its own conclusion or may be
+	// the page talking, and nothing at this boundary can tell the two apart.
+	//
+	// Bounded by this call's own position: a memory written before a page was
+	// fetched cannot have come from it.
+	//
+	// Read through TrustOrUntrusted, never directly. An unset level means
+	// nobody worked it out, and the safe reading of that is the lowest one:
+	// a caller that forgot to fill this in should get a memory it cannot
+	// promote rather than one it should not have trusted.
+	Trust domain.TrustLevel
+
 	// Origin says whether the turn came from a control client on this machine
 	// or through a gateway from somebody else's platform.
 	Origin domain.RunOrigin
@@ -183,6 +215,19 @@ type CallContext struct {
 	// Seq is where in the session's log this call sits, so anything a tool
 	// records can point back at what caused it.
 	Seq domain.Seq
+}
+
+// TrustOrUntrusted is the trust of this call, failing closed.
+//
+// An unset level is not "trusted by default"; it is "nobody said". Guessing
+// upwards there is the guess that costs the most when it is wrong, and it
+// would be invisible: a memory written by a mis-wired path would look exactly
+// like one the operator typed.
+func (c CallContext) TrustOrUntrusted() domain.TrustLevel {
+	if c.Trust == "" {
+		return domain.TrustUntrusted
+	}
+	return c.Trust
 }
 
 // PrincipalKey identifies whoever is asking, as a scope for anything kept per

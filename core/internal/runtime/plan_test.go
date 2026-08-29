@@ -30,6 +30,16 @@ func newPlanRuntime(t *testing.T) (*runtime.Runtime, *memory.Store) {
 // mid-run, which is a thing no test wants and every reader has to rule out.
 func newScriptedRuntime(t *testing.T, script []fake.Turn) (*runtime.Runtime, *memory.Store) {
 	t.Helper()
+	return newScriptedRuntimeWith(t, script)
+}
+
+// newScriptedRuntimeWith is the same with extra tools registered.
+func newScriptedRuntimeWith(
+	t *testing.T,
+	script []fake.Turn,
+	extra ...tool.Tool,
+) (*runtime.Runtime, *memory.Store) {
+	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -49,6 +59,9 @@ func newScriptedRuntime(t *testing.T, script []fake.Turn) (*runtime.Runtime, *me
 	// needs the tool to exist even though the runtime settles it itself.
 	registry := tool.NewRegistry()
 	registry.MustRegister(&builtin.AskUser{})
+	if len(extra) > 0 {
+		registry.MustRegister(extra...)
+	}
 
 	var steps atomic.Uint64
 	return runtime.New(ctx, runtime.Options{

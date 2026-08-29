@@ -285,6 +285,7 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 				Content:    p.Content,
 				IsError:    p.IsError,
 				Truncated:  p.Truncated,
+				Foreign:    p.Foreign,
 				Artifact:   artifactToProto(p.Artifact),
 				DurationMs: p.DurationMS,
 			},

@@ -142,6 +142,12 @@ message ToolCallCompleted {
   // The whole of what content is an excerpt of, when the tool stored one. A
   // truncated result with no artifact is output that is gone.
   Artifact artifact = 8;
+
+  // Whether the result carried text somebody else wrote — a page, a tool
+  // server's output. What the model writes after reading one of these may be
+  // its own conclusion or may be the page talking, and a client showing the
+  // difference is showing something worth knowing.
+  bool foreign = 9;
 }
 
 // A run has paused for a human. Every client sees this, so whoever is nearest

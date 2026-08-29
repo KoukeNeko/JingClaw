@@ -441,6 +441,15 @@ type ToolCallCompleted struct {
 	IsError   bool
 	Truncated bool
 
+	// Foreign says the result carried text somebody else wrote — a page, a
+	// tool server's output.
+	//
+	// Recorded on the event rather than looked up from the tool's spec when
+	// it is wanted. A tool removed from the configuration would otherwise
+	// make an old event unclassifiable, and "was this run reading somebody
+	// else's words" is a question about history that history should answer.
+	Foreign bool
+
 	// Artifact names the whole of what Content is an excerpt of, when the tool
 	// stored one. A truncated result with nothing here is output that is gone.
 	Artifact *Artifact

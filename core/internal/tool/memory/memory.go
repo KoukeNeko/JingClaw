@@ -243,10 +243,11 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 		ScopeRef:   ref,
 		Activation: activation,
 		Text:       text,
-		// The trust of the turn that produced it, which for anything arriving
-		// through a gateway is the lowest there is — and stays that way
-		// however many times it is summarised afterwards.
-		Trust:         trustOf(call.Context),
+		// The least trusted thing that reached the model before this call,
+		// which is what the field has always claimed to be. A gateway turn is
+		// the lowest there is; so is a local turn in which the model has
+		// already read somebody else's page.
+		Trust:         call.Context.TrustOrUntrusted(),
 		Origin:        call.Context.Origin,
 		SourceSession: domain.SessionID(call.Context.SessionID),
 		SourceSeq:     call.Context.Seq,
@@ -430,13 +431,6 @@ func memoryActivation(requested string) (domain.MemoryActivation, error) {
 // Anything arriving through a gateway is untrusted whatever it says about
 // itself, and that never improves: a fact derived from untrusted text is
 // untrusted however many summaries it has been through.
-func trustOf(call tool.CallContext) domain.TrustLevel {
-	if call.FromGateway() {
-		return domain.TrustUntrusted
-	}
-	return domain.TrustUser
-}
-
 // approverOf records who let it in.
 //
 // The approval itself happens in the permission engine before this runs; what

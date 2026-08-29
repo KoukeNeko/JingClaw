@@ -71,6 +71,7 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			Content:   "package main",
 			IsError:   true,
 			Truncated: true,
+			Foreign:   true,
 			Artifact: &domain.Artifact{
 				ID:        "sha256-" + strings.Repeat("ab", 32),
 				Size:      120_000,

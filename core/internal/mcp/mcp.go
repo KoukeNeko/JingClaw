@@ -283,6 +283,12 @@ func (s *Server) adapt(cfg ServerConfig, offered *sdk.Tool) (tool.Tool, error) {
 				Execute:     true,
 				Network:     true,
 				Destructive: true,
+
+				// Whatever comes back was written by somebody else's program,
+				// which may itself be relaying somebody else's words. Assumed
+				// for the same reason as the rest: guessing the other way is
+				// what costs when it is wrong.
+				ForeignContent: true,
 			},
 		},
 	}, nil
