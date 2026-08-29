@@ -74,6 +74,11 @@ type Adapter struct {
 	config Config
 	sink   Sink
 
+	// decider acts on a button press. Nil means the buttons are never
+	// attached and a press is answered as unavailable, which is what a
+	// deployment that never wired one in should see.
+	decider Decider
+
 	client *bot.Client
 
 	// selfID is written by the Ready handler and read by the message handler,
@@ -101,13 +106,20 @@ type Adapter struct {
 	answerMessages map[string]snowflake.ID
 }
 
-func New(config Config, sink Sink) *Adapter {
+// New builds the adapter.
+//
+// The decider is a parameter rather than something set afterwards because it
+// is a second power: sink starts work, decider permits it. A wiring site has
+// to name both, and passing nil for the second is a decision somebody wrote
+// down rather than a line they forgot.
+func New(config Config, sink Sink, decider Decider) *Adapter {
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
 	return &Adapter{
 		config:         config,
 		sink:           sink,
+		decider:        decider,
 		statusMessages: make(map[domain.RunID]snowflake.ID),
 		answerMessages: make(map[string]snowflake.ID),
 	}
@@ -128,6 +140,11 @@ func (a *Adapter) Run(ctx context.Context) error {
 		),
 		bot.WithEventListenerFunc(a.onReady),
 		bot.WithEventListenerFunc(a.onMessage),
+		// A press is not a message, and it does not travel on the message
+		// intents above: Discord delivers interactions to a bot regardless.
+		// Keeping them on separate handlers is also what lets a room hold
+		// people who may talk to the agent and not decide for it.
+		bot.WithEventListenerFunc(a.onComponent),
 	)
 	if err != nil {
 		return fmt.Errorf("discord: create client: %w", err)

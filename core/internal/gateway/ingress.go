@@ -62,11 +62,11 @@ type Ingress struct {
 	Binder    ProfileBinder
 	Artifacts ArtifactStore
 
-	// Console is the extra reach a console binding has. Left nil, a binding
-	// naming the console profile still runs under it, but the commands that
-	// decide approvals answer that they are unavailable rather than silently
-	// doing nothing.
-	Console ConsoleRuntime
+	// Decisions is the extra reach needed to answer an approval or a
+	// question. Left nil, a console binding still runs under its profile and
+	// a button still appears where one is configured, but both answer that
+	// deciding is unavailable rather than silently doing nothing.
+	Decisions DecidingRuntime
 
 	// NewDispatchID names a message this program sends on its own behalf,
 	// rather than one produced by a run.

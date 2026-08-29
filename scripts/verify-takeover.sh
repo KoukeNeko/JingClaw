@@ -61,8 +61,9 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 [gateway]
 platform = "discord"
+[gateway.discord]
 account_id = "main"
-[[gateway.channels]]
+[[gateway.discord.channels]]
 channel_ids = ["$CHANNEL"]
 tenant_id = "$TENANT"
 workspace_id = "default"

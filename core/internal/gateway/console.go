@@ -13,14 +13,21 @@ import (
 // ConsoleProfileName is the profile a binding names to become a console.
 const ConsoleProfileName = "console"
 
-// ConsoleRuntime is the extra reach a console binding has.
+// DecidingRuntime is the extra reach needed to answer an approval or a
+// question, rather than only to start work.
 //
 // Separate from Runtime, and optional, because Runtime is deliberately narrow:
 // an ingress serving ordinary channels may start work and nothing else. Adding
 // approvals to that interface would hand every channel the ability to resolve
 // them. Kept apart, an ingress without this cannot decide anything, and the
 // widening is visible at the point somebody wires it in.
-type ConsoleRuntime interface {
+//
+// Holding it is not the same as being allowed to use it. Two separate gates
+// decide that, and they identify the decider differently: a console channel,
+// where the room itself is the credential and a typed command is enough; and
+// a named approver in a shared room, who is identified by the platform when
+// they press a button and never by what they type.
+type DecidingRuntime interface {
 	PendingApprovals(ctx context.Context, session domain.SessionID) ([]domain.Approval, error)
 
 	DecideApproval(
@@ -121,7 +128,7 @@ func (i *Ingress) handleConsole(
 		return i.sendArtifact(ctx, message, session, command.arg)
 	}
 
-	if i.Console == nil {
+	if i.Decisions == nil {
 		return i.say(ctx, message, session,
 			"This daemon was not started with console commands available.")
 	}
@@ -131,7 +138,7 @@ func (i *Ingress) handleConsole(
 	// channel is remote control of its own conversations, and reaching past
 	// them would make every bound channel a way to approve anything.
 	if command.verb == "questions" || command.verb == "answer" {
-		asked, err := i.Console.PendingQuestions(ctx, session)
+		asked, err := i.Decisions.PendingQuestions(ctx, session)
 		if err != nil {
 			return err
 		}
@@ -141,7 +148,7 @@ func (i *Ingress) handleConsole(
 		return i.answer(ctx, message, session, asked, command)
 	}
 
-	waiting, err := i.Console.PendingApprovals(ctx, session)
+	waiting, err := i.Decisions.PendingApprovals(ctx, session)
 	if err != nil {
 		return err
 	}
@@ -184,7 +191,7 @@ func (i *Ingress) answer(
 		answeredBy = string(message.Principal.Platform)
 	}
 
-	answered, err := i.Console.AnswerQuestion(ctx, found.ID, command.rest, answeredBy)
+	answered, err := i.Decisions.AnswerQuestion(ctx, found.ID, command.rest, answeredBy)
 	if err != nil {
 		return i.say(ctx, message, session, fmt.Sprintf("That did not work: %v", err))
 	}
@@ -242,7 +249,7 @@ func (i *Ingress) decide(
 		decidedBy = string(binding.Platform)
 	}
 
-	if _, err := i.Console.DecideApproval(ctx, found.ID, allow, domain.RememberOnce, decidedBy); err != nil {
+	if _, err := i.Decisions.DecideApproval(ctx, found.ID, allow, domain.RememberOnce, decidedBy); err != nil {
 		return err
 	}
 

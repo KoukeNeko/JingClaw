@@ -243,6 +243,53 @@ message DeliverInboundResponse {
   bool duplicate = 3;
 }
 
+// Somebody pressed a control on a message a gateway posted.
+//
+// The gateway asserts who pressed it and where, which is what its platform
+// told it. It does not assert that they may decide anything: that is settled
+// on the daemon against the channel's binding, because a process holding a bot
+// token must not be able to approve something by claiming it may.
+message DeliverDecisionRequest {
+  string platform = 1;
+  string account_id = 2;
+  string tenant_id = 3;
+  string channel_id = 4;
+
+  // The platform's stable identifier for whoever pressed. Authorization reads
+  // this and never display_name.
+  string principal_id = 5;
+  string principal_display_name = 6;
+  bool principal_is_bot = 7;
+  repeated PrincipalClaim principal_claims = 8;
+
+  string approval_id = 9;
+  bool allow = 10;
+}
+
+message DeliverDecisionResponse {
+  DecisionOutcome outcome = 1;
+}
+
+// What became of a press. Deliberately coarse: the caller reports this to the
+// person who pressed, and a refusal must not tell somebody who may not decide
+// here whether the approval they named exists.
+enum DecisionOutcome {
+  DECISION_OUTCOME_UNSPECIFIED = 0;
+
+  // This press decided it.
+  DECISION_OUTCOME_RECORDED = 1;
+
+  // This person may not decide here, or there is nothing by that name. One
+  // value for both on purpose.
+  DECISION_OUTCOME_REFUSED = 2;
+
+  // Somebody else got there first.
+  DECISION_OUTCOME_ALREADY = 3;
+
+  // This daemon cannot decide anything.
+  DECISION_OUTCOME_UNAVAILABLE = 4;
+}
+
 enum DispatchKind {
   DISPATCH_KIND_UNSPECIFIED = 0;
   DISPATCH_KIND_MESSAGE = 1;
@@ -344,6 +391,13 @@ service GatewayIngressService {
   rpc DeliverInbound(DeliverInboundRequest) returns (DeliverInboundResponse);
   rpc SubscribeDispatches(SubscribeDispatchesRequest) returns (stream SubscribeDispatchesResponse);
   rpc AcknowledgeDispatch(AcknowledgeDispatchRequest) returns (AcknowledgeDispatchResponse);
+
+  // Carries a button press inward. It is here rather than on SessionService
+  // deliberately: DecideApproval there settles anything by id and belongs to
+  // an operator's client, while this one only reports that a named person
+  // pressed something in a named channel and lets the daemon decide whether
+  // that counts.
+  rpc DeliverDecision(DeliverDecisionRequest) returns (DeliverDecisionResponse);
 }
 
 // Binding management, spoken by an operator's control client rather than by a

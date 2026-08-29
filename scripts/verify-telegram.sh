@@ -129,10 +129,10 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 [gateway]
 platform = "telegram"
-account_id = "main"
 [gateway.telegram]
+account_id = "main"
 api_base = "http://127.0.0.1:7793"
-[[gateway.channels]]
+[[gateway.telegram.channels]]
 channel_ids = ["$CHAT_ID"]
 tenant_id = "$CHAT_ID"
 workspace_id = "default"

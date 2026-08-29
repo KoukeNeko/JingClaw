@@ -494,7 +494,7 @@ func TestADeclaredChannelIsChecked(t *testing.T) {
 			test.mutate(&channel)
 
 			cfg := config.Defaults()
-			cfg.Gateway.Channels = []config.Channel{channel}
+			cfg.Gateway.Discord.Channels = []config.Channel{channel}
 
 			err := cfg.Validate()
 			if err == nil {
@@ -508,10 +508,10 @@ func TestADeclaredChannelIsChecked(t *testing.T) {
 
 	// Several channels in one entry, and both lists at once.
 	cfg := config.Defaults()
-	cfg.Gateway.Channels = []config.Channel{{
+	cfg.Gateway.Discord.Channels = []config.Channel{{
 		ChannelIDs: []string{"111", "222"}, Users: []string{"user_1"},
 	}}
-	cfg.Gateway.Consoles = []config.Channel{{
+	cfg.Gateway.Discord.Consoles = []config.Channel{{
 		ChannelIDs: []string{"333"}, Users: []string{"user_1"},
 	}}
 	if err := cfg.Validate(); err != nil {
@@ -523,10 +523,10 @@ func TestADeclaredChannelIsChecked(t *testing.T) {
 // it, which is not something a file should be able to express.
 func TestAChannelCannotBeInBothLists(t *testing.T) {
 	cfg := config.Defaults()
-	cfg.Gateway.Channels = []config.Channel{{
+	cfg.Gateway.Discord.Channels = []config.Channel{{
 		ChannelIDs: []string{"111"}, Users: []string{"user_1"},
 	}}
-	cfg.Gateway.Consoles = []config.Channel{{
+	cfg.Gateway.Discord.Consoles = []config.Channel{{
 		ChannelIDs: []string{"111"}, Users: []string{"user_1"},
 	}}
 
@@ -534,7 +534,7 @@ func TestAChannelCannotBeInBothLists(t *testing.T) {
 	if err == nil {
 		t.Fatal("a channel declared as both an ordinary room and a console was accepted")
 	}
-	if !strings.Contains(err.Error(), "gateway.channels[0]") {
+	if !strings.Contains(err.Error(), "gateway.discord.channels[0]") {
 		t.Errorf("the error does not say where it was first declared: %v", err)
 	}
 }
@@ -543,11 +543,11 @@ func TestAChannelCannotBeInBothLists(t *testing.T) {
 // error naming none is an error somebody has to bisect.
 func TestAChannelProblemSaysWhichEntry(t *testing.T) {
 	cfg := config.Defaults()
-	cfg.Gateway.Channels = []config.Channel{
+	cfg.Gateway.Discord.Channels = []config.Channel{
 		{ChannelIDs: []string{"a"}, Users: []string{"user_1"}},
 		{ChannelIDs: []string{"b"}, Users: []string{"user_1"}},
 	}
-	cfg.Gateway.Consoles = []config.Channel{
+	cfg.Gateway.Discord.Consoles = []config.Channel{
 		{ChannelIDs: nil, Users: []string{"user_1"}},
 	}
 
@@ -555,7 +555,7 @@ func TestAChannelProblemSaysWhichEntry(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted")
 	}
-	if !strings.Contains(err.Error(), "gateway.consoles[0]") {
+	if !strings.Contains(err.Error(), "gateway.discord.consoles[0]") {
 		t.Errorf("the error does not say which entry: %v", err)
 	}
 }

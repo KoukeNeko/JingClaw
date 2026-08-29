@@ -172,15 +172,39 @@ type ApprovalPayload struct {
 	Summary    string   `json:"summary"`
 	Effects    []string `json:"effects,omitempty"`
 
-	// DecidableHere says this conversation may answer its own approval,
-	// which is true of a console channel and not of an ordinary one.
+	// Route is how a decision may be made where this is going.
 	//
 	// Carried rather than worked out by whatever renders the message: which
-	// channels are consoles is a fact about the deployment, and a renderer
-	// that guessed would eventually invite somebody to type a command that
-	// does nothing.
-	DecidableHere bool `json:"decidable_here,omitempty"`
+	// channels are consoles and who may press a button are facts about the
+	// deployment, and a renderer that guessed would eventually invite
+	// somebody to do something that does nothing.
+	Route ApprovalRoute `json:"route,omitempty"`
 }
+
+// ApprovalRoute is how an approval may be answered from a conversation.
+//
+// The three differ in what identifies the person deciding, which is the whole
+// question an approval asks.
+type ApprovalRoute string
+
+const (
+	// ApprovalElsewhere is the default: the message says where to go and
+	// offers nothing here.
+	ApprovalElsewhere ApprovalRoute = ""
+
+	// ApprovalByReply is a console, where the channel is the credential.
+	// Nobody but its owner can read or type in it, so a typed command is as
+	// good as anything else.
+	ApprovalByReply ApprovalRoute = "reply"
+
+	// ApprovalByPress is a shared room, where the person is the credential.
+	//
+	// Typing is not enough here and never becomes enough: a message in a room
+	// other people can type in says which account posted it and nothing more.
+	// A button press is delivered by the platform with the presser's
+	// authenticated identity attached, which is a different claim entirely.
+	ApprovalByPress ApprovalRoute = "press"
+)
 
 // QuestionPayload is the agent asking a person something.
 //
@@ -358,11 +382,11 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 
 	case domain.ApprovalRequested:
 		return p.enqueue(ctx, run, target, DispatchApproval, ApprovalPayload{
-			ApprovalID:    string(payload.ApprovalID),
-			ToolName:      payload.ToolName,
-			Summary:       payload.Summary,
-			Effects:       payload.Effects,
-			DecidableHere: p.isConsole(ctx, target),
+			ApprovalID: string(payload.ApprovalID),
+			ToolName:   payload.ToolName,
+			Summary:    payload.Summary,
+			Effects:    payload.Effects,
+			Route:      p.approvalRoute(ctx, target),
 		})
 
 	case domain.QuestionAsked:
@@ -491,11 +515,12 @@ func artifactID(ref *domain.Artifact) string {
 	return ref.ID
 }
 
-// isConsole reports whether this conversation may answer its own approvals.
+// isConsole reports whether this room is one an operator controls.
 //
-// Best effort: a lookup that fails leaves the message telling somebody to go
-// to the machine, which is always true and never misleading. The opposite
-// mistake — inviting a reply that will not work — is the one worth avoiding.
+// Read for several unrelated decisions — whether a finished tool call is worth
+// logging, whether a question may be answered here, whether a failure's own
+// words may be shown — so it stays its own question rather than becoming a
+// case of the approval route below.
 func (p *Projector) isConsole(ctx context.Context, target ConversationRef) bool {
 	binding, err := p.Store.Binding(ctx,
 		target.Platform, target.AccountID, target.TenantID, target.ChannelID)
@@ -503,6 +528,27 @@ func (p *Projector) isConsole(ctx context.Context, target ConversationRef) bool 
 		return false
 	}
 	return binding.PermissionProfile == ConsoleProfileName
+}
+
+// approvalRoute settles how the room this is going to may answer it.
+//
+// A binding that cannot be read offers nothing, which is the safe direction:
+// the message then says to go and decide it somewhere else, and that is always
+// true.
+func (p *Projector) approvalRoute(ctx context.Context, target ConversationRef) ApprovalRoute {
+	binding, err := p.Store.Binding(ctx,
+		target.Platform, target.AccountID, target.TenantID, target.ChannelID)
+	if err != nil {
+		return ApprovalElsewhere
+	}
+
+	if binding.PermissionProfile == ConsoleProfileName {
+		return ApprovalByReply
+	}
+	if len(binding.ApprovingPrincipals) > 0 || len(binding.ApprovingClaims) > 0 {
+		return ApprovalByPress
+	}
+	return ApprovalElsewhere
 }
 
 // record returns a run's accumulator, creating it if this is the first thing

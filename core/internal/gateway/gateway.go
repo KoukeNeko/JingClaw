@@ -245,7 +245,36 @@ type Binding struct {
 	AllowedPrincipals []string
 	AllowedClaims     []Claim
 
+	// ApprovingPrincipals and ApprovingClaims decide who may answer an
+	// approval from here. Empty means nobody, and nothing about being allowed
+	// to trigger work implies it.
+	ApprovingPrincipals []string
+	ApprovingClaims     []Claim
+
 	CreatedAt time.Time
+}
+
+// MayApprove reports whether this person may answer an approval here.
+//
+// The principal must be one the platform authenticated, never one read out of
+// a message or a tool argument: the whole value of a button over a typed
+// command is that the platform says who pressed it.
+func (b Binding) MayApprove(principal Principal) bool {
+	if principal.IsBot {
+		return false
+	}
+
+	for _, allowed := range b.ApprovingPrincipals {
+		if allowed == principal.ID {
+			return true
+		}
+	}
+	for _, claim := range b.ApprovingClaims {
+		if principal.HasClaim(claim.Namespace, claim.Value) {
+			return true
+		}
+	}
+	return false
 }
 
 // Permits reports whether a principal may trigger work through this binding.
@@ -328,7 +357,7 @@ func NewPlane(
 	rt Runtime,
 	binder ProfileBinder,
 	artifacts ArtifactStore,
-	console ConsoleRuntime,
+	console DecidingRuntime,
 	newID func() string,
 	now func() time.Time,
 	logger *slog.Logger,
@@ -343,7 +372,7 @@ func NewPlane(
 			Runtime:       rt,
 			Binder:        binder,
 			Artifacts:     artifacts,
-			Console:       console,
+			Decisions:     console,
 			NewDispatchID: newID,
 			Now:           now,
 			Logger:        logger,

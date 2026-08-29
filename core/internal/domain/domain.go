@@ -5,7 +5,10 @@
 // second one, has to be possible without touching this package.
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 type (
 	SessionID string
@@ -689,6 +692,16 @@ type ApprovalRequested struct {
 	// one. See Approval.Preview.
 	Preview string
 }
+
+// ErrApprovalDecided is returned when a decision arrives for something that
+// has already been settled, which in practice means two people answered the
+// same prompt at the same moment.
+//
+// Here rather than in the runtime because every caller that has to tell the
+// second person what happened would otherwise have to depend on the runtime
+// to name it, and a gateway that imports the agent loop to read one error
+// value has imported the agent loop.
+var ErrApprovalDecided = errors.New("domain: approval has already been decided")
 
 // QuestionID identifies one thing the agent asked a person.
 type QuestionID string

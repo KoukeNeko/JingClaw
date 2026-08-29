@@ -23,6 +23,7 @@ for CHECK in verify-config.sh verify-console.sh verify-compaction.sh \
 	verify-approval-preview.sh verify-takeover.sh verify-model-choice.sh \
 	verify-shutdown.sh verify-plan.sh verify-ask.sh verify-patch.sh \
 	verify-memory-time.sh verify-memory-trust.sh verify-memory-expand.sh \
+	verify-approval-buttons.sh \
 	verify-parity.sh; do
 	printf '\n=== %s ===\n' "$CHECK"
 	if ! "./$CHECK"; then

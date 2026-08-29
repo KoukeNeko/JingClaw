@@ -491,10 +491,6 @@ type Delivery struct {
 type Gateway struct {
 	Platform string `koanf:"platform"`
 
-	// AccountID names the bot account within JingClaw, so bindings and the
-	// delivery queue can be scoped to it.
-	AccountID string `koanf:"account_id"`
-
 	// WorkingInterval is the least time between "what it is doing now" lines.
 	// A run that reads six files in a second would otherwise send six of them,
 	// which is more than a person can read and more than a platform will take.
@@ -514,6 +510,27 @@ type Gateway struct {
 	// meant for one silently applying to the other.
 	Discord  Discord  `koanf:"discord"`
 	Telegram Telegram `koanf:"telegram"`
+}
+
+// The platforms a gateway can serve. Named so the resolver below and the
+// validator agree by symbol rather than by two spellings of one string.
+const (
+	PlatformDiscord  = "discord"
+	PlatformTelegram = "telegram"
+)
+
+// Bindings is the part of a platform section that has the same shape whichever
+// platform it is: which bot account, and which rooms it serves.
+//
+// A return type rather than an embedded field. Defaults are seeded by walking
+// the config struct, and that walk does not honour an embedded squash: the
+// keys come out as "gateway.discord.Bindings.account_id" and every default
+// inside is silently lost. So each platform declares the three fields itself
+// and this is what reads them back as one thing.
+type Bindings struct {
+	// AccountID names the bot account within JingClaw, so bindings and the
+	// delivery queue can be scoped to it.
+	AccountID string `koanf:"account_id"`
 
 	// Channels are rooms other people can type in. Reading runs unattended;
 	// changes, memory and web pages stop and ask; programs are refused.
@@ -541,8 +558,44 @@ type Gateway struct {
 	Consoles []Channel `koanf:"consoles"`
 }
 
+// Selected returns the account and rooms of the platform this daemon serves.
+//
+// Each platform declares its own rather than sharing one list, because a
+// channel id, a guild id, a user id and a role id all belong to one service.
+// One shared list would let a file written for Discord be read by a Telegram
+// daemon, which is the failure the separate sections exist to prevent.
+//
+// A platform this build does not serve returns nothing. Validation reports
+// that as a problem; this does not guess which section was meant.
+func (g Gateway) Selected() Bindings {
+	switch g.Platform {
+	case PlatformDiscord:
+		return Bindings{g.Discord.AccountID, g.Discord.Channels, g.Discord.Consoles}
+	case PlatformTelegram:
+		return Bindings{g.Telegram.AccountID, g.Telegram.Channels, g.Telegram.Consoles}
+	}
+	return Bindings{}
+}
+
+// SetAccountID overrides the selected platform's bot account.
+//
+// For the command-line flag that does that, which has to land in the section
+// the daemon will actually read rather than beside it.
+func (g *Gateway) SetAccountID(account string) {
+	switch g.Platform {
+	case PlatformDiscord:
+		g.Discord.AccountID = account
+	case PlatformTelegram:
+		g.Telegram.AccountID = account
+	}
+}
+
 // Discord is what the Discord adapter needs.
 type Discord struct {
+	AccountID string    `koanf:"account_id"`
+	Channels  []Channel `koanf:"channels"`
+	Consoles  []Channel `koanf:"consoles"`
+
 	TokenEnv  []string `koanf:"token_env"`
 	TokenFile string   `koanf:"token_file"`
 
@@ -563,6 +616,10 @@ type Discord struct {
 // no per-answer message budget worth setting, and no privileged intent to
 // negotiate for.
 type Telegram struct {
+	AccountID string    `koanf:"account_id"`
+	Channels  []Channel `koanf:"channels"`
+	Consoles  []Channel `koanf:"consoles"`
+
 	TokenEnv  []string `koanf:"token_env"`
 	TokenFile string   `koanf:"token_file"`
 
@@ -594,6 +651,21 @@ type Channel struct {
 	// channel that answers anyone who finds it is not a default worth having.
 	Users []string `koanf:"users"`
 	Roles []string `koanf:"roles"`
+
+	// Approvers and ApproverRoles are who may answer an approval from here,
+	// by pressing a button on the message rather than by typing.
+	//
+	// A separate list from Users on purpose. Being allowed to ask the agent
+	// for something and being allowed to permit it are different powers, and
+	// a deployment where everybody in the room holds both is a choice an
+	// operator should have to write down rather than get by default.
+	//
+	// Both empty means nobody, and the message then says to go and decide it
+	// somewhere else. Typing is never enough here however these are set: a
+	// message in a shared room says only which account posted it, and the
+	// point of the button is that the platform tells us who pressed it.
+	Approvers     []string `koanf:"approvers"`
+	ApproverRoles []string `koanf:"approver_roles"`
 }
 
 type Workspace struct {
@@ -724,11 +796,11 @@ func Defaults() Config {
 			ConsoleTTL: 7 * 24 * time.Hour,
 		},
 		Gateway: Gateway{
-			Platform:        "discord",
-			AccountID:       "main",
+			Platform:        PlatformDiscord,
 			WorkingInterval: 2 * time.Second,
 			StreamInterval:  1500 * time.Millisecond,
 			Discord: Discord{
+				AccountID:          "main",
 				TokenEnv:           []string{"DISCORD_BOT_TOKEN"},
 				TokenFile:          "discord.token",
 				MaxMessages:        3,
@@ -994,13 +1066,17 @@ func (c Config) choiceProblems() []Problem {
 		}
 	}
 
+	// Only the selected platform's rooms are checked. A file may describe
+	// both, and the one this daemon is not serving is not its business.
+	bound := c.Gateway.Selected()
+
 	seen := map[string]string{}
 	for _, list := range []struct {
 		name     string
 		channels []Channel
 	}{
-		{"gateway.channels", c.Gateway.Channels},
-		{"gateway.consoles", c.Gateway.Consoles},
+		{"gateway." + c.Gateway.Platform + ".channels", bound.Channels},
+		{"gateway." + c.Gateway.Platform + ".consoles", bound.Consoles},
 	} {
 		for index, channel := range list.channels {
 			where := fmt.Sprintf("%s[%d]", list.name, index)
@@ -1715,15 +1791,32 @@ web_console = true
 # the one chosen is the one that is read.
 platform = "discord"
 
-# Names this bot within JingClaw, so bindings and the delivery queue belong to
-# it. A second bot means a second account_id.
-account_id = "main"
-
 # The least time between "what it is doing now" lines, and between versions of
 # an answer still being written. Here rather than under a platform: what these
 # pace is the projector, which does not know which platform will carry them.
 # working_interval = "2s"
 # stream_interval = "1.5s"
+
+# Everything else about a platform lives in that platform's own section,
+# including which rooms it serves. A channel id, a guild id, a user id and a
+# role id all belong to one service, and a single shared list would let a file
+# written for Discord be read by a Telegram daemon.
+
+[gateway.discord]
+# Where the bot token comes from. The file must be mode 600, and the value
+# never reaches a log.
+token_env = ["DISCORD_BOT_TOKEN"]
+token_file = "discord.token"
+
+# Names this bot within JingClaw, so bindings and the delivery queue belong to
+# it. A second bot means a second account_id.
+account_id = "main"
+
+# How many messages one answer may become before it goes as a file instead.
+# max_messages = 3
+
+# The upload ceiling, well under what Discord accepts.
+# max_attachment_bytes = 4194304
 
 # The channels this agent answers in, applied when the daemon starts.
 # Declaring one that exists updates it.
@@ -1739,7 +1832,7 @@ account_id = "main"
 
 # Rooms other people can type in. Reading is unattended; changes, memory and
 # web pages stop and ask.
-# [[gateway.channels]]
+# [[gateway.discord.channels]]
 # Several channels may share an entry when they share their rules.
 # channel_ids = ["111111111111111111"]
 # tenant_id = "222222222222222222"
@@ -1747,28 +1840,24 @@ account_id = "main"
 # Both empty permits nobody, which is the right default for a room.
 # users = ["333333333333333333"]
 # roles = []
+# Who may answer an approval here, by pressing a button on the message.
+# A separate list because asking for something and permitting it are
+# different powers. Both empty means nobody, and the message then says to go
+# and decide it elsewhere. Typing is never enough in a shared room however
+# these are set: a message says which account posted it, and a button press
+# is delivered with the presser's own identity attached.
+# approvers = ["333333333333333333"]
+# approver_roles = []
 
 # Private channels you control. As above, and additionally: pages are fetched
 # unattended, and an approval can be answered by replying "approve <id>" or
 # "deny <id>". The channel is told what it is the first time it is used.
-# [[gateway.consoles]]
+# [[gateway.discord.consoles]]
 # channel_ids = ["111111111111111112"]
 # tenant_id = "222222222222222222"
 # workspace_id = "default"
 # users = ["333333333333333333"]
 # roles = []
-
-[gateway.discord]
-# Where the bot token comes from. The file must be mode 600, and the value
-# never reaches a log.
-token_env = ["DISCORD_BOT_TOKEN"]
-token_file = "discord.token"
-
-# How many messages one answer may become before it goes as a file instead.
-# max_messages = 3
-
-# The upload ceiling, well under what Discord accepts.
-# max_attachment_bytes = 4194304
 
 [gateway.telegram]
 # Where the bot token comes from. The file must be mode 600, and the value
@@ -1781,4 +1870,15 @@ token_file = "telegram.token"
 
 # The API root. Empty is Telegram itself; set it to reach a local proxy.
 # api_base = ""
+
+# The same three settings Discord has, because they name Telegram's own ids.
+# account_id = "main"
+# [[gateway.telegram.channels]]
+# channel_ids = ["-1001111111111"]
+# workspace_id = "default"
+# users = ["333333333"]
+# [[gateway.telegram.consoles]]
+# channel_ids = ["-1001111111112"]
+# workspace_id = "default"
+# users = ["333333333"]
 `

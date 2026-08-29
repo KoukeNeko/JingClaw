@@ -218,20 +218,29 @@ func renderApproval(payload jcgateway.ApprovalPayload, style Style) string {
 		}
 	}
 
-	if payload.DecidableHere {
+	switch payload.Route {
+	case jcgateway.ApprovalByReply:
 		// A console channel. Who can read and type here is settled by the
 		// platform's own permissions, and the person reading this is the one
 		// who owns it.
 		fmt.Fprintf(&out, "\nReply `approve %s` or `deny %s`.",
 			payload.ApprovalID, payload.ApprovalID)
-		return out.String()
-	}
 
-	// Everywhere else, deliberately not offered. A request and its approval
-	// arriving from the same account in a room other people can type in is
-	// one unbroken chain, and whoever holds that account holds both halves.
-	fmt.Fprintf(&out, "\nApprove it from a JingClaw client:\n%s",
-		style.block("agent approve "+payload.ApprovalID))
+	case jcgateway.ApprovalByPress:
+		// A shared room with named approvers. The buttons are attached by the
+		// platform adapter, so nothing is written here about how to press
+		// them; what this line does is tell everyone else why nothing happens
+		// when they try.
+		out.WriteString("\nAn approver can decide this on the message itself.")
+
+	default:
+		// Typing is deliberately not offered. A request and its approval
+		// arriving from the same account in a room other people can type in
+		// is one unbroken chain, and whoever holds that account holds both
+		// halves. A button is different: the platform says who pressed it.
+		fmt.Fprintf(&out, "\nApprove it from a JingClaw client:\n%s",
+			style.block("agent approve "+payload.ApprovalID))
+	}
 
 	return out.String()
 }

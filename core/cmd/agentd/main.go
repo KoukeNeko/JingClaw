@@ -461,7 +461,7 @@ func run() error {
 	// channel bound to the console profile can decide the approvals raised by
 	// its own conversations; every other binding sees the narrow interface
 	// and cannot decide anything.
-	plane.Ingress.Console = rt
+	plane.Ingress.Decisions = rt
 
 	api := http.NewServeMux()
 	api.Handle(controlv1connect.NewSessionServiceHandler(

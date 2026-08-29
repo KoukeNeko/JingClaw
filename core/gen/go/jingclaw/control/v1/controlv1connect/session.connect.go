@@ -46,6 +46,9 @@ const (
 	// GatewayIngressServiceAcknowledgeDispatchProcedure is the fully-qualified name of the
 	// GatewayIngressService's AcknowledgeDispatch RPC.
 	GatewayIngressServiceAcknowledgeDispatchProcedure = "/jingclaw.control.v1.GatewayIngressService/AcknowledgeDispatch"
+	// GatewayIngressServiceDeliverDecisionProcedure is the fully-qualified name of the
+	// GatewayIngressService's DeliverDecision RPC.
+	GatewayIngressServiceDeliverDecisionProcedure = "/jingclaw.control.v1.GatewayIngressService/DeliverDecision"
 	// ChannelServiceListBindingsProcedure is the fully-qualified name of the ChannelService's
 	// ListBindings RPC.
 	ChannelServiceListBindingsProcedure = "/jingclaw.control.v1.ChannelService/ListBindings"
@@ -100,6 +103,12 @@ type GatewayIngressServiceClient interface {
 	DeliverInbound(context.Context, *connect.Request[v1.DeliverInboundRequest]) (*connect.Response[v1.DeliverInboundResponse], error)
 	SubscribeDispatches(context.Context, *connect.Request[v1.SubscribeDispatchesRequest]) (*connect.ServerStreamForClient[v1.SubscribeDispatchesResponse], error)
 	AcknowledgeDispatch(context.Context, *connect.Request[v1.AcknowledgeDispatchRequest]) (*connect.Response[v1.AcknowledgeDispatchResponse], error)
+	// Carries a button press inward. It is here rather than on SessionService
+	// deliberately: DecideApproval there settles anything by id and belongs to
+	// an operator's client, while this one only reports that a named person
+	// pressed something in a named channel and lets the daemon decide whether
+	// that counts.
+	DeliverDecision(context.Context, *connect.Request[v1.DeliverDecisionRequest]) (*connect.Response[v1.DeliverDecisionResponse], error)
 }
 
 // NewGatewayIngressServiceClient constructs a client for the
@@ -131,6 +140,12 @@ func NewGatewayIngressServiceClient(httpClient connect.HTTPClient, baseURL strin
 			connect.WithSchema(gatewayIngressServiceMethods.ByName("AcknowledgeDispatch")),
 			connect.WithClientOptions(opts...),
 		),
+		deliverDecision: connect.NewClient[v1.DeliverDecisionRequest, v1.DeliverDecisionResponse](
+			httpClient,
+			baseURL+GatewayIngressServiceDeliverDecisionProcedure,
+			connect.WithSchema(gatewayIngressServiceMethods.ByName("DeliverDecision")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -139,6 +154,7 @@ type gatewayIngressServiceClient struct {
 	deliverInbound      *connect.Client[v1.DeliverInboundRequest, v1.DeliverInboundResponse]
 	subscribeDispatches *connect.Client[v1.SubscribeDispatchesRequest, v1.SubscribeDispatchesResponse]
 	acknowledgeDispatch *connect.Client[v1.AcknowledgeDispatchRequest, v1.AcknowledgeDispatchResponse]
+	deliverDecision     *connect.Client[v1.DeliverDecisionRequest, v1.DeliverDecisionResponse]
 }
 
 // DeliverInbound calls jingclaw.control.v1.GatewayIngressService.DeliverInbound.
@@ -156,12 +172,23 @@ func (c *gatewayIngressServiceClient) AcknowledgeDispatch(ctx context.Context, r
 	return c.acknowledgeDispatch.CallUnary(ctx, req)
 }
 
+// DeliverDecision calls jingclaw.control.v1.GatewayIngressService.DeliverDecision.
+func (c *gatewayIngressServiceClient) DeliverDecision(ctx context.Context, req *connect.Request[v1.DeliverDecisionRequest]) (*connect.Response[v1.DeliverDecisionResponse], error) {
+	return c.deliverDecision.CallUnary(ctx, req)
+}
+
 // GatewayIngressServiceHandler is an implementation of the
 // jingclaw.control.v1.GatewayIngressService service.
 type GatewayIngressServiceHandler interface {
 	DeliverInbound(context.Context, *connect.Request[v1.DeliverInboundRequest]) (*connect.Response[v1.DeliverInboundResponse], error)
 	SubscribeDispatches(context.Context, *connect.Request[v1.SubscribeDispatchesRequest], *connect.ServerStream[v1.SubscribeDispatchesResponse]) error
 	AcknowledgeDispatch(context.Context, *connect.Request[v1.AcknowledgeDispatchRequest]) (*connect.Response[v1.AcknowledgeDispatchResponse], error)
+	// Carries a button press inward. It is here rather than on SessionService
+	// deliberately: DecideApproval there settles anything by id and belongs to
+	// an operator's client, while this one only reports that a named person
+	// pressed something in a named channel and lets the daemon decide whether
+	// that counts.
+	DeliverDecision(context.Context, *connect.Request[v1.DeliverDecisionRequest]) (*connect.Response[v1.DeliverDecisionResponse], error)
 }
 
 // NewGatewayIngressServiceHandler builds an HTTP handler from the service implementation. It
@@ -189,6 +216,12 @@ func NewGatewayIngressServiceHandler(svc GatewayIngressServiceHandler, opts ...c
 		connect.WithSchema(gatewayIngressServiceMethods.ByName("AcknowledgeDispatch")),
 		connect.WithHandlerOptions(opts...),
 	)
+	gatewayIngressServiceDeliverDecisionHandler := connect.NewUnaryHandler(
+		GatewayIngressServiceDeliverDecisionProcedure,
+		svc.DeliverDecision,
+		connect.WithSchema(gatewayIngressServiceMethods.ByName("DeliverDecision")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.GatewayIngressService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case GatewayIngressServiceDeliverInboundProcedure:
@@ -197,6 +230,8 @@ func NewGatewayIngressServiceHandler(svc GatewayIngressServiceHandler, opts ...c
 			gatewayIngressServiceSubscribeDispatchesHandler.ServeHTTP(w, r)
 		case GatewayIngressServiceAcknowledgeDispatchProcedure:
 			gatewayIngressServiceAcknowledgeDispatchHandler.ServeHTTP(w, r)
+		case GatewayIngressServiceDeliverDecisionProcedure:
+			gatewayIngressServiceDeliverDecisionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -216,6 +251,10 @@ func (UnimplementedGatewayIngressServiceHandler) SubscribeDispatches(context.Con
 
 func (UnimplementedGatewayIngressServiceHandler) AcknowledgeDispatch(context.Context, *connect.Request[v1.AcknowledgeDispatchRequest]) (*connect.Response[v1.AcknowledgeDispatchResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch is not implemented"))
+}
+
+func (UnimplementedGatewayIngressServiceHandler) DeliverDecision(context.Context, *connect.Request[v1.DeliverDecisionRequest]) (*connect.Response[v1.DeliverDecisionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.GatewayIngressService.DeliverDecision is not implemented"))
 }
 
 // ChannelServiceClient is a client for the jingclaw.control.v1.ChannelService service.

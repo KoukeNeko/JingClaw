@@ -25,14 +25,14 @@ func openStore(t *testing.T) *sqlite.Store {
 func configWith(channels ...config.Channel) config.Config {
 	cfg := config.Defaults()
 	cfg.Gateway.Platform = "discord"
-	cfg.Gateway.AccountID = "main"
-	cfg.Gateway.Channels = channels
+	cfg.Gateway.Discord.AccountID = "main"
+	cfg.Gateway.Discord.Channels = channels
 	return cfg
 }
 
 func consolesWith(channels ...config.Channel) config.Config {
 	cfg := configWith()
-	cfg.Gateway.Consoles = channels
+	cfg.Gateway.Discord.Consoles = channels
 	return cfg
 }
 
@@ -209,7 +209,7 @@ func TestTheListDecidesTheProfile(t *testing.T) {
 	cfg := configWith(config.Channel{
 		ChannelIDs: []string{"ordinary"}, Users: []string{"user_1"},
 	})
-	cfg.Gateway.Consoles = []config.Channel{{
+	cfg.Gateway.Discord.Consoles = []config.Channel{{
 		ChannelIDs: []string{"private"}, Users: []string{"user_1"},
 	}}
 

@@ -28,6 +28,11 @@ func applyChannels(
 ) error {
 	platform := gateway.Platform(cfg.Gateway.Platform)
 
+	// Only the section belonging to the platform this daemon serves. A file
+	// may describe both; binding the rooms of the other one would give a
+	// Discord channel id to a Telegram deployment.
+	bound := cfg.Gateway.Selected()
+
 	// Which list an entry is in decides what it may do, so the profile is not
 	// something the file can misspell.
 	lists := []struct {
@@ -35,8 +40,8 @@ func applyChannels(
 		profile  string
 		channels []config.Channel
 	}{
-		{"gateway.channels", "gateway", cfg.Gateway.Channels},
-		{"gateway.consoles", "console", cfg.Gateway.Consoles},
+		{"gateway." + cfg.Gateway.Platform + ".channels", "gateway", bound.Channels},
+		{"gateway." + cfg.Gateway.Platform + ".consoles", "console", bound.Consoles},
 	}
 
 	declared := map[string]bool{}
@@ -46,14 +51,19 @@ func applyChannels(
 				binding := gateway.Binding{
 					ID:                id.WithPrefix("bnd"),
 					Platform:          platform,
-					AccountID:         cfg.Gateway.AccountID,
+					AccountID:         bound.AccountID,
 					TenantID:          channel.TenantID,
 					ChannelID:         channelID,
 					WorkspaceID:       channel.WorkspaceID,
 					PermissionProfile: list.profile,
 					AllowedPrincipals: channel.Users,
 					AllowedClaims:     claimsFor(platform, channel.Roles),
-					CreatedAt:         time.Now(),
+
+					// Empty stays empty. Nobody gains the power to permit
+					// something by being allowed to ask for it.
+					ApprovingPrincipals: channel.Approvers,
+					ApprovingClaims:     claimsFor(platform, channel.ApproverRoles),
+					CreatedAt:           time.Now(),
 				}
 
 				if err := store.UpsertBinding(ctx, binding); err != nil {

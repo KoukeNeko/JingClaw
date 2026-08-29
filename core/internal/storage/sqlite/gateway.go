@@ -15,7 +15,8 @@ import (
 var _ gateway.Store = (*Store)(nil)
 
 const bindingColumns = `id, platform, account_id, tenant_id, channel_id,
-	workspace_id, permission_profile, allowed_principals, allowed_claims, created_at`
+	workspace_id, permission_profile, allowed_principals, allowed_claims,
+	approving_principals, approving_claims, created_at`
 
 func (s *Store) UpsertBinding(ctx context.Context, binding gateway.Binding) error {
 	principals, err := json.Marshal(binding.AllowedPrincipals)
@@ -26,17 +27,28 @@ func (s *Store) UpsertBinding(ctx context.Context, binding gateway.Binding) erro
 	if err != nil {
 		return fmt.Errorf("sqlite: encode claims: %w", err)
 	}
+	approvers, err := json.Marshal(binding.ApprovingPrincipals)
+	if err != nil {
+		return fmt.Errorf("sqlite: encode approvers: %w", err)
+	}
+	approverClaims, err := json.Marshal(binding.ApprovingClaims)
+	if err != nil {
+		return fmt.Errorf("sqlite: encode approver claims: %w", err)
+	}
 
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO gateway_bindings (`+bindingColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (platform, account_id, tenant_id, channel_id) DO UPDATE SET
 		   workspace_id = excluded.workspace_id,
 		   permission_profile = excluded.permission_profile,
 		   allowed_principals = excluded.allowed_principals,
-		   allowed_claims = excluded.allowed_claims`,
+		   allowed_claims = excluded.allowed_claims,
+		   approving_principals = excluded.approving_principals,
+		   approving_claims = excluded.approving_claims`,
 		binding.ID, string(binding.Platform), binding.AccountID, binding.TenantID, binding.ChannelID,
 		binding.WorkspaceID, binding.PermissionProfile, string(principals), string(claims),
+		string(approvers), string(approverClaims),
 		binding.CreatedAt.UnixNano(),
 	)
 	if err != nil {
@@ -94,16 +106,18 @@ func (s *Store) DeleteBinding(ctx context.Context, id string) error {
 
 func scanBinding(row scanner) (gateway.Binding, error) {
 	var (
-		binding       gateway.Binding
-		platform      string
-		principalsRaw string
-		claimsRaw     string
-		created       int64
+		binding          gateway.Binding
+		platform         string
+		principalsRaw    string
+		claimsRaw        string
+		approversRaw     string
+		approverClaimRaw string
+		created          int64
 	)
 
 	if err := row.Scan(&binding.ID, &platform, &binding.AccountID, &binding.TenantID,
 		&binding.ChannelID, &binding.WorkspaceID, &binding.PermissionProfile,
-		&principalsRaw, &claimsRaw, &created); err != nil {
+		&principalsRaw, &claimsRaw, &approversRaw, &approverClaimRaw, &created); err != nil {
 		return gateway.Binding{}, err
 	}
 
@@ -115,6 +129,12 @@ func scanBinding(row scanner) (gateway.Binding, error) {
 	}
 	if err := json.Unmarshal([]byte(claimsRaw), &binding.AllowedClaims); err != nil {
 		return gateway.Binding{}, fmt.Errorf("sqlite: decode claims: %w", err)
+	}
+	if err := json.Unmarshal([]byte(approversRaw), &binding.ApprovingPrincipals); err != nil {
+		return gateway.Binding{}, fmt.Errorf("sqlite: decode approvers: %w", err)
+	}
+	if err := json.Unmarshal([]byte(approverClaimRaw), &binding.ApprovingClaims); err != nil {
+		return gateway.Binding{}, fmt.Errorf("sqlite: decode approver claims: %w", err)
 	}
 
 	return binding, nil

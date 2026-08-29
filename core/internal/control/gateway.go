@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
 )
 
@@ -49,6 +50,67 @@ func (s *GatewayServer) DeliverInbound(
 		RunId:     string(accepted.RunID),
 		Duplicate: accepted.Duplicate,
 	}), nil
+}
+
+// DeliverDecision carries a button press inward.
+//
+// What the caller is trusted to say is who pressed and where, because that is
+// what its platform told it. Whether that person may decide anything is
+// settled below against the channel's binding: a gateway that could assert
+// its own authority would be a bot token that can approve.
+func (s *GatewayServer) DeliverDecision(
+	ctx context.Context,
+	req *connect.Request[controlv1.DeliverDecisionRequest],
+) (*connect.Response[controlv1.DeliverDecisionResponse], error) {
+	message := req.Msg
+	if message.GetApprovalId() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("approval_id is required"))
+	}
+	if message.GetPrincipalId() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("principal_id is required"))
+	}
+
+	outcome, err := s.ingress.Decide(ctx, gateway.ApprovalDecision{
+		Principal: gateway.Principal{
+			Platform:    gateway.Platform(message.GetPlatform()),
+			AccountID:   message.GetAccountId(),
+			TenantID:    message.GetTenantId(),
+			ID:          message.GetPrincipalId(),
+			DisplayName: message.GetPrincipalDisplayName(),
+			IsBot:       message.GetPrincipalIsBot(),
+			Claims:      claimsFromProto(message.GetPrincipalClaims()),
+		},
+		Conversation: gateway.ConversationRef{
+			Platform:  gateway.Platform(message.GetPlatform()),
+			AccountID: message.GetAccountId(),
+			TenantID:  message.GetTenantId(),
+			ChannelID: message.GetChannelId(),
+		},
+		ApprovalID: domain.ApprovalID(message.GetApprovalId()),
+		Allow:      message.GetAllow(),
+	})
+	if err != nil {
+		return nil, gatewayError(err)
+	}
+
+	return connect.NewResponse(&controlv1.DeliverDecisionResponse{
+		Outcome: outcomeToProto(outcome),
+	}), nil
+}
+
+func outcomeToProto(outcome gateway.DecisionOutcome) controlv1.DecisionOutcome {
+	switch outcome {
+	case gateway.DecisionRecorded:
+		return controlv1.DecisionOutcome_DECISION_OUTCOME_RECORDED
+	case gateway.DecisionAlready:
+		return controlv1.DecisionOutcome_DECISION_OUTCOME_ALREADY
+	case gateway.DecisionUnavailable:
+		return controlv1.DecisionOutcome_DECISION_OUTCOME_UNAVAILABLE
+	default:
+		// Refused covers "not an approver here" and "no such approval", which
+		// are one value on the wire on purpose.
+		return controlv1.DecisionOutcome_DECISION_OUTCOME_REFUSED
+	}
 }
 
 // SubscribeDispatches streams undelivered work for one gateway account.
@@ -124,11 +186,24 @@ const (
 	dispatchPollInterval = 500 * time.Millisecond
 )
 
-func inboundFromProto(message *controlv1.InboundMessage) gateway.InboundMessage {
-	claims := make([]gateway.Claim, 0, len(message.GetPrincipalClaims()))
-	for _, claim := range message.GetPrincipalClaims() {
-		claims = append(claims, gateway.Claim{Namespace: claim.GetNamespace(), Value: claim.GetValue()})
+// claimsFromProto carries a principal's claims across unchanged.
+//
+// Opaque on purpose: a Discord role and a GitHub collaborator status are not
+// the same kind of thing, and giving them a shared meaning here would invent a
+// hierarchy nobody wrote down.
+func claimsFromProto(claims []*controlv1.PrincipalClaim) []gateway.Claim {
+	carried := make([]gateway.Claim, 0, len(claims))
+	for _, claim := range claims {
+		carried = append(carried, gateway.Claim{
+			Namespace: claim.GetNamespace(),
+			Value:     claim.GetValue(),
+		})
 	}
+	return carried
+}
+
+func inboundFromProto(message *controlv1.InboundMessage) gateway.InboundMessage {
+	claims := claimsFromProto(message.GetPrincipalClaims())
 
 	platform := gateway.Platform(message.GetPlatform())
 

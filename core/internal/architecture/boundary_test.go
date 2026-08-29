@@ -32,6 +32,21 @@ func TestCLIDoesNotDependOnRuntime(t *testing.T) {
 	}
 }
 
+// The gateway talks to the runtime through a narrow interface it declares
+// itself, so that what an untrusted channel can reach is a short list somebody
+// can read rather than everything the agent loop exports.
+//
+// Importing the runtime for one error value is how that stops being true: the
+// dependency arrives for something harmless and the next call is not.
+func TestGatewayDoesNotDependOnRuntime(t *testing.T) {
+	deps := packageDeps(t, "github.com/KoukeNeko/JingClaw/core/internal/gateway")
+
+	if deps["github.com/KoukeNeko/JingClaw/core/internal/runtime"] {
+		t.Error("internal/gateway must not depend on internal/runtime;\n" +
+			"widen the DecidingRuntime interface, or put the shared vocabulary in internal/domain")
+	}
+}
+
 // The runtime must stay ignorant of the wire format, so that a second
 // transport (or a replacement for Connect) is an additive change.
 func TestRuntimeDoesNotDependOnGeneratedProtobuf(t *testing.T) {

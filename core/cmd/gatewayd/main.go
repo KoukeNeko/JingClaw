@@ -67,7 +67,7 @@ func run() error {
 		case "platform":
 			cfg.Gateway.Platform = *platform
 		case "account":
-			cfg.Gateway.AccountID = *accountID
+			cfg.Gateway.SetAccountID(*accountID)
 		}
 	})
 
@@ -84,20 +84,20 @@ func run() error {
 
 	relay := &relay{
 		client:    client,
-		accountID: cfg.Gateway.AccountID,
+		accountID: cfg.Gateway.Selected().AccountID,
 		logger:    logger,
 	}
 
-	platformAdapter, err := newAdapter(cfg, relay, logger)
+	platformAdapter, err := newAdapter(cfg, relay, relay, logger)
 	if err != nil {
 		return err
 	}
 	relay.poster = platformAdapter
 
 	logger.Info("gateway starting",
-		"platform", cfg.Gateway.Platform, "account_id", cfg.Gateway.AccountID)
+		"platform", cfg.Gateway.Platform, "account_id", cfg.Gateway.Selected().AccountID)
 	fmt.Printf("JingClaw gateway\nConfig:   %s\nPlatform: %s\nAccount:  %s\n",
-		configFile, cfg.Gateway.Platform, cfg.Gateway.AccountID)
+		configFile, cfg.Gateway.Platform, cfg.Gateway.Selected().AccountID)
 
 	group, ctx := errgroup.WithContext(rootCtx)
 
@@ -165,6 +165,55 @@ func (r *relay) Deliver(ctx context.Context, message gateway.InboundMessage) err
 // The stream is re-established after a failure rather than ending the process:
 // agentd restarting is ordinary, and anything unacknowledged is still in the
 // outbox when the connection comes back.
+// Decide carries a button press inward.
+//
+// The daemon settles whether this person may decide; this process only reports
+// what Discord told it. A gateway that could answer that question itself would
+// be a bot token that can approve.
+func (r *relay) Decide(
+	ctx context.Context,
+	decision gateway.ApprovalDecision,
+) (gateway.DecisionOutcome, error) {
+	claims := make([]*controlv1.PrincipalClaim, 0, len(decision.Principal.Claims))
+	for _, claim := range decision.Principal.Claims {
+		claims = append(claims, &controlv1.PrincipalClaim{
+			Namespace: claim.Namespace,
+			Value:     claim.Value,
+		})
+	}
+
+	resp, err := r.client.DeliverDecision(ctx, connect.NewRequest(&controlv1.DeliverDecisionRequest{
+		Platform:             string(decision.Conversation.Platform),
+		AccountId:            decision.Conversation.AccountID,
+		TenantId:             decision.Conversation.TenantID,
+		ChannelId:            decision.Conversation.ChannelID,
+		PrincipalId:          decision.Principal.ID,
+		PrincipalDisplayName: decision.Principal.DisplayName,
+		PrincipalIsBot:       decision.Principal.IsBot,
+		PrincipalClaims:      claims,
+		ApprovalId:           string(decision.ApprovalID),
+		Allow:                decision.Allow,
+	}))
+	if err != nil {
+		return "", err
+	}
+
+	return outcomeFromProto(resp.Msg.GetOutcome()), nil
+}
+
+func outcomeFromProto(outcome controlv1.DecisionOutcome) gateway.DecisionOutcome {
+	switch outcome {
+	case controlv1.DecisionOutcome_DECISION_OUTCOME_RECORDED:
+		return gateway.DecisionRecorded
+	case controlv1.DecisionOutcome_DECISION_OUTCOME_ALREADY:
+		return gateway.DecisionAlready
+	case controlv1.DecisionOutcome_DECISION_OUTCOME_UNAVAILABLE:
+		return gateway.DecisionUnavailable
+	default:
+		return gateway.DecisionRefused
+	}
+}
+
 func (r *relay) deliver(ctx context.Context) error {
 	const retryDelay = 2 * time.Second
 

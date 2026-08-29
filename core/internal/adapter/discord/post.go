@@ -270,7 +270,17 @@ func (a *Adapter) finishAsMessages(
 			}
 		}
 
-		message, err := a.client.Rest.CreateMessage(channelID, messageWith(segment))
+		// Controls go on the last message of an approval and nowhere else.
+		// An approval that split into several would otherwise carry a set of
+		// buttons above the effects they are agreeing to.
+		create := messageWith(segment)
+		if index == len(segments)-1 {
+			if approvalID, wanted := approvalIDOf(dispatch); wanted && a.decider != nil {
+				create.Components = []discord.LayoutComponent{approvalButtons(approvalID)}
+			}
+		}
+
+		message, err := a.client.Rest.CreateMessage(channelID, create)
 		if err != nil {
 			// Whatever was already posted is reported, so a caller retrying
 			// knows the delivery was partial rather than assuming none of it

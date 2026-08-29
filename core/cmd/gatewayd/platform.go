@@ -37,8 +37,22 @@ type sink interface {
 	Deliver(ctx context.Context, message gateway.InboundMessage) error
 }
 
+// decider is where an adapter hands a press on one of its controls.
+//
+// A separate interface from sink because they are separate powers: one starts
+// work, the other permits it. An adapter given the first and not the second
+// cannot decide anything, whatever anybody presses.
+type decider interface {
+	Decide(ctx context.Context, decision gateway.ApprovalDecision) (gateway.DecisionOutcome, error)
+}
+
 // newAdapter builds the platform named in the configuration.
-func newAdapter(cfg config.Config, into sink, logger *slog.Logger) (adapter, error) {
+// newAdapter builds the platform adapter.
+//
+// The relay is passed twice under two names on purpose: one is the way work
+// gets started, the other the way a decision gets recorded. They are different
+// powers, and an adapter is handed each of them explicitly.
+func newAdapter(cfg config.Config, into sink, decisions decider, logger *slog.Logger) (adapter, error) {
 	switch cfg.Gateway.Platform {
 	case "discord":
 		token, err := secret.Find(cfg.Gateway.Discord.TokenEnv, cfg.Gateway.Discord.TokenFile)
@@ -47,11 +61,11 @@ func newAdapter(cfg config.Config, into sink, logger *slog.Logger) (adapter, err
 		}
 		return discord.New(discord.Config{
 			Token:              token.Reveal(),
-			AccountID:          cfg.Gateway.AccountID,
+			AccountID:          cfg.Gateway.Selected().AccountID,
 			MaxMessages:        cfg.Gateway.Discord.MaxMessages,
 			MaxAttachmentBytes: cfg.Gateway.Discord.MaxAttachmentBytes,
 			Logger:             logger,
-		}, into), nil
+		}, into, decisions), nil
 
 	case "telegram":
 		token, err := secret.Find(cfg.Gateway.Telegram.TokenEnv, cfg.Gateway.Telegram.TokenFile)
@@ -60,7 +74,7 @@ func newAdapter(cfg config.Config, into sink, logger *slog.Logger) (adapter, err
 		}
 		return telegram.New(telegram.Config{
 			Token:          token.Reveal(),
-			AccountID:      cfg.Gateway.AccountID,
+			AccountID:      cfg.Gateway.Selected().AccountID,
 			APIBase:        cfg.Gateway.Telegram.APIBase,
 			MaxUploadBytes: cfg.Gateway.Telegram.MaxUploadBytes,
 			Logger:         logger,

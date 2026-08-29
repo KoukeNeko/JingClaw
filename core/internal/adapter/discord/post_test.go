@@ -264,7 +264,7 @@ func TestConversationsAreSeparatedByWhereTheyAre(t *testing.T) {
 // which by then was sitting at the bottom of the previous answer, so asking a
 // fresh question rewrote the tail of the last one.
 func TestTheStatusLineBelongsToItsRun(t *testing.T) {
-	adapter := New(Config{AccountID: "main", Logger: slog.New(slog.DiscardHandler)}, nil)
+	adapter := New(Config{AccountID: "main", Logger: slog.New(slog.DiscardHandler)}, nil, nil)
 
 	adapter.setStatus("run_1", 111)
 
@@ -300,7 +300,7 @@ func TestAFinishedRunReleasesItsLine(t *testing.T) {
 // arrived as a second message below the answer instead of rewriting the line
 // above it.
 func TestAnAnswerDoesNotReleaseTheStatusLine(t *testing.T) {
-	adapter := New(Config{AccountID: "main", Logger: slog.New(slog.DiscardHandler)}, nil)
+	adapter := New(Config{AccountID: "main", Logger: slog.New(slog.DiscardHandler)}, nil, nil)
 	adapter.setStatus("run_1", 111)
 
 	// Whatever Post does with a message dispatch, the run's line has to still
@@ -380,7 +380,7 @@ func TestAPartialAnswerStaysInOneMessage(t *testing.T) {
 
 // Two answers being written at once must not share a message.
 func TestEachAnswerGrowsInItsOwnMessage(t *testing.T) {
-	adapter := New(Config{AccountID: "main", Logger: slog.New(slog.DiscardHandler)}, nil)
+	adapter := New(Config{AccountID: "main", Logger: slog.New(slog.DiscardHandler)}, nil, nil)
 
 	adapter.setAnswer("msg_1", 111)
 	adapter.setAnswer("msg_2", 222)

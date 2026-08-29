@@ -186,8 +186,8 @@ func TestAnApprovalIsGivenInTheChannelAndTheRunContinues(t *testing.T) {
 	if err := json.Unmarshal([]byte(approval.Payload), &payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !payload.DecidableHere {
-		t.Error("a console channel was not told it can decide its own approval")
+	if payload.Route != gateway.ApprovalByReply {
+		t.Errorf("a console channel was routed %q, want a reply", payload.Route)
 	}
 
 	// Answered in the channel.

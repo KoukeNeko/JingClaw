@@ -100,7 +100,7 @@ func newHarness(t *testing.T, chunkDelay time.Duration) *harness {
 		Runtime:       rt,
 		Binder:        permissions,
 		Artifacts:     artifacts,
-		Console:       rt,
+		Decisions:     rt,
 		NewDispatchID: func() string { return fmt.Sprintf("dsp_%d", counter.Add(1)) },
 		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
 		Logger:        slog.New(slog.DiscardHandler),

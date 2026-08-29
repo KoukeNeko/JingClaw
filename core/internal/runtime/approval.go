@@ -14,7 +14,10 @@ import (
 // ErrApprovalNotPending is returned when a decision arrives for something that
 // has already been settled, which in practice means two clients answered the
 // same prompt.
-var ErrApprovalNotPending = errors.New("runtime: approval has already been decided")
+//
+// The same value as domain.ErrApprovalDecided rather than a second one, so
+// that a caller matching on either matches on both.
+var ErrApprovalNotPending = domain.ErrApprovalDecided
 
 // gate decides what happens to one tool call.
 type gate struct {
