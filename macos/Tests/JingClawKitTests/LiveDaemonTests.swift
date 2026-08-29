@@ -131,3 +131,79 @@ func followsAStream() async throws {
     #expect(sawHello, "the stream never opened with a hello frame")
     #expect(sawOurText, "the turn that was sent never arrived on the stream")
 }
+
+@Test("a discovery file whose daemon has gone is not used")
+func refusesAStaleDiscoveryFile() throws {
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent(UUID().uuidString)
+    let runtime = directory.appendingPathComponent("run")
+    try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
+
+    // A pid that cannot be running: the daemon stopped without tidying up,
+    // and its port is very likely somebody else's by now. Connecting to it is
+    // worse than finding nothing, because the client works and talks to the
+    // wrong thing.
+    let stale = """
+        {"pid": 2147483000, "base_url": "http://127.0.0.1:1", "token": "x"}
+        """
+    try stale.write(
+        to: runtime.appendingPathComponent(Discovery.fileName),
+        atomically: true, encoding: .utf8)
+
+    #expect(throws: (any Error).self) {
+        _ = try Discovery.locate(
+            from: directory,
+            environment: ["JINGCLAW_RUNTIME_DIR": runtime.path])
+    }
+}
+
+@Test("a discovery file whose daemon is running is used")
+func acceptsALiveDiscoveryFile() throws {
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent(UUID().uuidString)
+    let runtime = directory.appendingPathComponent("run")
+    try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
+
+    // This process is certainly running, which is the point.
+    let live = """
+        {"pid": \(ProcessInfo.processInfo.processIdentifier), \
+        "base_url": "http://127.0.0.1:1", "token": "x"}
+        """
+    try live.write(
+        to: runtime.appendingPathComponent(Discovery.fileName),
+        atomically: true, encoding: .utf8)
+
+    let found = try Discovery.locate(
+        from: directory, environment: ["JINGCLAW_RUNTIME_DIR": runtime.path])
+    #expect(found.token == "x")
+}
+
+@Test("a folder that cannot be read is not reported as no daemon")
+func tellsRefusedPermissionFromNoDaemon() throws {
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    // Unreadable to anybody, which is what a refused permission looks like
+    // from inside the process.
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o000], ofItemAtPath: directory.path)
+    defer {
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: directory.path)
+    }
+
+    do {
+        _ = try Discovery.locate(from: directory, environment: [:])
+        Issue.record("an unreadable folder was accepted")
+    } catch let error as DiscoveryError {
+        guard case .notPermitted = error else {
+            Issue.record("""
+                reported \(error) for a folder it may not read.
+                Telling somebody no daemon is running sends them to restart one \
+                that already is.
+                """)
+            return
+        }
+    }
+}

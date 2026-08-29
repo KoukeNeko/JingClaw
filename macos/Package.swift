@@ -11,10 +11,12 @@ let package = Package(
     name: "JingClaw",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "JingClawKit", targets: ["JingClawKit"])
+        .library(name: "JingClawKit", targets: ["JingClawKit"]),
+        .executable(name: "JingClaw", targets: ["JingClawApp"]),
     ],
     targets: [
         .target(name: "JingClawKit"),
+        .executableTarget(name: "JingClawApp", dependencies: ["JingClawKit"]),
         .testTarget(
             name: "JingClawKitTests",
             dependencies: ["JingClawKit"],
