@@ -242,6 +242,7 @@ const (
 	EventUserMessageAdded          EventKind = "user.message"
 	EventRunStateChanged           EventKind = "run.state_changed"
 	EventAssistantTextDelta        EventKind = "assistant.delta"
+	EventAssistantReasoningDelta   EventKind = "assistant.reasoning"
 	EventAssistantMessageCompleted EventKind = "assistant.completed"
 	EventUsageChanged              EventKind = "usage.changed"
 	EventToolCallRequested         EventKind = "tool.requested"
@@ -300,6 +301,22 @@ type RunStateChanged struct {
 }
 
 type AssistantTextDelta struct {
+	MessageID MessageID
+	Text      string
+}
+
+// AssistantReasoningDelta is a chunk of the model's working-out.
+//
+// A separate kind from the answer, and the separation is the point: this is
+// not what the model is telling anybody. It never leaves the machine — the
+// projector refuses it, so no chat platform can carry it, console channel
+// included. A platform account is somebody's account, and the working-out
+// quotes whatever the run has been reading.
+//
+// Not folded back into the conversation on the next turn either. A provider
+// that needs its own reasoning returned carries it as an opaque block on the
+// message it belongs to; this is for reading.
+type AssistantReasoningDelta struct {
 	MessageID MessageID
 	Text      string
 }
@@ -428,6 +445,7 @@ func AllEventKinds() []EventKind {
 		EventUserMessageAdded,
 		EventRunStateChanged,
 		EventAssistantTextDelta,
+		EventAssistantReasoningDelta,
 		EventAssistantMessageCompleted,
 		EventUsageChanged,
 		EventToolCallRequested,
@@ -442,6 +460,7 @@ func AllEventKinds() []EventKind {
 func (UserMessageAdded) isEventPayload()          {}
 func (RunStateChanged) isEventPayload()           {}
 func (AssistantTextDelta) isEventPayload()        {}
+func (AssistantReasoningDelta) isEventPayload()   {}
 func (AssistantMessageCompleted) isEventPayload() {}
 func (UsageChanged) isEventPayload()              {}
 func (ToolCallRequested) isEventPayload()         {}

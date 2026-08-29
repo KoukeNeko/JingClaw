@@ -638,3 +638,41 @@ func TestTheFirstDeltaDoesNotPostAnything(t *testing.T) {
 		t.Errorf("the first delta produced %d dispatches", got)
 	}
 }
+
+// The working-out never reaches a platform.
+//
+// Not "is not currently sent" — refused, so that a future kind added to the
+// projector's switch cannot pick it up by resembling text. A platform account
+// is somebody's account, and the reasoning quotes whatever the run has been
+// reading.
+func TestReasoningNeverReachesAPlatform(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+	run := gatewayRun(*clock)
+
+	events := []domain.EventPayload{
+		domain.AssistantReasoningDelta{
+			MessageID: "msg_1",
+			Text:      "The token is in ~/.config/jingclaw/discord.token, so I should not print it.",
+		},
+		domain.AssistantTextDelta{MessageID: "msg_1", Text: "Done."},
+		domain.AssistantMessageCompleted{MessageID: "msg_1", StopReason: domain.StopEndTurn},
+	}
+	for i, payload := range events {
+		if err := projector.Observe(context.Background(), run, domain.Event{
+			SessionID:  run.SessionID,
+			RunID:      run.ID,
+			Seq:        domain.Seq(i + 1),
+			OccurredAt: *clock,
+			Kind:       domain.EventAssistantTextDelta,
+			Payload:    payload,
+		}); err != nil {
+			t.Fatalf("observe %T: %v", payload, err)
+		}
+	}
+
+	for _, dispatch := range enqueued(t, store) {
+		if strings.Contains(dispatch.Payload, "discord.token") {
+			t.Fatalf("the working-out was queued for a platform: %s", dispatch.Payload)
+		}
+	}
+}

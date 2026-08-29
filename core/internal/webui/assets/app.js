@@ -30,6 +30,7 @@ const state = {
   // Assistant text arrives as many deltas; they are folded into the line
   // already on screen rather than each becoming one.
   openMessage: null,
+  openReasoning: null,
 };
 
 // ---------------------------------------------------------------- transport
@@ -368,6 +369,9 @@ async function openFromView(id) {
 // drawViewMessage renders one assembled turn.
 function drawViewMessage(message) {
   const role = message.role === 'MESSAGE_ROLE_USER' ? 'user' : 'assistant';
+  if (message.reasoning) {
+    addLine('reasoning', 'thinking', message.reasoning);
+  }
   if (message.text) {
     addLine(role, role === 'user' ? 'you' : 'agent', message.text);
   }
@@ -385,6 +389,9 @@ function drawViewMessage(message) {
 function replayLocally(events) {
   const state = reduceAll(events);
   for (const message of state.messages) {
+    if (message.reasoning) {
+      addLine('reasoning', 'thinking', message.reasoning);
+    }
     if (message.text) {
       addLine(message.role, message.role === 'user' ? 'you' : 'agent', message.text);
     }
@@ -458,15 +465,22 @@ function applyEvent(event) {
 
   if (event.userMessageAdded) {
     state.openMessage = null;
+    state.openReasoning = null;
     return addLine('user', 'you', event.userMessageAdded.text);
   }
 
   if (event.assistantTextDelta) {
+    state.openReasoning = null;
     return appendAssistant(event.assistantTextDelta.text || '');
+  }
+
+  if (event.assistantReasoningDelta) {
+    return appendReasoning(event.assistantReasoningDelta.text || '');
   }
 
   if (event.assistantMessageCompleted) {
     state.openMessage = null;
+    state.openReasoning = null;
     return;
   }
 
@@ -484,6 +498,7 @@ function applyEvent(event) {
   if (event.toolCallRequested) {
     const { name, arguments: args } = event.toolCallRequested;
     state.openMessage = null;
+    state.openReasoning = null;
     return addLine('tool', name, compact(args || '', 300));
   }
 
@@ -518,6 +533,19 @@ function appendAssistant(text) {
     state.openMessage = addLine('assistant', 'agent', '');
   }
   state.openMessage.textContent += text;
+  scrollToEnd();
+}
+
+// appendReasoning grows the working-out for the turn being written.
+//
+// Its own line, set apart, because it is not the answer. This page is on the
+// control plane and may see it; nothing that forwards an answer elsewhere ever
+// does.
+function appendReasoning(text) {
+  if (!state.openReasoning) {
+    state.openReasoning = addLine('reasoning', 'thinking', '');
+  }
+  state.openReasoning.textContent += text;
   scrollToEnd();
 }
 

@@ -61,8 +61,17 @@ type State struct {
 
 // Message is one turn as a client draws it.
 type Message struct {
-	Role      string     `json:"role"`
-	Text      string     `json:"text"`
+	Role string `json:"role"`
+	Text string `json:"text"`
+
+	// Reasoning is the model's working-out for this turn, where a provider
+	// exposed it and the client is one allowed to see it.
+	//
+	// Its own field rather than part of Text, and the separation is the whole
+	// point: a client that joined them would show the working-out as the
+	// answer, and a client that forwards the answer would forward it too.
+	Reasoning string `json:"reasoning,omitempty"`
+
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 

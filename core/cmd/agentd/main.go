@@ -829,7 +829,9 @@ func describeConfigFile(path string, created bool) string {
 func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, error) {
 	switch cfg.Model.Provider {
 	case "fake":
-		return fake.New(cfg.Model.FakeDelay), nil
+		offline := fake.New(cfg.Model.FakeDelay)
+		offline.Reasoning = cfg.Model.FakeReasoning
+		return offline, nil
 
 	case "gemini":
 		keyFiles, err := secret.DefaultFiles(cfg.Model.APIKeyFile)

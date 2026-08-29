@@ -217,6 +217,14 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 			MessageID: string(payload.MessageID),
 		})
 
+	case domain.AssistantReasoningDelta:
+		// Never carried to a platform, console channel included, and refused
+		// here rather than left to a missing case. A platform account is
+		// somebody's account, and the working-out quotes whatever the run has
+		// been reading — a file it opened, a page it fetched, a memory. The
+		// answer is what was asked for; this is not.
+		return nil
+
 	case domain.AssistantMessageCompleted:
 		text := p.take(payload.MessageID)
 		if strings.TrimSpace(text) != "" {

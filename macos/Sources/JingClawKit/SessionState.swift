@@ -40,11 +40,26 @@ public struct Message: Equatable, Sendable {
 
     public var role: Role
     public var text: String
+
+    /// The model's working-out for this turn, where a provider exposed it and
+    /// the client is one allowed to see it.
+    ///
+    /// Its own property rather than part of `text`, and the separation is the
+    /// point: joined, a client would show the working-out as the answer, and a
+    /// client that forwards the answer would forward it too.
+    public var reasoning: String
+
     public var toolCalls: [ToolCall]
 
-    public init(role: Role, text: String = "", toolCalls: [ToolCall] = []) {
+    public init(
+        role: Role,
+        text: String = "",
+        reasoning: String = "",
+        toolCalls: [ToolCall] = []
+    ) {
         self.role = role
         self.text = text
+        self.reasoning = reasoning
         self.toolCalls = toolCalls
     }
 }

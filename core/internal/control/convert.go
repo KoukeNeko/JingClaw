@@ -249,6 +249,14 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 			},
 		}
 
+	case domain.AssistantReasoningDelta:
+		out.Payload = &controlv1.Event_AssistantReasoningDelta{
+			AssistantReasoningDelta: &controlv1.AssistantReasoningDelta{
+				MessageId: string(p.MessageID),
+				Text:      p.Text,
+			},
+		}
+
 	case domain.AssistantMessageCompleted:
 		out.Payload = &controlv1.Event_AssistantMessageCompleted{
 			AssistantMessageCompleted: &controlv1.AssistantMessageCompleted{
@@ -362,11 +370,12 @@ func sessionViewToProto(view runtime.SessionView) *controlv1.GetSessionViewRespo
 
 func viewMessageToProto(message runtime.ViewMessage) *controlv1.ViewMessage {
 	out := &controlv1.ViewMessage{
-		Id:   string(message.ID),
-		Role: messageRoleToProto(message.Role),
-		Text: message.Text,
-		At:   timestamppb.New(time.Unix(0, message.At)),
-		Seq:  uint64(message.Seq),
+		Id:        string(message.ID),
+		Role:      messageRoleToProto(message.Role),
+		Text:      message.Text,
+		Reasoning: message.Reasoning,
+		At:        timestamppb.New(time.Unix(0, message.At)),
+		Seq:       uint64(message.Seq),
 	}
 
 	out.ToolCalls = make([]*controlv1.ViewToolCall, 0, len(message.ToolCalls))

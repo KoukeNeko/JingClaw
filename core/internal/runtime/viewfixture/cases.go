@@ -30,6 +30,31 @@ func Cases() []Case {
 			},
 		},
 		{
+			Name: "the working-out is kept apart from the answer",
+			Why: "It arrives before the turn has any text, so a client that " +
+				"joined the two would open the reply with the thinking and " +
+				"then forward the whole thing as the answer.",
+			Events: []Event{
+				user(1, "msg_1", "what time is it in Taipei?"),
+				reasoning(2, "msg_2", "They did not say where they are. "),
+				reasoning(3, "msg_2", "Taipei is UTC+8, no daylight saving."),
+				delta(4, "msg_2", "It is 14:20 in Taipei."),
+				completed(5, "msg_2"),
+			},
+			Expected: State{
+				Messages: []Message{
+					{Role: RoleUser, Text: "what time is it in Taipei?"},
+					{
+						Role: RoleAssistant,
+						Text: "It is 14:20 in Taipei.",
+						Reasoning: "They did not say where they are. " +
+							"Taipei is UTC+8, no daylight saving.",
+					},
+				},
+				HeadSeq: 5,
+			},
+		},
+		{
 			Name: "a tool call belongs to the turn that asked for it",
 			Why: "Drawn as its own entry, a call floats between turns and a " +
 				"reader cannot tell which request caused it.",
@@ -203,6 +228,12 @@ func delta(seq uint64, message, text string) Event {
 func completed(seq uint64, message string) Event {
 	return Event{Seq: seq, Kind: "assistant.completed", Body: body(map[string]string{
 		"message_id": message,
+	})}
+}
+
+func reasoning(seq uint64, message, text string) Event {
+	return Event{Seq: seq, Kind: "assistant.reasoning", Body: body(map[string]string{
+		"message_id": message, "text": text,
 	})}
 }
 

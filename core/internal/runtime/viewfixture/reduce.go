@@ -33,6 +33,21 @@ func Reduce(state State, event Event) State {
 		}
 		state.Messages[index].Text += payload.Text
 
+	case "assistant.reasoning":
+		var payload struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal(event.Body, &payload)
+		// Onto the same turn as the answer, in its own field. A model thinks
+		// before it replies, so the working-out reaches a turn that has no
+		// text yet and must not be mistaken for the start of one.
+		index := openAssistant(state.Messages)
+		if index < 0 {
+			state.Messages = append(state.Messages, Message{Role: RoleAssistant})
+			index = len(state.Messages) - 1
+		}
+		state.Messages[index].Reasoning += payload.Text
+
 	case "tool.requested":
 		var payload struct {
 			Name string `json:"name"`

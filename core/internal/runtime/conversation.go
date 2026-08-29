@@ -170,6 +170,12 @@ func (b *conversationBuilder) apply(event domain.Event) {
 		b.pendingText += payload.Text
 		b.assistantSeq = event.Seq
 
+	case domain.AssistantReasoningDelta:
+		// Not replayed. A provider that needs its own reasoning back carries
+		// it as an opaque block on the message it belongs to; sending this
+		// text instead would hand one model another model's working-out as
+		// though it were its own.
+
 	case domain.ToolCallRequested:
 		b.flushResults()
 		b.pendingToolCalls = append(b.pendingToolCalls, provider.ToolUseBlock{

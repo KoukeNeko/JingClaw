@@ -180,6 +180,16 @@ li.error .body { color: var(--error); }
 li.tool .body { color: var(--ink-dim); }
 li.meta .body { color: var(--ink-dim); font-size: 0.85em; }
 
+/* The working-out, set apart because it is not the answer. Dimmed and in
+   italic so a glance down the page reads the replies and skips these. */
+li.reasoning .body {
+  color: var(--ink-dim);
+  font-style: italic;
+  font-size: 0.9em;
+  border-left: 2px solid var(--line);
+  padding-left: 0.6rem;
+}
+
 .body .artifact { display: inline-block; margin-left: 0.4rem; }
 
 .artifact-body {

@@ -61,6 +61,67 @@
       }
     },
     {
+      "name": "the working-out is kept apart from the answer",
+      "why": "It arrives before the turn has any text, so a client that joined the two would open the reply with the thinking and then forward the whole thing as the answer.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "what time is it in Taipei?"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "assistant.reasoning",
+          "body": {
+            "message_id": "msg_2",
+            "text": "They did not say where they are. "
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "assistant.reasoning",
+          "body": {
+            "message_id": "msg_2",
+            "text": "Taipei is UTC+8, no daylight saving."
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_2",
+            "text": "It is 14:20 in Taipei."
+          }
+        },
+        {
+          "seq": 5,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_2"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "what time is it in Taipei?"
+          },
+          {
+            "role": "assistant",
+            "text": "It is 14:20 in Taipei.",
+            "reasoning": "They did not say where they are. Taipei is UTC+8, no daylight saving."
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 5
+      }
+    },
+    {
       "name": "a tool call belongs to the turn that asked for it",
       "why": "Drawn as its own entry, a call floats between turns and a reader cannot tell which request caused it.",
       "events": [

@@ -45,11 +45,13 @@ private struct ExpectedState: Decodable {
 private struct ExpectedMessage: Decodable {
     var role: String
     var text: String?
+    var reasoning: String?
     var toolCalls: [ExpectedToolCall]?
 
     private enum CodingKeys: String, CodingKey {
         case role
         case text
+        case reasoning
         case toolCalls = "tool_calls"
     }
 
@@ -57,10 +59,24 @@ private struct ExpectedMessage: Decodable {
         Message(
             role: role == "user" ? .user : .assistant,
             text: text ?? "",
+            reasoning: reasoning ?? "",
             toolCalls: (toolCalls ?? []).map(\.call)
         )
     }
 }
+
+/// Every field the fixtures carry, so one added to them and not to the types
+/// above cannot pass unnoticed.
+///
+/// `Decodable` ignores keys it was not told about, so a new field in the
+/// fixtures would be dropped here and this client would agree with every case
+/// without computing it — silently exempt from the one check that exists to
+/// catch exactly that.
+private let comparedStateKeys: Set<String> = [
+    "messages", "pending_approvals", "active_run", "head_seq",
+]
+private let comparedMessageKeys: Set<String> = ["role", "text", "reasoning", "tool_calls"]
+private let comparedToolCallKeys: Set<String> = ["name", "completed", "is_error"]
 
 private struct ExpectedToolCall: Decodable {
     var name: String
@@ -89,6 +105,38 @@ private func loadFixtures() throws -> [FixtureCase] {
 
     let data = try Data(contentsOf: path)
     return try JSONDecoder().decode(FixtureFile.self, from: data).cases
+}
+
+@Test("no fixture field goes unchecked")
+func noFieldGoesUnchecked() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let data = try Data(contentsOf: root.appendingPathComponent("fixtures/session-view.json"))
+    let file = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    let cases = file?["cases"] as? [[String: Any]] ?? []
+
+    #expect(!cases.isEmpty, "the fixtures loaded as nothing, so this checks nothing")
+
+    for fixture in cases {
+        let name = fixture["name"] as? String ?? "?"
+        let expected = fixture["expected"] as? [String: Any] ?? [:]
+
+        let unknownState = Set(expected.keys).subtracting(comparedStateKeys)
+        #expect(unknownState.isEmpty, "\(name): the fixture carries \(unknownState), which this client ignores")
+
+        for message in expected["messages"] as? [[String: Any]] ?? [] {
+            let unknown = Set(message.keys).subtracting(comparedMessageKeys)
+            #expect(unknown.isEmpty, "\(name): a message carries \(unknown), which this client ignores")
+
+            for call in message["tool_calls"] as? [[String: Any]] ?? [] {
+                let unknownCall = Set(call.keys).subtracting(comparedToolCallKeys)
+                #expect(unknownCall.isEmpty, "\(name): a tool call carries \(unknownCall)")
+            }
+        }
+    }
 }
 
 @Test("the macOS client agrees with every shared case")

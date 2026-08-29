@@ -102,6 +102,21 @@ private struct MessageRow: View {
                 .font(.caption).bold()
                 .foregroundStyle(message.role == .user ? .blue : .secondary)
 
+            // The working-out, set apart because it is not the answer.
+            // Dimmed and inset so a glance down the transcript reads the
+            // replies and skips these.
+            if !message.reasoning.isEmpty {
+                Text(message.reasoning)
+                    .font(.callout.italic())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.leading, 8)
+                    .overlay(alignment: .leading) {
+                        Rectangle().frame(width: 2).foregroundStyle(.quaternary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if !message.text.isEmpty {
                 Text(message.text)
                     .textSelection(.enabled)

@@ -28,6 +28,7 @@ const normalise = (state) => JSON.stringify({
   messages: (state.messages || []).map((m) => ({
     role: m.role,
     text: m.text || '',
+    reasoning: m.reasoning || '',
     tool_calls: (m.tool_calls || []).map((c) => ({
       name: c.name, completed: !!c.completed, is_error: !!c.is_error,
     })),
@@ -37,8 +38,39 @@ const normalise = (state) => JSON.stringify({
   head_seq: Number(state.head_seq || 0),
 });
 
+// The normaliser above names the fields it compares, so a field added to the
+// fixtures and not to it is silently exempt — every client would pass without
+// computing it. Checked rather than remembered: this is exactly the drift the
+// fixtures exist to catch, and it would be invisible in the one place looking
+// for drift.
+const KNOWN_STATE_KEYS = ['messages', 'pending_approvals', 'active_run', 'head_seq'];
+const KNOWN_MESSAGE_KEYS = ['role', 'text', 'reasoning', 'tool_calls'];
+const KNOWN_CALL_KEYS = ['name', 'completed', 'is_error'];
+
+const unknownKeys = (object, known) => Object.keys(object || {}).filter((k) => !known.includes(k));
+
+const uncompared = (expected) => {
+  const missed = unknownKeys(expected, KNOWN_STATE_KEYS);
+  for (const message of expected.messages || []) {
+    missed.push(...unknownKeys(message, KNOWN_MESSAGE_KEYS));
+    for (const call of message.tool_calls || []) {
+      missed.push(...unknownKeys(call, KNOWN_CALL_KEYS));
+    }
+  }
+  return missed;
+};
+
 let failed = 0;
 for (const testCase of cases) {
+  const missed = uncompared(testCase.expected);
+  if (missed.length > 0) {
+    failed += 1;
+    console.error(`FAIL  ${testCase.name}`);
+    console.error(`      the fixture carries ${missed.join(', ')}, which this check does not compare;`);
+    console.error('      add it to the normaliser and to every client, or the field is checked nowhere');
+    continue;
+  }
+
   const got = reduceAll(parsed(testCase.events));
   if (normalise(got) !== normalise(testCase.expected)) {
     failed += 1;

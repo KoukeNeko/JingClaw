@@ -42,6 +42,10 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			MessageID: "msg_2",
 			Text:      "收到：",
 		},
+		domain.EventAssistantReasoningDelta: domain.AssistantReasoningDelta{
+			MessageID: "msg_2",
+			Text:      "使用者問的是時間，先確認時區。",
+		},
 		domain.EventAssistantMessageCompleted: domain.AssistantMessageCompleted{
 			MessageID:  "msg_2",
 			StopReason: domain.StopEndTurn,

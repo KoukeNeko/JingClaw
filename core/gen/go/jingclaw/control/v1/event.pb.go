@@ -46,6 +46,7 @@ type Event struct {
 	//	*Event_ApprovalResolved
 	//	*Event_ConversationCompacted
 	//	*Event_RunDirections
+	//	*Event_AssistantReasoningDelta
 	Payload       isEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -222,6 +223,15 @@ func (x *Event) GetRunDirections() *RunDirections {
 	return nil
 }
 
+func (x *Event) GetAssistantReasoningDelta() *AssistantReasoningDelta {
+	if x != nil {
+		if x, ok := x.Payload.(*Event_AssistantReasoningDelta); ok {
+			return x.AssistantReasoningDelta
+		}
+	}
+	return nil
+}
+
 type isEvent_Payload interface {
 	isEvent_Payload()
 }
@@ -270,6 +280,10 @@ type Event_RunDirections struct {
 	RunDirections *RunDirections `protobuf:"bytes,20,opt,name=run_directions,json=runDirections,proto3,oneof"`
 }
 
+type Event_AssistantReasoningDelta struct {
+	AssistantReasoningDelta *AssistantReasoningDelta `protobuf:"bytes,21,opt,name=assistant_reasoning_delta,json=assistantReasoningDelta,proto3,oneof"`
+}
+
 func (*Event_UserMessageAdded) isEvent_Payload() {}
 
 func (*Event_RunStateChanged) isEvent_Payload() {}
@@ -291,6 +305,8 @@ func (*Event_ApprovalResolved) isEvent_Payload() {}
 func (*Event_ConversationCompacted) isEvent_Payload() {}
 
 func (*Event_RunDirections) isEvent_Payload() {}
+
+func (*Event_AssistantReasoningDelta) isEvent_Payload() {}
 
 type UserMessageAdded struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
@@ -567,6 +583,63 @@ func (x *AssistantTextDelta) GetText() string {
 	return ""
 }
 
+// The model's working-out, where a provider exposes it.
+//
+// Never sent to a chat platform. The projector refuses it, console channel
+// included: a platform account is somebody's account, and the working-out
+// quotes whatever the run has been reading.
+type AssistantReasoningDelta struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AssistantReasoningDelta) Reset() {
+	*x = AssistantReasoningDelta{}
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AssistantReasoningDelta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AssistantReasoningDelta) ProtoMessage() {}
+
+func (x *AssistantReasoningDelta) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AssistantReasoningDelta.ProtoReflect.Descriptor instead.
+func (*AssistantReasoningDelta) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *AssistantReasoningDelta) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+func (x *AssistantReasoningDelta) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
 type AssistantMessageCompleted struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
@@ -577,7 +650,7 @@ type AssistantMessageCompleted struct {
 
 func (x *AssistantMessageCompleted) Reset() {
 	*x = AssistantMessageCompleted{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[5]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -589,7 +662,7 @@ func (x *AssistantMessageCompleted) String() string {
 func (*AssistantMessageCompleted) ProtoMessage() {}
 
 func (x *AssistantMessageCompleted) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[5]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -602,7 +675,7 @@ func (x *AssistantMessageCompleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssistantMessageCompleted.ProtoReflect.Descriptor instead.
 func (*AssistantMessageCompleted) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{5}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AssistantMessageCompleted) GetMessageId() string {
@@ -634,7 +707,7 @@ type ToolCallRequested struct {
 
 func (x *ToolCallRequested) Reset() {
 	*x = ToolCallRequested{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[6]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +719,7 @@ func (x *ToolCallRequested) String() string {
 func (*ToolCallRequested) ProtoMessage() {}
 
 func (x *ToolCallRequested) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[6]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,7 +732,7 @@ func (x *ToolCallRequested) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolCallRequested.ProtoReflect.Descriptor instead.
 func (*ToolCallRequested) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{6}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ToolCallRequested) GetCallId() string {
@@ -698,7 +771,7 @@ type Artifact struct {
 
 func (x *Artifact) Reset() {
 	*x = Artifact{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[7]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -710,7 +783,7 @@ func (x *Artifact) String() string {
 func (*Artifact) ProtoMessage() {}
 
 func (x *Artifact) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[7]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -723,7 +796,7 @@ func (x *Artifact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Artifact.ProtoReflect.Descriptor instead.
 func (*Artifact) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{7}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Artifact) GetId() string {
@@ -768,7 +841,7 @@ type ToolCallCompleted struct {
 
 func (x *ToolCallCompleted) Reset() {
 	*x = ToolCallCompleted{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[8]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -780,7 +853,7 @@ func (x *ToolCallCompleted) String() string {
 func (*ToolCallCompleted) ProtoMessage() {}
 
 func (x *ToolCallCompleted) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[8]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -793,7 +866,7 @@ func (x *ToolCallCompleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolCallCompleted.ProtoReflect.Descriptor instead.
 func (*ToolCallCompleted) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{8}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ToolCallCompleted) GetCallId() string {
@@ -871,7 +944,7 @@ type ApprovalRequested struct {
 
 func (x *ApprovalRequested) Reset() {
 	*x = ApprovalRequested{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[9]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -883,7 +956,7 @@ func (x *ApprovalRequested) String() string {
 func (*ApprovalRequested) ProtoMessage() {}
 
 func (x *ApprovalRequested) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[9]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -896,7 +969,7 @@ func (x *ApprovalRequested) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalRequested.ProtoReflect.Descriptor instead.
 func (*ApprovalRequested) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{9}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ApprovalRequested) GetApprovalId() string {
@@ -956,7 +1029,7 @@ type ApprovalResolved struct {
 
 func (x *ApprovalResolved) Reset() {
 	*x = ApprovalResolved{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[10]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -968,7 +1041,7 @@ func (x *ApprovalResolved) String() string {
 func (*ApprovalResolved) ProtoMessage() {}
 
 func (x *ApprovalResolved) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[10]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -981,7 +1054,7 @@ func (x *ApprovalResolved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalResolved.ProtoReflect.Descriptor instead.
 func (*ApprovalResolved) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{10}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ApprovalResolved) GetApprovalId() string {
@@ -1037,7 +1110,7 @@ type UsageChanged struct {
 
 func (x *UsageChanged) Reset() {
 	*x = UsageChanged{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[11]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1049,7 +1122,7 @@ func (x *UsageChanged) String() string {
 func (*UsageChanged) ProtoMessage() {}
 
 func (x *UsageChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[11]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1062,7 +1135,7 @@ func (x *UsageChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageChanged.ProtoReflect.Descriptor instead.
 func (*UsageChanged) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{11}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UsageChanged) GetUsage() *Usage {
@@ -1083,7 +1156,7 @@ type StreamHello struct {
 
 func (x *StreamHello) Reset() {
 	*x = StreamHello{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[12]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1095,7 +1168,7 @@ func (x *StreamHello) String() string {
 func (*StreamHello) ProtoMessage() {}
 
 func (x *StreamHello) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[12]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1108,7 +1181,7 @@ func (x *StreamHello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamHello.ProtoReflect.Descriptor instead.
 func (*StreamHello) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{12}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *StreamHello) GetHeadSeq() uint64 {
@@ -1128,7 +1201,7 @@ type StreamHeartbeat struct {
 
 func (x *StreamHeartbeat) Reset() {
 	*x = StreamHeartbeat{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[13]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1140,7 +1213,7 @@ func (x *StreamHeartbeat) String() string {
 func (*StreamHeartbeat) ProtoMessage() {}
 
 func (x *StreamHeartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[13]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1153,7 +1226,7 @@ func (x *StreamHeartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamHeartbeat.ProtoReflect.Descriptor instead.
 func (*StreamHeartbeat) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{13}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StreamHeartbeat) GetHeadSeq() uint64 {
@@ -1185,7 +1258,7 @@ type ConversationCompacted struct {
 
 func (x *ConversationCompacted) Reset() {
 	*x = ConversationCompacted{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[14]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1197,7 +1270,7 @@ func (x *ConversationCompacted) String() string {
 func (*ConversationCompacted) ProtoMessage() {}
 
 func (x *ConversationCompacted) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[14]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1210,7 +1283,7 @@ func (x *ConversationCompacted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationCompacted.ProtoReflect.Descriptor instead.
 func (*ConversationCompacted) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{14}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ConversationCompacted) GetSummary() string {
@@ -1264,7 +1337,7 @@ type RunDirections struct {
 
 func (x *RunDirections) Reset() {
 	*x = RunDirections{}
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[15]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1276,7 +1349,7 @@ func (x *RunDirections) String() string {
 func (*RunDirections) ProtoMessage() {}
 
 func (x *RunDirections) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_event_proto_msgTypes[15]
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1289,7 +1362,7 @@ func (x *RunDirections) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunDirections.ProtoReflect.Descriptor instead.
 func (*RunDirections) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{15}
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RunDirections) GetText() string {
@@ -1303,7 +1376,7 @@ var File_jingclaw_control_v1_event_proto protoreflect.FileDescriptor
 
 const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\n" +
-	"\x1fjingclaw/control/v1/event.proto\x12\x13jingclaw.control.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a jingclaw/control/v1/common.proto\"\x80\t\n" +
+	"\x1fjingclaw/control/v1/event.proto\x12\x13jingclaw.control.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a jingclaw/control/v1/common.proto\"\xec\t\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1323,7 +1396,8 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\x12approval_requested\x18\x11 \x01(\v2&.jingclaw.control.v1.ApprovalRequestedH\x00R\x11approvalRequested\x12T\n" +
 	"\x11approval_resolved\x18\x12 \x01(\v2%.jingclaw.control.v1.ApprovalResolvedH\x00R\x10approvalResolved\x12c\n" +
 	"\x16conversation_compacted\x18\x13 \x01(\v2*.jingclaw.control.v1.ConversationCompactedH\x00R\x15conversationCompacted\x12K\n" +
-	"\x0erun_directions\x18\x14 \x01(\v2\".jingclaw.control.v1.RunDirectionsH\x00R\rrunDirectionsB\t\n" +
+	"\x0erun_directions\x18\x14 \x01(\v2\".jingclaw.control.v1.RunDirectionsH\x00R\rrunDirections\x12j\n" +
+	"\x19assistant_reasoning_delta\x18\x15 \x01(\v2,.jingclaw.control.v1.AssistantReasoningDeltaH\x00R\x17assistantReasoningDeltaB\t\n" +
 	"\apayload\"\xfe\x01\n" +
 	"\x10UserMessageAdded\x12\x1d\n" +
 	"\n" +
@@ -1344,6 +1418,10 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12!\n" +
 	"\ffailure_kind\x18\x03 \x01(\tR\vfailureKind\"G\n" +
 	"\x12AssistantTextDelta\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"L\n" +
+	"\x17AssistantReasoningDelta\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\"|\n" +
@@ -1418,60 +1496,62 @@ func file_jingclaw_control_v1_event_proto_rawDescGZIP() []byte {
 	return file_jingclaw_control_v1_event_proto_rawDescData
 }
 
-var file_jingclaw_control_v1_event_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_jingclaw_control_v1_event_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_jingclaw_control_v1_event_proto_goTypes = []any{
 	(*Event)(nil),                     // 0: jingclaw.control.v1.Event
 	(*UserMessageAdded)(nil),          // 1: jingclaw.control.v1.UserMessageAdded
 	(*MessageAttachment)(nil),         // 2: jingclaw.control.v1.MessageAttachment
 	(*RunStateChanged)(nil),           // 3: jingclaw.control.v1.RunStateChanged
 	(*AssistantTextDelta)(nil),        // 4: jingclaw.control.v1.AssistantTextDelta
-	(*AssistantMessageCompleted)(nil), // 5: jingclaw.control.v1.AssistantMessageCompleted
-	(*ToolCallRequested)(nil),         // 6: jingclaw.control.v1.ToolCallRequested
-	(*Artifact)(nil),                  // 7: jingclaw.control.v1.Artifact
-	(*ToolCallCompleted)(nil),         // 8: jingclaw.control.v1.ToolCallCompleted
-	(*ApprovalRequested)(nil),         // 9: jingclaw.control.v1.ApprovalRequested
-	(*ApprovalResolved)(nil),          // 10: jingclaw.control.v1.ApprovalResolved
-	(*UsageChanged)(nil),              // 11: jingclaw.control.v1.UsageChanged
-	(*StreamHello)(nil),               // 12: jingclaw.control.v1.StreamHello
-	(*StreamHeartbeat)(nil),           // 13: jingclaw.control.v1.StreamHeartbeat
-	(*ConversationCompacted)(nil),     // 14: jingclaw.control.v1.ConversationCompacted
-	(*RunDirections)(nil),             // 15: jingclaw.control.v1.RunDirections
-	(*timestamppb.Timestamp)(nil),     // 16: google.protobuf.Timestamp
-	(TrustLevel)(0),                   // 17: jingclaw.control.v1.TrustLevel
-	(*RunOrigin)(nil),                 // 18: jingclaw.control.v1.RunOrigin
-	(RunStatus)(0),                    // 19: jingclaw.control.v1.RunStatus
-	(StopReason)(0),                   // 20: jingclaw.control.v1.StopReason
-	(ApprovalStatus)(0),               // 21: jingclaw.control.v1.ApprovalStatus
-	(RememberScope)(0),                // 22: jingclaw.control.v1.RememberScope
-	(*Usage)(nil),                     // 23: jingclaw.control.v1.Usage
+	(*AssistantReasoningDelta)(nil),   // 5: jingclaw.control.v1.AssistantReasoningDelta
+	(*AssistantMessageCompleted)(nil), // 6: jingclaw.control.v1.AssistantMessageCompleted
+	(*ToolCallRequested)(nil),         // 7: jingclaw.control.v1.ToolCallRequested
+	(*Artifact)(nil),                  // 8: jingclaw.control.v1.Artifact
+	(*ToolCallCompleted)(nil),         // 9: jingclaw.control.v1.ToolCallCompleted
+	(*ApprovalRequested)(nil),         // 10: jingclaw.control.v1.ApprovalRequested
+	(*ApprovalResolved)(nil),          // 11: jingclaw.control.v1.ApprovalResolved
+	(*UsageChanged)(nil),              // 12: jingclaw.control.v1.UsageChanged
+	(*StreamHello)(nil),               // 13: jingclaw.control.v1.StreamHello
+	(*StreamHeartbeat)(nil),           // 14: jingclaw.control.v1.StreamHeartbeat
+	(*ConversationCompacted)(nil),     // 15: jingclaw.control.v1.ConversationCompacted
+	(*RunDirections)(nil),             // 16: jingclaw.control.v1.RunDirections
+	(*timestamppb.Timestamp)(nil),     // 17: google.protobuf.Timestamp
+	(TrustLevel)(0),                   // 18: jingclaw.control.v1.TrustLevel
+	(*RunOrigin)(nil),                 // 19: jingclaw.control.v1.RunOrigin
+	(RunStatus)(0),                    // 20: jingclaw.control.v1.RunStatus
+	(StopReason)(0),                   // 21: jingclaw.control.v1.StopReason
+	(ApprovalStatus)(0),               // 22: jingclaw.control.v1.ApprovalStatus
+	(RememberScope)(0),                // 23: jingclaw.control.v1.RememberScope
+	(*Usage)(nil),                     // 24: jingclaw.control.v1.Usage
 }
 var file_jingclaw_control_v1_event_proto_depIdxs = []int32{
-	16, // 0: jingclaw.control.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
+	17, // 0: jingclaw.control.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
 	1,  // 1: jingclaw.control.v1.Event.user_message_added:type_name -> jingclaw.control.v1.UserMessageAdded
 	3,  // 2: jingclaw.control.v1.Event.run_state_changed:type_name -> jingclaw.control.v1.RunStateChanged
 	4,  // 3: jingclaw.control.v1.Event.assistant_text_delta:type_name -> jingclaw.control.v1.AssistantTextDelta
-	5,  // 4: jingclaw.control.v1.Event.assistant_message_completed:type_name -> jingclaw.control.v1.AssistantMessageCompleted
-	11, // 5: jingclaw.control.v1.Event.usage_changed:type_name -> jingclaw.control.v1.UsageChanged
-	6,  // 6: jingclaw.control.v1.Event.tool_call_requested:type_name -> jingclaw.control.v1.ToolCallRequested
-	8,  // 7: jingclaw.control.v1.Event.tool_call_completed:type_name -> jingclaw.control.v1.ToolCallCompleted
-	9,  // 8: jingclaw.control.v1.Event.approval_requested:type_name -> jingclaw.control.v1.ApprovalRequested
-	10, // 9: jingclaw.control.v1.Event.approval_resolved:type_name -> jingclaw.control.v1.ApprovalResolved
-	14, // 10: jingclaw.control.v1.Event.conversation_compacted:type_name -> jingclaw.control.v1.ConversationCompacted
-	15, // 11: jingclaw.control.v1.Event.run_directions:type_name -> jingclaw.control.v1.RunDirections
-	17, // 12: jingclaw.control.v1.UserMessageAdded.trust:type_name -> jingclaw.control.v1.TrustLevel
-	18, // 13: jingclaw.control.v1.UserMessageAdded.origin:type_name -> jingclaw.control.v1.RunOrigin
-	2,  // 14: jingclaw.control.v1.UserMessageAdded.attachments:type_name -> jingclaw.control.v1.MessageAttachment
-	19, // 15: jingclaw.control.v1.RunStateChanged.status:type_name -> jingclaw.control.v1.RunStatus
-	20, // 16: jingclaw.control.v1.AssistantMessageCompleted.stop_reason:type_name -> jingclaw.control.v1.StopReason
-	7,  // 17: jingclaw.control.v1.ToolCallCompleted.artifact:type_name -> jingclaw.control.v1.Artifact
-	21, // 18: jingclaw.control.v1.ApprovalResolved.status:type_name -> jingclaw.control.v1.ApprovalStatus
-	22, // 19: jingclaw.control.v1.ApprovalResolved.scope:type_name -> jingclaw.control.v1.RememberScope
-	23, // 20: jingclaw.control.v1.UsageChanged.usage:type_name -> jingclaw.control.v1.Usage
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	6,  // 4: jingclaw.control.v1.Event.assistant_message_completed:type_name -> jingclaw.control.v1.AssistantMessageCompleted
+	12, // 5: jingclaw.control.v1.Event.usage_changed:type_name -> jingclaw.control.v1.UsageChanged
+	7,  // 6: jingclaw.control.v1.Event.tool_call_requested:type_name -> jingclaw.control.v1.ToolCallRequested
+	9,  // 7: jingclaw.control.v1.Event.tool_call_completed:type_name -> jingclaw.control.v1.ToolCallCompleted
+	10, // 8: jingclaw.control.v1.Event.approval_requested:type_name -> jingclaw.control.v1.ApprovalRequested
+	11, // 9: jingclaw.control.v1.Event.approval_resolved:type_name -> jingclaw.control.v1.ApprovalResolved
+	15, // 10: jingclaw.control.v1.Event.conversation_compacted:type_name -> jingclaw.control.v1.ConversationCompacted
+	16, // 11: jingclaw.control.v1.Event.run_directions:type_name -> jingclaw.control.v1.RunDirections
+	5,  // 12: jingclaw.control.v1.Event.assistant_reasoning_delta:type_name -> jingclaw.control.v1.AssistantReasoningDelta
+	18, // 13: jingclaw.control.v1.UserMessageAdded.trust:type_name -> jingclaw.control.v1.TrustLevel
+	19, // 14: jingclaw.control.v1.UserMessageAdded.origin:type_name -> jingclaw.control.v1.RunOrigin
+	2,  // 15: jingclaw.control.v1.UserMessageAdded.attachments:type_name -> jingclaw.control.v1.MessageAttachment
+	20, // 16: jingclaw.control.v1.RunStateChanged.status:type_name -> jingclaw.control.v1.RunStatus
+	21, // 17: jingclaw.control.v1.AssistantMessageCompleted.stop_reason:type_name -> jingclaw.control.v1.StopReason
+	8,  // 18: jingclaw.control.v1.ToolCallCompleted.artifact:type_name -> jingclaw.control.v1.Artifact
+	22, // 19: jingclaw.control.v1.ApprovalResolved.status:type_name -> jingclaw.control.v1.ApprovalStatus
+	23, // 20: jingclaw.control.v1.ApprovalResolved.scope:type_name -> jingclaw.control.v1.RememberScope
+	24, // 21: jingclaw.control.v1.UsageChanged.usage:type_name -> jingclaw.control.v1.Usage
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_event_proto_init() }
@@ -1492,6 +1572,7 @@ func file_jingclaw_control_v1_event_proto_init() {
 		(*Event_ApprovalResolved)(nil),
 		(*Event_ConversationCompacted)(nil),
 		(*Event_RunDirections)(nil),
+		(*Event_AssistantReasoningDelta)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1499,7 +1580,7 @@ func file_jingclaw_control_v1_event_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jingclaw_control_v1_event_proto_rawDesc), len(file_jingclaw_control_v1_event_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

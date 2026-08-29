@@ -2464,7 +2464,13 @@ type ViewMessage struct {
 	// Tools this turn asked for, in order.
 	ToolCalls []*ViewToolCall `protobuf:"bytes,5,rep,name=tool_calls,json=toolCalls,proto3" json:"tool_calls,omitempty"`
 	// Seq of the last event that contributed to this message.
-	Seq           uint64 `protobuf:"varint,6,opt,name=seq,proto3" json:"seq,omitempty"`
+	Seq uint64 `protobuf:"varint,6,opt,name=seq,proto3" json:"seq,omitempty"`
+	// The model's working-out for this turn, where a provider exposed it.
+	//
+	// Answered only to a client on the control plane. It never reaches a chat
+	// platform: the projector refuses the events it is built from, console
+	// channel included.
+	Reasoning     string `protobuf:"bytes,7,opt,name=reasoning,proto3" json:"reasoning,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2539,6 +2545,13 @@ func (x *ViewMessage) GetSeq() uint64 {
 		return x.Seq
 	}
 	return 0
+}
+
+func (x *ViewMessage) GetReasoning() string {
+	if x != nil {
+		return x.Reasoning
+	}
+	return ""
 }
 
 type ViewToolCall struct {
@@ -2986,7 +2999,7 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\n" +
 	"active_run\x18\x04 \x01(\v2\x18.jingclaw.control.v1.RunR\tactiveRun\x12\x19\n" +
 	"\bhead_seq\x18\x05 \x01(\x04R\aheadSeq\x12\x1c\n" +
-	"\ttruncated\x18\x06 \x01(\bR\ttruncated\"\xe7\x01\n" +
+	"\ttruncated\x18\x06 \x01(\bR\ttruncated\"\x85\x02\n" +
 	"\vViewMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\x04role\x18\x02 \x01(\x0e2 .jingclaw.control.v1.MessageRoleR\x04role\x12\x12\n" +
@@ -2994,7 +3007,8 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\x02at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12@\n" +
 	"\n" +
 	"tool_calls\x18\x05 \x03(\v2!.jingclaw.control.v1.ViewToolCallR\ttoolCalls\x12\x10\n" +
-	"\x03seq\x18\x06 \x01(\x04R\x03seq\"\x8e\x01\n" +
+	"\x03seq\x18\x06 \x01(\x04R\x03seq\x12\x1c\n" +
+	"\treasoning\x18\a \x01(\tR\treasoning\"\x8e\x01\n" +
 	"\fViewToolCall\x12\x17\n" +
 	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +

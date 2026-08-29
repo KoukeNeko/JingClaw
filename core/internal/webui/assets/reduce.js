@@ -44,6 +44,17 @@ export function reduce(state, event) {
       break;
     }
 
+    case 'assistant.reasoning': {
+      // Onto the same turn as the answer, in its own field. A model thinks
+      // before it replies, so this reaches a turn that has no text yet and
+      // must not be mistaken for the start of one.
+      const index = openAssistant(next.messages);
+      if (index < 0) next.messages.push({ role: ROLE_ASSISTANT, text: '' });
+      const at = index < 0 ? next.messages.length - 1 : index;
+      next.messages[at].reasoning = (next.messages[at].reasoning || '') + (body.text || '');
+      break;
+    }
+
     case 'tool.requested': {
       // Attached to the turn that asked, which is the assistant turn being
       // written — creating one if the model asked before saying anything.
@@ -98,6 +109,7 @@ export function reduceAll(events) {
 
 function cloneMessage(message) {
   const copy = { role: message.role, text: message.text };
+  if (message.reasoning) copy.reasoning = message.reasoning;
   if (message.tool_calls) copy.tool_calls = message.tool_calls.map((c) => ({ ...c }));
   return copy;
 }

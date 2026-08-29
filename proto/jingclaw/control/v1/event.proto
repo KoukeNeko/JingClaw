@@ -31,6 +31,7 @@ message Event {
     ApprovalResolved approval_resolved = 18;
     ConversationCompacted conversation_compacted = 19;
     RunDirections run_directions = 20;
+    AssistantReasoningDelta assistant_reasoning_delta = 21;
   }
 }
 
@@ -79,6 +80,16 @@ message RunStateChanged {
 // Provider deltas are coalesced before becoming events: one row per token
 // would make the log unusable and, once persisted, would hammer the database.
 message AssistantTextDelta {
+  string message_id = 1;
+  string text = 2;
+}
+
+// The model's working-out, where a provider exposes it.
+//
+// Never sent to a chat platform. The projector refuses it, console channel
+// included: a platform account is somebody's account, and the working-out
+// quotes whatever the run has been reading.
+message AssistantReasoningDelta {
   string message_id = 1;
   string text = 2;
 }

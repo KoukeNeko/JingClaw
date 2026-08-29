@@ -813,6 +813,9 @@ type coalescer struct {
 	text          strings.Builder
 	lastTextFlush time.Time
 
+	reasoning          strings.Builder
+	lastReasoningFlush time.Time
+
 	usage          domain.Usage
 	usagePending   bool
 	lastUsageFlush time.Time
@@ -821,12 +824,13 @@ type coalescer struct {
 func (r *Runtime) newCoalescer(run domain.Run, messageID domain.MessageID) *coalescer {
 	now := r.opts.Now()
 	return &coalescer{
-		rt:             r,
-		run:            run,
-		messageID:      messageID,
-		limits:         r.opts.Coalescing.withDefaults(),
-		lastTextFlush:  now,
-		lastUsageFlush: now,
+		rt:                 r,
+		run:                run,
+		messageID:          messageID,
+		limits:             r.opts.Coalescing.withDefaults(),
+		lastTextFlush:      now,
+		lastReasoningFlush: now,
+		lastUsageFlush:     now,
 	}
 }
 
@@ -843,6 +847,24 @@ func (c *coalescer) addText(ctx context.Context, text string) error {
 	return c.flushText(ctx)
 }
 
+// addReasoning buffers working-out on the same cadence as the answer.
+//
+// Its own buffer rather than the text one: interleaved, a flush would emit a
+// chunk that is part answer and part reasoning under one kind, and no reader
+// could separate them again.
+func (c *coalescer) addReasoning(ctx context.Context, text string) error {
+	if text == "" {
+		return nil
+	}
+	c.reasoning.WriteString(text)
+
+	elapsed := c.rt.opts.Now().Sub(c.lastReasoningFlush)
+	if c.reasoning.Len() < c.limits.TextFlushBytes && elapsed < c.limits.TextFlushInterval {
+		return nil
+	}
+	return c.flushReasoning(ctx)
+}
+
 func (c *coalescer) setUsage(ctx context.Context, usage domain.Usage) error {
 	c.usage = usage
 	c.usagePending = true
@@ -853,13 +875,32 @@ func (c *coalescer) setUsage(ctx context.Context, usage domain.Usage) error {
 	return c.flushUsage(ctx)
 }
 
-// flush emits everything still buffered. Text goes first so the reply reads in
-// order before the accounting that describes it.
+// flush emits everything still buffered.
+//
+// Reasoning first, then the answer, then the accounting that describes it: a
+// model thinks before it replies, and a log that shows the working-out after
+// the conclusion reads as a justification written afterwards.
 func (c *coalescer) flush(ctx context.Context) error {
+	if err := c.flushReasoning(ctx); err != nil {
+		return err
+	}
 	if err := c.flushText(ctx); err != nil {
 		return err
 	}
 	return c.flushUsage(ctx)
+}
+
+func (c *coalescer) flushReasoning(ctx context.Context) error {
+	if c.reasoning.Len() == 0 {
+		return nil
+	}
+
+	text := c.reasoning.String()
+	c.reasoning.Reset()
+	c.lastReasoningFlush = c.rt.opts.Now()
+
+	return c.rt.append(ctx, c.run.SessionID, c.run.ID, domain.EventAssistantReasoningDelta,
+		domain.AssistantReasoningDelta{MessageID: c.messageID, Text: text})
 }
 
 func (c *coalescer) flushText(ctx context.Context) error {
@@ -963,11 +1004,14 @@ func (r *Runtime) generateTurn(
 			}
 
 		case provider.ReasoningDelta:
-			// Dropped on purpose, and stated rather than left to a missing
-			// case. A model's working-out is not its answer, and this is the
-			// path that ends with text posted to whoever asked. Showing it is
-			// a decision with its own audience and its own switch, not
-			// something to acquire by falling through.
+			// Recorded, and deliberately not as text. This is the path that
+			// ends with an answer posted to whoever asked; the working-out
+			// travels under its own kind so that everything downstream has to
+			// decide about it rather than acquire it by falling through.
+			if err := output.addReasoning(ctx, e.Text); err != nil {
+				r.abort(ctx, run, output, err)
+				return nil, err
+			}
 
 		case provider.Completed:
 			stopReason = e.StopReason

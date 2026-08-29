@@ -32,6 +32,15 @@ type Provider struct {
 
 	// ChunkDelay is applied before every chunk after the first.
 	ChunkDelay time.Duration
+
+	// Reasoning is emitted as working-out before the answer, where set.
+	//
+	// Off by default: most checks are about the answer, and a fake that
+	// always thought would make every one of them assert around it. It exists
+	// so the path a real thinking model takes — recorded under its own kind,
+	// refused by the projector, shown only on the control plane — can be
+	// driven without one.
+	Reasoning string
 }
 
 var _ provider.Provider = (*Provider)(nil)
@@ -69,21 +78,29 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request) (provider
 		chunks = append(chunks, text)
 	}
 
-	return &stream{chunks: chunks, delay: p.ChunkDelay}, nil
+	return &stream{chunks: chunks, reasoning: p.Reasoning, delay: p.ChunkDelay}, nil
 }
 
 type stream struct {
-	chunks []string
-	delay  time.Duration
+	chunks    []string
+	reasoning string
+	delay     time.Duration
 
-	next      int
-	usageSent bool
-	done      bool
+	next          int
+	reasoningSent bool
+	usageSent     bool
+	done          bool
 }
 
 func (s *stream) Recv(ctx context.Context) (provider.Event, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+
+	// Before the answer, as a real model thinks before it replies.
+	if s.reasoning != "" && !s.reasoningSent {
+		s.reasoningSent = true
+		return provider.ReasoningDelta{Text: s.reasoning}, nil
 	}
 
 	if s.next < len(s.chunks) {

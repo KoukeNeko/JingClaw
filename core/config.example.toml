@@ -51,6 +51,10 @@ api_key_file = "gemini.key"
 # How fast the offline provider pretends to think.
 # fake_delay = "150ms"
 
+# Working-out the offline provider emits before its answer, so the path a
+# thinking model takes can be driven without one. Empty means none.
+# fake_reasoning = ""
+
 [model.retry]
 # A server's own Retry-After is honoured exactly, never shortened: asking again
 # early earns the same refusal. These bound what this code invents when the

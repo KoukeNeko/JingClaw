@@ -44,6 +44,11 @@ type ViewMessage struct {
 	Role domain.MessageRole
 	Text string
 
+	// Reasoning is the model's working-out for this turn, where a provider
+	// exposed it. Answered only on the control plane; the projector refuses
+	// the events it is built from, so no chat platform can carry it.
+	Reasoning string
+
 	At        int64
 	ToolCalls []ViewToolCall
 	Seq       domain.Seq
@@ -139,6 +144,17 @@ func foldEvents(events []domain.Event) ([]ViewMessage, domain.RunID) {
 				index = appendMessage(payload.MessageID, domain.RoleAssistant, event)
 			}
 			messages[index].Text += payload.Text
+			messages[index].Seq = event.Seq
+
+		case domain.AssistantReasoningDelta:
+			// Onto the same turn as the answer, in its own field. It arrives
+			// before the turn has any text, so the message is created here as
+			// readily as by a delta.
+			index, ok := byMessage[payload.MessageID]
+			if !ok {
+				index = appendMessage(payload.MessageID, domain.RoleAssistant, event)
+			}
+			messages[index].Reasoning += payload.Text
 			messages[index].Seq = event.Seq
 
 		case domain.AssistantMessageCompleted:

@@ -40,6 +40,11 @@ type assistantTextDeltaJSON struct {
 	Text      string `json:"text"`
 }
 
+type assistantReasoningDeltaJSON struct {
+	MessageID string `json:"message_id"`
+	Text      string `json:"text"`
+}
+
 type assistantMessageCompletedJSON struct {
 	MessageID  string `json:"message_id"`
 	StopReason string `json:"stop_reason,omitempty"`
@@ -193,6 +198,12 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			Text:      p.Text,
 		})
 
+	case domain.AssistantReasoningDelta:
+		return json.Marshal(assistantReasoningDeltaJSON{
+			MessageID: string(p.MessageID),
+			Text:      p.Text,
+		})
+
 	case domain.AssistantMessageCompleted:
 		return json.Marshal(assistantMessageCompletedJSON{
 			MessageID:  string(p.MessageID),
@@ -299,6 +310,16 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
 		}
 		return domain.AssistantTextDelta{
+			MessageID: domain.MessageID(p.MessageID),
+			Text:      p.Text,
+		}, nil
+
+	case domain.EventAssistantReasoningDelta:
+		var p assistantReasoningDeltaJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		return domain.AssistantReasoningDelta{
 			MessageID: domain.MessageID(p.MessageID),
 			Text:      p.Text,
 		}, nil

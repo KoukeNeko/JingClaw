@@ -29,6 +29,16 @@ public enum Reducer {
             }()
             next.messages[index].text += event.body.text ?? ""
 
+        case "assistant.reasoning":
+            // Onto the same turn as the answer, in its own property. A model
+            // thinks before it replies, so this reaches a turn that has no
+            // text yet and must not be mistaken for the start of one.
+            let index = openAssistant(next.messages) ?? {
+                next.messages.append(Message(role: .assistant))
+                return next.messages.count - 1
+            }()
+            next.messages[index].reasoning += event.body.text ?? ""
+
         case "tool.requested":
             // Attached to the turn that asked, which is the assistant turn
             // being written — creating one if the model asked for a tool

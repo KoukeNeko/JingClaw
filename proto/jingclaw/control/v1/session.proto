@@ -413,6 +413,13 @@ message ViewMessage {
 
   // Seq of the last event that contributed to this message.
   uint64 seq = 6;
+
+  // The model's working-out for this turn, where a provider exposed it.
+  //
+  // Answered only to a client on the control plane. It never reaches a chat
+  // platform: the projector refuses the events it is built from, console
+  // channel included.
+  string reasoning = 7;
 }
 
 message ViewToolCall {

@@ -425,6 +425,9 @@ func describe(ev *controlv1.Event, showOutput bool) (label, detail string) {
 	case *controlv1.Event_AssistantTextDelta:
 		return "assistant.delta", payload.AssistantTextDelta.GetText()
 
+	case *controlv1.Event_AssistantReasoningDelta:
+		return "assistant.thinking", payload.AssistantReasoningDelta.GetText()
+
 	case *controlv1.Event_AssistantMessageCompleted:
 		reason := payload.AssistantMessageCompleted.GetStopReason()
 		if reason == controlv1.StopReason_STOP_REASON_END_TURN ||

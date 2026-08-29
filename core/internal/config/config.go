@@ -102,6 +102,14 @@ type Model struct {
 	// be watched at human speed.
 	FakeDelay time.Duration `koanf:"fake_delay"`
 
+	// FakeReasoning is working-out the offline provider emits before its
+	// answer. Empty means none, which is what most checks want.
+	//
+	// It exists so the path a thinking model takes can be driven without one:
+	// recorded under its own kind, refused by the projector, shown only on the
+	// control plane.
+	FakeReasoning string `koanf:"fake_reasoning"`
+
 	Retry Retry `koanf:"retry"`
 
 	Ollama       Ollama       `koanf:"ollama"`
@@ -1343,6 +1351,10 @@ api_key_file = "gemini.key"
 
 # How fast the offline provider pretends to think.
 # fake_delay = "150ms"
+
+# Working-out the offline provider emits before its answer, so the path a
+# thinking model takes can be driven without one. Empty means none.
+# fake_reasoning = ""
 
 [model.retry]
 # A server's own Retry-After is honoured exactly, never shortened: asking again
