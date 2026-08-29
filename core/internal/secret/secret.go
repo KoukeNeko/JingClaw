@@ -147,3 +147,32 @@ func DefaultFiles(name string) ([]string, error) {
 }
 
 const appDir = "JingClaw"
+
+// Find is the whole of "where does this credential come from".
+//
+// The environment first, then the files DefaultFiles names — and a clear
+// refusal naming both when there is nothing, because "no token" with no
+// indication of where one should go is a message somebody has to read the
+// source to act on.
+//
+// Here rather than in each command that needs one. There are three now, and
+// three copies of this would eventually disagree about which places are
+// looked in.
+func Find(envVars []string, fileName string) (Value, error) {
+	files, err := DefaultFiles(fileName)
+	if err != nil {
+		return Value{}, err
+	}
+
+	found, err := Load(LoadOptions{EnvVars: envVars, Files: files})
+	if err != nil {
+		return Value{}, err
+	}
+	if !found.IsSet() {
+		return Value{}, fmt.Errorf(
+			"no credential: set %s, or write it with mode 600 to one of: %v",
+			strings.Join(envVars, " or "), files)
+	}
+
+	return found, nil
+}

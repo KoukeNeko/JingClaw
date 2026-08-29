@@ -362,6 +362,37 @@ type Web struct {
 	// MaxLinks bounds the link list. A navigation page can have thousands, and
 	// none of them are worth the context.
 	MaxLinks int `koanf:"max_links"`
+
+	// Search is finding an address rather than reading one somebody named.
+	//
+	// Its own section, and its own switch, because it is a different thing to
+	// be trusted with: reading fetches what somebody chose, and searching
+	// lets the agent choose. A deployment may reasonably want one and not the
+	// other.
+	Search Search `koanf:"search"`
+}
+
+// Search is how the agent finds addresses worth reading.
+type Search struct {
+	// Backend is the search service. "brave" or "none".
+	//
+	// One implemented rather than four written from four sets of
+	// documentation: every service has its own key, quota and result shape,
+	// and an adapter that has never run is a liability. The next one is added
+	// when somebody has a key to try it with.
+	Backend string `koanf:"backend"`
+
+	// KeyEnv and KeyFile are where the subscription token comes from. The
+	// file must be mode 600, and the value never reaches a log.
+	KeyEnv  []string `koanf:"key_env"`
+	KeyFile string   `koanf:"key_file"`
+
+	// Endpoint overrides the API root, for a deployment behind a proxy.
+	// Empty uses the service's own.
+	Endpoint string `koanf:"endpoint"`
+
+	// MaxResults is how many results one search returns by default.
+	MaxResults int `koanf:"max_results"`
 }
 
 // MCP is the tool servers this agent runs alongside itself.
@@ -653,6 +684,12 @@ func Defaults() Config {
 			Timeout:       45 * time.Second,
 			MaxCharacters: 40000,
 			MaxLinks:      50,
+			Search: Search{
+				Backend:    "none",
+				KeyEnv:     []string{"BRAVE_SEARCH_TOKEN"},
+				KeyFile:    "brave-search.token",
+				MaxResults: 8,
+			},
 		},
 		MCP: MCP{
 			StartTimeout: 30 * time.Second,
@@ -1148,6 +1185,23 @@ func (c Config) rangeProblems() []Problem {
 				Fix: "Use 0 to list no links at all.",
 			})
 		}
+
+		switch c.Web.Search.Backend {
+		case "brave", "none", "":
+		default:
+			problems = append(problems, Problem{
+				Key: "web.search.backend", Value: quote(c.Web.Search.Backend),
+				Why: "is not a search backend this knows",
+				Fix: `Use "brave", or "none" to leave searching off.`,
+			})
+		}
+		if c.Web.Search.MaxResults < 0 {
+			problems = append(problems, Problem{
+				Key: "web.search.max_results", Value: fmt.Sprint(c.Web.Search.MaxResults),
+				Why: "is negative",
+				Fix: "Leave it at 0 to use the default of 8.",
+			})
+		}
 	}
 
 	if c.Context.Window < 0 {
@@ -1498,6 +1552,27 @@ backend = "browser"
 # timeout = "45s"
 # max_characters = 40000
 # max_links = 50
+
+[web.search]
+# Finding an address rather than reading one somebody named. Its own switch,
+# because it is a different thing to be trusted with: reading fetches what
+# somebody chose, and searching lets the agent choose.
+#
+# "brave" or "none". One backend is implemented rather than four written from
+# four sets of documentation; the next is added when somebody has a key to try
+# it with.
+# backend = "none"
+
+# Where the subscription token comes from. The file must be mode 600, and the
+# value never reaches a log.
+# key_env = ["BRAVE_SEARCH_TOKEN"]
+# key_file = "brave-search.token"
+
+# The API root, for a deployment behind a proxy. Empty uses the service's own.
+# endpoint = ""
+
+# How many results one search returns by default.
+# max_results = 8
 
 [tools]
 # Bounds on what one tool call may read, write or return. A tool that can fill

@@ -160,6 +160,27 @@ backend = "browser"
 # max_characters = 40000
 # max_links = 50
 
+[web.search]
+# Finding an address rather than reading one somebody named. Its own switch,
+# because it is a different thing to be trusted with: reading fetches what
+# somebody chose, and searching lets the agent choose.
+#
+# "brave" or "none". One backend is implemented rather than four written from
+# four sets of documentation; the next is added when somebody has a key to try
+# it with.
+# backend = "none"
+
+# Where the subscription token comes from. The file must be mode 600, and the
+# value never reaches a log.
+# key_env = ["BRAVE_SEARCH_TOKEN"]
+# key_file = "brave-search.token"
+
+# The API root, for a deployment behind a proxy. Empty uses the service's own.
+# endpoint = ""
+
+# How many results one search returns by default.
+# max_results = 8
+
 [tools]
 # Bounds on what one tool call may read, write or return. A tool that can fill
 # the context window in one call can end a session in one call.

@@ -306,6 +306,19 @@ func run() error {
 		logger.Info("web reading is on", "backend", fetcher.Describe())
 	}
 
+	// Searching is registered separately, and needs reading to be on: an
+	// agent that can find addresses and not read them has been given the
+	// half of the capability that is no use on its own.
+	if searcher, err := webSearcher(cfg); err != nil {
+		return err
+	} else if searcher != nil {
+		tools.MustRegister(&builtin.WebSearch{
+			Searcher:   searcher,
+			MaxResults: cfg.Web.Search.MaxResults,
+		})
+		logger.Info("web search is on", "backend", searcher.Describe())
+	}
+
 	profile, ok := permission.ProfileByName(cfg.Agent.PermissionProfile)
 	if !ok {
 		return fmt.Errorf("unknown permission profile %q", cfg.Agent.PermissionProfile)
@@ -801,6 +814,32 @@ func webFetcher(cfg config.Config) (web.Fetcher, error) {
 		// Validation has already refused anything else; reaching here means
 		// the two lists disagree, which is worth saying out loud.
 		return nil, fmt.Errorf("web.backend %q has no implementation", cfg.Web.Backend)
+	}
+}
+
+// webSearcher builds the search backend, if one is configured.
+//
+// The key is resolved now rather than at the first call, for the same reason
+// the browser interpreter is: an agent that advertises a tool it cannot run
+// wastes a turn discovering that, and the operator finds out from a log line
+// rather than from a model apologising.
+func webSearcher(cfg config.Config) (web.Searcher, error) {
+	if !cfg.Web.Enabled || cfg.Web.Search.Backend == "none" || cfg.Web.Search.Backend == "" {
+		return nil, nil
+	}
+
+	switch cfg.Web.Search.Backend {
+	case "brave":
+		key, err := secret.Find(cfg.Web.Search.KeyEnv, cfg.Web.Search.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("web.search.backend is \"brave\": %w", err)
+		}
+		return &web.Brave{Key: key.Reveal(), Endpoint: cfg.Web.Search.Endpoint}, nil
+
+	default:
+		// Validation has already refused anything else; reaching here means
+		// the two lists disagree, which is worth saying out loud.
+		return nil, fmt.Errorf("web.search.backend %q has no implementation", cfg.Web.Search.Backend)
 	}
 }
 

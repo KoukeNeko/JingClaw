@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/adapter/discord"
 	"github.com/KoukeNeko/JingClaw/core/internal/adapter/telegram"
@@ -42,7 +41,7 @@ type sink interface {
 func newAdapter(cfg config.Config, into sink, logger *slog.Logger) (adapter, error) {
 	switch cfg.Gateway.Platform {
 	case "discord":
-		token, err := loadToken(cfg.Gateway.Discord.TokenEnv, cfg.Gateway.Discord.TokenFile)
+		token, err := secret.Find(cfg.Gateway.Discord.TokenEnv, cfg.Gateway.Discord.TokenFile)
 		if err != nil {
 			return nil, err
 		}
@@ -55,7 +54,7 @@ func newAdapter(cfg config.Config, into sink, logger *slog.Logger) (adapter, err
 		}, into), nil
 
 	case "telegram":
-		token, err := loadToken(cfg.Gateway.Telegram.TokenEnv, cfg.Gateway.Telegram.TokenFile)
+		token, err := secret.Find(cfg.Gateway.Telegram.TokenEnv, cfg.Gateway.Telegram.TokenFile)
 		if err != nil {
 			return nil, err
 		}
@@ -74,25 +73,4 @@ func newAdapter(cfg config.Config, into sink, logger *slog.Logger) (adapter, err
 		// process that serves nothing.
 		return nil, fmt.Errorf("gatewayd: no adapter for platform %q", cfg.Gateway.Platform)
 	}
-}
-
-// loadToken finds a bot credential without it passing through the shell
-// history or a command line.
-func loadToken(envVars []string, tokenFile string) (secret.Value, error) {
-	files, err := secret.DefaultFiles(tokenFile)
-	if err != nil {
-		return secret.Value{}, err
-	}
-
-	token, err := secret.Load(secret.LoadOptions{EnvVars: envVars, Files: files})
-	if err != nil {
-		return secret.Value{}, err
-	}
-	if !token.IsSet() {
-		return secret.Value{}, fmt.Errorf(
-			"no bot token: set %s, or write it with mode 600 to one of: %v",
-			strings.Join(envVars, " or "), files)
-	}
-
-	return token, nil
 }
