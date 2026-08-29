@@ -1,4 +1,4 @@
-import { reduceAll, FOLD_NOTICE } from './reduce.js';
+import { approvalFrom, reduceAll, FOLD_NOTICE } from './reduce.js';
 
 // The console talks to the daemon over Connect with JSON bodies, which is why
 // there is no bundler and no generated client here: a unary call is a POST
@@ -347,13 +347,12 @@ async function openFromView(id) {
     state.runId = view.activeRun?.id || null;
     setRunStatus(view.activeRun ? statusText(view.activeRun.status) : '');
 
+    // Everything, not a summary of it. A person opening a session where
+    // something is already waiting is being asked to allow a call, and
+    // narrowing this is what left them approving one they could not see.
     state.approvals.clear();
     for (const approval of view.pendingApprovals || []) {
-      state.approvals.set(approval.id, {
-        approvalId: approval.id,
-        toolName: approval.toolName,
-        summary: approval.summary,
-      });
+      remember(approval);
     }
     renderApprovals();
     scrollToEnd();
@@ -522,8 +521,7 @@ function applyEvent(event) {
   }
 
   if (event.approvalRequested) {
-    const asked = event.approvalRequested;
-    state.approvals.set(asked.approvalId, asked);
+    remember(event.approvalRequested);
     return renderApprovals();
   }
 
@@ -593,6 +591,26 @@ function artifactButton(artifact) {
   button.textContent = label();
   button.title = artifact.id;
 
+  // Saving is separate from showing. What is shown is the first screenful,
+  // because that is what somebody glancing at a failure wants; the whole of it
+  // is a file.
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'artifact';
+  save.textContent = 'save';
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    const was = save.textContent;
+    try {
+      await saveArtifact(artifact.id);
+      save.textContent = was;
+    } catch (err) {
+      save.textContent = `could not save: ${err.message}`;
+    } finally {
+      save.disabled = false;
+    }
+  });
+
   let panel = null;
 
   button.addEventListener('click', async () => {
@@ -616,7 +634,7 @@ function artifactButton(artifact) {
         panel.textContent += `\n\n[showing the first ${formatBytes(ARTIFACT_VIEW_BYTES)} of ` +
           `${formatBytes(artifact.size)}; the whole of it is ${artifact.id}]`;
       }
-      button.after(panel);
+      (button.parentElement ?? button).after(panel);
       button.textContent = 'hide';
     } catch (err) {
       button.textContent = `could not read: ${err.message}`;
@@ -625,13 +643,38 @@ function artifactButton(artifact) {
     }
   });
 
-  return button;
+  // A panel goes after the whole group, so the two buttons stay on one line.
+  const holder = document.createElement('span');
+  holder.className = 'artifact-actions';
+  holder.append(button, save);
+  return holder;
 }
 
 // readArtifact fetches stored bytes as text.
 //
 // A plain link cannot do it: the call is a POST and the credential belongs in
 // a header rather than in a URL somebody might copy out of a screenshot.
+// saveArtifact hands the whole of it to the browser as a file.
+//
+// The whole, unlike what is shown inline: a person who asks to save a build
+// log wants the build log, and the reason it was stored in the first place is
+// that it did not fit anywhere. Fetched into memory and handed over as a blob
+// because the endpoint needs a credential in a header, which a plain link
+// cannot carry.
+async function saveArtifact(id) {
+  const text = await readArtifact(id, 0);
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${id}.txt`;
+  link.click();
+
+  // Released on the next turn of the loop rather than immediately: revoking
+  // it before the browser has started the download cancels the download.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 async function readArtifact(id, limit) {
   const response = await fetch(`${API}ArtifactService/ReadArtifact`, {
     method: 'POST',
@@ -685,11 +728,22 @@ async function loadApprovals() {
       sessionId: state.sessionId,
     });
     state.approvals.clear();
-    for (const approval of approvals) state.approvals.set(approval.approvalId, approval);
+    for (const approval of approvals) remember(approval);
     renderApprovals();
   } catch (err) {
     setDaemonStatus(`could not read approvals — ${err.message}`);
   }
+}
+
+// remember stores one approval, whichever shape it arrived in.
+//
+// Keyed by the id the normaliser found rather than by a field name that
+// depends on where it came from: keyed by a missing one, every waiting
+// approval collapses into a single row and only the last is shown.
+function remember(source) {
+  const approval = approvalFrom(source);
+  if (!approval.approvalId) return;
+  state.approvals.set(approval.approvalId, approval);
 }
 
 function renderApprovals() {

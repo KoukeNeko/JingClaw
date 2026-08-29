@@ -142,3 +142,25 @@ function markCompleted(messages, name, failed, artifact) {
     }
   }
 }
+
+// approvalFrom normalises the two shapes an approval arrives in.
+//
+// The event names it `approval_id`; the session view and the approval listing
+// name it `id`, and carry more besides. A client that read one shape drew a
+// row it could not act on and, worse, keyed every waiting approval to
+// undefined — so two of them collapsed into one and only the last was shown.
+//
+// Here rather than in the page because it is the kind of thing every client
+// gets to be wrong about separately, and because putting it beside the reducer
+// is what makes it something a check can reach.
+export function approvalFrom(source) {
+  const from = source || {};
+  return {
+    approvalId: from.approvalId || from.approval_id || from.id || '',
+    toolName: from.toolName || from.tool_name || '',
+    arguments: from.arguments || '',
+    summary: from.summary || '',
+    effects: from.effects || [],
+    preview: from.preview || '',
+  };
+}

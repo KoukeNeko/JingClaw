@@ -212,6 +212,7 @@ li.reasoning .body {
 }
 
 .body .artifact { display: inline-block; margin-left: 0.4rem; }
+.artifact-actions { display: inline; white-space: nowrap; }
 
 .artifact-body {
   margin: 0.5rem 0 0.2rem;

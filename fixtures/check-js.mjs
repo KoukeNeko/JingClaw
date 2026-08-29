@@ -89,3 +89,58 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log(`\nall ${cases.length} cases agree`);
+
+// An approval arrives in two shapes: the event names it approval_id, the
+// session view and the listing name it id and carry more besides. A client
+// that read only one drew a row it could not act on, and keyed every waiting
+// approval to undefined so that two of them collapsed into one.
+//
+// Not a fixture case, because this is not about folding a log — it is about
+// one field having two names on the wire, which is the sort of thing that is
+// only ever found in a browser.
+{
+  const { approvalFrom } = await import('../core/internal/webui/assets/reduce.js');
+
+  const shapes = {
+    'the event': {
+      approvalId: 'apr_1', toolName: 'edit_file',
+      arguments: '{"path":"a.go"}', summary: 'edit a.go',
+      effects: ['Modifies a.go'], preview: '-old\n+new',
+    },
+    'the session view': {
+      id: 'apr_1', toolName: 'edit_file',
+      arguments: '{"path":"a.go"}', summary: 'edit a.go',
+      effects: ['Modifies a.go'], preview: '-old\n+new',
+    },
+  };
+
+  for (const [where, shape] of Object.entries(shapes)) {
+    const got = approvalFrom(shape);
+    if (got.approvalId !== 'apr_1') {
+      failed += 1;
+      console.error(`FAIL  an approval from ${where} has no id, so nothing can decide it`);
+    }
+    for (const field of ['arguments', 'summary', 'preview']) {
+      if (!got[field]) {
+        failed += 1;
+        console.error(`FAIL  an approval from ${where} lost ${field}, so it cannot be reviewed`);
+      }
+    }
+    if (got.effects.length !== 1) {
+      failed += 1;
+      console.error(`FAIL  an approval from ${where} lost its effects`);
+    }
+  }
+
+  if (approvalFrom({}).approvalId !== '') {
+    failed += 1;
+    console.error('FAIL  an approval with no id was given one');
+  }
+
+  if (failed === 0) console.log('ok    an approval reads the same whichever shape it arrived in');
+}
+
+if (failed > 0) {
+  console.error(`\n${failed} problem(s)`);
+  process.exit(1);
+}
