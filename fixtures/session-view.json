@@ -1,0 +1,499 @@
+{
+  "cases": [
+    {
+      "name": "deltas are joined into one message",
+      "why": "A client that draws each delta shows one word per line. They are pieces of a message, not messages.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "hello"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_2",
+            "text": "Hel"
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_2",
+            "text": "lo the"
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_2",
+            "text": "re."
+          }
+        },
+        {
+          "seq": 5,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_2"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "hello"
+          },
+          {
+            "role": "assistant",
+            "text": "Hello there."
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 5
+      }
+    },
+    {
+      "name": "a tool call belongs to the turn that asked for it",
+      "why": "Drawn as its own entry, a call floats between turns and a reader cannot tell which request caused it.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "read it"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_2",
+            "text": "Looking."
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "tool.requested",
+          "body": {
+            "call_id": "call_1",
+            "name": "read_file"
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "tool.completed",
+          "body": {
+            "call_id": "call_1",
+            "is_error": false,
+            "name": "read_file"
+          }
+        },
+        {
+          "seq": 5,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_2"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "read it"
+          },
+          {
+            "role": "assistant",
+            "text": "Looking.",
+            "tool_calls": [
+              {
+                "name": "read_file",
+                "completed": true,
+                "is_error": false
+              }
+            ]
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 5
+      }
+    },
+    {
+      "name": "a failed call is not a finished one",
+      "why": "A client showing every completed call the same way tells somebody the work was done.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "run it"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "tool.requested",
+          "body": {
+            "call_id": "call_1",
+            "name": "exec_command"
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "tool.completed",
+          "body": {
+            "call_id": "call_1",
+            "is_error": true,
+            "name": "exec_command"
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_2"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "run it"
+          },
+          {
+            "role": "assistant",
+            "text": "",
+            "tool_calls": [
+              {
+                "name": "exec_command",
+                "completed": true,
+                "is_error": true
+              }
+            ]
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 4
+      }
+    },
+    {
+      "name": "an approval waits until it is resolved",
+      "why": "A client that forgets a pending approval shows a session that looks finished and is blocked on somebody.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "run.state_changed",
+          "body": {
+            "run_id": "run_1",
+            "status": "running"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "write it"
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "tool.requested",
+          "body": {
+            "call_id": "call_1",
+            "name": "write_file"
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "approval.requested",
+          "body": {
+            "approval_id": "apr_1"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "write it"
+          },
+          {
+            "role": "assistant",
+            "text": "",
+            "tool_calls": [
+              {
+                "name": "write_file",
+                "completed": false,
+                "is_error": false
+              }
+            ]
+          }
+        ],
+        "pending_approvals": [
+          "apr_1"
+        ],
+        "active_run": "run_1",
+        "head_seq": 4
+      }
+    },
+    {
+      "name": "a resolved approval stops waiting",
+      "why": "Otherwise it waits forever and the run looks stuck.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "write it"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "tool.requested",
+          "body": {
+            "call_id": "call_1",
+            "name": "write_file"
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "approval.requested",
+          "body": {
+            "approval_id": "apr_1"
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "approval.resolved",
+          "body": {
+            "approval_id": "apr_1"
+          }
+        },
+        {
+          "seq": 5,
+          "kind": "tool.completed",
+          "body": {
+            "call_id": "call_1",
+            "is_error": false,
+            "name": "write_file"
+          }
+        },
+        {
+          "seq": 6,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_2"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "write it"
+          },
+          {
+            "role": "assistant",
+            "text": "",
+            "tool_calls": [
+              {
+                "name": "write_file",
+                "completed": true,
+                "is_error": false
+              }
+            ]
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 6
+      }
+    },
+    {
+      "name": "a fold replaces what came before it",
+      "why": "Drawing turns the model no longer has shows a conversation the agent cannot remember, and the next answer looks like amnesia rather than compaction.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "first"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_2",
+            "text": "one"
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_2"
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "conversation.compacted",
+          "body": {
+            "through_seq": 3
+          }
+        },
+        {
+          "seq": 5,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_3",
+            "text": "second"
+          }
+        },
+        {
+          "seq": 6,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_4",
+            "text": "two"
+          }
+        },
+        {
+          "seq": 7,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_4"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "text": "[earlier turns were folded into a summary]"
+          },
+          {
+            "role": "user",
+            "text": "second"
+          },
+          {
+            "role": "assistant",
+            "text": "two"
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 7
+      }
+    },
+    {
+      "name": "a run that is still going is named",
+      "why": "A client that does not know a run is active offers no way to interrupt it.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "run.state_changed",
+          "body": {
+            "run_id": "run_1",
+            "status": "running"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "go"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "go"
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "run_1",
+        "head_seq": 2
+      }
+    },
+    {
+      "name": "a finished run is not active",
+      "why": "Otherwise a client shows a spinner over a conversation that ended.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "run.state_changed",
+          "body": {
+            "run_id": "run_1",
+            "status": "running"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "go"
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_2",
+            "text": "done"
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_2"
+          }
+        },
+        {
+          "seq": 5,
+          "kind": "run.state_changed",
+          "body": {
+            "run_id": "run_1",
+            "status": "completed"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "go"
+          },
+          {
+            "role": "assistant",
+            "text": "done"
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 5
+      }
+    }
+  ],
+  "comment": "Every client must produce these states from these events. Generated by internal/runtime/viewfixture; edit the cases there."
+}

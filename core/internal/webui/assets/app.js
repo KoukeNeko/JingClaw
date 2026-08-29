@@ -1,9 +1,10 @@
+import { reduceAll, FOLD_NOTICE } from './reduce.js';
+
 // The console talks to the daemon over Connect with JSON bodies, which is why
 // there is no bundler and no generated client here: a unary call is a POST
 // whose body is the message, and a stream is the same POST answered with
 // length-prefixed frames. A build step that has to have run on the machine
 // that produced the binary would defeat the point of the binary.
-'use strict';
 
 const API = '/jingclaw.control.v1.';
 const TOKEN_KEY = 'jingclaw.token';
@@ -373,6 +374,26 @@ function drawViewMessage(message) {
   for (const call of message.toolCalls || []) {
     addLine(call.isError ? 'error' : 'tool', call.name, call.summary || '');
   }
+}
+
+// replayLocally folds a log the same way every other client does.
+//
+// Used only when the daemon cannot answer with a view. It goes through the
+// shared reducer rather than a second implementation, so the fallback path
+// draws the same screen as the ordinary one — a divergence that only appears
+// against an old daemon is one nobody would find.
+function replayLocally(events) {
+  const state = reduceAll(events);
+  for (const message of state.messages) {
+    if (message.text) {
+      addLine(message.role, message.role === 'user' ? 'you' : 'agent', message.text);
+    }
+    for (const call of message.tool_calls || []) {
+      addLine(call.is_error ? 'error' : 'tool', call.name, call.completed ? 'ok' : '…');
+    }
+  }
+  state.head_seq = Number(state.head_seq || 0);
+  return state;
 }
 
 function statusText(status) {
