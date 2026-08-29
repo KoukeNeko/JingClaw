@@ -76,21 +76,28 @@ private let comparedStateKeys: Set<String> = [
     "messages", "pending_approvals", "active_run", "head_seq",
 ]
 private let comparedMessageKeys: Set<String> = ["role", "text", "reasoning", "tool_calls"]
-private let comparedToolCallKeys: Set<String> = ["name", "completed", "is_error"]
+private let comparedToolCallKeys: Set<String> = ["name", "completed", "is_error", "artifact"]
 
 private struct ExpectedToolCall: Decodable {
     var name: String
     var completed: Bool?
     var isError: Bool?
+    var artifact: String?
 
     private enum CodingKeys: String, CodingKey {
         case name
         case completed
         case isError = "is_error"
+        case artifact
     }
 
     var call: ToolCall {
-        ToolCall(name: name, completed: completed ?? false, isError: isError ?? false)
+        ToolCall(
+            name: name,
+            completed: completed ?? false,
+            isError: isError ?? false,
+            artifact: artifact ?? ""
+        )
     }
 }
 

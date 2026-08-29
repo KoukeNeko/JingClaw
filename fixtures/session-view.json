@@ -190,6 +190,79 @@
       }
     },
     {
+      "name": "output too large to show is still reachable",
+      "why": "A client that drops the artifact id shows a truncated build log with no way to reach the rest, and reopening the session loses it entirely.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "run the tests"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "tool.requested",
+          "body": {
+            "call_id": "call_1",
+            "name": "exec_command"
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "tool.completed",
+          "body": {
+            "artifact": {
+              "id": "art_1",
+              "size": 91234
+            },
+            "call_id": "call_1",
+            "is_error": false,
+            "name": "exec_command"
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "assistant.delta",
+          "body": {
+            "message_id": "msg_2",
+            "text": "One test failed."
+          }
+        },
+        {
+          "seq": 5,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_2"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "run the tests"
+          },
+          {
+            "role": "assistant",
+            "text": "One test failed.",
+            "tool_calls": [
+              {
+                "name": "exec_command",
+                "completed": true,
+                "is_error": false,
+                "artifact": "art_1"
+              }
+            ]
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 5
+      }
+    },
+    {
       "name": "a failed call is not a finished one",
       "why": "A client showing every completed call the same way tells somebody the work was done.",
       "events": [

@@ -31,6 +31,7 @@ const normalise = (state) => JSON.stringify({
     reasoning: m.reasoning || '',
     tool_calls: (m.tool_calls || []).map((c) => ({
       name: c.name, completed: !!c.completed, is_error: !!c.is_error,
+      artifact: c.artifact || '',
     })),
   })),
   pending_approvals: state.pending_approvals || [],
@@ -45,7 +46,7 @@ const normalise = (state) => JSON.stringify({
 // for drift.
 const KNOWN_STATE_KEYS = ['messages', 'pending_approvals', 'active_run', 'head_seq'];
 const KNOWN_MESSAGE_KEYS = ['role', 'text', 'reasoning', 'tool_calls'];
-const KNOWN_CALL_KEYS = ['name', 'completed', 'is_error'];
+const KNOWN_CALL_KEYS = ['name', 'completed', 'is_error', 'artifact'];
 
 const unknownKeys = (object, known) => Object.keys(object || {}).filter((k) => !known.includes(k));
 

@@ -15,6 +15,13 @@ public final class SessionStore {
     public private(set) var status: String = ""
     public private(set) var selected: String?
 
+    /// Stored output somebody asked to look at, by artifact id.
+    ///
+    /// Kept here rather than fetched by the view so that opening the same one
+    /// twice does not download it twice, and so a window redraw does not start
+    /// a request.
+    public private(set) var opened: [String: String] = [:]
+
     private let client: DaemonClient
     private var following: Task<Void, Never>?
 
@@ -86,6 +93,36 @@ public final class SessionStore {
                 ])
         } catch {
             status = "\(error)"
+        }
+    }
+
+    /// Fetches stored output so it can be shown where the reader already is.
+    ///
+    /// A window into the start of it rather than the whole: what a person
+    /// glancing at a failed build wants is the first screenful, and the whole
+    /// of a test suite's output is what `save` is for.
+    public func openArtifact(_ id: String) async {
+        if opened[id] != nil { return }
+        do {
+            opened[id] = try await client.readArtifact(id)
+            status = ""
+        } catch {
+            status = "could not read \(id): \(error)"
+        }
+    }
+
+    /// Closes an opened artifact, so the panel folds away and the bytes go.
+    public func closeArtifact(_ id: String) {
+        opened[id] = nil
+    }
+
+    /// Writes an artifact to a file, whole.
+    public func saveArtifact(_ id: String, to url: URL) async {
+        do {
+            try await client.saveArtifact(id, to: url)
+            status = "saved \(id)"
+        } catch {
+            status = "could not save \(id): \(error)"
         }
     }
 

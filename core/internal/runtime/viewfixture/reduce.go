@@ -66,11 +66,18 @@ func Reduce(state State, event Event) State {
 
 	case "tool.completed":
 		var payload struct {
-			Name    string `json:"name"`
-			IsError bool   `json:"is_error"`
+			Name     string `json:"name"`
+			IsError  bool   `json:"is_error"`
+			Artifact *struct {
+				ID string `json:"id"`
+			} `json:"artifact"`
 		}
 		_ = json.Unmarshal(event.Body, &payload)
-		markCompleted(state.Messages, payload.Name, payload.IsError)
+		artifact := ""
+		if payload.Artifact != nil {
+			artifact = payload.Artifact.ID
+		}
+		markCompleted(state.Messages, payload.Name, payload.IsError, artifact)
 
 	case "approval.requested":
 		var payload struct {
@@ -134,7 +141,7 @@ func openAssistant(messages []Message) int {
 	return last
 }
 
-func markCompleted(messages []Message, name string, failed bool) {
+func markCompleted(messages []Message, name string, failed bool, artifact string) {
 	// The last call of that name that has not finished. Names repeat within a
 	// turn, and marking the first would report the wrong one as done.
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -143,6 +150,7 @@ func markCompleted(messages []Message, name string, failed bool) {
 			if calls[j].Name == name && !calls[j].Completed {
 				calls[j].Completed = true
 				calls[j].IsError = failed
+				calls[j].Artifact = artifact
 				return
 			}
 		}

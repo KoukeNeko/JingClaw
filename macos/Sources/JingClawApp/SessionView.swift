@@ -12,7 +12,7 @@ struct SessionView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
             VStack(spacing: 0) {
-                Timeline(state: store.state)
+                Timeline(state: store.state, store: store)
 
                 if !store.state.pendingApprovals.isEmpty {
                     Approvals(store: store)
@@ -74,13 +74,14 @@ private struct SessionList: View {
 
 private struct Timeline: View {
     let state: SessionState
+    @Bindable var store: SessionStore
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(state.messages.enumerated()), id: \.offset) { index, message in
-                        MessageRow(message: message).id(index)
+                        MessageRow(message: message, store: store).id(index)
                     }
                 }
                 .padding(16)
@@ -95,6 +96,7 @@ private struct Timeline: View {
 
 private struct MessageRow: View {
     let message: Message
+    @Bindable var store: SessionStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -124,20 +126,83 @@ private struct MessageRow: View {
             }
 
             ForEach(Array(message.toolCalls.enumerated()), id: \.offset) { _, call in
-                HStack(spacing: 6) {
-                    Image(systemName: icon(for: call))
-                        .foregroundStyle(call.isError ? .red : .secondary)
-                    Text(call.name).font(.system(.caption, design: .monospaced))
+                ToolCallRow(call: call, store: store)
+            }
+        }
+    }
+
+}
+
+/// One tool a turn asked for, and the stored output it produced.
+private struct ToolCallRow: View {
+    let call: ToolCall
+    @Bindable var store: SessionStore
+
+    @State private var saving = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .foregroundStyle(call.isError ? .red : .secondary)
+                Text(call.name).font(.system(.caption, design: .monospaced))
+
+                // Stored output is shown where the reader already is rather
+                // than in a window they have to go and find: what somebody
+                // wants with a build log is to glance at it next to the line
+                // that produced it.
+                if !call.artifact.isEmpty {
+                    Button(store.opened[call.artifact] == nil ? "Show output" : "Hide") {
+                        if store.opened[call.artifact] == nil {
+                            Task { await store.openArtifact(call.artifact) }
+                        } else {
+                            store.closeArtifact(call.artifact)
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+
+                    Button("Save…") { save() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        .disabled(saving)
                 }
+            }
+
+            if let output = store.opened[call.artifact], !call.artifact.isEmpty {
+                ScrollView {
+                    Text(output)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .frame(maxHeight: 260)
+                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
             }
         }
     }
 
     /// A finished call and a failed one must not look the same: a client that
     /// draws both the same way tells somebody the work was done.
-    private func icon(for call: ToolCall) -> String {
+    private var icon: String {
         if call.isError { return "xmark.circle" }
         return call.completed ? "checkmark.circle" : "circle.dotted"
+    }
+
+    private func save() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = call.artifact + ".txt"
+        // Asked for rather than written somewhere chosen here: this is the
+        // user's disk, and a file that appears in a folder nobody picked is
+        // one nobody finds.
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        saving = true
+        Task {
+            await store.saveArtifact(call.artifact, to: url)
+            saving = false
+        }
     }
 }
 

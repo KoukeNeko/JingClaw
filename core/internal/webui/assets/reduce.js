@@ -70,7 +70,8 @@ export function reduce(state, event) {
     }
 
     case 'tool.completed':
-      markCompleted(next.messages, body.name || '', Boolean(body.is_error));
+      markCompleted(next.messages, body.name || '', Boolean(body.is_error),
+        (body.artifact || {}).id || '');
       break;
 
     case 'approval.requested':
@@ -128,13 +129,14 @@ function openAssistant(messages) {
 //
 // The last rather than the first: names repeat within a turn, and marking the
 // first reports the wrong one as done.
-function markCompleted(messages, name, failed) {
+function markCompleted(messages, name, failed, artifact) {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const calls = messages[i].tool_calls || [];
     for (let j = calls.length - 1; j >= 0; j -= 1) {
       if (calls[j].name === name && !calls[j].completed) {
         calls[j].completed = true;
         calls[j].is_error = failed;
+        if (artifact) calls[j].artifact = artifact;
         return;
       }
     }

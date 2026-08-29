@@ -61,6 +61,11 @@ type ViewToolCall struct {
 	Summary   string
 	Completed bool
 	IsError   bool
+
+	// Artifact is stored output this call produced, when it produced any.
+	// Carried here as well as on the event because a client that opened a
+	// session rather than watching it happen has only this.
+	Artifact *domain.Artifact
 }
 
 // SessionViewOf assembles the current state of a session.
@@ -190,6 +195,7 @@ func foldEvents(events []domain.Event) ([]ViewMessage, domain.RunID) {
 			if payload.Summary != "" {
 				call.Summary = payload.Summary
 			}
+			call.Artifact = payload.Artifact
 
 		case domain.ConversationCompacted:
 			// Everything before the fold is a summary now. A client drawing

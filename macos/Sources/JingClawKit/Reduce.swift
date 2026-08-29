@@ -53,7 +53,8 @@ public enum Reducer {
             markCompleted(
                 &next.messages,
                 name: event.body.name ?? "",
-                failed: event.body.isError ?? false
+                failed: event.body.isError ?? false,
+                artifact: event.body.artifact?.id ?? ""
             )
 
         case "approval.requested":
@@ -104,13 +105,21 @@ public enum Reducer {
     ///
     /// The last rather than the first: names repeat within a turn, and marking
     /// the first reports the wrong one as done.
-    private static func markCompleted(_ messages: inout [Message], name: String, failed: Bool) {
+    private static func markCompleted(
+        _ messages: inout [Message],
+        name: String,
+        failed: Bool,
+        artifact: String
+    ) {
         for messageIndex in messages.indices.reversed() {
             for callIndex in messages[messageIndex].toolCalls.indices.reversed() {
                 let call = messages[messageIndex].toolCalls[callIndex]
                 if call.name == name && !call.completed {
                     messages[messageIndex].toolCalls[callIndex].completed = true
                     messages[messageIndex].toolCalls[callIndex].isError = failed
+                    if !artifact.isEmpty {
+                        messages[messageIndex].toolCalls[callIndex].artifact = artifact
+                    }
                     return
                 }
             }

@@ -386,6 +386,7 @@ func viewMessageToProto(message runtime.ViewMessage) *controlv1.ViewMessage {
 			Summary:   call.Summary,
 			Completed: call.Completed,
 			IsError:   call.IsError,
+			Artifact:  artifactToProto(call.Artifact),
 		})
 	}
 

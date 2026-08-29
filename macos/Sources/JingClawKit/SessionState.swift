@@ -70,10 +70,21 @@ public struct ToolCall: Equatable, Sendable {
     public var completed: Bool
     public var isError: Bool
 
-    public init(name: String, completed: Bool = false, isError: Bool = false) {
+    /// The id of stored output this call produced, empty when it produced
+    /// none. The id and not the bytes: an artifact is by definition the thing
+    /// that did not fit, and it is fetched only when somebody asks for it.
+    public var artifact: String
+
+    public init(
+        name: String,
+        completed: Bool = false,
+        isError: Bool = false,
+        artifact: String = ""
+    ) {
         self.name = name
         self.completed = completed
         self.isError = isError
+        self.artifact = artifact
     }
 }
 
@@ -103,6 +114,7 @@ public struct EventBody: Sendable, Decodable {
     public var approvalID: String?
     public var runID: String?
     public var status: String?
+    public var artifact: ArtifactRef?
 
     public init(
         text: String? = nil,
@@ -110,7 +122,8 @@ public struct EventBody: Sendable, Decodable {
         isError: Bool? = nil,
         approvalID: String? = nil,
         runID: String? = nil,
-        status: String? = nil
+        status: String? = nil,
+        artifact: ArtifactRef? = nil
     ) {
         self.text = text
         self.name = name
@@ -118,6 +131,7 @@ public struct EventBody: Sendable, Decodable {
         self.approvalID = approvalID
         self.runID = runID
         self.status = status
+        self.artifact = artifact
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -127,5 +141,17 @@ public struct EventBody: Sendable, Decodable {
         case approvalID = "approval_id"
         case runID = "run_id"
         case status
+        case artifact
+    }
+}
+
+/// Stored output named on an event, without its bytes.
+public struct ArtifactRef: Sendable, Decodable, Equatable {
+    public var id: String
+    public var size: Int64?
+
+    public init(id: String, size: Int64? = nil) {
+        self.id = id
+        self.size = size
     }
 }

@@ -77,6 +77,31 @@ func Cases() []Case {
 			},
 		},
 		{
+			Name: "output too large to show is still reachable",
+			Why: "A client that drops the artifact id shows a truncated build " +
+				"log with no way to reach the rest, and reopening the session " +
+				"loses it entirely.",
+			Events: []Event{
+				user(1, "msg_1", "run the tests"),
+				toolRequested(2, "call_1", "exec_command"),
+				toolStored(3, "call_1", "exec_command", "art_1"),
+				delta(4, "msg_2", "One test failed."),
+				completed(5, "msg_2"),
+			},
+			Expected: State{
+				Messages: []Message{
+					{Role: RoleUser, Text: "run the tests"},
+					{
+						Role: RoleAssistant, Text: "One test failed.",
+						ToolCalls: []ToolCall{
+							{Name: "exec_command", Completed: true, Artifact: "art_1"},
+						},
+					},
+				},
+				HeadSeq: 5,
+			},
+		},
+		{
 			Name: "a failed call is not a finished one",
 			Why: "A client showing every completed call the same way tells " +
 				"somebody the work was done.",
@@ -246,6 +271,13 @@ func toolRequested(seq uint64, call, name string) Event {
 func toolCompleted(seq uint64, call, name string, failed bool) Event {
 	return Event{Seq: seq, Kind: "tool.completed", Body: body(map[string]any{
 		"call_id": call, "name": name, "is_error": failed,
+	})}
+}
+
+func toolStored(seq uint64, call, name, artifact string) Event {
+	return Event{Seq: seq, Kind: "tool.completed", Body: body(map[string]any{
+		"call_id": call, "name": name, "is_error": false,
+		"artifact": map[string]any{"id": artifact, "size": 91234},
 	})}
 }
 

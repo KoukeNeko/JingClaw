@@ -8,6 +8,10 @@ import Foundation
 /// code to own, and it keeps the client free of a code generator in a language
 /// that already has one for protobuf but not for this transport.
 public actor DaemonClient {
+    /// What this client calls itself in a request. The daemon logs it, so a
+    /// deployment with three clients attached can tell which one did what.
+    public static let clientName = "jingclaw-macos"
+
     private let baseURL: URL
     private let token: String
     private let session: URLSession

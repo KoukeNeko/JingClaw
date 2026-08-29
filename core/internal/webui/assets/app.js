@@ -376,7 +376,10 @@ function drawViewMessage(message) {
     addLine(role, role === 'user' ? 'you' : 'agent', message.text);
   }
   for (const call of message.toolCalls || []) {
-    addLine(call.isError ? 'error' : 'tool', call.name, call.summary || '');
+    const line = addLine(call.isError ? 'error' : 'tool', call.name, call.summary || '');
+    // Reopening a session must not lose the way to the build log that
+    // explains why something failed, so the view carries the id too.
+    if (call.artifact) line.append(artifactButton(call.artifact));
   }
 }
 
@@ -396,7 +399,9 @@ function replayLocally(events) {
       addLine(message.role, message.role === 'user' ? 'you' : 'agent', message.text);
     }
     for (const call of message.tool_calls || []) {
-      addLine(call.is_error ? 'error' : 'tool', call.name, call.completed ? 'ok' : '…');
+      const line = addLine(call.is_error ? 'error' : 'tool', call.name,
+        call.completed ? 'ok' : '…');
+      if (call.artifact) line.append(artifactButton({ id: call.artifact, size: 0 }));
     }
   }
   state.head_seq = Number(state.head_seq || 0);
@@ -575,10 +580,17 @@ function addLine(kind, label, text) {
 // actually wants to do with a build log is glance at it next to the line that
 // produced it.
 function artifactButton(artifact) {
+  // A size of zero means it was not stated rather than that the artifact is
+  // empty: the session view names what a call stored without repeating how
+  // large it was.
+  const label = () => (Number(artifact.size) > 0
+    ? `show ${formatBytes(artifact.size)}`
+    : 'show output');
+
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'artifact';
-  button.textContent = `show ${formatBytes(artifact.size)}`;
+  button.textContent = label();
   button.title = artifact.id;
 
   let panel = null;
@@ -587,7 +599,7 @@ function artifactButton(artifact) {
     if (panel) {
       panel.remove();
       panel = null;
-      button.textContent = `show ${formatBytes(artifact.size)}`;
+      button.textContent = label();
       return;
     }
 

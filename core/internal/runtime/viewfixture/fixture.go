@@ -82,6 +82,17 @@ type ToolCall struct {
 	// Completed and IsError are what a client shows about how it ended.
 	Completed bool `json:"completed"`
 	IsError   bool `json:"is_error"`
+
+	// Artifact is the id of stored output this call produced, empty when it
+	// produced none.
+	//
+	// The id and not the bytes: an artifact is by definition the thing that
+	// did not fit, and a client that pulled every one as it went would
+	// download a test suite's whole output to draw a line saying a test
+	// failed. It is here at all because a client that opened a session rather
+	// than watching it happen would otherwise have no way to reach the build
+	// log that explains the failure.
+	Artifact string `json:"artifact,omitempty"`
 }
 
 // Roles as clients name them.

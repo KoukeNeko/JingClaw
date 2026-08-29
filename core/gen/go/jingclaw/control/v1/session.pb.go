@@ -2555,12 +2555,19 @@ func (x *ViewMessage) GetReasoning() string {
 }
 
 type ViewToolCall struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CallId        string                 `protobuf:"bytes,1,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Summary       string                 `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
-	Completed     bool                   `protobuf:"varint,4,opt,name=completed,proto3" json:"completed,omitempty"`
-	IsError       bool                   `protobuf:"varint,5,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CallId    string                 `protobuf:"bytes,1,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	Name      string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Summary   string                 `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
+	Completed bool                   `protobuf:"varint,4,opt,name=completed,proto3" json:"completed,omitempty"`
+	IsError   bool                   `protobuf:"varint,5,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	// Stored output this call produced, when it produced any.
+	//
+	// Here as well as on the event because a client that opened a session
+	// rather than watching it happen has only this: without it, reopening a
+	// session loses every way of reaching the build log that explains why
+	// something failed.
+	Artifact      *Artifact `protobuf:"bytes,6,opt,name=artifact,proto3" json:"artifact,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2628,6 +2635,13 @@ func (x *ViewToolCall) GetIsError() bool {
 		return x.IsError
 	}
 	return false
+}
+
+func (x *ViewToolCall) GetArtifact() *Artifact {
+	if x != nil {
+		return x.Artifact
+	}
+	return nil
 }
 
 type ListSessionsRequest struct {
@@ -3008,13 +3022,14 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\n" +
 	"tool_calls\x18\x05 \x03(\v2!.jingclaw.control.v1.ViewToolCallR\ttoolCalls\x12\x10\n" +
 	"\x03seq\x18\x06 \x01(\x04R\x03seq\x12\x1c\n" +
-	"\treasoning\x18\a \x01(\tR\treasoning\"\x8e\x01\n" +
+	"\treasoning\x18\a \x01(\tR\treasoning\"\xc9\x01\n" +
 	"\fViewToolCall\x12\x17\n" +
 	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\asummary\x18\x03 \x01(\tR\asummary\x12\x1c\n" +
 	"\tcompleted\x18\x04 \x01(\bR\tcompleted\x12\x19\n" +
-	"\bis_error\x18\x05 \x01(\bR\aisError\"K\n" +
+	"\bis_error\x18\x05 \x01(\bR\aisError\x129\n" +
+	"\bartifact\x18\x06 \x01(\v2\x1d.jingclaw.control.v1.ArtifactR\bartifact\"K\n" +
 	"\x13ListSessionsRequest\x124\n" +
 	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\"P\n" +
 	"\x14ListSessionsResponse\x128\n" +
@@ -3130,6 +3145,7 @@ var file_jingclaw_control_v1_session_proto_goTypes = []any{
 	(*StreamHello)(nil),                 // 52: jingclaw.control.v1.StreamHello
 	(*Event)(nil),                       // 53: jingclaw.control.v1.Event
 	(*StreamHeartbeat)(nil),             // 54: jingclaw.control.v1.StreamHeartbeat
+	(*Artifact)(nil),                    // 55: jingclaw.control.v1.Artifact
 }
 var file_jingclaw_control_v1_session_proto_depIdxs = []int32{
 	44, // 0: jingclaw.control.v1.Session.created_at:type_name -> google.protobuf.Timestamp
@@ -3179,45 +3195,46 @@ var file_jingclaw_control_v1_session_proto_depIdxs = []int32{
 	2,  // 44: jingclaw.control.v1.ViewMessage.role:type_name -> jingclaw.control.v1.MessageRole
 	44, // 45: jingclaw.control.v1.ViewMessage.at:type_name -> google.protobuf.Timestamp
 	39, // 46: jingclaw.control.v1.ViewMessage.tool_calls:type_name -> jingclaw.control.v1.ViewToolCall
-	48, // 47: jingclaw.control.v1.ListSessionsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	3,  // 48: jingclaw.control.v1.ListSessionsResponse.sessions:type_name -> jingclaw.control.v1.Session
-	48, // 49: jingclaw.control.v1.ListRunsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	4,  // 50: jingclaw.control.v1.ListRunsResponse.runs:type_name -> jingclaw.control.v1.Run
-	20, // 51: jingclaw.control.v1.GatewayIngressService.DeliverInbound:input_type -> jingclaw.control.v1.DeliverInboundRequest
-	24, // 52: jingclaw.control.v1.GatewayIngressService.SubscribeDispatches:input_type -> jingclaw.control.v1.SubscribeDispatchesRequest
-	25, // 53: jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch:input_type -> jingclaw.control.v1.AcknowledgeDispatchRequest
-	28, // 54: jingclaw.control.v1.ChannelService.ListBindings:input_type -> jingclaw.control.v1.ListBindingsRequest
-	30, // 55: jingclaw.control.v1.ChannelService.UpsertBinding:input_type -> jingclaw.control.v1.UpsertBindingRequest
-	32, // 56: jingclaw.control.v1.ChannelService.DeleteBinding:input_type -> jingclaw.control.v1.DeleteBindingRequest
-	5,  // 57: jingclaw.control.v1.SessionService.CreateSession:input_type -> jingclaw.control.v1.CreateSessionRequest
-	40, // 58: jingclaw.control.v1.SessionService.ListSessions:input_type -> jingclaw.control.v1.ListSessionsRequest
-	42, // 59: jingclaw.control.v1.SessionService.ListRuns:input_type -> jingclaw.control.v1.ListRunsRequest
-	36, // 60: jingclaw.control.v1.SessionService.GetSessionView:input_type -> jingclaw.control.v1.GetSessionViewRequest
-	7,  // 61: jingclaw.control.v1.SessionService.SendTurn:input_type -> jingclaw.control.v1.SendTurnRequest
-	10, // 62: jingclaw.control.v1.SessionService.SubscribeEvents:input_type -> jingclaw.control.v1.SubscribeEventsRequest
-	11, // 63: jingclaw.control.v1.SessionService.InterruptRun:input_type -> jingclaw.control.v1.InterruptRunRequest
-	14, // 64: jingclaw.control.v1.SessionService.ListApprovals:input_type -> jingclaw.control.v1.ListApprovalsRequest
-	16, // 65: jingclaw.control.v1.SessionService.DecideApproval:input_type -> jingclaw.control.v1.DecideApprovalRequest
-	21, // 66: jingclaw.control.v1.GatewayIngressService.DeliverInbound:output_type -> jingclaw.control.v1.DeliverInboundResponse
-	23, // 67: jingclaw.control.v1.GatewayIngressService.SubscribeDispatches:output_type -> jingclaw.control.v1.SubscribeDispatchesResponse
-	26, // 68: jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch:output_type -> jingclaw.control.v1.AcknowledgeDispatchResponse
-	29, // 69: jingclaw.control.v1.ChannelService.ListBindings:output_type -> jingclaw.control.v1.ListBindingsResponse
-	31, // 70: jingclaw.control.v1.ChannelService.UpsertBinding:output_type -> jingclaw.control.v1.UpsertBindingResponse
-	33, // 71: jingclaw.control.v1.ChannelService.DeleteBinding:output_type -> jingclaw.control.v1.DeleteBindingResponse
-	6,  // 72: jingclaw.control.v1.SessionService.CreateSession:output_type -> jingclaw.control.v1.CreateSessionResponse
-	41, // 73: jingclaw.control.v1.SessionService.ListSessions:output_type -> jingclaw.control.v1.ListSessionsResponse
-	43, // 74: jingclaw.control.v1.SessionService.ListRuns:output_type -> jingclaw.control.v1.ListRunsResponse
-	37, // 75: jingclaw.control.v1.SessionService.GetSessionView:output_type -> jingclaw.control.v1.GetSessionViewResponse
-	9,  // 76: jingclaw.control.v1.SessionService.SendTurn:output_type -> jingclaw.control.v1.SendTurnResponse
-	34, // 77: jingclaw.control.v1.SessionService.SubscribeEvents:output_type -> jingclaw.control.v1.SubscribeEventsResponse
-	12, // 78: jingclaw.control.v1.SessionService.InterruptRun:output_type -> jingclaw.control.v1.InterruptRunResponse
-	15, // 79: jingclaw.control.v1.SessionService.ListApprovals:output_type -> jingclaw.control.v1.ListApprovalsResponse
-	17, // 80: jingclaw.control.v1.SessionService.DecideApproval:output_type -> jingclaw.control.v1.DecideApprovalResponse
-	66, // [66:81] is the sub-list for method output_type
-	51, // [51:66] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	55, // 47: jingclaw.control.v1.ViewToolCall.artifact:type_name -> jingclaw.control.v1.Artifact
+	48, // 48: jingclaw.control.v1.ListSessionsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	3,  // 49: jingclaw.control.v1.ListSessionsResponse.sessions:type_name -> jingclaw.control.v1.Session
+	48, // 50: jingclaw.control.v1.ListRunsRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	4,  // 51: jingclaw.control.v1.ListRunsResponse.runs:type_name -> jingclaw.control.v1.Run
+	20, // 52: jingclaw.control.v1.GatewayIngressService.DeliverInbound:input_type -> jingclaw.control.v1.DeliverInboundRequest
+	24, // 53: jingclaw.control.v1.GatewayIngressService.SubscribeDispatches:input_type -> jingclaw.control.v1.SubscribeDispatchesRequest
+	25, // 54: jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch:input_type -> jingclaw.control.v1.AcknowledgeDispatchRequest
+	28, // 55: jingclaw.control.v1.ChannelService.ListBindings:input_type -> jingclaw.control.v1.ListBindingsRequest
+	30, // 56: jingclaw.control.v1.ChannelService.UpsertBinding:input_type -> jingclaw.control.v1.UpsertBindingRequest
+	32, // 57: jingclaw.control.v1.ChannelService.DeleteBinding:input_type -> jingclaw.control.v1.DeleteBindingRequest
+	5,  // 58: jingclaw.control.v1.SessionService.CreateSession:input_type -> jingclaw.control.v1.CreateSessionRequest
+	40, // 59: jingclaw.control.v1.SessionService.ListSessions:input_type -> jingclaw.control.v1.ListSessionsRequest
+	42, // 60: jingclaw.control.v1.SessionService.ListRuns:input_type -> jingclaw.control.v1.ListRunsRequest
+	36, // 61: jingclaw.control.v1.SessionService.GetSessionView:input_type -> jingclaw.control.v1.GetSessionViewRequest
+	7,  // 62: jingclaw.control.v1.SessionService.SendTurn:input_type -> jingclaw.control.v1.SendTurnRequest
+	10, // 63: jingclaw.control.v1.SessionService.SubscribeEvents:input_type -> jingclaw.control.v1.SubscribeEventsRequest
+	11, // 64: jingclaw.control.v1.SessionService.InterruptRun:input_type -> jingclaw.control.v1.InterruptRunRequest
+	14, // 65: jingclaw.control.v1.SessionService.ListApprovals:input_type -> jingclaw.control.v1.ListApprovalsRequest
+	16, // 66: jingclaw.control.v1.SessionService.DecideApproval:input_type -> jingclaw.control.v1.DecideApprovalRequest
+	21, // 67: jingclaw.control.v1.GatewayIngressService.DeliverInbound:output_type -> jingclaw.control.v1.DeliverInboundResponse
+	23, // 68: jingclaw.control.v1.GatewayIngressService.SubscribeDispatches:output_type -> jingclaw.control.v1.SubscribeDispatchesResponse
+	26, // 69: jingclaw.control.v1.GatewayIngressService.AcknowledgeDispatch:output_type -> jingclaw.control.v1.AcknowledgeDispatchResponse
+	29, // 70: jingclaw.control.v1.ChannelService.ListBindings:output_type -> jingclaw.control.v1.ListBindingsResponse
+	31, // 71: jingclaw.control.v1.ChannelService.UpsertBinding:output_type -> jingclaw.control.v1.UpsertBindingResponse
+	33, // 72: jingclaw.control.v1.ChannelService.DeleteBinding:output_type -> jingclaw.control.v1.DeleteBindingResponse
+	6,  // 73: jingclaw.control.v1.SessionService.CreateSession:output_type -> jingclaw.control.v1.CreateSessionResponse
+	41, // 74: jingclaw.control.v1.SessionService.ListSessions:output_type -> jingclaw.control.v1.ListSessionsResponse
+	43, // 75: jingclaw.control.v1.SessionService.ListRuns:output_type -> jingclaw.control.v1.ListRunsResponse
+	37, // 76: jingclaw.control.v1.SessionService.GetSessionView:output_type -> jingclaw.control.v1.GetSessionViewResponse
+	9,  // 77: jingclaw.control.v1.SessionService.SendTurn:output_type -> jingclaw.control.v1.SendTurnResponse
+	34, // 78: jingclaw.control.v1.SessionService.SubscribeEvents:output_type -> jingclaw.control.v1.SubscribeEventsResponse
+	12, // 79: jingclaw.control.v1.SessionService.InterruptRun:output_type -> jingclaw.control.v1.InterruptRunResponse
+	15, // 80: jingclaw.control.v1.SessionService.ListApprovals:output_type -> jingclaw.control.v1.ListApprovalsResponse
+	17, // 81: jingclaw.control.v1.SessionService.DecideApproval:output_type -> jingclaw.control.v1.DecideApprovalResponse
+	67, // [67:82] is the sub-list for method output_type
+	52, // [52:67] is the sub-list for method input_type
+	52, // [52:52] is the sub-list for extension type_name
+	52, // [52:52] is the sub-list for extension extendee
+	0,  // [0:52] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_session_proto_init() }

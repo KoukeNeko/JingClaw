@@ -429,6 +429,14 @@ message ViewToolCall {
 
   bool completed = 4;
   bool is_error = 5;
+
+  // Stored output this call produced, when it produced any.
+  //
+  // Here as well as on the event because a client that opened a session
+  // rather than watching it happen has only this: without it, reopening a
+  // session loses every way of reaching the build log that explains why
+  // something failed.
+  Artifact artifact = 6;
 }
 
 enum MessageRole {
