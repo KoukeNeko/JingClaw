@@ -245,6 +245,15 @@ type Context struct {
 	// SummaryTokens caps the summary. One that may grow without limit is not a
 	// smaller conversation.
 	SummaryTokens int `koanf:"summary_tokens"`
+
+	// KeepAfterFold is how many events before a summary are kept anyway.
+	//
+	// Once turns are folded, the conversation sent to the model reads the
+	// summary and not the turns behind it, so they can go. A margin keeps the
+	// tail of what was folded readable for somebody asking what actually
+	// happened. Negative keeps everything, which is what a deployment that
+	// wants a complete audit log wants.
+	KeepAfterFold int `koanf:"keep_after_fold"`
 }
 
 // Tools bounds what the built-in tools will read, search and run.
@@ -553,6 +562,7 @@ func Defaults() Config {
 			CompactAt:     0.7,
 			KeepFraction:  0.3,
 			SummaryTokens: 1024,
+			KeepAfterFold: 200,
 		},
 		Tools: Tools{
 			ReadLimit:         64 * 1024,
@@ -1363,6 +1373,17 @@ window = 0
 # compact_at = 0.7
 # keep_fraction = 0.3
 # summary_tokens = 1024
+
+# How many events before a summary are kept anyway.
+#
+# Once turns are folded, the conversation sent to the model reads the summary
+# and not the turns behind it, so they are discarded — that is what stops the
+# log growing forever. This margin keeps the tail of what was folded readable
+# for somebody asking what actually happened.
+#
+# A negative number keeps everything, for a deployment that wants a complete
+# audit log and will manage the size itself.
+# keep_after_fold = 200
 
 [memory]
 # What the agent carries between sessions.

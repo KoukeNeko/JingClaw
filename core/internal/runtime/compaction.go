@@ -130,6 +130,21 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 		"tokens_before", before,
 		"tokens_after", after,
 	)
+
+	// The moment the turns behind the summary stop being read is the moment
+	// they can go. Doing it here rather than on a timer means retention needs
+	// no schedule of its own and can never run against a session in a state
+	// where discarding is unsafe.
+	//
+	// A failure is logged and not returned: the compaction succeeded, and
+	// refusing the run because the tidying afterwards did not would throw away
+	// work that was done.
+	if r.opts.KeepAfterFold >= 0 {
+		if _, err := r.PruneSession(ctx, run.SessionID, r.opts.KeepAfterFold); err != nil {
+			r.opts.Logger.Warn("could not discard what the summary replaced",
+				"session_id", string(run.SessionID), "error", err)
+		}
+	}
 }
 
 // planCompaction decides what to fold, and whether folding it is worth doing.

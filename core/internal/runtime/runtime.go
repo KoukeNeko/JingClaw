@@ -165,6 +165,14 @@ type Options struct {
 	// guess at the window.
 	ContextBudget ContextBudget
 
+	// KeepAfterFold is how many events before a summary are kept anyway.
+	//
+	// Zero discards everything the summary replaced, which is correct and
+	// leaves nothing to look at when somebody asks what actually happened. A
+	// margin costs a little space and keeps the tail of the folded
+	// conversation readable. Negative turns pruning off entirely.
+	KeepAfterFold int
+
 	// MaxIterations bounds the tool loop. A model that keeps calling tools
 	// without converging must stop somewhere, and stopping with a recorded
 	// reason beats burning quota until a human notices.

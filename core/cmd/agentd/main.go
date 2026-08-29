@@ -320,6 +320,7 @@ func run() error {
 			TextFlushInterval:  cfg.Delivery.TextFlushInterval,
 			UsageFlushInterval: cfg.Delivery.UsageFlushInterval,
 		},
+		KeepAfterFold: cfg.Context.KeepAfterFold,
 		ContextBudget: runtime.ContextBudget{
 			Window:        window,
 			CompactAt:     cfg.Context.CompactAt,

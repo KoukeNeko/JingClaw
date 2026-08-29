@@ -40,6 +40,8 @@ fake_delay = "0s"
 window = 2000
 compact_at = 0.7
 keep_fraction = 0.3
+# No margin, so the check sees pruning happen rather than a default hiding it.
+keep_after_fold = 0
 
 [workspace]
 root = "$WORK/ws"
@@ -96,5 +98,18 @@ sleep 0.6
 grep -c 'run.failed' "$WORK/daemon.err" >/dev/null 2>&1 &&
 	fail "a run failed during compaction: $(grep run.failed "$WORK/daemon.err")"
 printf 'ok   keeps serving turns afterwards\n'
+
+# Folding is what makes the turns behind a summary safe to discard, and
+# discarding them is what stops the log growing forever. Checked by the
+# numbering: sequences name an event for the life of a session, so an oldest
+# sequence above one is proof that earlier events went and that the count did
+# not restart behind them.
+OLDEST=$(python3 -c "import sqlite3,sys;print(sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True).execute('SELECT MIN(seq) FROM events').fetchone()[0])" "$WORK/data/jingclaw.db")
+FOLDS=$(python3 -c "import sqlite3,sys;print(sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True).execute(\"SELECT COUNT(*) FROM events WHERE kind='conversation.compacted'\").fetchone()[0])" "$WORK/data/jingclaw.db")
+
+[ "$FOLDS" -gt 0 ] || fail "nothing was folded, so retention proves nothing"
+[ "$OLDEST" -gt 1 ] ||
+	fail "the oldest surviving sequence is $OLDEST: a fold happened and nothing was discarded"
+printf 'ok   %s folds, and what they replaced is gone (oldest sequence %s)\n' "$FOLDS" "$OLDEST"
 
 printf '\nall checks passed\n'
