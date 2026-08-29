@@ -28,3 +28,7 @@ node_modules/
 # Swift build products.
 macos/.build/
 macos/.swiftpm/
+
+# The built and signed application. A compiled binary in git is a large blob
+# nobody diffs and everybody clones; scripts/build-macos.sh makes it.
+/build/
