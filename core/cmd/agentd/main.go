@@ -253,6 +253,7 @@ func run() error {
 		&builtin.StartProcess{Workspace: ws, Processes: processes},
 		&builtin.ProcessIO{Processes: processes},
 		&builtin.StopProcess{Processes: processes},
+		&builtin.ListProcesses{Processes: processes},
 	)
 
 	// Tool servers are started before the prompt is assembled, because what

@@ -252,3 +252,71 @@ func asToolError(err error, out **tool.Error) bool {
 	}
 	return false
 }
+
+// A model that started something and lost the id must be able to find it
+// again. Without this it could neither read what the program was printing nor
+// stop it, and the process would sit there until the daemon did.
+func TestWhatIsRunningCanBeListed(t *testing.T) {
+	start, _, stop := newProcessTools(t)
+	ctx := context.Background()
+
+	lister := &ListProcesses{Processes: start.Processes}
+
+	empty, err := lister.Execute(ctx, callWith(t, struct{}{}))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(empty.Content, "Nothing is running") {
+		t.Errorf("a session that started nothing does not say so: %q", empty.Content)
+	}
+
+	started, err := start.Execute(ctx, callWith(t, startProcessArgs{
+		Program: "sh", Args: []string{"-c", "sleep 30"},
+	}))
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	id := startedID(t, started)
+
+	listed, err := lister.Execute(ctx, callWith(t, struct{}{}))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(listed.Content, id) {
+		t.Errorf("the process is not listed:\n%s", listed.Content)
+	}
+	if !strings.Contains(listed.Content, "sleep 30") {
+		t.Errorf("the listing does not say what is running:\n%s", listed.Content)
+	}
+	if !strings.Contains(listed.Content, "running") {
+		t.Errorf("the listing does not say it is still running:\n%s", listed.Content)
+	}
+
+	if _, err := stop.Execute(ctx, callWith(t, stopProcessArgs{ProcessID: id})); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+}
+
+// One session must not see another's processes.
+func TestTheListingIsPerSession(t *testing.T) {
+	start, _, _ := newProcessTools(t)
+	ctx := context.Background()
+
+	if _, err := start.Execute(ctx, callWith(t, startProcessArgs{
+		Program: "sh", Args: []string{"-c", "sleep 30"},
+	})); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	lister := &ListProcesses{Processes: start.Processes}
+	elsewhere := callWith(t, struct{}{})
+	elsewhere.Context.SessionID = "ses_someone_else"
+
+	listed, err := lister.Execute(ctx, elsewhere)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(listed.Content, "Nothing is running") {
+		t.Errorf("another session's processes leaked:\n%s", listed.Content)
+	}
+}

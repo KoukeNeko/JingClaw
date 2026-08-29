@@ -385,3 +385,88 @@ func processError(err error, id string) error {
 		return tool.Errorf(tool.CodeInternal, "", "%v", err)
 	}
 }
+
+// ListProcesses says what is still running in this session.
+//
+// Without it a model that started something and lost the id could not reach
+// it again: it could neither read what the server was printing nor stop it,
+// and the process would sit there until the daemon did. The manager could
+// answer this from the first day; nothing asked.
+type ListProcesses struct {
+	Processes *process.Manager
+}
+
+func (t *ListProcesses) Spec() tool.Spec {
+	return tool.Spec{
+		Name: "list_processes",
+		Description: "List the programs start_process has running in this session, with " +
+			"their ids. Use it when you have lost track of one you started.",
+		InputSchema: json.RawMessage(`{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}`),
+		// Nothing is started, written to or stopped. It reports on what this
+		// session already did.
+		Level:        tool.LevelInternal,
+		Capabilities: tool.Capabilities{Idempotent: true, ParallelSafe: true},
+	}
+}
+
+func (t *ListProcesses) Execute(_ context.Context, call tool.Call) (tool.Result, error) {
+	if call.Context.SessionID == "" {
+		return tool.Result{}, tool.Errorf(tool.CodeInvalidArguments,
+			"", "a process belongs to a session, and this call has none")
+	}
+
+	running := t.Processes.List(call.Context.SessionID)
+	if len(running) == 0 {
+		return tool.Result{
+			Content: "Nothing is running in this session.",
+			Summary: "no processes",
+		}, nil
+	}
+
+	var out strings.Builder
+	var alive int
+	for _, state := range running {
+		fmt.Fprintf(&out, "%s  %s", state.ID, commandOf(state))
+
+		if state.Running {
+			alive++
+			fmt.Fprintf(&out, "  running (pid %d)", state.PID)
+		} else {
+			fmt.Fprintf(&out, "  ended with exit code %d", state.ExitCode)
+		}
+		if state.Terminal {
+			out.WriteString("  [terminal]")
+		}
+		if state.OutputDropped > 0 {
+			// Said here as well as on a read: somebody looking at the list is
+			// deciding what to read, and a buffer that has already lost its
+			// beginning changes that decision.
+			fmt.Fprintf(&out, "  (%d bytes of earlier output dropped)", state.OutputDropped)
+		}
+		out.WriteString("\n")
+	}
+
+	return tool.Result{
+		Content: out.String(),
+		Summary: fmt.Sprintf("%d running, %d ended", alive, len(running)-alive),
+	}, nil
+}
+
+// commandOf is the program and its arguments, short enough for a list.
+func commandOf(state process.State) string {
+	line := state.Program
+	if len(state.Args) > 0 {
+		line += " " + strings.Join(state.Args, " ")
+	}
+
+	const maxCommandLength = 90
+	runes := []rune(line)
+	if len(runes) <= maxCommandLength {
+		return line
+	}
+	return string(runes[:maxCommandLength]) + "…"
+}
