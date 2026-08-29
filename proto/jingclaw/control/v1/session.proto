@@ -13,6 +13,10 @@ message Session {
 
   google.protobuf.Timestamp created_at = 3;
   google.protobuf.Timestamp updated_at = 4;
+
+  // Which model answers here. Empty uses the daemon's configured one, which
+  // is what almost every session does.
+  string model = 5;
 }
 
 // One "please do something" execution inside a Session.
@@ -365,6 +369,72 @@ service SessionService {
   rpc InterruptRun(InterruptRunRequest) returns (InterruptRunResponse);
   rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
   rpc DecideApproval(DecideApprovalRequest) returns (DecideApprovalResponse);
+
+  // ListModels is what this daemon's provider offers, and which one a session
+  // is using.
+  //
+  // Asked of the provider rather than read from a list here: a local server
+  // has whatever somebody pulled onto that machine, and a catalogue written
+  // here would be wrong on every deployment that is not this one.
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+
+  // SetSessionModel chooses which model answers in a session.
+  //
+  // The next run picks it up. A run already generating has a request open
+  // with a model in it, and changing that underneath would attribute a turn
+  // to a model that did not write it.
+  rpc SetSessionModel(SetSessionModelRequest) returns (SetSessionModelResponse);
+}
+
+message ListModelsRequest {
+  RequestMeta meta = 1;
+
+  // Which session's current choice to report. Optional; without it, current
+  // names the daemon's default.
+  string session_id = 2;
+}
+
+message ListModelsResponse {
+  // Provider is what serves these. There is one per daemon: a conversation
+  // carries blocks only its own provider can read back, so moving one to
+  // another provider would silently discard them.
+  string provider = 1;
+
+  repeated ModelInfo models = 2;
+
+  // Current is the model this session answers with — its own choice where it
+  // has one, otherwise the daemon's default.
+  string current = 3;
+
+  // Default is what a session with no choice of its own uses.
+  string default = 4;
+}
+
+message ModelInfo {
+  string id = 1;
+  string display_name = 2;
+  string description = 3;
+
+  // ContextWindow is how much this model can be given, and where that figure
+  // came from. A model trained for 128k is routinely loaded with 4k, and a
+  // client showing the catalogue's number for a server that says otherwise is
+  // showing a number that is wrong.
+  int64 context_window = 4;
+  string context_source = 5;
+
+  int64 max_output_tokens = 6;
+}
+
+message SetSessionModelRequest {
+  RequestMeta meta = 1;
+  string session_id = 2;
+
+  // Empty goes back to the daemon's default.
+  string model = 3;
+}
+
+message SetSessionModelResponse {
+  Session session = 1;
 }
 
 message GetSessionViewRequest {

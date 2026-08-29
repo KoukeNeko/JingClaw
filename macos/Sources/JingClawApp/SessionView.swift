@@ -9,6 +9,15 @@ struct SessionView: View {
     @State private var draft = ""
     @State private var showingGateway = false
 
+    /// The picker writes through to the daemon rather than to local state, so
+    /// what is shown is what the next run will actually use.
+    private var modelSelection: Binding<String> {
+        Binding(
+            get: { store.currentModel },
+            set: { chosen in Task { await store.chooseModel(chosen) } }
+        )
+    }
+
     var body: some View {
         NavigationSplitView {
             SessionList(store: store)
@@ -30,6 +39,23 @@ struct SessionView: View {
                             ProgressView().controlSize(.small)
                             Button("Stop") { Task { await store.interrupt() } }
                         }
+                    }
+                }
+
+                ToolbarItem {
+                    // Hidden rather than shown empty when the daemon cannot
+                    // say what it has: a picker with nothing in it reads as
+                    // "there are no models", which is a different and wrong
+                    // thing.
+                    if !store.models.isEmpty {
+                        Picker("Model", selection: modelSelection) {
+                            ForEach(store.models, id: \.self) { model in
+                                Text(model == store.defaultModel ? "\(model) (default)" : model)
+                                    .tag(model)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .help("Which model answers in this session")
                     }
                 }
 

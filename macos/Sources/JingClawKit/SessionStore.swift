@@ -22,6 +22,15 @@ public final class SessionStore {
     /// contents you cannot see is not a decision.
     public private(set) var waiting: [PendingApproval] = []
 
+    /// What the provider offers, and which one this session uses.
+    ///
+    /// Per session rather than per daemon because that is what a local
+    /// deployment needs: the small model that fits in memory for most of what
+    /// gets asked, and the large one for the conversation that needs it.
+    public private(set) var models: [String] = []
+    public private(set) var currentModel = ""
+    public private(set) var defaultModel = ""
+
     /// Stored output somebody asked to look at, by artifact id.
     ///
     /// Kept here rather than fetched by the view so that opening the same one
@@ -78,6 +87,7 @@ public final class SessionStore {
         }
 
         await loadApprovals()
+        await loadModels()
         follow(id, after: state.headSeq)
     }
 
@@ -104,6 +114,41 @@ public final class SessionStore {
             waiting.removeAll { $0.id == approvalID }
         } catch {
             status = "\(error)"
+        }
+    }
+
+    /// Fetches what the provider offers and which one this session uses.
+    ///
+    /// A daemon that cannot answer leaves the picker empty rather than
+    /// stopping the session opening: a client that refused to show a
+    /// conversation because a model list was unavailable would be worse than
+    /// one without a picker.
+    public func loadModels() async {
+        guard let id = selected else { return }
+        do {
+            let answer: ModelListResponse = try await client.call(
+                "SessionService", "ListModels", ["sessionId": id])
+            models = (answer.models ?? []).map(\.id)
+            currentModel = answer.current ?? ""
+            defaultModel = answer.defaultModel ?? ""
+        } catch {
+            models = []
+            currentModel = ""
+            defaultModel = ""
+        }
+    }
+
+    /// Chooses which model answers here. The next run picks it up.
+    public func chooseModel(_ model: String) async {
+        guard let id = selected else { return }
+        do {
+            try await client.send(
+                "SessionService", "SetSessionModel", ["sessionId": id, "model": model])
+            currentModel = model.isEmpty ? defaultModel : model
+            status = "this session now answers with \(currentModel)"
+        } catch {
+            status = "could not change the model: \(error)"
+            await loadModels()
         }
     }
 
@@ -221,6 +266,23 @@ public struct SessionSummary: Decodable, Identifiable, Sendable {
 
 struct SessionListResponse: Decodable {
     var sessions: [SessionSummary]?
+}
+
+struct ModelListResponse: Decodable {
+    struct Model: Decodable { var id: String }
+
+    var models: [Model]?
+    var current: String?
+
+    /// `default` is a Swift keyword, so the wire name is spelled out here
+    /// rather than left to the compiler to reject.
+    var defaultModel: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case models
+        case current
+        case defaultModel = "default"
+    }
 }
 
 struct ApprovalListResponse: Decodable {

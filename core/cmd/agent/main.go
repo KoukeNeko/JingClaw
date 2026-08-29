@@ -80,6 +80,85 @@ func newRootCommand() *cobra.Command {
 	return root
 }
 
+// newSessionModelCommand shows and changes which model answers in a session.
+//
+// Per session rather than per daemon because that is what a local deployment
+// needs: the small model that fits in memory for most of what gets asked, and
+// the large one for the conversation that actually needs it.
+func newSessionModelCommand() *cobra.Command {
+	model := &cobra.Command{
+		Use:   "model <session-id> [model]",
+		Short: "Show or set which model answers in a session",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := dial()
+			if err != nil {
+				return err
+			}
+
+			if len(args) == 2 {
+				resp, err := client.SetSessionModel(cmd.Context(),
+					connect.NewRequest(&controlv1.SetSessionModelRequest{
+						Meta: newMeta(), SessionId: args[0], Model: args[1],
+					}))
+				if err != nil {
+					return err
+				}
+
+				chosen := resp.Msg.GetSession().GetModel()
+				if chosen == "" {
+					fmt.Fprintln(cmd.ErrOrStderr(), "back to the configured model")
+					return nil
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "this session now answers with %s\n", chosen)
+				return nil
+			}
+
+			resp, err := client.ListModels(cmd.Context(),
+				connect.NewRequest(&controlv1.ListModelsRequest{
+					Meta: newMeta(), SessionId: args[0],
+				}))
+			if err != nil {
+				return err
+			}
+
+			// Marked rather than merely listed: a list of twenty names with no
+			// indication of which is in use answers a different question from
+			// the one that was asked.
+			for _, one := range resp.Msg.GetModels() {
+				mark := "  "
+				if one.GetId() == resp.Msg.GetCurrent() {
+					mark = "* "
+				}
+				fmt.Printf("%s%s", mark, one.GetId())
+				if window := one.GetContextWindow(); window > 0 {
+					fmt.Printf("  %s context (%s)", formatCount(window), one.GetContextSource())
+				}
+				fmt.Println()
+			}
+
+			fmt.Fprintf(cmd.ErrOrStderr(), "provider %s; the daemon's default is %s\n",
+				resp.Msg.GetProvider(), resp.Msg.GetDefault())
+			return nil
+		},
+	}
+
+	return model
+}
+
+// formatCount keeps a context window readable. The exact figure matters to
+// nobody choosing a model; the order of magnitude is the whole message.
+func formatCount(count int64) string {
+	switch {
+	case count >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(count)/1_000_000)
+	case count >= 1_000:
+		return fmt.Sprintf("%dk", count/1_000)
+	default:
+		return fmt.Sprintf("%d", count)
+	}
+}
+
 func newSessionCommand() *cobra.Command {
 	session := &cobra.Command{Use: "session", Short: "Manage sessions"}
 
@@ -144,7 +223,7 @@ func newSessionCommand() *cobra.Command {
 	}
 	create.Flags().StringVar(&title, "title", "", "human-readable session title")
 
-	session.AddCommand(create, list)
+	session.AddCommand(create, list, newSessionModelCommand())
 	return session
 }
 

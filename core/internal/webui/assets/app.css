@@ -191,6 +191,17 @@ button.danger { color: var(--error); }
   flex: 1 1 auto;
 }
 
+#model {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.15rem 0.3rem;
+  max-width: 16rem;
+}
+
 #timeline li { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.75rem; padding: 0.18rem 0; }
 
 .kind { color: var(--ink-dim); font-size: 0.76rem; text-align: right; padding-top: 0.25rem; }

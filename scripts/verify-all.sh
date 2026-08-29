@@ -20,7 +20,7 @@ for CHECK in verify-config.sh verify-console.sh verify-compaction.sh \
 	verify-mcp.sh verify-memory.sh verify-images.sh verify-artifacts.sh \
 	verify-web.sh verify-providers.sh verify-home.sh \
 	verify-telegram.sh verify-reasoning.sh verify-processes.sh \
-	verify-approval-preview.sh verify-takeover.sh \
+	verify-approval-preview.sh verify-takeover.sh verify-model-choice.sh \
 	verify-parity.sh; do
 	printf '\n=== %s ===\n' "$CHECK"
 	if ! "./$CHECK"; then

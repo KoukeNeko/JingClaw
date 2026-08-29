@@ -96,8 +96,26 @@ type DeliveryTarget struct {
 const DeliveryLocalClient = "local_client"
 
 type Session struct {
-	ID        SessionID
-	Title     string
+	ID    SessionID
+	Title string
+
+	// Model overrides which model answers here. Empty uses the configured
+	// one, which is what almost every session does.
+	//
+	// Per session rather than per run: a conversation whose model changed
+	// halfway through is one whose earlier turns were written by a different
+	// writer, and the answer to "why did it get worse" would be invisible.
+	// Per session, the choice is a property of the conversation and shows up
+	// in every run summary it produces.
+	//
+	// The provider is deliberately not overridable. A conversation carries
+	// blocks only its own provider can read back — a thought signature, an
+	// opaque tool-call payload — and moving it to another one silently
+	// discards them. Choosing a model within the configured provider is what
+	// a local deployment actually needs: the small one that fits in memory,
+	// or the large one that does not.
+	Model string
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

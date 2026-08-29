@@ -37,6 +37,12 @@ type SessionStore interface {
 	CreateSession(ctx context.Context, session domain.Session) error
 	Session(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	ListSessions(ctx context.Context) ([]domain.Session, error)
+
+	// SetSessionModel changes which model answers here. The next run picks it
+	// up; one already generating has a request open with a model in it, and
+	// changing that underneath would attribute a turn to a model that did not
+	// write it.
+	SetSessionModel(ctx context.Context, id domain.SessionID, model string, at time.Time) error
 }
 
 type RunStore interface {

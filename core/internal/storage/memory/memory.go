@@ -78,6 +78,29 @@ func (s *Store) Session(ctx context.Context, id domain.SessionID) (domain.Sessio
 	return session, nil
 }
 
+func (s *Store) SetSessionModel(
+	ctx context.Context,
+	id domain.SessionID,
+	model string,
+	at time.Time,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.sessions[id]
+	if !ok {
+		return storage.ErrSessionNotFound
+	}
+	session.Model = model
+	session.UpdatedAt = at
+	s.sessions[id] = session
+	return nil
+}
+
 func (s *Store) ListSessions(ctx context.Context) ([]domain.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -19,6 +19,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/media"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
@@ -43,8 +44,19 @@ const (
 type SessionStore interface {
 	storage.EventStore
 
+	Session(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	ListSessions(ctx context.Context) ([]domain.Session, error)
 	ListRuns(ctx context.Context, session domain.SessionID) ([]domain.Run, error)
+}
+
+// Models is what a client is offered when choosing one.
+//
+// The provider itself, asked at the time. A local server has whatever
+// somebody pulled onto that machine, so a list written here would be wrong on
+// every deployment that is not this one.
+type Models interface {
+	Models(ctx context.Context) ([]provider.ModelInfo, error)
+	Name() string
 }
 
 // AttachmentStore is where files sent with a turn are kept.
@@ -57,6 +69,11 @@ type Server struct {
 	store     SessionStore
 	hub       *event.Hub
 	artifacts AttachmentStore
+
+	// models answers "what could this session use instead", and defaultModel
+	// is what a session with no choice of its own uses.
+	models       Models
+	defaultModel string
 }
 
 func NewServer(
@@ -64,8 +81,13 @@ func NewServer(
 	store SessionStore,
 	hub *event.Hub,
 	artifacts AttachmentStore,
+	models Models,
+	defaultModel string,
 ) *Server {
-	return &Server{rt: rt, store: store, hub: hub, artifacts: artifacts}
+	return &Server{
+		rt: rt, store: store, hub: hub, artifacts: artifacts,
+		models: models, defaultModel: defaultModel,
+	}
 }
 
 func (s *Server) CreateSession(
@@ -422,4 +444,76 @@ func toConnectError(err error) error {
 	default:
 		return connect.NewError(connect.CodeInternal, err)
 	}
+}
+
+// ListModels is what this daemon's provider offers, and which one a session
+// is using.
+func (s *Server) ListModels(
+	ctx context.Context,
+	req *connect.Request[controlv1.ListModelsRequest],
+) (*connect.Response[controlv1.ListModelsResponse], error) {
+	if s.models == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented,
+			errors.New("this daemon cannot list its models"))
+	}
+
+	available, err := s.models.Models(ctx)
+	if err != nil {
+		// A provider that cannot be asked is worth saying so about rather than
+		// answering with an empty list, which a client would draw as "there
+		// are no models" — a different and wrong thing.
+		return nil, connect.NewError(connect.CodeUnavailable,
+			fmt.Errorf("could not ask the provider what it has: %w", err))
+	}
+
+	current := s.defaultModel
+	if id := req.Msg.GetSessionId(); id != "" {
+		session, err := s.store.Session(ctx, domain.SessionID(id))
+		if err != nil {
+			return nil, toConnectError(err)
+		}
+		if session.Model != "" {
+			current = session.Model
+		}
+	}
+
+	models := make([]*controlv1.ModelInfo, 0, len(available))
+	for _, one := range available {
+		models = append(models, &controlv1.ModelInfo{
+			Id:              one.ID,
+			DisplayName:     one.DisplayName,
+			Description:     one.Description,
+			ContextWindow:   int64(one.ContextWindow),
+			ContextSource:   string(one.ContextSource),
+			MaxOutputTokens: int64(one.MaxOutputTokens),
+		})
+	}
+
+	return connect.NewResponse(&controlv1.ListModelsResponse{
+		Provider: s.models.Name(),
+		Models:   models,
+		Current:  current,
+		Default:  s.defaultModel,
+	}), nil
+}
+
+// SetSessionModel chooses which model answers in a session.
+func (s *Server) SetSessionModel(
+	ctx context.Context,
+	req *connect.Request[controlv1.SetSessionModelRequest],
+) (*connect.Response[controlv1.SetSessionModelResponse], error) {
+	id := domain.SessionID(req.Msg.GetSessionId())
+	if id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			errors.New("name the session"))
+	}
+
+	session, err := s.rt.SetSessionModel(ctx, id, req.Msg.GetModel())
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	return connect.NewResponse(&controlv1.SetSessionModelResponse{
+		Session: sessionToProto(session),
+	}), nil
 }

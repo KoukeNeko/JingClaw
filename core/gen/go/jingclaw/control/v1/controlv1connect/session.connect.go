@@ -80,6 +80,12 @@ const (
 	// SessionServiceDecideApprovalProcedure is the fully-qualified name of the SessionService's
 	// DecideApproval RPC.
 	SessionServiceDecideApprovalProcedure = "/jingclaw.control.v1.SessionService/DecideApproval"
+	// SessionServiceListModelsProcedure is the fully-qualified name of the SessionService's ListModels
+	// RPC.
+	SessionServiceListModelsProcedure = "/jingclaw.control.v1.SessionService/ListModels"
+	// SessionServiceSetSessionModelProcedure is the fully-qualified name of the SessionService's
+	// SetSessionModel RPC.
+	SessionServiceSetSessionModelProcedure = "/jingclaw.control.v1.SessionService/SetSessionModel"
 )
 
 // GatewayIngressServiceClient is a client for the jingclaw.control.v1.GatewayIngressService
@@ -352,6 +358,19 @@ type SessionServiceClient interface {
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
 	ListApprovals(context.Context, *connect.Request[v1.ListApprovalsRequest]) (*connect.Response[v1.ListApprovalsResponse], error)
 	DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error)
+	// ListModels is what this daemon's provider offers, and which one a session
+	// is using.
+	//
+	// Asked of the provider rather than read from a list here: a local server
+	// has whatever somebody pulled onto that machine, and a catalogue written
+	// here would be wrong on every deployment that is not this one.
+	ListModels(context.Context, *connect.Request[v1.ListModelsRequest]) (*connect.Response[v1.ListModelsResponse], error)
+	// SetSessionModel chooses which model answers in a session.
+	//
+	// The next run picks it up. A run already generating has a request open
+	// with a model in it, and changing that underneath would attribute a turn
+	// to a model that did not write it.
+	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
 }
 
 // NewSessionServiceClient constructs a client for the jingclaw.control.v1.SessionService service.
@@ -419,6 +438,18 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("DecideApproval")),
 			connect.WithClientOptions(opts...),
 		),
+		listModels: connect.NewClient[v1.ListModelsRequest, v1.ListModelsResponse](
+			httpClient,
+			baseURL+SessionServiceListModelsProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("ListModels")),
+			connect.WithClientOptions(opts...),
+		),
+		setSessionModel: connect.NewClient[v1.SetSessionModelRequest, v1.SetSessionModelResponse](
+			httpClient,
+			baseURL+SessionServiceSetSessionModelProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("SetSessionModel")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -433,6 +464,8 @@ type sessionServiceClient struct {
 	interruptRun    *connect.Client[v1.InterruptRunRequest, v1.InterruptRunResponse]
 	listApprovals   *connect.Client[v1.ListApprovalsRequest, v1.ListApprovalsResponse]
 	decideApproval  *connect.Client[v1.DecideApprovalRequest, v1.DecideApprovalResponse]
+	listModels      *connect.Client[v1.ListModelsRequest, v1.ListModelsResponse]
+	setSessionModel *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
 }
 
 // CreateSession calls jingclaw.control.v1.SessionService.CreateSession.
@@ -480,6 +513,16 @@ func (c *sessionServiceClient) DecideApproval(ctx context.Context, req *connect.
 	return c.decideApproval.CallUnary(ctx, req)
 }
 
+// ListModels calls jingclaw.control.v1.SessionService.ListModels.
+func (c *sessionServiceClient) ListModels(ctx context.Context, req *connect.Request[v1.ListModelsRequest]) (*connect.Response[v1.ListModelsResponse], error) {
+	return c.listModels.CallUnary(ctx, req)
+}
+
+// SetSessionModel calls jingclaw.control.v1.SessionService.SetSessionModel.
+func (c *sessionServiceClient) SetSessionModel(ctx context.Context, req *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error) {
+	return c.setSessionModel.CallUnary(ctx, req)
+}
+
 // SessionServiceHandler is an implementation of the jingclaw.control.v1.SessionService service.
 type SessionServiceHandler interface {
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
@@ -504,6 +547,19 @@ type SessionServiceHandler interface {
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
 	ListApprovals(context.Context, *connect.Request[v1.ListApprovalsRequest]) (*connect.Response[v1.ListApprovalsResponse], error)
 	DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error)
+	// ListModels is what this daemon's provider offers, and which one a session
+	// is using.
+	//
+	// Asked of the provider rather than read from a list here: a local server
+	// has whatever somebody pulled onto that machine, and a catalogue written
+	// here would be wrong on every deployment that is not this one.
+	ListModels(context.Context, *connect.Request[v1.ListModelsRequest]) (*connect.Response[v1.ListModelsResponse], error)
+	// SetSessionModel chooses which model answers in a session.
+	//
+	// The next run picks it up. A run already generating has a request open
+	// with a model in it, and changing that underneath would attribute a turn
+	// to a model that did not write it.
+	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -567,6 +623,18 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("DecideApproval")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceListModelsHandler := connect.NewUnaryHandler(
+		SessionServiceListModelsProcedure,
+		svc.ListModels,
+		connect.WithSchema(sessionServiceMethods.ByName("ListModels")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceSetSessionModelHandler := connect.NewUnaryHandler(
+		SessionServiceSetSessionModelProcedure,
+		svc.SetSessionModel,
+		connect.WithSchema(sessionServiceMethods.ByName("SetSessionModel")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -587,6 +655,10 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceListApprovalsHandler.ServeHTTP(w, r)
 		case SessionServiceDecideApprovalProcedure:
 			sessionServiceDecideApprovalHandler.ServeHTTP(w, r)
+		case SessionServiceListModelsProcedure:
+			sessionServiceListModelsHandler.ServeHTTP(w, r)
+		case SessionServiceSetSessionModelProcedure:
+			sessionServiceSetSessionModelHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -630,4 +702,12 @@ func (UnimplementedSessionServiceHandler) ListApprovals(context.Context, *connec
 
 func (UnimplementedSessionServiceHandler) DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.DecideApproval is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) ListModels(context.Context, *connect.Request[v1.ListModelsRequest]) (*connect.Response[v1.ListModelsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.ListModels is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.SetSessionModel is not implemented"))
 }

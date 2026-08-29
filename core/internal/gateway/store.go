@@ -105,4 +105,11 @@ type Store interface {
 	// MarkDelivered settles a dispatch. It must refuse a second attempt, so a
 	// duplicate acknowledgement cannot make a reply appear twice.
 	MarkDelivered(ctx context.Context, id string, platformMessageIDs []string, at time.Time) error
+
+	// Sessions
+
+	// Session is read for one thing here: which model a session answered
+	// with, so a run summary names the one that actually did rather than the
+	// daemon's default.
+	Session(ctx context.Context, id domain.SessionID) (domain.Session, error)
 }

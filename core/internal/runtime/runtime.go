@@ -326,6 +326,26 @@ func (r *Runtime) CreateSession(ctx context.Context, title string) (domain.Sessi
 	return session, nil
 }
 
+// SetSessionModel chooses which model answers in a session.
+//
+// Recorded rather than applied to whatever is running: a run already
+// generating has a request open with a model in it, and changing that
+// underneath would produce a turn attributed to a model that did not write
+// it. The next run picks it up.
+//
+// An empty model goes back to the daemon's configured one, which is how a
+// session gets undone rather than needing a separate call for it.
+func (r *Runtime) SetSessionModel(
+	ctx context.Context,
+	id domain.SessionID,
+	model string,
+) (domain.Session, error) {
+	if err := r.opts.Store.SetSessionModel(ctx, id, model, r.opts.Now()); err != nil {
+		return domain.Session{}, err
+	}
+	return r.opts.Store.Session(ctx, id)
+}
+
 func (r *Runtime) Session(ctx context.Context, id domain.SessionID) (domain.Session, error) {
 	return r.opts.Store.Session(ctx, id)
 }
@@ -511,7 +531,7 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 		}
 
 		calls, err := r.generateTurn(ctx, run, provider.Request{
-			Model:    r.opts.Model,
+			Model:    r.modelFor(ctx, run.SessionID),
 			System:   system,
 			Messages: messages,
 			Tools:    declarations,
@@ -926,6 +946,21 @@ func (c *coalescer) flushUsage(ctx context.Context) error {
 
 	return c.rt.append(ctx, c.run.SessionID, c.run.ID, domain.EventUsageChanged,
 		domain.UsageChanged{Usage: c.usage})
+}
+
+// modelFor is the model this session answers with.
+//
+// The session's own choice where it has one, otherwise the configured
+// default. Read per turn rather than held for the run, so a change takes
+// effect at the next turn rather than at the next conversation — and read
+// through a failure to a sensible answer, because a session row that cannot
+// be read is a reason to use the default rather than a reason not to answer.
+func (r *Runtime) modelFor(ctx context.Context, sessionID domain.SessionID) string {
+	session, err := r.opts.Store.Session(ctx, sessionID)
+	if err != nil || session.Model == "" {
+		return r.opts.Model
+	}
+	return session.Model
 }
 
 // generateTurn runs one model call, recording its output, and returns any

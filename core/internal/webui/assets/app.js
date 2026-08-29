@@ -315,7 +315,54 @@ async function selectSession(id) {
   renderApprovals();
 
   await openFromView(id);
+  await loadModels(id);
   attach();
+}
+
+// loadModels fills the picker with what the provider has, and marks the one
+// this session is using.
+//
+// Asked per session rather than once: the list is the provider's and does not
+// change, but which one is current is a property of the conversation. A daemon
+// that cannot answer leaves the picker hidden — a console that refused to open
+// a session because a model list was unavailable would be worse than one
+// without a picker.
+async function loadModels(id) {
+  const picker = el('model');
+  try {
+    const answer = await call('SessionService', 'ListModels', { sessionId: id });
+    const models = answer.models || [];
+    if (models.length === 0) {
+      picker.hidden = true;
+      return;
+    }
+
+    picker.replaceChildren();
+    for (const model of models) {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = model.id === answer.default
+        ? `${model.id} (default)`
+        : model.id;
+      option.selected = model.id === answer.current;
+      picker.append(option);
+    }
+    picker.hidden = false;
+  } catch {
+    picker.hidden = true;
+  }
+}
+
+async function chooseModel(id, model) {
+  try {
+    await call('SessionService', 'SetSessionModel', { sessionId: id, model });
+    // Said rather than silent: the next turn uses it, and a picker that moved
+    // with no acknowledgement leaves somebody wondering whether it took.
+    setDaemonStatus(`this session now answers with ${model}`);
+  } catch (err) {
+    setDaemonStatus(`could not change the model — ${err.message}`);
+    await loadModels(id);
+  }
 }
 
 // openFromView draws the session as it is now, and says where to resume.
@@ -955,6 +1002,11 @@ el('input').addEventListener('keydown', (event) => {
     event.preventDefault();
     el('composer').requestSubmit();
   }
+});
+
+el('model').addEventListener('change', async (changed) => {
+  if (!state.sessionId) return;
+  await chooseModel(state.sessionId, changed.target.value);
 });
 
 el('interrupt').addEventListener('click', async () => {

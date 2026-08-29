@@ -42,9 +42,14 @@ type Projector struct {
 	// rather than a feature.
 	StreamInterval time.Duration
 
-	// Provider and Model are what this daemon answers with, reported in a
-	// run's summary. Daemon-wide rather than per run, because that is what
-	// they are: one daemon serves one model.
+	// Provider and Model are what this daemon answers with by default,
+	// reported in a run's summary.
+	//
+	// The provider is daemon-wide, because that is what it is. The model is a
+	// default: a session may name its own, and the summary has to say the one
+	// that actually answered — a line naming the wrong model is worse than no
+	// line, because it is the thing somebody reads to work out why an answer
+	// was poor.
 	Provider string
 	Model    string
 
@@ -342,7 +347,7 @@ func (p *Projector) observeState(
 		// read: it has already put a billing endpoint, a quota metric and an
 		// account's limits in front of everybody in a room. The log keeps the
 		// whole of it; a stranger gets a sentence.
-		summary := p.close(run.ID)
+		summary := p.close(ctx, run)
 
 		// A console gets what actually happened. The redaction exists because
 		// a provider's own words land in a room other people read; where the
@@ -364,7 +369,7 @@ func (p *Projector) observeState(
 		// saying what it was doing, which would otherwise sit above the answer
 		// claiming the agent is still busy.
 		p.forget(run.ID)
-		summary := p.close(run.ID)
+		summary := p.close(ctx, run)
 		duration := p.Now().Sub(run.CreatedAt)
 		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
 			State:      "completed",
@@ -450,18 +455,34 @@ func (p *Projector) record(run domain.RunID) *runRecord {
 // Nothing is kept after a run ends: these records are the one structure here
 // that grows with the number of runs a daemon has served rather than with the
 // number in flight.
-func (p *Projector) close(run domain.RunID) *RunSummary {
+func (p *Projector) close(ctx context.Context, run domain.Run) *RunSummary {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	existing, ok := p.records[run.ID]
+	if ok {
+		delete(p.records, run.ID)
+	}
+	p.mu.Unlock()
 
-	existing, ok := p.records[run]
 	if !ok {
 		return nil
 	}
-	delete(p.records, run)
 
-	summary := existing.summarise(p.Provider, p.Model)
+	summary := existing.summarise(p.Provider, p.modelFor(ctx, run.SessionID))
 	return &summary
+}
+
+// modelFor is the model this session answered with.
+//
+// Read here rather than taken from the daemon's default, because a session may
+// name its own and the summary is what somebody reads to work out why an
+// answer was poor. Falling back on any failure: an unreadable session row is a
+// reason to name the default, not a reason to leave the line out.
+func (p *Projector) modelFor(ctx context.Context, sessionID domain.SessionID) string {
+	session, err := p.Store.Session(ctx, sessionID)
+	if err != nil || session.Model == "" {
+		return p.Model
+	}
+	return session.Model
 }
 
 func (p *Projector) forget(run domain.RunID) {

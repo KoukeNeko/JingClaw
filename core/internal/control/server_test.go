@@ -78,9 +78,11 @@ func newHarness(t *testing.T, chunkDelay time.Duration) harness {
 		t.Fatalf("open artifacts: %v", err)
 	}
 
+	offline := fake.New(chunkDelay)
+
 	mux := http.NewServeMux()
 	mux.Handle(controlv1connect.NewSessionServiceHandler(
-		control.NewServer(rt, store, hub, artifacts)))
+		control.NewServer(rt, store, hub, artifacts, offline, fake.ModelID)))
 
 	// The port is unknown until the test server starts, so host validation is
 	// exercised separately in TestAuthMiddleware.

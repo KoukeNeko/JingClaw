@@ -160,6 +160,7 @@ func sessionToProto(s domain.Session) *controlv1.Session {
 	return &controlv1.Session{
 		Id:        string(s.ID),
 		Title:     s.Title,
+		Model:     s.Model,
 		CreatedAt: timestamppb.New(s.CreatedAt),
 		UpdatedAt: timestamppb.New(s.UpdatedAt),
 	}
