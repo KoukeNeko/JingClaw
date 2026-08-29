@@ -53,7 +53,18 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
-const shutdownGrace = 10 * time.Second
+const (
+	// shutdownGrace is how long run goroutines get to finish what they are
+	// doing. This is the one that protects the log.
+	shutdownGrace = 10 * time.Second
+
+	// httpDrainGrace is how long ordinary requests get to finish.
+	//
+	// Short on purpose. A subscription is an in-flight request that will not
+	// end on its own, so waiting for one is waiting for the whole window —
+	// which is what used to leave the runtime none of it at all.
+	httpDrainGrace = 2 * time.Second
+)
 
 func main() {
 	if err := run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -527,15 +538,31 @@ func run() error {
 
 	logger.Info("shutting down")
 
-	// Ordered teardown: stop accepting, let in-flight streams close, then wait
-	// for run goroutines. Never os.Exit while work is outstanding.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-	defer cancel()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
+	// Ordered teardown, and each phase gets its own window.
+	//
+	// One shared deadline meant the http drain consumed all of it: a gateway
+	// or a console holds a stream open, that stream is an in-flight request,
+	// and Shutdown waits for it. By the time the runtime was asked to drain
+	// there was no time left, so it was never actually waited for — the
+	// process exited while a run goroutine could still be writing.
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), httpDrainGrace)
+	err = server.Shutdown(drainCtx)
+	cancelDrain()
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		logger.Warn("http shutdown", "error", err)
 	}
-	if err := rt.Shutdown(shutdownCtx); err != nil {
+
+	// Whatever is left is a stream nobody is going to close. Dropping them is
+	// safe: the log is the truth, and a client reconnects and reads what it
+	// missed from there.
+	_ = server.Close()
+
+	// The one that matters. A run goroutine still writing when the process
+	// exits leaves a log that ends without a terminal event, and a client
+	// reattaching afterwards sees a run that never finished and never failed.
+	runCtx, cancelRun := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancelRun()
+	if err := rt.Shutdown(runCtx); err != nil {
 		logger.Warn("runtime shutdown", "error", err)
 	}
 
