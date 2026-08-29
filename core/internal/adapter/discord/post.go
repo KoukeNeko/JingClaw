@@ -79,6 +79,14 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 		return a.finishAsMessages(channelID, dispatch, render.Split(body, discordStyle))
 	}
 
+	// An approval this room can answer is a card with controls, not a
+	// paragraph. Before the file and splitting paths below, because neither
+	// applies to it: an approval is short by construction, and its controls
+	// have to be on the message somebody is reading.
+	if payload, pressable := pressableApproval(dispatch); pressable && a.decider != nil {
+		return a.postApprovalCard(channelID, payload)
+	}
+
 	// Something asked for by name, handed over as a file rather than pasted
 	// into the channel.
 	if file, carried := attachedFile(dispatch); carried {
@@ -270,17 +278,7 @@ func (a *Adapter) finishAsMessages(
 			}
 		}
 
-		// Controls go on the last message of an approval and nowhere else.
-		// An approval that split into several would otherwise carry a set of
-		// buttons above the effects they are agreeing to.
-		create := messageWith(segment)
-		if index == len(segments)-1 {
-			if approvalID, wanted := approvalIDOf(dispatch); wanted && a.decider != nil {
-				create.Components = []discord.LayoutComponent{approvalButtons(approvalID)}
-			}
-		}
-
-		message, err := a.client.Rest.CreateMessage(channelID, create)
+		message, err := a.client.Rest.CreateMessage(channelID, messageWith(segment))
 		if err != nil {
 			// Whatever was already posted is reported, so a caller retrying
 			// knows the delivery was partial rather than assuming none of it

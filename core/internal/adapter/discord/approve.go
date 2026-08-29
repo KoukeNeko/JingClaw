@@ -37,6 +37,70 @@ type Decider interface {
 	Decide(ctx context.Context, decision jcgateway.ApprovalDecision) (jcgateway.DecisionOutcome, error)
 }
 
+// Colours for the two states an approval message can be in. Discord shows
+// these as a stripe down the left, which is the fastest thing to read in a
+// channel somebody is scrolling past.
+const (
+	colourWaiting = 0xE8A33D // amber
+	colourAllowed = 0x3BA55D // green
+	colourDenied  = 0xED4245 // red
+)
+
+// approvalEmbed renders an approval as a card rather than as a paragraph.
+//
+// Built from the payload rather than from the text the shared renderer
+// produces. What a platform can draw is that platform's business: Telegram
+// gets the paragraph, and turning that paragraph back into fields here would
+// mean parsing our own output.
+func approvalEmbed(payload jcgateway.ApprovalPayload) discord.Embed {
+	embed := discord.Embed{
+		Title:       "Waiting for approval",
+		Color:       colourWaiting,
+		Description: "```\n" + payload.Summary + "\n```",
+	}
+
+	if len(payload.Effects) > 0 {
+		var effects strings.Builder
+		for _, effect := range payload.Effects {
+			effects.WriteString("• " + effect + "\n")
+		}
+		embed.Fields = append(embed.Fields, discord.EmbedField{
+			Name:  "This will",
+			Value: strings.TrimRight(effects.String(), "\n"),
+		})
+	}
+
+	// The id in the footer rather than in the body. Nobody reading the card
+	// needs it, and the one person who does — somebody deciding from a
+	// terminal instead — needs to be able to copy it.
+	embed.Footer = &discord.EmbedFooter{Text: payload.ApprovalID}
+
+	return embed
+}
+
+// settledEmbed is the same card once somebody has decided.
+//
+// The controls are gone by then, so the card has to say what happened on its
+// own: a message that still reads "Waiting for approval" with no buttons under
+// it looks broken rather than finished.
+func settledEmbed(original discord.Embed, allowed bool, presser string) discord.Embed {
+	settled := original
+
+	settled.Title = "Denied"
+	settled.Color = colourDenied
+	if allowed {
+		settled.Title = "Approved"
+		settled.Color = colourAllowed
+	}
+
+	settled.Fields = append(settled.Fields, discord.EmbedField{
+		Name:  "Decided by",
+		Value: "<@" + presser + ">",
+	})
+
+	return settled
+}
+
 // approvalButtons is the row attached to an approval a room may answer.
 func approvalButtons(approvalID string) discord.LayoutComponent {
 	return discord.NewActionRow(
@@ -65,21 +129,41 @@ func parseButtonID(customID string) (approvalID, action string, ok bool) {
 	return parts[1], parts[2], true
 }
 
-// approvalIDOf reports which approval a dispatch is about, so the buttons can
-// name it. Only an approval carries one.
-func approvalIDOf(dispatch jcgateway.Dispatch) (string, bool) {
+// pressableApproval reports whether this dispatch is an approval this room
+// may answer on the message itself, and hands back what it says.
+//
+// Anything else — a console, a room with no approvers, a dispatch that is not
+// an approval at all — is posted the ordinary way. A card with no controls
+// would be a worse version of the paragraph.
+func pressableApproval(dispatch jcgateway.Dispatch) (jcgateway.ApprovalPayload, bool) {
 	if dispatch.Kind != jcgateway.DispatchApproval {
-		return "", false
+		return jcgateway.ApprovalPayload{}, false
 	}
 
 	var payload jcgateway.ApprovalPayload
 	if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
-		return "", false
+		return jcgateway.ApprovalPayload{}, false
 	}
 	if payload.Route != jcgateway.ApprovalByPress || payload.ApprovalID == "" {
-		return "", false
+		return jcgateway.ApprovalPayload{}, false
 	}
-	return payload.ApprovalID, true
+	return payload, true
+}
+
+// postApprovalCard posts an approval as an embed with its controls.
+func (a *Adapter) postApprovalCard(
+	channelID snowflake.ID,
+	payload jcgateway.ApprovalPayload,
+) ([]string, error) {
+	message, err := a.client.Rest.CreateMessage(channelID, discord.MessageCreate{
+		Embeds:          []discord.Embed{approvalEmbed(payload)},
+		Components:      []discord.LayoutComponent{approvalButtons(payload.ApprovalID)},
+		AllowedMentions: &discord.AllowedMentions{},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("discord: post approval to %s: %w", channelID, err)
+	}
+	return []string{message.ID.String()}, nil
 }
 
 // onComponent handles a button press.
@@ -176,34 +260,27 @@ func (a *Adapter) settleButtons(
 	action string,
 ) {
 	message := event.Message
-	settled := message.Content + "\n" + settledLine(outcome, action, event)
 
-	_, err := a.client.Rest.UpdateMessage(message.ChannelID, message.ID,
-		discord.MessageUpdate{
-			Content:         &settled,
-			Components:      &[]discord.LayoutComponent{},
-			AllowedMentions: &discord.AllowedMentions{},
-		})
-	if err != nil {
-		a.config.Logger.Warn("could not clear approval buttons",
+	update := discord.MessageUpdate{
+		// Empty rather than absent. Leaving the field out keeps whatever is
+		// there, which is exactly the controls being taken away.
+		Components:      &[]discord.LayoutComponent{},
+		AllowedMentions: &discord.AllowedMentions{},
+	}
+
+	// Somebody else's press got there first, so the card is already settled
+	// and says who did it. Only the controls need to go.
+	if outcome != jcgateway.DecisionAlready && len(message.Embeds) > 0 {
+		settled := []discord.Embed{
+			settledEmbed(message.Embeds[0], action == buttonAllow, event.User().ID.String()),
+		}
+		update.Embeds = &settled
+	}
+
+	if _, err := a.client.Rest.UpdateMessage(message.ChannelID, message.ID, update); err != nil {
+		a.config.Logger.Warn("could not settle an approval card",
 			"message_id", message.ID.String(), "error", err)
 	}
-}
-
-func settledLine(
-	outcome jcgateway.DecisionOutcome,
-	action string,
-	event *events.ComponentInteractionCreate,
-) string {
-	if outcome == jcgateway.DecisionAlready {
-		return "— already decided."
-	}
-
-	verb := "Denied"
-	if action == buttonAllow {
-		verb = "Approved"
-	}
-	return fmt.Sprintf("— %s by <@%s>.", verb, event.User().ID.String())
 }
 
 // pressPrincipal reads who pressed, from what the platform said rather than
