@@ -8,6 +8,10 @@
 # two deployments that believe they are one.
 set -eu
 
+# This one is about how a directory is found, so it must not be told. Any
+# setting inherited from a caller is cleared.
+unset JINGCLAW_HOME
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)

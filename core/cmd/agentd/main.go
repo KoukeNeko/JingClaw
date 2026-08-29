@@ -68,6 +68,7 @@ func run() error {
 		printConfig = flag.Bool("print-config", false, "print an example configuration file and exit")
 		listModels  = flag.Bool("list-models", false, "print the provider's available models and exit")
 		initHere    = flag.Bool("init", false, "create a "+home.DirName+" directory here and exit")
+		printPaths  = flag.Bool("print-paths", false, "print where this deployment keeps things and exit")
 
 		// Every flag below has a setting of the same meaning in the
 		// configuration file, and exists only so one run can differ from it.
@@ -121,6 +122,10 @@ func run() error {
 	// Settings are checked once, here. Making something configurable is
 	// exactly when it needs validating: a value nobody could previously write
 	// is now one somebody can.
+	if *printPaths {
+		return reportPaths(cfg, configFile)
+	}
+
 	if err := cfg.Validate(); err != nil {
 		// Reported here rather than left to main: a mistyped setting is
 		// something a person is about to go and edit, and a JSON log line is
@@ -523,6 +528,47 @@ func run() error {
 
 // databasePath resolves where state is kept. An explicit --data-dir wins so a
 // test or a second instance can be fully isolated.
+// reportPaths says where this deployment keeps things.
+//
+// Everything that resolves from a directory, a setting or a platform default
+// resolves in one place; a script or an operator asking where the discovery
+// file is should not have to reimplement that and then drift from it.
+func reportPaths(cfg config.Config, configFile string) error {
+	database, err := resolveDatabase(cfg.Server.DataDir)
+	if err != nil {
+		return err
+	}
+
+	discoveryPath, err := discovery.PathIn(cfg.Server.RuntimeDir)
+	if err != nil {
+		return err
+	}
+
+	root := "(none)"
+	if dir, found := home.FromWorkingDirectory(); found {
+		root = dir.Root
+	}
+
+	for _, line := range [][2]string{
+		{"home", root},
+		{"config", orNone(configFile)},
+		{"workspace", cfg.Workspace.Root},
+		{"database", database},
+		{"artifacts", artifactDir(cfg, database)},
+		{"discovery", discoveryPath},
+	} {
+		fmt.Printf("%-10s %s\n", line[0], line[1])
+	}
+	return nil
+}
+
+func orNone(path string) string {
+	if path == "" {
+		return "(none)"
+	}
+	return path
+}
+
 // initialise creates a .JingClaw directory in the working directory.
 //
 // Explicit rather than automatic. A daemon that made one wherever it was
@@ -562,6 +608,23 @@ func initialise() error {
 func ConfigName() string { return home.ConfigName }
 
 func databasePath(dataDir string) (string, error) {
+	path, err := resolveDatabase(dataDir)
+	if err != nil {
+		return "", err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", fmt.Errorf("create data dir: %w", err)
+	}
+	return path, nil
+}
+
+// resolveDatabase says where the database would be, without making anything.
+//
+// Separate from databasePath because asking where a deployment keeps its
+// things should not create them: a --print-paths that leaves directories
+// behind is one nobody can run to find out.
+func resolveDatabase(dataDir string) (string, error) {
 	if dataDir == "" {
 		if dir, found := home.FromWorkingDirectory(); found {
 			dataDir = dir.Data()
@@ -572,10 +635,6 @@ func databasePath(dataDir string) (string, error) {
 			}
 			dataDir = filepath.Join(base, "JingClaw")
 		}
-	}
-
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return "", fmt.Errorf("create data dir: %w", err)
 	}
 	return filepath.Join(dataDir, "jingclaw.db"), nil
 }

@@ -8,6 +8,11 @@
 # visible within seconds of actually running the thing.
 set -eu
 
+# A .JingClaw directory above this checkout must not decide anything here: a
+# check that reaches the operator's own deployment would read its settings and,
+# worse, write to its database. Stated rather than relied on.
+export JINGCLAW_HOME=none
+
 cd "$(dirname "$0")"
 
 FAILED=0

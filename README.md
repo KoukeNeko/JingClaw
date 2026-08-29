@@ -62,6 +62,15 @@ Without a `.JingClaw`, the platform's own config, data and runtime directories
 are used exactly as before, and the workspace is the working directory. An
 explicit setting always wins over both.
 
+`JINGCLAW_HOME` names a directory outright, for running against a deployment
+without being inside it. Set it to `none` to say there is no directory at all,
+which is how a test or a check states that it means the machine to look like
+one that has never had one.
+
+`agentd --print-paths` reports where everything resolved, so a script that needs
+the discovery file can ask rather than reimplement the rules and then drift from
+them.
+
 The workspace defaults to *inside* the directory rather than beside it, so a
 deployment set up to try the thing out cannot reach the project it was set up
 in. Point `[workspace] root` at your code to work on that.

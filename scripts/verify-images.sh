@@ -8,6 +8,11 @@
 # image to a real model and asks a question only the picture answers.
 set -eu
 
+# A .JingClaw directory above this checkout must not decide anything here: a
+# check that reaches the operator's own deployment would read its settings and,
+# worse, write to its database. Stated rather than relied on.
+export JINGCLAW_HOME=none
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)

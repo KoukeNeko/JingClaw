@@ -13,8 +13,17 @@ POLL_SECONDS=0.5
 START_TIMEOUT=60
 STOP_TIMEOUT=20
 
+# Asked of the daemon rather than worked out here. Where the discovery file
+# goes depends on a .JingClaw directory, a setting and the platform, and a
+# script that reimplements that resolution is one that will disagree with the
+# daemon the first time any of it changes — and then stop and start nothing.
 if [ -n "${JINGCLAW_RUNTIME_DIR:-}" ]; then
 	DISCOVERY_FILE="$JINGCLAW_RUNTIME_DIR/daemon.json"
+elif [ -x "$AGENTD_BIN" ] &&
+	DISCOVERY_FILE=$(cd "$PROJECT_DIR" && "$AGENTD_BIN" --print-paths 2>/dev/null |
+		awk '$1 == "discovery" { $1 = ""; sub(/^ +/, ""); print }') &&
+	[ -n "$DISCOVERY_FILE" ]; then
+	:
 else
 	DISCOVERY_FILE="$HOME/Library/Application Support/JingClaw/run/daemon.json"
 fi

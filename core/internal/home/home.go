@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // DirName is what the directory is called.
@@ -112,8 +113,31 @@ func (d Dir) Run() string { return filepath.Join(d.Root, RunName) }
 // SecretFile is where a named credential lives.
 func (d Dir) SecretFile(name string) string { return filepath.Join(d.Root, name) }
 
+// EnvVar names a directory outright, skipping the search.
+//
+// For running against a deployment without being inside it, and for a test
+// that must not pick up whatever happens to exist above the package it lives
+// in. Set to "none" to say there is no directory at all, which is how a test
+// asserts the behaviour of a machine that has never had one.
+const EnvVar = "JINGCLAW_HOME"
+
 // FromWorkingDirectory finds the directory for the process's own location.
+//
+// The environment wins over the search, so a process can be pointed at a
+// deployment rather than having to be started inside it.
 func FromWorkingDirectory() (Dir, bool) {
+	switch named := strings.TrimSpace(os.Getenv(EnvVar)); named {
+	case "":
+	case "none":
+		return Dir{}, false
+	default:
+		absolute, err := filepath.Abs(named)
+		if err != nil {
+			return Dir{}, false
+		}
+		return Dir{Root: absolute}, true
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return Dir{}, false

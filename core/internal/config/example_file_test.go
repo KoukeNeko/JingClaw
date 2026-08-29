@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
+	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
 // exampleFile is the copy checked into the repository, where somebody browsing
@@ -35,6 +36,9 @@ func TestCheckedInExampleMatchesTheSource(t *testing.T) {
 // Creating the file is meant to be a convenience, not a change of behaviour,
 // so what it writes has to be the fully commented example.
 func TestEnsureFileCreatesTheExample(t *testing.T) {
+	// A machine with no .JingClaw, stated rather than assumed.
+	t.Setenv(home.EnvVar, "none")
+
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("HOME", dir)

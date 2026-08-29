@@ -110,3 +110,41 @@ func TestCreatingTwiceIsRefused(t *testing.T) {
 		t.Fatal("creating over an existing directory was allowed")
 	}
 }
+
+// The environment names a directory outright, for running against a
+// deployment without being inside it.
+func TestTheEnvironmentCanNameIt(t *testing.T) {
+	elsewhere := filepath.Join(t.TempDir(), "somewhere", home.DirName)
+	t.Setenv(home.EnvVar, elsewhere)
+	// From a directory that has its own, to prove the environment wins rather
+	// than merely filling a gap.
+	inside := t.TempDir()
+	if _, err := home.Create(inside); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Chdir(inside)
+
+	found, ok := home.FromWorkingDirectory()
+	if !ok {
+		t.Fatal("a named directory was not used")
+	}
+	if found.Root != elsewhere {
+		t.Errorf("used %s, want the named %s", found.Root, elsewhere)
+	}
+}
+
+// "none" says there is no directory, which is how a test asserts the
+// behaviour of a machine that has never had one without depending on what
+// happens to exist above the package it lives in.
+func TestTheEnvironmentCanSayThereIsNone(t *testing.T) {
+	inside := t.TempDir()
+	if _, err := home.Create(inside); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Chdir(inside)
+
+	t.Setenv(home.EnvVar, "none")
+	if found, ok := home.FromWorkingDirectory(); ok {
+		t.Errorf("found %s despite being told there is none", found.Root)
+	}
+}
