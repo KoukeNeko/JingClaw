@@ -162,10 +162,11 @@ func TestStatusReactionsFollowRunLifecycle(t *testing.T) {
 		"running":          "",
 		"working":          "",
 		"network_started":  "🌍",
+		"memory_started":   "📓",
 		"provider_started": "🧠",
 		"completed":        "✅",
-		"failed":           "✅",
-		"cancelled":        "✅",
+		"failed":           "❌",
+		"cancelled":        "🛑",
 	} {
 		got, remove := reactionForStatus(state)
 		if got != want || remove {
@@ -174,6 +175,9 @@ func TestStatusReactionsFollowRunLifecycle(t *testing.T) {
 	}
 	if _, remove := reactionForStatus("network_finished"); !remove {
 		t.Error("network_finished did not request removing the earth reaction")
+	}
+	if emoji, remove := reactionForStatus("memory_finished"); emoji != "" || remove {
+		t.Errorf("memory_finished = %q, remove=%v; want notebook retained", emoji, remove)
 	}
 }
 

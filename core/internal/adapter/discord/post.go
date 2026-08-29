@@ -112,10 +112,10 @@ func (a *Adapter) postReactionStatus(
 		return nil, fmt.Errorf("discord: unusable source message in dispatch %s: %w", dispatch.ID, err)
 	}
 	if remove {
-		if err := a.client.Rest.RemoveOwnReaction(channelID, messageID, "🌍"); err != nil {
-			a.config.Logger.Warn("could not remove network status reaction",
+		if err := a.client.Rest.RemoveOwnReaction(channelID, messageID, emoji); err != nil {
+			a.config.Logger.Warn("could not remove status reaction",
 				"run_id", string(dispatch.RunID), "message_id", conversation.SourceMessageID,
-				"emoji", "🌍", "error", err)
+				"emoji", emoji, "error", err)
 		}
 	} else if err := a.client.Rest.AddReaction(channelID, messageID, emoji); err != nil {
 		a.config.Logger.Warn("could not add status reaction",
@@ -138,11 +138,22 @@ func reactionForStatus(state string) (string, bool) {
 	case "network_started":
 		return "🌍", false
 	case "network_finished":
-		return "", true
+		return "🌍", true
+	case "memory_started":
+		return "📓", false
+	case "memory_finished":
+		return "", false
 	case "provider_started":
 		return "🧠", false
-	case "completed", "failed", "cancelled":
+	case "completed":
 		return "✅", false
+	case "failed":
+		// Not a tick. A reader glances at the reaction and reads the text only
+		// if something looks worth reading, so a run that failed under a ✅ is
+		// one nobody finds out about.
+		return "❌", false
+	case "cancelled":
+		return "🛑", false
 	default:
 		return "", false
 	}

@@ -215,6 +215,9 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		if payload.Name == "web_read" {
 			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "network_started"})
 		}
+		if payload.Name == "recall" {
+			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "memory_started"})
+		}
 
 		// What it is doing, while it is doing it. Throttled, because a run
 		// that reads six files in a second would otherwise send six lines
@@ -231,6 +234,9 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		p.record(run.ID).completed(payload, event.Seq)
 		if payload.Name == "web_read" {
 			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "network_finished"})
+		}
+		if payload.Name == "recall" {
+			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "memory_finished"})
 		}
 
 		// A finished call is not news to a room full of people, and it is
