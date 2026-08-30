@@ -597,7 +597,7 @@ func describe(ev *controlv1.Event, showOutput bool) (label, detail string) {
 		resolved := payload.ApprovalResolved
 		return "approval." + strings.ToLower(strings.TrimPrefix(
 				resolved.GetStatus().String(), "APPROVAL_STATUS_")),
-			fmt.Sprintf("%s by %s", resolved.GetToolName(), resolved.GetDecidedBy())
+			fmt.Sprintf("%s by %s", resolved.GetToolName(), describeOrigin(resolved.GetDecidedBy()))
 
 	case *controlv1.Event_UsageChanged:
 		usage := payload.UsageChanged.GetUsage()
@@ -1082,4 +1082,28 @@ func renderQuestionLine(asked *controlv1.QuestionAsked) string {
 		labels = append(labels, fmt.Sprintf("%s=%s", option.GetId(), option.GetLabel()))
 	}
 	return line + "  [" + strings.Join(labels, ", ") + "]"
+}
+
+// describeOrigin is the one-line form of who did something, for a listing.
+//
+// The name a person recognises when there is one, the identifier
+// authorisation was actually checked against when there is not, and what kind
+// of access it was when nobody was named at all. Never empty: a blank in a
+// column headed by who decided something reads as a decision nobody made.
+func describeOrigin(origin *controlv1.RunOrigin) string {
+	if principal := origin.GetPrincipal(); principal != nil {
+		if name := principal.GetDisplayName(); name != "" {
+			return name
+		}
+		if id := principal.GetPrincipalId(); id != "" {
+			return principal.GetPlatform() + ":" + id
+		}
+	}
+	if client := origin.GetClientId(); client != "" {
+		return client
+	}
+	if kind := origin.GetKind(); kind != controlv1.RunOriginKind_RUN_ORIGIN_KIND_UNSPECIFIED {
+		return strings.ToLower(strings.TrimPrefix(kind.String(), "RUN_ORIGIN_KIND_"))
+	}
+	return "unrecorded"
 }

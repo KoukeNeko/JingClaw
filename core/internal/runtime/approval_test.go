@@ -102,7 +102,7 @@ func TestWriteSuspendsTheRunUntilApproved(t *testing.T) {
 		}
 	}
 
-	if _, err := rt.DecideApproval(ctx, approval.ID, true, domain.RememberOnce, "test"); err != nil {
+	if _, err := rt.DecideApproval(ctx, approval.ID, true, domain.RememberOnce, domain.FromTheMachine("test")); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	waitForRun(t, rt, runID)
@@ -140,7 +140,7 @@ func TestDenialIsReportedToTheModelAsFinal(t *testing.T) {
 	waitForRun(t, rt, runID)
 
 	approval := onlyPendingApproval(t, rt, session.ID)
-	if _, err := rt.DecideApproval(ctx, approval.ID, false, domain.RememberOnce, "test"); err != nil {
+	if _, err := rt.DecideApproval(ctx, approval.ID, false, domain.RememberOnce, domain.FromTheMachine("test")); err != nil {
 		t.Fatalf("deny: %v", err)
 	}
 	waitForRun(t, rt, runID)
@@ -195,10 +195,10 @@ func TestSecondDecisionIsRejected(t *testing.T) {
 
 	approval := onlyPendingApproval(t, rt, session.ID)
 
-	if _, err := rt.DecideApproval(ctx, approval.ID, true, domain.RememberOnce, "first"); err != nil {
+	if _, err := rt.DecideApproval(ctx, approval.ID, true, domain.RememberOnce, domain.FromTheMachine("first")); err != nil {
 		t.Fatalf("first decision: %v", err)
 	}
-	_, err = rt.DecideApproval(ctx, approval.ID, true, domain.RememberOnce, "second")
+	_, err = rt.DecideApproval(ctx, approval.ID, true, domain.RememberOnce, domain.FromTheMachine("second"))
 	if !errors.Is(err, runtime.ErrApprovalNotPending) {
 		t.Fatalf("second decision returned %v, want ErrApprovalNotPending", err)
 	}
@@ -230,7 +230,7 @@ func TestSessionScopeSkipsLaterPromptsForThatToolOnly(t *testing.T) {
 	waitForRun(t, rt, runID)
 
 	approval := onlyPendingApproval(t, rt, session.ID)
-	if _, err := rt.DecideApproval(ctx, approval.ID, true, domain.RememberSession, "test"); err != nil {
+	if _, err := rt.DecideApproval(ctx, approval.ID, true, domain.RememberSession, domain.FromTheMachine("test")); err != nil {
 		t.Fatalf("approve for session: %v", err)
 	}
 	waitForRun(t, rt, runID)
@@ -388,7 +388,7 @@ func TestApprovalSurvivesADaemonRestart(t *testing.T) {
 		t.Errorf("a different approval survived: %s then %s", approval.ID, stillPending.ID)
 	}
 
-	if _, err := second.DecideApproval(ctx, stillPending.ID, true, domain.RememberOnce, "later"); err != nil {
+	if _, err := second.DecideApproval(ctx, stillPending.ID, true, domain.RememberOnce, domain.FromTheMachine("later")); err != nil {
 		t.Fatalf("approve after restart: %v", err)
 	}
 	waitForRun(t, second, runID)

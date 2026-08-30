@@ -82,10 +82,78 @@ type ExternalPrincipal struct {
 	DisplayName string
 }
 
+// RunOrigin says where something came from and, when that is knowable, who
+// was behind it.
+//
+// Two things rather than one, because they are two different facts and only
+// one of them is a claim about a person. A platform identifies whoever pressed
+// a button; a loopback credential identifies the machine and says nothing
+// about who is at it. Written as one string, the second case has nowhere
+// honest to go, and what ends up in the field meaning "who" is the name of a
+// program.
+//
+// Principal is nil exactly when nobody is known. That is a fact worth
+// recording rather than a gap to fill in.
 type RunOrigin struct {
 	Kind      RunOriginKind
 	ClientID  string
 	Principal *ExternalPrincipal
+}
+
+// FromTheMachine is a decision made by somebody with local access.
+//
+// No principal. The loopback credential authenticates the machine, and every
+// process running as its owner holds it, so which person typed the command is
+// not something this program knows.
+func FromTheMachine(client string) RunOrigin {
+	return RunOrigin{Kind: OriginLocalClient, ClientID: client}
+}
+
+// FromAPlatformAccount is a decision made by somebody the platform named.
+func FromAPlatformAccount(platform, principalID, displayName string) RunOrigin {
+	return RunOrigin{
+		Kind: OriginGateway,
+		Principal: &ExternalPrincipal{
+			Platform:    platform,
+			PrincipalID: principalID,
+			DisplayName: displayName,
+		},
+	}
+}
+
+// FromAChannel is a decision made in a room that is itself the credential.
+//
+// For a console binding, where a typed command is enough and the platform is
+// not asked who typed it. The room is what was authorised, so the room is what
+// is recorded — not the platform's name, which would say only that somebody
+// somewhere on Discord decided this.
+func FromAChannel(platform, channelID string) RunOrigin {
+	return RunOrigin{
+		Kind:     OriginGateway,
+		ClientID: platform + ":" + channelID,
+	}
+}
+
+// Describe is the one-line form, for a person reading a log or a listing.
+//
+// Never empty: an origin that says nothing would read as a decision nobody
+// made.
+func (o RunOrigin) Describe() string {
+	if o.Principal != nil {
+		if o.Principal.DisplayName != "" {
+			return o.Principal.DisplayName
+		}
+		if o.Principal.PrincipalID != "" {
+			return o.Principal.Platform + ":" + o.Principal.PrincipalID
+		}
+	}
+	if o.ClientID != "" {
+		return o.ClientID
+	}
+	if o.Kind != "" {
+		return string(o.Kind)
+	}
+	return "unrecorded"
 }
 
 // DeliveryTarget says where a run's output should go. It belongs to the Run
@@ -666,8 +734,8 @@ type Approval struct {
 	CreatedAt time.Time
 	DecidedAt *time.Time
 
-	// DecidedBy identifies the client that answered, for the audit trail.
-	DecidedBy string
+	// DecidedBy is who allowed or refused it, and from where.
+	DecidedBy RunOrigin
 }
 
 // IsPending reports whether this approval is still waiting.
@@ -740,8 +808,8 @@ type Question struct {
 	// text as typed.
 	Answer string
 
-	// AnsweredBy identifies the client that answered, for the audit trail.
-	AnsweredBy string
+	// AnsweredBy is who answered it, and from where.
+	AnsweredBy RunOrigin
 
 	CreatedAt  time.Time
 	AnsweredAt *time.Time
@@ -811,7 +879,7 @@ type QuestionAnswered struct {
 	CallID     ToolCallID
 	Status     QuestionStatus
 	Answer     string
-	AnsweredBy string
+	AnsweredBy RunOrigin
 }
 
 // PlanItem is one step of what the agent says it is going to do.
@@ -927,7 +995,7 @@ type ApprovalResolved struct {
 	ToolName   string
 	Status     ApprovalStatus
 	Scope      RememberScope
-	DecidedBy  string
+	DecidedBy  RunOrigin
 }
 
 func (ApprovalRequested) isEventPayload() {}

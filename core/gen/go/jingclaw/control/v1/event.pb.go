@@ -1423,8 +1423,14 @@ type QuestionAnswered struct {
 	Status     QuestionStatus         `protobuf:"varint,3,opt,name=status,proto3,enum=jingclaw.control.v1.QuestionStatus" json:"status,omitempty"`
 	// The chosen option's id for a choice, or the text as typed.
 	Answer string `protobuf:"bytes,4,opt,name=answer,proto3" json:"answer,omitempty"`
-	// Which client answered, for the audit trail.
-	AnsweredBy    string `protobuf:"bytes,5,opt,name=answered_by,json=answeredBy,proto3" json:"answered_by,omitempty"`
+	// Who answered it, and from where.
+	//
+	// An origin rather than one string, because who and from where are two
+	// facts and only one of them is a claim about a person. A platform names
+	// whoever pressed a button; a loopback credential names the machine and
+	// says nothing about who is at it, so its principal is unset rather than
+	// filled in with the name of a program.
+	AnsweredBy    *RunOrigin `protobuf:"bytes,6,opt,name=answered_by,json=answeredBy,proto3" json:"answered_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1487,11 +1493,11 @@ func (x *QuestionAnswered) GetAnswer() string {
 	return ""
 }
 
-func (x *QuestionAnswered) GetAnsweredBy() string {
+func (x *QuestionAnswered) GetAnsweredBy() *RunOrigin {
 	if x != nil {
 		return x.AnsweredBy
 	}
-	return ""
+	return nil
 }
 
 type ApprovalRequested struct {
@@ -1603,8 +1609,8 @@ type ApprovalResolved struct {
 	ToolName   string                 `protobuf:"bytes,3,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
 	Status     ApprovalStatus         `protobuf:"varint,4,opt,name=status,proto3,enum=jingclaw.control.v1.ApprovalStatus" json:"status,omitempty"`
 	Scope      RememberScope          `protobuf:"varint,5,opt,name=scope,proto3,enum=jingclaw.control.v1.RememberScope" json:"scope,omitempty"`
-	// Which client answered, for the audit trail.
-	DecidedBy     string `protobuf:"bytes,6,opt,name=decided_by,json=decidedBy,proto3" json:"decided_by,omitempty"`
+	// Who allowed or refused it, and from where. See QuestionAnswered.
+	DecidedBy     *RunOrigin `protobuf:"bytes,7,opt,name=decided_by,json=decidedBy,proto3" json:"decided_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1674,11 +1680,11 @@ func (x *ApprovalResolved) GetScope() RememberScope {
 	return RememberScope_REMEMBER_SCOPE_UNSPECIFIED
 }
 
-func (x *ApprovalResolved) GetDecidedBy() string {
+func (x *ApprovalResolved) GetDecidedBy() *RunOrigin {
 	if x != nil {
 		return x.DecidedBy
 	}
-	return ""
+	return nil
 }
 
 // Cumulative usage for the run so far. Sent as its own event so cost is
@@ -2052,15 +2058,15 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\x0eQuestionOption\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12\x16\n" +
-	"\x06detail\x18\x03 \x01(\tR\x06detail\"\xc2\x01\n" +
+	"\x06detail\x18\x03 \x01(\tR\x06detail\"\xe8\x01\n" +
 	"\x10QuestionAnswered\x12\x1f\n" +
 	"\vquestion_id\x18\x01 \x01(\tR\n" +
 	"questionId\x12\x17\n" +
 	"\acall_id\x18\x02 \x01(\tR\x06callId\x12;\n" +
 	"\x06status\x18\x03 \x01(\x0e2#.jingclaw.control.v1.QuestionStatusR\x06status\x12\x16\n" +
-	"\x06answer\x18\x04 \x01(\tR\x06answer\x12\x1f\n" +
-	"\vanswered_by\x18\x05 \x01(\tR\n" +
-	"answeredBy\"\xd6\x01\n" +
+	"\x06answer\x18\x04 \x01(\tR\x06answer\x12?\n" +
+	"\vanswered_by\x18\x06 \x01(\v2\x1e.jingclaw.control.v1.RunOriginR\n" +
+	"answeredByJ\x04\b\x05\x10\x06\"\xd6\x01\n" +
 	"\x11ApprovalRequested\x12\x1f\n" +
 	"\vapproval_id\x18\x01 \x01(\tR\n" +
 	"approvalId\x12\x17\n" +
@@ -2069,16 +2075,16 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\targuments\x18\x04 \x01(\tR\targuments\x12\x18\n" +
 	"\asummary\x18\x05 \x01(\tR\asummary\x12\x18\n" +
 	"\aeffects\x18\x06 \x03(\tR\aeffects\x12\x18\n" +
-	"\apreview\x18\a \x01(\tR\apreview\"\xff\x01\n" +
+	"\apreview\x18\a \x01(\tR\apreview\"\xa5\x02\n" +
 	"\x10ApprovalResolved\x12\x1f\n" +
 	"\vapproval_id\x18\x01 \x01(\tR\n" +
 	"approvalId\x12\x17\n" +
 	"\acall_id\x18\x02 \x01(\tR\x06callId\x12\x1b\n" +
 	"\ttool_name\x18\x03 \x01(\tR\btoolName\x12;\n" +
 	"\x06status\x18\x04 \x01(\x0e2#.jingclaw.control.v1.ApprovalStatusR\x06status\x128\n" +
-	"\x05scope\x18\x05 \x01(\x0e2\".jingclaw.control.v1.RememberScopeR\x05scope\x12\x1d\n" +
+	"\x05scope\x18\x05 \x01(\x0e2\".jingclaw.control.v1.RememberScopeR\x05scope\x12=\n" +
 	"\n" +
-	"decided_by\x18\x06 \x01(\tR\tdecidedBy\"@\n" +
+	"decided_by\x18\a \x01(\v2\x1e.jingclaw.control.v1.RunOriginR\tdecidedByJ\x04\b\x06\x10\a\"@\n" +
 	"\fUsageChanged\x120\n" +
 	"\x05usage\x18\x01 \x01(\v2\x1a.jingclaw.control.v1.UsageR\x05usage\"(\n" +
 	"\vStreamHello\x12\x19\n" +
@@ -2190,14 +2196,16 @@ var file_jingclaw_control_v1_event_proto_depIdxs = []int32{
 	1,  // 24: jingclaw.control.v1.QuestionAsked.kind:type_name -> jingclaw.control.v1.QuestionKind
 	16, // 25: jingclaw.control.v1.QuestionAsked.options:type_name -> jingclaw.control.v1.QuestionOption
 	2,  // 26: jingclaw.control.v1.QuestionAnswered.status:type_name -> jingclaw.control.v1.QuestionStatus
-	30, // 27: jingclaw.control.v1.ApprovalResolved.status:type_name -> jingclaw.control.v1.ApprovalStatus
-	31, // 28: jingclaw.control.v1.ApprovalResolved.scope:type_name -> jingclaw.control.v1.RememberScope
-	32, // 29: jingclaw.control.v1.UsageChanged.usage:type_name -> jingclaw.control.v1.Usage
-	30, // [30:30] is the sub-list for method output_type
-	30, // [30:30] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	27, // 27: jingclaw.control.v1.QuestionAnswered.answered_by:type_name -> jingclaw.control.v1.RunOrigin
+	30, // 28: jingclaw.control.v1.ApprovalResolved.status:type_name -> jingclaw.control.v1.ApprovalStatus
+	31, // 29: jingclaw.control.v1.ApprovalResolved.scope:type_name -> jingclaw.control.v1.RememberScope
+	27, // 30: jingclaw.control.v1.ApprovalResolved.decided_by:type_name -> jingclaw.control.v1.RunOrigin
+	32, // 31: jingclaw.control.v1.UsageChanged.usage:type_name -> jingclaw.control.v1.Usage
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_event_proto_init() }

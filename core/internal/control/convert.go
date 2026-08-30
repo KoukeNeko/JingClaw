@@ -314,7 +314,7 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 				CallId:     string(p.CallID),
 				Status:     questionStatusToProto(p.Status),
 				Answer:     p.Answer,
-				AnsweredBy: p.AnsweredBy,
+				AnsweredBy: originToProto(p.AnsweredBy),
 			},
 		}
 
@@ -339,7 +339,7 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 				ToolName:   p.ToolName,
 				Status:     approvalStatusToProto(p.Status),
 				Scope:      rememberScopeToProto(p.Scope),
-				DecidedBy:  p.DecidedBy,
+				DecidedBy:  originToProto(p.DecidedBy),
 			},
 		}
 

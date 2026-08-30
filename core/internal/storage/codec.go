@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 )
@@ -101,11 +102,11 @@ type questionAskedJSON struct {
 }
 
 type questionAnsweredJSON struct {
-	QuestionID string `json:"question_id"`
-	CallID     string `json:"call_id"`
-	Status     string `json:"status"`
-	Answer     string `json:"answer,omitempty"`
-	AnsweredBy string `json:"answered_by,omitempty"`
+	QuestionID string        `json:"question_id"`
+	CallID     string        `json:"call_id"`
+	Status     string        `json:"status"`
+	Answer     string        `json:"answer,omitempty"`
+	AnsweredBy decidedByJSON `json:"answered_by,omitempty"`
 }
 
 type approvalRequestedJSON struct {
@@ -119,12 +120,12 @@ type approvalRequestedJSON struct {
 }
 
 type approvalResolvedJSON struct {
-	ApprovalID string `json:"approval_id"`
-	CallID     string `json:"call_id"`
-	ToolName   string `json:"tool_name"`
-	Status     string `json:"status"`
-	Scope      string `json:"scope,omitempty"`
-	DecidedBy  string `json:"decided_by,omitempty"`
+	ApprovalID string        `json:"approval_id"`
+	CallID     string        `json:"call_id"`
+	ToolName   string        `json:"tool_name"`
+	Status     string        `json:"status"`
+	Scope      string        `json:"scope,omitempty"`
+	DecidedBy  decidedByJSON `json:"decided_by,omitempty"`
 }
 
 type conversationCompactedJSON struct {
@@ -150,6 +151,51 @@ type runOriginJSON struct {
 	Kind      string             `json:"kind"`
 	ClientID  string             `json:"client_id,omitempty"`
 	Principal *externalPrincipal `json:"principal,omitempty"`
+}
+
+// decidedByJSON reads a field that used to be one string and is now an origin.
+//
+// The log is append-only, so the events already in it are the specification
+// for what this must still read. Written before the split, "who decided this"
+// held a single string, and the only shape ever produced by a running
+// deployment was "<platform>:<principal id>" from a button press — the one
+// path that did know a person.
+//
+// New values are written as an object and read as one. Old values are read as
+// what they were: somebody a platform named, arriving through a gateway.
+type decidedByJSON struct {
+	runOriginJSON
+}
+
+func (d *decidedByJSON) UnmarshalJSON(raw []byte) error {
+	if len(raw) > 0 && raw[0] == '"' {
+		var old string
+		if err := json.Unmarshal(raw, &old); err != nil {
+			return err
+		}
+		d.runOriginJSON = fromTheOldString(old)
+		return nil
+	}
+	return json.Unmarshal(raw, &d.runOriginJSON)
+}
+
+// fromTheOldString reads a value written before the field carried an origin.
+func fromTheOldString(old string) runOriginJSON {
+	if old == "" {
+		return runOriginJSON{}
+	}
+
+	platform, id, split := strings.Cut(old, ":")
+	if !split || platform == "" || id == "" {
+		// Anything else was a client name or a platform on its own, and
+		// neither says who. Kept where it is rather than promoted into a
+		// principal, which is the mistake this split exists to undo.
+		return runOriginJSON{Kind: string(domain.OriginGateway), ClientID: old}
+	}
+	return runOriginJSON{
+		Kind:      string(domain.OriginGateway),
+		Principal: &externalPrincipal{Platform: platform, PrincipalID: id},
+	}
 }
 
 type externalPrincipal struct {
@@ -309,7 +355,7 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			CallID:     string(p.CallID),
 			Status:     string(p.Status),
 			Answer:     p.Answer,
-			AnsweredBy: p.AnsweredBy,
+			AnsweredBy: decidedByJSON{encodeOrigin(p.AnsweredBy)},
 		})
 
 	case domain.ApprovalRequested:
@@ -330,7 +376,7 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			ToolName:   p.ToolName,
 			Status:     string(p.Status),
 			Scope:      string(p.Scope),
-			DecidedBy:  p.DecidedBy,
+			DecidedBy:  decidedByJSON{encodeOrigin(p.DecidedBy)},
 		})
 
 	case domain.UsageChanged:
@@ -497,7 +543,7 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			CallID:     domain.ToolCallID(p.CallID),
 			Status:     domain.QuestionStatus(p.Status),
 			Answer:     p.Answer,
-			AnsweredBy: p.AnsweredBy,
+			AnsweredBy: decodeOrigin(p.AnsweredBy.runOriginJSON),
 		}, nil
 
 	case domain.EventApprovalRequested:
@@ -526,7 +572,7 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			ToolName:   p.ToolName,
 			Status:     domain.ApprovalStatus(p.Status),
 			Scope:      domain.RememberScope(p.Scope),
-			DecidedBy:  p.DecidedBy,
+			DecidedBy:  decodeOrigin(p.DecidedBy.runOriginJSON),
 		}, nil
 
 	case domain.EventUsageChanged:

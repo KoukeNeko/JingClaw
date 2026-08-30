@@ -79,7 +79,11 @@ func (i *Ingress) Decide(ctx context.Context, decision ApprovalDecision) (Decisi
 	// Who decided, in the form the rest of the system records people: the
 	// platform and the account, not a display name that its owner can change
 	// to somebody else's between the press and the log line.
-	decidedBy := string(decision.Conversation.Platform) + ":" + decision.Principal.ID
+	decidedBy := domain.FromAPlatformAccount(
+		string(decision.Conversation.Platform),
+		decision.Principal.ID,
+		decision.Principal.DisplayName,
+	)
 
 	if _, err := i.Decisions.DecideApproval(
 		ctx, decision.ApprovalID, decision.Allow, domain.RememberOnce, decidedBy,

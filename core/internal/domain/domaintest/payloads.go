@@ -112,7 +112,7 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			CallID:     "call_3",
 			Status:     domain.AnswerGiven,
 			Answer:     "b",
-			AnsweredBy: "jingclaw-cli",
+			AnsweredBy: domain.FromTheMachine("jingclaw-cli"),
 		},
 		domain.EventApprovalRequested: domain.ApprovalRequested{
 			ApprovalID: "apr_1",
@@ -129,7 +129,7 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			ToolName:   "exec_command",
 			Status:     domain.ApprovalAllowed,
 			Scope:      domain.RememberSession,
-			DecidedBy:  "cli",
+			DecidedBy:  domain.FromAPlatformAccount("discord", "675724351156518953", "Alice"),
 		},
 	}
 }

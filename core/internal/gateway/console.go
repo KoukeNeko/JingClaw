@@ -35,7 +35,7 @@ type DecidingRuntime interface {
 		id domain.ApprovalID,
 		allow bool,
 		scope domain.RememberScope,
-		decidedBy string,
+		decidedBy domain.RunOrigin,
 	) (domain.Approval, error)
 
 	PendingQuestions(ctx context.Context, session domain.SessionID) ([]domain.Question, error)
@@ -43,8 +43,33 @@ type DecidingRuntime interface {
 	AnswerQuestion(
 		ctx context.Context,
 		id domain.QuestionID,
-		answer, answeredBy string,
+		answer string,
+		answeredBy domain.RunOrigin,
 	) (domain.Question, error)
+}
+
+// whoTyped is who to record for something a console channel was told to do.
+//
+// A console binding is a room that is itself the credential: a typed command
+// is enough, and the platform is not asked who typed it. So the principal is
+// taken when the platform happened to supply one, and otherwise the room is
+// what is recorded — the room being what was authorised.
+//
+// Not the platform's name on its own, which was what this did before. "This
+// was decided by discord" says only that it happened somewhere on Discord,
+// which of every channel and every account is true.
+func whoTyped(message InboundMessage) domain.RunOrigin {
+	if message.Principal.ID != "" {
+		return domain.FromAPlatformAccount(
+			string(message.Principal.Platform),
+			message.Principal.ID,
+			message.Principal.DisplayName,
+		)
+	}
+	return domain.FromAChannel(
+		string(message.Conversation.Platform),
+		message.Conversation.ChannelID,
+	)
 }
 
 // consoleCommand is something typed in a console channel that is an
@@ -186,10 +211,7 @@ func (i *Ingress) answer(
 
 	// Recorded as the platform account that typed it, not as the operator
 	// running the daemon. Who answered is part of what the log is for.
-	answeredBy := message.Principal.ID
-	if answeredBy == "" {
-		answeredBy = string(message.Principal.Platform)
-	}
+	answeredBy := whoTyped(message)
 
 	answered, err := i.Decisions.AnswerQuestion(ctx, found.ID, command.rest, answeredBy)
 	if err != nil {
@@ -244,10 +266,7 @@ func (i *Ingress) decide(
 
 	// Recorded as the platform account that typed it, not as the operator
 	// running the daemon. Who decided is part of what the log is for.
-	decidedBy := message.Principal.ID
-	if decidedBy == "" {
-		decidedBy = string(binding.Platform)
-	}
+	decidedBy := whoTyped(message)
 
 	if _, err := i.Decisions.DecideApproval(ctx, found.ID, allow, domain.RememberOnce, decidedBy); err != nil {
 		return err

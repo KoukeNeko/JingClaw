@@ -177,6 +177,19 @@ while [ ! -f "$WORK/ws/notes.md" ]; do
 done
 printf 'ok   and the run continued\n'
 
+# Who authorised it. Here the platform did name a person — it named them when
+# they pressed the button — so the record has to say which one, by the
+# identifier authorisation was checked against and not by a name they can
+# change.
+DECIDED=$(sqlite3 -readonly "$WORK/data/jingclaw.db" \
+	"select json_extract(payload,'$.decided_by') from events where kind='approval.resolved';")
+
+echo "$DECIDED" | grep -q "\"principal_id\":\"$APPROVER\"" ||
+	fail "the record does not say who approved it: $DECIDED"
+echo "$DECIDED" | grep -q '"platform":"discord"' ||
+	fail "the record does not say where they were named: $DECIDED"
+printf 'ok   and the record names the person who pressed it\n' 
+
 # 6. A second press cannot decide it again. Two approvers can press in the
 #    same instant and exactly one can win; the store settles that, not the UI.
 AGAIN=$(press "$APPROVER" "$APPROVAL" false)

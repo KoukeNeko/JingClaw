@@ -104,7 +104,7 @@ func (r *Runtime) DecideApproval(
 	id domain.ApprovalID,
 	allow bool,
 	scope domain.RememberScope,
-	decidedBy string,
+	decidedBy domain.RunOrigin,
 ) (domain.Approval, error) {
 	status := domain.ApprovalDenied
 	if allow {

@@ -399,7 +399,7 @@ func (s *Store) DecideApproval(
 	id domain.ApprovalID,
 	status domain.ApprovalStatus,
 	scope domain.RememberScope,
-	decidedBy string,
+	decidedBy domain.RunOrigin,
 	at time.Time,
 ) (domain.Approval, error) {
 	if err := ctx.Err(); err != nil {
@@ -554,7 +554,8 @@ func (s *Store) AnswerQuestion(
 	ctx context.Context,
 	id domain.QuestionID,
 	status domain.QuestionStatus,
-	answer, answeredBy string,
+	answer string,
+	answeredBy domain.RunOrigin,
 	at time.Time,
 ) (domain.Question, error) {
 	if err := ctx.Err(); err != nil {

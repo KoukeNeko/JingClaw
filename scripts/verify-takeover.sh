@@ -160,6 +160,21 @@ while ! grep -q 'timeout := 120' "$WORK/ws/settings.go" 2>/dev/null; do
 done
 printf 'ok   approving it at the machine resumes the run\n'
 
+# Who authorised it, and whether the record says so honestly. A loopback
+# credential authenticates the machine and every process running as its owner
+# holds it, so there is no person to name here — and the field that means
+# "who" must be empty rather than hold the name of the program.
+DECIDED=$(sqlite3 -readonly "$WORK/data/jingclaw.db" \
+	"select json_extract(payload,'$.decided_by') from events where kind='approval.resolved';")
+
+echo "$DECIDED" | grep -q '"kind":"local_client"' ||
+	fail "a decision at the machine was not recorded as one: $DECIDED"
+echo "$DECIDED" | grep -q '"client_id":"jingclaw-cli"' ||
+	fail "the decision does not say which client made it: $DECIDED"
+echo "$DECIDED" | grep -q '"principal"' &&
+	fail "a decision at the machine claimed to know who made it: $DECIDED"
+printf 'ok   and the record names no person, because there is none to name\n' 
+
 # 5. And the channel is told. A run taken over must not go quiet on the people
 #    who started it.
 QUEUED=$(python3 -c "

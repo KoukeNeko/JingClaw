@@ -309,7 +309,7 @@ func (s *Server) DecideApproval(
 		domain.ApprovalID(req.Msg.GetApprovalId()),
 		decision == controlv1.ApprovalDecision_APPROVAL_DECISION_ALLOW,
 		rememberScopeFromProto(req.Msg.GetRemember()),
-		req.Msg.GetMeta().GetClientId(),
+		whoIsAsking(req.Msg.GetMeta()),
 	)
 	if err != nil {
 		return nil, toConnectError(err)
@@ -552,13 +552,9 @@ func (s *Server) AnswerQuestion(
 	ctx context.Context,
 	req *connect.Request[controlv1.AnswerQuestionRequest],
 ) (*connect.Response[controlv1.AnswerQuestionResponse], error) {
-	answeredBy := req.Msg.GetMeta().GetClientId()
-	if answeredBy == "" {
-		answeredBy = "unknown"
-	}
-
 	question, err := s.rt.AnswerQuestion(ctx,
-		domain.QuestionID(req.Msg.GetQuestionId()), req.Msg.GetAnswer(), answeredBy)
+		domain.QuestionID(req.Msg.GetQuestionId()), req.Msg.GetAnswer(),
+		whoIsAsking(req.Msg.GetMeta()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -566,4 +562,23 @@ func (s *Server) AnswerQuestion(
 	return connect.NewResponse(&controlv1.AnswerQuestionResponse{
 		Question: questionToProto(question),
 	}), nil
+}
+
+// whoIsAsking is what this server can honestly say about the caller.
+//
+// Not much: the credential is a loopback token, which every process running
+// as its owner can read, so what it authenticates is the machine. The client
+// says which program it is, and that is recorded as where the request came
+// from rather than as who made it — the field meaning "who" is left unset,
+// because unset is what this server knows.
+//
+// The one thing this must not do is put the client's name where a person
+// belongs. An approval that names a program has recorded nobody, while
+// looking like it recorded somebody.
+func whoIsAsking(meta *controlv1.RequestMeta) domain.RunOrigin {
+	client := meta.GetClientId()
+	if client == "" {
+		client = "an unnamed client"
+	}
+	return domain.FromTheMachine(client)
 }

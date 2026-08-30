@@ -232,8 +232,17 @@ message QuestionAnswered {
   // The chosen option's id for a choice, or the text as typed.
   string answer = 4;
 
-  // Which client answered, for the audit trail.
-  string answered_by = 5;
+  // 5 was this field when it was one string.
+  reserved 5;
+
+  // Who answered it, and from where.
+  //
+  // An origin rather than one string, because who and from where are two
+  // facts and only one of them is a claim about a person. A platform names
+  // whoever pressed a button; a loopback credential names the machine and
+  // says nothing about who is at it, so its principal is unset rather than
+  // filled in with the name of a program.
+  RunOrigin answered_by = 6;
 }
 
 enum QuestionStatus {
@@ -277,8 +286,11 @@ message ApprovalResolved {
   ApprovalStatus status = 4;
   RememberScope scope = 5;
 
-  // Which client answered, for the audit trail.
-  string decided_by = 6;
+  // 6 was this field when it was one string.
+  reserved 6;
+
+  // Who allowed or refused it, and from where. See QuestionAnswered.
+  RunOrigin decided_by = 7;
 }
 
 // Cumulative usage for the run so far. Sent as its own event so cost is

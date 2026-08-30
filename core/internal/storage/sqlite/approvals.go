@@ -26,7 +26,7 @@ func (s *Store) CreateApproval(ctx context.Context, approval domain.Approval) er
 		string(approval.ToolCallID), approval.ToolName, approval.Arguments,
 		approval.Summary, string(effects), approval.Preview,
 		string(approval.Status), string(approval.Scope),
-		approval.CreatedAt.UnixNano(), nullableTime(approval.DecidedAt), approval.DecidedBy,
+		approval.CreatedAt.UnixNano(), nullableTime(approval.DecidedAt), storedOrigin{approval.DecidedBy},
 	)
 	if isUniqueViolation(err) {
 		return storage.ErrApprovalDecided
@@ -57,7 +57,7 @@ func (s *Store) DecideApproval(
 	id domain.ApprovalID,
 	status domain.ApprovalStatus,
 	scope domain.RememberScope,
-	decidedBy string,
+	decidedBy domain.RunOrigin,
 	at time.Time,
 ) (domain.Approval, error) {
 	var approval domain.Approval
@@ -66,7 +66,7 @@ func (s *Store) DecideApproval(
 		result, err := tx.ExecContext(ctx,
 			`UPDATE approvals SET status = ?, scope = ?, decided_by = ?, decided_at = ?
 			 WHERE id = ? AND status = ?`,
-			string(status), string(scope), decidedBy, at.UnixNano(),
+			string(status), string(scope), storedOrigin{decidedBy}, at.UnixNano(),
 			string(id), string(domain.ApprovalPending),
 		)
 		if err != nil {
@@ -148,16 +148,19 @@ func scanApproval(row scanner) (domain.Approval, error) {
 		effectsRaw string
 		created    int64
 		decided    sql.NullInt64
+		decidedBy  storedOrigin
 	)
 
 	if err := row.Scan(
 		&approval.ID, &approval.SessionID, &approval.RunID,
 		&approval.ToolCallID, &approval.ToolName, &approval.Arguments,
 		&approval.Summary, &effectsRaw, &approval.Preview, &approval.Status, &approval.Scope,
-		&created, &decided, &approval.DecidedBy,
+		&created, &decided, &decidedBy,
 	); err != nil {
 		return domain.Approval{}, err
 	}
+
+	approval.DecidedBy = decidedBy.RunOrigin
 
 	if effectsRaw != "" {
 		if err := json.Unmarshal([]byte(effectsRaw), &approval.Effects); err != nil {

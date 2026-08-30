@@ -30,7 +30,7 @@ func (s *Store) CreateQuestion(ctx context.Context, question domain.Question) er
 		`INSERT INTO questions (`+questionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(question.ID), string(question.SessionID), string(question.RunID),
 		string(question.ToolCallID), question.Prompt, string(question.Kind), string(options),
-		string(question.Status), question.Answer, question.AnsweredBy,
+		string(question.Status), question.Answer, storedOrigin{question.AnsweredBy},
 		question.CreatedAt.UnixNano(), nullableTime(question.AnsweredAt),
 	)
 	if isUniqueViolation(err) {
@@ -105,7 +105,8 @@ func (s *Store) AnswerQuestion(
 	ctx context.Context,
 	id domain.QuestionID,
 	status domain.QuestionStatus,
-	answer, answeredBy string,
+	answer string,
+	answeredBy domain.RunOrigin,
 	at time.Time,
 ) (domain.Question, error) {
 	var question domain.Question
@@ -114,7 +115,7 @@ func (s *Store) AnswerQuestion(
 		result, err := tx.ExecContext(ctx,
 			`UPDATE questions SET status = ?, answer = ?, answered_by = ?, answered_at = ?
 			 WHERE id = ? AND status = ?`,
-			string(status), answer, answeredBy, at.UnixNano(),
+			string(status), answer, storedOrigin{answeredBy}, at.UnixNano(),
 			string(id), string(domain.AnswerPending),
 		)
 		if err != nil {
@@ -163,16 +164,19 @@ func scanQuestion(row scanner) (domain.Question, error) {
 		optionsRaw string
 		created    int64
 		answered   sql.NullInt64
+		answeredBy storedOrigin
 	)
 
 	if err := row.Scan(
 		&question.ID, &question.SessionID, &question.RunID, &question.ToolCallID,
 		&question.Prompt, &question.Kind, &optionsRaw,
-		&question.Status, &question.Answer, &question.AnsweredBy,
+		&question.Status, &question.Answer, &answeredBy,
 		&created, &answered,
 	); err != nil {
 		return domain.Question{}, err
 	}
+
+	question.AnsweredBy = answeredBy.RunOrigin
 
 	if optionsRaw != "" {
 		var rows []questionOptionRow

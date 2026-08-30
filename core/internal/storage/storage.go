@@ -70,7 +70,8 @@ type QuestionStore interface {
 		ctx context.Context,
 		id domain.QuestionID,
 		status domain.QuestionStatus,
-		answer, answeredBy string,
+		answer string,
+		answeredBy domain.RunOrigin,
 		at time.Time,
 	) (domain.Question, error)
 }
@@ -110,7 +111,7 @@ type ApprovalStore interface {
 	// overwrite when the approval is already decided, so a duplicate answer
 	// cannot cause a second execution.
 	DecideApproval(ctx context.Context, id domain.ApprovalID, status domain.ApprovalStatus,
-		scope domain.RememberScope, decidedBy string, at time.Time) (domain.Approval, error)
+		scope domain.RememberScope, decidedBy domain.RunOrigin, at time.Time) (domain.Approval, error)
 
 	// PendingApprovals lists what is waiting, so a client that connects late
 	// can still answer.

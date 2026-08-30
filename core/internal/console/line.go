@@ -162,7 +162,7 @@ func Describe(event domain.Event) (Line, bool) {
 		line.Kind = "APPROVAL"
 		line.State = string(payload.Status)
 		line.Meta = string(payload.ApprovalID)
-		line.Preview = payload.DecidedBy
+		line.Preview = payload.DecidedBy.Describe()
 
 	case domain.QuestionAsked:
 		line.Kind = "QUESTION"
@@ -173,7 +173,7 @@ func Describe(event domain.Event) (Line, bool) {
 	case domain.QuestionAnswered:
 		line.Kind = "QUESTION"
 		line.State = string(payload.Status)
-		line.Meta = payload.AnsweredBy
+		line.Meta = payload.AnsweredBy.Describe()
 		line.Preview = payload.Answer
 
 	case domain.PlanChanged:

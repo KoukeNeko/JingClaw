@@ -160,7 +160,8 @@ func (r *Runtime) askQuestion(
 func (r *Runtime) AnswerQuestion(
 	ctx context.Context,
 	id domain.QuestionID,
-	answer, answeredBy string,
+	answer string,
+	answeredBy domain.RunOrigin,
 ) (domain.Question, error) {
 	answer = strings.TrimSpace(answer)
 	if answer == "" {

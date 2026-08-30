@@ -101,7 +101,7 @@ func TestTheAnswerComesBackAsTheToolResult(t *testing.T) {
 	}
 
 	question := waitForQuestion(t, rt, session.ID)
-	if _, err := rt.AnswerQuestion(ctx, question.ID, "b", "test"); err != nil {
+	if _, err := rt.AnswerQuestion(ctx, question.ID, "b", domain.FromTheMachine("test")); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 
@@ -140,13 +140,13 @@ func TestAChoiceRefusesAnAnswerThatIsNotOnOffer(t *testing.T) {
 	}
 
 	question := waitForQuestion(t, rt, session.ID)
-	if _, err := rt.AnswerQuestion(ctx, question.ID, "c", "test"); err == nil {
+	if _, err := rt.AnswerQuestion(ctx, question.ID, "c", domain.FromTheMachine("test")); err == nil {
 		t.Error("an answer that was not on offer was accepted")
 	}
 
 	// The labels work too: somebody answering from a chat channel types what
 	// they read rather than the id beside it.
-	if _, err := rt.AnswerQuestion(ctx, question.ID, "upgrade in place", "test"); err != nil {
+	if _, err := rt.AnswerQuestion(ctx, question.ID, "upgrade in place", domain.FromTheMachine("test")); err != nil {
 		t.Errorf("answering with the label was refused: %v", err)
 	}
 }
@@ -167,7 +167,7 @@ func TestAnEmptyAnswerIsRefused(t *testing.T) {
 	}
 
 	question := waitForQuestion(t, rt, session.ID)
-	if _, err := rt.AnswerQuestion(ctx, question.ID, "   ", "test"); !errors.Is(err, runtime.ErrNoAnswer) {
+	if _, err := rt.AnswerQuestion(ctx, question.ID, "   ", domain.FromTheMachine("test")); !errors.Is(err, runtime.ErrNoAnswer) {
 		t.Errorf("an empty answer was accepted: %v", err)
 	}
 }
@@ -188,10 +188,10 @@ func TestAQuestionIsAnsweredOnce(t *testing.T) {
 	}
 
 	question := waitForQuestion(t, rt, session.ID)
-	if _, err := rt.AnswerQuestion(ctx, question.ID, "main", "first"); err != nil {
+	if _, err := rt.AnswerQuestion(ctx, question.ID, "main", domain.FromTheMachine("first")); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
-	if _, err := rt.AnswerQuestion(ctx, question.ID, "other", "second"); !errors.Is(err, storage.ErrQuestionAnswered) {
+	if _, err := rt.AnswerQuestion(ctx, question.ID, "other", domain.FromTheMachine("second")); !errors.Is(err, storage.ErrQuestionAnswered) {
 		t.Errorf("the same question was answered twice: %v", err)
 	}
 }
