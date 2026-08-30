@@ -11,9 +11,19 @@ import (
 
 // The CLI is a control-plane client. If it can reach the runtime directly it
 // will eventually be tempted to, and then there are two implementations of the
-// agent loop that drift apart. The same rule protects the SwiftUI, WinUI and
-// web clients, which cannot import Go at all — this test is the one place it
-// can be mechanically enforced.
+// agent loop that drift apart. The same rule protects any client that cannot
+// import Go at all — this test is the one place it can be mechanically
+// enforced.
+//
+// Asked of the package rather than of a binary. The daemon and the client are
+// one program now, so the binary necessarily contains the runtime and the
+// question "does the CLI reach it" can only be asked of internal/cli/client.
+//
+// This test spent several commits naming cmd/agent, which stopped existing
+// when the programs were merged. It did not go red, because it shells out to
+// go list and imports nothing: no edit anywhere invalidated its cached pass.
+// A test that cannot notice its own subject is gone is worth less than no
+// test, and that is why the package below is one this module builds.
 func TestCLIDoesNotDependOnRuntime(t *testing.T) {
 	forbidden := []string{
 		"github.com/KoukeNeko/JingClaw/core/internal/runtime",
@@ -22,15 +32,19 @@ func TestCLIDoesNotDependOnRuntime(t *testing.T) {
 		"github.com/KoukeNeko/JingClaw/core/internal/provider/fake",
 	}
 
-	deps := packageDeps(t, "github.com/KoukeNeko/JingClaw/core/cmd/agent")
+	deps := packageDeps(t, clientPackage)
 
 	for _, pkg := range forbidden {
 		if deps[pkg] {
-			t.Errorf("cmd/agent must not depend on %s;\n"+
-				"the CLI is a projection of the daemon, not a second runtime", pkg)
+			t.Errorf("%s must not depend on %s;\n"+
+				"the CLI is a projection of the daemon, not a second runtime",
+				clientPackage, pkg)
 		}
 	}
 }
+
+// clientPackage is the CLI as a package, which is what the boundary is about.
+const clientPackage = "github.com/KoukeNeko/JingClaw/core/internal/cli/client"
 
 // The gateway talks to the runtime through a narrow interface it declares
 // itself, so that what an untrusted channel can reach is a short list somebody
@@ -108,7 +122,7 @@ func TestVendorSDKStaysInsideItsAdapter(t *testing.T) {
 		"github.com/KoukeNeko/JingClaw/core/internal/control",
 		"github.com/KoukeNeko/JingClaw/core/internal/storage",
 		"github.com/KoukeNeko/JingClaw/core/internal/provider",
-		"github.com/KoukeNeko/JingClaw/core/cmd/agent",
+		clientPackage,
 	} {
 		if packageDeps(t, pkg)[vendorSDK] {
 			t.Errorf("%s depends on %s; the SDK belongs to internal/provider/gemini alone", pkg, vendorSDK)
@@ -121,7 +135,13 @@ func packageDeps(t *testing.T, pkg string) map[string]bool {
 
 	out, err := exec.Command("go", "list", "-deps", pkg).Output()
 	if err != nil {
-		t.Fatalf("go list -deps %s: %v", pkg, err)
+		// Named separately from any other failure. A package that has been
+		// renamed or removed makes every assertion below vacuous, and the
+		// useful thing to say is that the test no longer knows what it is
+		// testing.
+		t.Fatalf("go list -deps %s: %v\n"+
+			"if that package was renamed or removed, this test has been asserting "+
+			"nothing since it was; point it at what replaced it", pkg, err)
 	}
 
 	deps := make(map[string]bool)
