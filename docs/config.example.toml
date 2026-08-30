@@ -180,6 +180,8 @@ enabled = false
 # env = { LOG_LEVEL = "info" }
 # Names variables passed through from this daemon's own environment.
 # pass_env = ["HOME"]
+# What this server's tools count as to the policy engine.
+# level = "execute"
 
 # ── Interfaces ──────────────────────────────────────────────
 

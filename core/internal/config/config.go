@@ -1285,11 +1285,23 @@ func (c Config) serverProblems() []Problem {
 			seen[server.Name] = true
 		}
 
-		if server.Command == "" {
+		// One of the two, never both, which is the same rule the transport
+		// applies. Requiring a command outright — which this used to — made
+		// the url setting undocumentable in practice: it existed, it worked,
+		// and no configuration that used it would start.
+		switch {
+		case server.Command == "" && server.URL == "":
 			problems = append(problems, Problem{
 				Key: where + ".command", Value: `""`,
-				Why: "is empty",
-				Fix: "Give the program to run, with its arguments in args.",
+				Why: "is empty, and so is url",
+				Fix: "Give the program to run, with its arguments in args — " +
+					"or a url, for a server that is already running.",
+			})
+		case server.Command != "" && server.URL != "":
+			problems = append(problems, Problem{
+				Key: where + ".url", Value: quote(server.URL),
+				Why: "is set, and so is command",
+				Fix: "A server is a child process or an endpoint, never both. Remove one.",
 			})
 		}
 
@@ -1769,6 +1781,8 @@ enabled = false
 # env = { LOG_LEVEL = "info" }
 # Names variables passed through from this daemon's own environment.
 # pass_env = ["HOME"]
+# What this server's tools count as to the policy engine.
+# level = "execute"
 
 # ── Interfaces ──────────────────────────────────────────────
 
