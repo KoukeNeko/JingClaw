@@ -58,7 +58,7 @@ func triggerToProto(trigger gateway.Trigger) controlv1.MessageTrigger {
 func dispatchFromProto(dispatch *controlv1.Dispatch) (gateway.Dispatch, error) {
 	var target gateway.ConversationRef
 	if err := json.Unmarshal([]byte(dispatch.GetTarget()), &target); err != nil {
-		return gateway.Dispatch{}, fmt.Errorf("gatewayd: unusable delivery target: %w", err)
+		return gateway.Dispatch{}, fmt.Errorf("gateway: unusable delivery target: %w", err)
 	}
 
 	return gateway.Dispatch{

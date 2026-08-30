@@ -968,7 +968,7 @@ func authenticated() (*http.Client, string, error) {
 
 	d, err := discovery.Read(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w (is agentd running?)", err)
+		return nil, "", fmt.Errorf("%w (is jingclaw running?)", err)
 	}
 
 	return &http.Client{

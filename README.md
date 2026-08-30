@@ -2,74 +2,80 @@
 
 A local-first, durable agent runtime you can attach to from anywhere.
 
-`agentd` owns every piece of state — sessions, runs, the event log. The
-control clients are projections of it, so closing one never stops work that is
-already running, and reattaching from somewhere else picks up exactly where
-you left off.
+One executable. Run `jingclaw` and it starts the daemon and the chat gateway
+together, the way a game server starts.
+
+The daemon owns every piece of state — sessions, runs, the event log. Everything
+else is a projection of it, so closing a client never stops work that is already
+running, and reattaching from somewhere else picks up exactly where you left
+off.
 
 ```
-                    proto/jingclaw/control/v1
-                              │
-        ┌─────────────┬───────┴───────┬─────────────┐
-        ↓             ↓               ↓             ↓
-   SwiftUI        WinUI 3          Web UI        Go CLI
-   (macOS)       (Windows)      (no GUI needed)
-        └─────────────┴───────┬───────┴─────────────┘
-                              ↓
-                      Connect-RPC / loopback
-                              ↓
-                           agentd
+    Discord ──→ gateway ─┐            jingclaw <subcommand> ─┐
+                         │                                   │
+                         └─────────────┬─────────────────────┘
+                                       ↓
+                               Connect-RPC / loopback
+                                       ↓
+                                    daemon
+                                       ↓
+                                    SQLite
 ```
 
-## Status: M0 — walking skeleton
+Two processes, not one. The gateway holds somebody else's bot token and keeps a
+socket open to the internet; the process that owns the shell, the workspace and
+the event log must not go down with it.
+
+## Status: M1b — the gateway plane
 
 Given a repository with a failing test, JingClaw finds the cause, fixes it, and
 runs the tests to confirm — stopping for a human before each change. State
 persists to SQLite and survives a restart, including runs orphaned by a crash
 and runs parked on an approval.
 
-Deliberately absent until M1b and beyond: context compaction, MCP, subagents,
-and every GUI.
+Conversation happens in a chat channel. The terminal is where you watch it and
+answer it, not where you talk to it.
 
 | Milestone | Scope |
 |---|---|
 | M0 | walking skeleton — done |
 | M1a | durable runtime, providers, tools, permissions — done |
-| **M1b** | gateway plane ✓, Discord adapter ✓ |
-| M2 | SwiftUI, WinUI 3 and web clients at parity |
-| M3 | subagents, replay, sandboxing, remote fleet |
+| **M1b** | gateway plane ✓, Discord adapter ✓, one executable ✓ |
+| M2 | the console: one scrolling log, one command line |
+| M3 | skills, subagents, replay, sandboxing, remote fleet |
+
+The macOS, Windows and web clients are not being built. A terminal is a client
+that works everywhere, and three of them at parity was three times the work for
+the same thing.
 
 ### Where it keeps things
 
-```bash
-agentd --init      # creates .JingClaw/ here
 ```
-
-```
-.JingClaw/
+~/.jingclaw/
   config.toml    the settings
+  AGENTS.md      standing instructions
+  PERSONA.md     who it is
   workspace/     what the agent may read and change
   data/          the database and stored output
   run/           how clients find the daemon
+  log/           what a service writes when nobody is watching
 ```
 
-Credentials go in beside them, mode 600. The directory is found by walking up
-from wherever the daemon or a client is started, so running one from a
-subdirectory reaches the same deployment rather than quietly becoming a second
-one with its own database.
+Created on first run. Credentials go in beside them, mode 600.
 
-Without a `.JingClaw`, the platform's own config, data and runtime directories
-are used exactly as before, and the workspace is the working directory. An
-explicit setting always wins over both.
+One place, always the same place. Where you happen to be standing when you type
+the name does not take part: a daemon whose database depended on the working
+directory is one that quietly becomes two, and then the settings you edited are
+not the settings that ran.
 
 `JINGCLAW_HOME` names a directory outright, for running against a deployment
 without being inside it. Set it to `none` to say there is no directory at all,
 which is how a test or a check states that it means the machine to look like
 one that has never had one.
 
-`agentd --print-paths` reports where everything resolved, so a script that needs
-the discovery file can ask rather than reimplement the rules and then drift from
-them.
+`jingclaw daemon --print-paths` reports where everything resolved, so a script
+that needs the discovery file can ask rather than reimplement the rules and then
+drift from them.
 
 The workspace defaults to *inside* the directory rather than beside it, so a
 deployment set up to try the thing out cannot reach the project it was set up
@@ -229,12 +235,12 @@ Three things hold regardless of which page comes back:
 
 ### From a chat channel
 
-`gatewayd` connects a Discord bot to the same runtime, so a mention in a bound
-channel starts work and the reply comes back to that thread.
+The gateway connects a Discord bot to the same runtime, so a mention in a bound
+channel starts work and the reply comes back to that thread. `jingclaw` starts
+it along with the daemon; binding a channel is the only step of your own.
 
 ```bash
-agent bindings add --channel <id> --guild <id> --workspace ws --user <your-user-id>
-gatewayd --account main
+jingclaw bindings add --channel <id> --guild <id> --workspace ws --user <your-user-id>
 ```
 
 Every default is no: a channel with no binding is unreachable, a binding with
@@ -247,16 +253,23 @@ authorised from a local client.
 ## Layout
 
 ```
-proto/    the contract, shared by every client
-core/     Go daemon and CLI
-macos/    SwiftUI client       (M2)
-windows/  WinUI 3 client       (M2)
-web/      embedded web UI      (M2)
+proto/    the contract
+core/     everything: daemon, gateway, CLI
+scripts/  the checks
+docs/     plans and research
 ```
 
-Generated code lives in `core/gen/` and **is committed**, so Xcode, Visual
-Studio and the web build never need `buf` installed. CI regenerates and fails
-on any drift.
+Inside `core`:
+
+```
+cmd/jingclaw/   the one executable
+internal/cli/   its subcommands: daemon, gateway, client, supervise, service
+internal/       the runtime, the store, the tools, the adapters
+gen/            generated from proto, and committed
+```
+
+Generated code is committed, so a build never needs `buf` installed. CI
+regenerates and fails on any drift.
 
 ## Build
 
@@ -264,21 +277,36 @@ Requires Go 1.26+ and [buf](https://buf.build) 1.72+ (only for changing the
 proto files).
 
 ```bash
-cd core && go build -o bin/agentd ./cmd/agentd && go build -o bin/agent ./cmd/agent
+go install github.com/KoukeNeko/JingClaw/core/cmd/jingclaw@latest
+```
+
+Or from a checkout:
+
+```bash
+cd core && go install ./cmd/jingclaw
 ```
 
 ## Try it
 
-Three terminals. First, the daemon:
-
 ```bash
-core/bin/agentd --dev-fake
+jingclaw
 ```
 
-Or against a real model:
+That is the whole thing: it creates `~/.jingclaw` if there is none, starts the
+daemon and the gateway, and stays until you interrupt it. Run it again from
+another terminal and it says so rather than starting a second one.
 
 ```bash
-core/bin/agentd --provider=gemini --model=gemma-4-31b-it --workspace .
+jingclaw status      # running, and where
+jingclaw stop        # stop the one that is running
+```
+
+To be one of the parts by hand — which is what the supervisor does, and what
+the checks do:
+
+```bash
+jingclaw daemon --provider=gemini --model=gemma-4-31b-it
+jingclaw gateway
 ```
 
 `--workspace` is the only directory tools can reach. Paths are resolved and
@@ -289,9 +317,9 @@ Reads run unattended; anything that modifies the workspace stops for a
 decision:
 
 ```bash
-core/bin/agent approvals <session-id>
-core/bin/agent approve <approval-id>     # --session to allow that tool for the session
-core/bin/agent deny <approval-id>
+jingclaw approvals <session-id>
+jingclaw approve <approval-id>     # --session to allow that tool for the session
+jingclaw deny <approval-id>
 ```
 
 The pause is durable. A run waiting for an answer survives a daemon restart and
@@ -310,14 +338,14 @@ lives in `jingclaw.db` under the user config directory, or wherever
 Then create a session and follow it:
 
 ```bash
-core/bin/agent session create
-core/bin/agent attach <session-id>
+jingclaw session create
+jingclaw attach <session-id>
 ```
 
 And in a third, send a turn:
 
 ```bash
-core/bin/agent send <session-id> "測試訊息"
+jingclaw send <session-id> "測試訊息"
 ```
 
 ```
@@ -333,7 +361,7 @@ Detach with `Ctrl+C` — the run keeps going — then resume from where you
 stopped:
 
 ```bash
-core/bin/agent attach <session-id> --after 3
+jingclaw attach <session-id> --after 3
 ```
 
 Only events 4, 5 and 6 arrive. Restarting the daemon changes nothing: the
@@ -349,7 +377,7 @@ The daemon writes the file the first time it starts, so there is nothing to
 find out and nowhere to put it:
 
 ```
-$ core/bin/agentd
+$ jingclaw daemon
 JingClaw daemon
 Listening: http://127.0.0.1:54832
 Config:    /Users/you/.config/JingClaw/config.toml (created, all defaults)
@@ -406,50 +434,27 @@ That last refusal is not a preference. This API reads files and runs programs;
 binding it somewhere reachable needs a more deliberate mechanism than a config
 line, and there is not one.
 
-## The console
+## Watching it work
 
-The machine this agent is most useful on often has no desktop: a server reached
-over SSH, a container, somebody else's Linux box. So a console ships inside the
-binary, and the daemon prints where it is:
+Conversation happens in the chat channel. The terminal is where you watch what
+it is doing and answer it when it stops to ask.
 
+```bash
+jingclaw attach <session-id>          # follow one session's events
+jingclaw approvals <session-id>       # what is waiting for a decision
+jingclaw questions                    # what it has stopped to ask
 ```
-Console:   http://127.0.0.1:54832/?c=4EDM-HB22-V5LY-6BKA
-           valid once, until 13:58:19 (agent console for another)
-```
 
-Open it and you get the session list, a live timeline, approvals with
-allow/deny, interrupt, and stored output shown inline next to the line that
-produced it. Over SSH, forward the port — nothing else has to be installed at
-the other end.
+The daemon owns the run, so detaching does not stop it. Reattach with
+`--after <seq>` and you resume exactly where you left off, because the sequence
+is dense within a session and a client that asks for something older than what
+is kept is told to resync rather than handed a conversation missing its middle.
 
-It is one page with no build step, talking Connect over JSON: a unary call is a
-POST whose body is the message, a stream is the same POST answered in
-length-prefixed frames. That is deliberate. A static binary that needs a
-`node_modules` directory to have been present on the machine that built it is
-not a static binary, and the browser needs no proxy to reach the same endpoint
-the CLI uses.
-
-What is in that URL is a **code, not a credential**. It works once, expires,
-and buys the browser its own token — which is narrower than the one the CLI
-holds and can be revoked without touching it. A console credential cannot mint
-another, and cannot rewrite which channels the gateway listens to.
-
-That distinction is the whole point of the line above. It is going to sit in a
-terminal's scrollback, on a machine somebody else can scroll back through,
-inside a screenshot of a demo. A code that stopped working an hour ago is a
-very different thing to leave lying there than a credential that works until
-the daemon restarts. `agent console` prints another when you need one.
-
-The page takes the code out of the address bar before anything else happens,
-and keeps what it bought in `localStorage` so a reload and a second tab work —
-a code only works once, so a second tab has no way to get its own. The files
-themselves are served without a credential, because they are code rather than
-data and everything the console can *do* is behind the check. The Host
-validation applies to all of it.
-
-A session started from the terminal shows up in the console, and a turn sent
-from the terminal streams into it while it is open — which is what "clients are
-projections" has to mean in practice rather than only in the design.
+A console — one scrolling log across every session with a command line at the
+bottom, the shape a game server has — is the next thing being built. There was
+a web console; it was removed. A page served over loopback, its own credential
+kind, its own pairing code and its own client at parity was a second product
+next to a terminal that already worked everywhere the first one did.
 
 ## Images
 
@@ -461,7 +466,7 @@ own is a picture it was never shown.
 From a terminal it is the same picture, a flag away:
 
 ```bash
-core/bin/agent send <session-id> "what is wrong with this layout" --attach shot.png
+jingclaw send <session-id> "what is wrong with this layout" --attach shot.png
 ```
  The path is the same
 shape as everything else here: the adapter fetches the bytes, the ingress puts
@@ -538,9 +543,9 @@ outside this machine.
 You can see all of it, which is the control that matters:
 
 ```bash
-core/bin/agent memory list             # everything, with where each came from
-core/bin/agent memory list --history   # including what has been superseded
-core/bin/agent memory forget mem_01K…  # gone, not merely superseded
+jingclaw memory list             # everything, with where each came from
+jingclaw memory list --history   # including what has been superseded
+jingclaw memory forget mem_01K…  # gone, not merely superseded
 ```
 
 A correction invalidates rather than overwrites, so "what is believed now" and
@@ -588,7 +593,7 @@ much remains, so a caller paging through does not have to hold its own belief
 about how much there is. A person gets the same bytes:
 
 ```bash
-core/bin/agent artifact get sha256-2d932a66... > build.log
+jingclaw artifact get sha256-2d932a66... > build.log
 ```
 
 Content is addressed by its digest, so running a failing suite four times in an
@@ -688,8 +693,10 @@ project has had was in an assembly seam rather than in logic a unit test was
 looking at: the daemon that never wired the projector, so runs completed and
 Discord got nothing; the storage codec that did not know an event, so
 compaction worked in memory and vanished on SQLite; the bot that connected,
-logged cleanly, and ignored every message. None were visible to a unit test.
-All were visible within seconds of running the thing.
+logged cleanly, and ignored every message; the client subcommands leaving their
+read-the-configuration step on the shared root command, so the daemon ran it
+too and refused to start anywhere without a default location. None were visible
+to a unit test. All were visible within seconds of running the thing.
 
 So each script starts a real daemon, drives it the way a person would, and
 checks what came out. `verify-artifacts.sh` needs a provider credential —

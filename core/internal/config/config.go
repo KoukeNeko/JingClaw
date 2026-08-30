@@ -996,7 +996,7 @@ func (e *InvalidError) Report(file string) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("Run \"agentd --print-config\" to see every setting with its default.\n\n")
+	b.WriteString("Run \"jingclaw daemon --print-config\" to see every setting with its default.\n\n")
 	return b.String()
 }
 
@@ -1538,7 +1538,7 @@ func DefaultPath() (string, error) {
 // deleting it make somebody editing this line more likely to get it wrong".
 //
 // Everything is commented out, so copying this file changes nothing until a
-// line is deliberately uncommented. `agentd` reports every unusable setting
+// line is deliberately uncommented. The daemon reports every unusable setting
 // at startup by name, value and fix, which is where a wrong value gets
 // explained rather than here.
 const Example = `# JingClaw configuration. Every setting is shown at its default.
@@ -1704,7 +1704,7 @@ enabled = false
 # runtime_dir = ""
 
 [gateway]
-# Read by gatewayd. The section below matching this is the one that is read.
+# Read by the gateway. The section below matching this is the one that is read.
 platform = "discord"
 # working_interval = "2s"
 # stream_interval = "1.5s"

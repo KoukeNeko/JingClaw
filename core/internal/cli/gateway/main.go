@@ -31,7 +31,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
 )
 
-const clientName = "jingclaw-gatewayd"
+const clientName = "jingclaw-gateway"
 
 // Main runs the gateway. Args are the arguments after the subcommand name.
 func Main(args []string) error {
@@ -168,7 +168,7 @@ func (r *relay) Deliver(ctx context.Context, message gateway.InboundMessage) err
 // deliver posts whatever the agent has queued, and keeps trying.
 //
 // The stream is re-established after a failure rather than ending the process:
-// agentd restarting is ordinary, and anything unacknowledged is still in the
+// The daemon restarting is ordinary, and anything unacknowledged is still in
 // outbox when the connection comes back.
 // Decide carries a button press inward.
 //
@@ -286,7 +286,7 @@ func (r *relay) post(ctx context.Context, dispatch *controlv1.Dispatch) error {
 	return err
 }
 
-// dialAgent connects to agentd with the gateway-scoped credential.
+// dialAgent connects to the daemon with the gateway-scoped credential.
 func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient, error) {
 	path, err := discovery.PathIn(runtimeDir)
 	if err != nil {
@@ -295,7 +295,7 @@ func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient,
 
 	found, err := discovery.Read(path)
 	if err != nil {
-		return nil, fmt.Errorf("%w (is agentd running?)", err)
+		return nil, fmt.Errorf("%w (is jingclaw running?)", err)
 	}
 	if found.GatewayToken == "" {
 		return nil, errors.New("agentd did not publish a gateway credential")

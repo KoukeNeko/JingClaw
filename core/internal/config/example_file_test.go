@@ -33,7 +33,7 @@ func TestCheckedInExampleMatchesTheSource(t *testing.T) {
 
 	if string(onDisk) != config.Example {
 		t.Errorf("%s no longer matches config.Example; regenerate it with:\n"+
-			"\tgo run ./cmd/agentd --print-config > ../%s", exampleFile, exampleFile)
+			"\tgo run ./cmd/jingclaw daemon --print-config > ../%s", exampleFile, exampleFile)
 	}
 }
 

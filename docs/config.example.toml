@@ -161,7 +161,7 @@ enabled = false
 # runtime_dir = ""
 
 [gateway]
-# Read by gatewayd. The section below matching this is the one that is read.
+# Read by the gateway. The section below matching this is the one that is read.
 platform = "discord"
 # working_interval = "2s"
 # stream_interval = "1.5s"
