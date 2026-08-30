@@ -15,7 +15,7 @@ import (
 func TestAViewIsTheConversationWithoutTheReplay(t *testing.T) {
 	arguments := `{"path":"notes.md"}`
 
-	rt, _, _ := newToolHarness(t, [][]provider.Event{
+	rt, _, _, _ := newToolHarness(t, [][]provider.Event{
 		{
 			toolCall("call_1", "read_file", map[string]any{"path": "notes.md"}),
 			provider.Completed{StopReason: domain.StopToolUse},
@@ -117,7 +117,7 @@ func TestALongConversationIsCutFromTheTop(t *testing.T) {
 		})
 	}
 
-	rt, _, _ := newToolHarness(t, replies)
+	rt, _, _, _ := newToolHarness(t, replies)
 
 	session, err := rt.CreateSession(context.Background(), "long")
 	if err != nil {

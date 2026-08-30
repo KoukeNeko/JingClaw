@@ -16,8 +16,8 @@ import (
 // rather than held in memory alongside it. That is what lets a session survive
 // a restart with its history intact, and it means there is exactly one place
 // where "what the model has seen" is defined.
-func (r *Runtime) buildConversation(ctx context.Context, sessionID domain.SessionID) ([]provider.Message, error) {
-	bounded, _, err := r.buildBoundedConversation(ctx, sessionID)
+func (r *Runtime) buildConversation(ctx context.Context, run domain.Run) ([]provider.Message, error) {
+	bounded, _, err := r.buildBoundedConversation(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -61,11 +61,22 @@ func plainMessages(bounded []boundedMessage) []provider.Message {
 // The sequence that summary replaces comes back with the messages, because the
 // next compaction has to be able to tell whether it would actually fold
 // anything new.
+//
+// Which run is asking matters, and only because of delegation: a worker's
+// events are not part of the conversation, except to the worker, whose whole
+// conversation they are.
 func (r *Runtime) buildBoundedConversation(
 	ctx context.Context,
-	sessionID domain.SessionID,
+	asking domain.Run,
 ) ([]boundedMessage, domain.Seq, error) {
+	sessionID := asking.SessionID
+
 	events, err := r.opts.Store.ListAfter(ctx, sessionID, 0, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	events, err = r.eventsVisibleTo(ctx, asking, events)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -474,4 +485,63 @@ func (r *Runtime) readForeignSoFar(ctx context.Context, run domain.Run) (bool, e
 		return false, err
 	}
 	return r.hasReadForeign(ctx, run, head+1)
+}
+
+// eventsVisibleTo narrows a session's log to what one run may read.
+//
+// Two rules, and they are not symmetrical:
+//
+// A worker sees only itself. It was delegated a question that stands alone,
+// and the point of asking it that way is that everything it does happens
+// somewhere the conversation is not — a fresh context is what makes the
+// hundred tool results affordable. Showing it the conversation would undo
+// that at both ends: it would carry the history it was supposed to be spared,
+// and it would be reading a turn it was not addressed in.
+//
+// Everybody else sees everything except a worker. Keeping a delegated
+// search's steps out of what the model reads again is the whole reason for
+// delegating it; left in, the run would carry every step of the work it asked
+// somebody else to do, and the delegation would have cost context rather than
+// saved it.
+func (r *Runtime) eventsVisibleTo(
+	ctx context.Context, asking domain.Run, events []domain.Event,
+) ([]domain.Event, error) {
+	if asking.Kind == domain.RunWorker {
+		mine := events[:0]
+		for _, event := range events {
+			if event.RunID == asking.ID {
+				mine = append(mine, event)
+			}
+		}
+		return mine, nil
+	}
+
+	// Asked of the store rather than carried on each event: which runs are
+	// workers is a fact about the runs, and copying it onto every event would
+	// be a second place for it to be wrong.
+	//
+	// Nothing is a worker until something delegates, so the ordinary session
+	// pays one query that finds none.
+	runs, err := r.opts.Store.ListRuns(ctx, asking.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	delegated := make(map[domain.RunID]bool)
+	for _, run := range runs {
+		if run.Kind == domain.RunWorker {
+			delegated[run.ID] = true
+		}
+	}
+	if len(delegated) == 0 {
+		return events, nil
+	}
+
+	kept := events[:0]
+	for _, event := range events {
+		if !delegated[event.RunID] {
+			kept = append(kept, event)
+		}
+	}
+	return kept, nil
 }

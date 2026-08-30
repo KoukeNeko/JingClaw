@@ -31,7 +31,7 @@ import (
 func newGatedHarness(t *testing.T, turns [][]provider.Event) (*runtime.Runtime, *memory.Store, *scriptedProvider) {
 	t.Helper()
 
-	rt, store, scripted := newToolHarness(t, turns)
+	rt, store, scripted, _ := newToolHarness(t, turns)
 	rt.SetPermissions(permission.New(permission.LocalProfile()))
 
 	return rt, store, scripted

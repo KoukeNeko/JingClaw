@@ -103,10 +103,21 @@ func (r *Runtime) SessionViewOf(
 		return SessionView{}, err
 	}
 
+	// HeadSeq before the narrowing, because it is where a client resumes from
+	// and that has to be a real position in the log rather than the last
+	// event this particular view happened to keep.
 	view := SessionView{Session: session}
-	messages, active := foldEvents(events)
-
 	view.HeadSeq = headSeq(events)
+
+	// A delegated search is a tool call, and is drawn as one. Its own events
+	// are in the log and a client that wants them can read the log; folded in
+	// here they would draw as a second person asking a second question and
+	// getting a second answer, in the middle of somebody else's conversation.
+	if events, err = r.eventsVisibleTo(ctx, domain.Run{SessionID: sessionID}, events); err != nil {
+		return SessionView{}, err
+	}
+
+	messages, active := foldEvents(events)
 	view.ActiveRun = r.activeRun(ctx, active)
 
 	if len(messages) > maxMessages {

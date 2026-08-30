@@ -15,8 +15,9 @@ import (
 // is filled in as soon as the runtime exists.
 //
 // The alternative was registering them afterwards, which is what this
-// replaces. It worked, and it quietly left every one of them out of the list
-// the model is given — three tools the agent had and was never told about.
+// replaces. It worked, and it quietly left four tools out of the list the
+// model is given — including the one for delegating, which a model that is
+// never told about will never use.
 type theRuntime struct{ is *runtime.Runtime }
 
 // UpdatePlan is builtin.Planner.
@@ -32,4 +33,11 @@ func (r *theRuntime) SkillActivated(
 	activated domain.SkillActivated,
 ) error {
 	return r.is.SkillActivated(ctx, session, run, activated)
+}
+
+// Investigate is builtin.Delegator.
+func (r *theRuntime) Investigate(
+	ctx context.Context, parent domain.RunID, question string,
+) (string, error) {
+	return r.is.Investigate(ctx, parent, question)
 }

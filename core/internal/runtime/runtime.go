@@ -125,6 +125,16 @@ type Options struct {
 	// SystemPrompt is prepended to every request.
 	SystemPrompt string
 
+	// WorkerSystemPrompt replaces it for a delegated search.
+	//
+	// Replaces rather than adds. A worker is not the assistant: most of what
+	// the standing prompt says is addressed to something having a
+	// conversation, and the operator's own instructions in it are authority a
+	// search has no use for and should not be carrying while it reads files
+	// nobody vetted. Empty falls back to SystemPrompt, so a deployment that
+	// has not thought about it is no worse off than before.
+	WorkerSystemPrompt string
+
 	// SystemPromptFor contributes text that depends on the run, appended after
 	// SystemPrompt once when the run starts.
 	//
@@ -473,7 +483,14 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 		maxIterations = defaultMaxIterations
 	}
 
-	declarations := r.toolDeclarations()
+	// A delegated search is bounded harder than a conversation: what it was
+	// asked is a question with an answer, and one that needs more turns than
+	// this is one the run should be doing itself where somebody can watch.
+	if run.Kind == domain.RunWorker && maxIterations > workerIterations {
+		maxIterations = workerIterations
+	}
+
+	declarations := r.declarationsFor(run)
 	system, err := r.systemPrompt(ctx, run)
 	if err != nil {
 		r.finishFromError(ctx, run, err)
@@ -531,7 +548,7 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 		// result, so folding history cannot separate a call from its result.
 		r.compactIfNeeded(ctx, run, overhead)
 
-		messages, err := r.buildConversation(ctx, run.SessionID)
+		messages, err := r.buildConversation(ctx, run)
 		if err != nil {
 			r.finishFromError(ctx, run, err)
 			return
@@ -1167,6 +1184,21 @@ func (r *Runtime) settleCall(ctx context.Context, run domain.Run, call tool.Call
 			"no tools are available in this session").Result(), notParked, nil
 	}
 
+	// Withheld from a worker, and refused here as well as left out of what it
+	// was told about. Leaving it out only decides what a well-behaved model
+	// asks for; a name it invented, or one replayed from a conversation this
+	// is not, would otherwise reach the registry and run.
+	//
+	// Before the approval path on purpose. A worker parking on an approval is
+	// worse than a worker being refused: nobody is looking at it, it sits
+	// underneath a tool call that is itself already waiting, and the person
+	// who would decide is being asked about work they never saw begin.
+	if run.Kind == domain.RunWorker && !readOnlyForWorkers[call.Name] {
+		return tool.Errorf(tool.CodeNotFound,
+			"Answer from what you can read, or say you cannot.",
+			"no tool named %q", call.Name).Result(), notParked, nil
+	}
+
 	// Settled by finding an answer rather than by running anything. This is
 	// the one tool whose result a person types.
 	if call.Name == AskName {
@@ -1321,6 +1353,9 @@ func (r *Runtime) withPlan(
 
 func (r *Runtime) systemPrompt(ctx context.Context, run domain.Run) ([]provider.ContentBlock, error) {
 	prompt := r.opts.SystemPrompt
+	if run.Kind == domain.RunWorker && r.opts.WorkerSystemPrompt != "" {
+		prompt = r.opts.WorkerSystemPrompt
+	}
 
 	extra, err := r.directionsFor(ctx, run)
 	if err != nil {

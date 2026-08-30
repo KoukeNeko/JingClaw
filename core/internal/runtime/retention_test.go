@@ -14,7 +14,7 @@ import (
 // event the rebuild still reads makes a session unusable rather than smaller,
 // and the failure appears one turn later as the agent having forgotten.
 func TestNothingIsPrunedBeforeAnythingIsFolded(t *testing.T) {
-	rt, store, _ := newToolHarness(t, [][]provider.Event{
+	rt, store, _, _ := newToolHarness(t, [][]provider.Event{
 		{provider.TextDelta{Text: "one"}, provider.Completed{StopReason: domain.StopEndTurn}},
 	})
 
@@ -56,7 +56,7 @@ func TestNothingIsPrunedBeforeAnythingIsFolded(t *testing.T) {
 // because it is what tells a rebuild that history was summarised rather than
 // lost.
 func TestOnlyWhatAFoldReplacedIsDiscarded(t *testing.T) {
-	rt, store, _ := newToolHarness(t, [][]provider.Event{
+	rt, store, _, _ := newToolHarness(t, [][]provider.Event{
 		{provider.TextDelta{Text: "one"}, provider.Completed{StopReason: domain.StopEndTurn}},
 	})
 

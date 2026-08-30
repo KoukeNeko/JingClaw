@@ -77,7 +77,7 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 		return
 	}
 
-	messages, alreadyFolded, err := r.buildBoundedConversation(ctx, run.SessionID)
+	messages, alreadyFolded, err := r.buildBoundedConversation(ctx, run)
 	if err != nil {
 		r.opts.Logger.Warn("could not measure the conversation",
 			"run_id", string(run.ID), "error", err)

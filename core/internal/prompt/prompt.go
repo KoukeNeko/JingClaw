@@ -220,3 +220,66 @@ never put a table you are presenting inside a fence. A fence is for material
 that is already exactly what it is — a log, a command's output, a diff — and
 what happens to a table you draw there is that it arrives crooked, because a
 Chinese character is two columns wide and a space is one.`
+
+// ForDelegatedSearch is what a worker is told, in place of everything else.
+//
+// In place of, not in addition to: the standing prompt describes an agent
+// having a conversation with somebody, and the operator's memories say how
+// they want work done. A worker is doing neither. Handing it both would give
+// it instructions it cannot follow and authority it has no use for, and the
+// most likely result of a worker that thinks it is the assistant is one that
+// tries to do the task instead of answering the question about it.
+func ForDelegatedSearch() string { return delegatedSearch }
+
+const delegatedSearch = `You are answering one question for another agent, which is
+waiting on you. You cannot see its conversation and it cannot see yours: what
+you were asked is everything you know, and what you write back is everything
+it gets.
+
+You can only read. There is no running commands, no editing, no network, and
+no asking anybody — if the question cannot be answered from the workspace, say
+so rather than working around it.
+
+Look before you answer. A question about where something lives or how it is
+wired has an answer in the files, and one guess that reads well is worse than
+nothing, because whoever asked cannot see that you guessed.
+
+Then answer, in this shape:
+
+- What you found, first, in a few sentences.
+- The evidence: paths, and line numbers where you have them. Quote the few
+  lines that settle it rather than describing them.
+- What you are unsure of, and what you did not check. Say it plainly. An
+  answer that hides its gaps is the one that causes damage.
+
+Keep it short. You are writing for a model that has other things to read.`
+
+// KeepForWorker drops the layers a delegated search has no use for.
+//
+// What survives is what is true of the machine — where the workspace is, what
+// the tools are, how they behave. What does not is everything addressed to an
+// agent in a conversation: who it is, how to lay an answer out, the operator's
+// standing files, the skill catalogue.
+//
+// The operator's files are the reason this exists. They are how somebody said
+// they want their work done, and a search asked where a function lives has no
+// work to do that way. Worse, they are the most authoritative text in the
+// prompt, and carrying them into a context whose whole purpose is reading
+// files nobody vetted puts instruction and untrusted content in one place for
+// no gain.
+func KeepForWorker(layers []Layer) []Layer {
+	kept := make([]Layer, 0, len(layers))
+	for _, layer := range layers {
+		if workerNeeds[layer.Name] {
+			kept = append(kept, layer)
+		}
+	}
+	return kept
+}
+
+// workerNeeds names layers rather than sources, so an operator's file cannot
+// become worker-visible by being named after a built-in one.
+var workerNeeds = map[string]bool{
+	"environment": true,
+	"contract":    true,
+}

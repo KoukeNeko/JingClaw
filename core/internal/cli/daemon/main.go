@@ -368,6 +368,7 @@ func run(args []string) error {
 		&builtin.TodoUpdate{Planner: later},
 		&builtin.AskUser{},
 		&builtin.SkillLoad{Skills: installedSkills{}, Activations: later},
+		&builtin.Investigate{Delegator: later},
 	)
 
 	layers, err := buildPrompt(cfg, ws, tools, logger)
@@ -415,20 +416,21 @@ func run(args []string) error {
 			KeepFraction:  cfg.Context.KeepFraction,
 			SummaryTokens: cfg.Context.SummaryTokens,
 		},
-		Attachments:     artifacts,
-		MaxImageBytes:   cfg.Artifacts.MaxImageBytes,
-		SystemPrompt:    prompt.Render(layers),
-		SystemPromptFor: standingDirections(cfg, memoryOptions, logger),
-		MaxIterations:   cfg.Agent.MaxIterations,
-		NewSessionID:    func() string { return id.WithPrefix("ses") },
-		NewRunID:        func() string { return id.WithPrefix("run") },
-		NewMessageID:    func() string { return id.WithPrefix("msg") },
-		NewEventID:      func() string { return id.WithPrefix("evt") },
-		NewApprovalID:   func() string { return id.WithPrefix("apr") },
-		NewPlanItemID:   planItemIDs(),
-		NewQuestionID:   func() string { return id.WithPrefix("qst") },
-		Now:             time.Now,
-		Logger:          logger,
+		Attachments:        artifacts,
+		MaxImageBytes:      cfg.Artifacts.MaxImageBytes,
+		SystemPrompt:       prompt.Render(layers),
+		WorkerSystemPrompt: prompt.Render(prompt.KeepForWorker(layers)),
+		SystemPromptFor:    standingDirections(cfg, memoryOptions, logger),
+		MaxIterations:      cfg.Agent.MaxIterations,
+		NewSessionID:       func() string { return id.WithPrefix("ses") },
+		NewRunID:           func() string { return id.WithPrefix("run") },
+		NewMessageID:       func() string { return id.WithPrefix("msg") },
+		NewEventID:         func() string { return id.WithPrefix("evt") },
+		NewApprovalID:      func() string { return id.WithPrefix("apr") },
+		NewPlanItemID:      planItemIDs(),
+		NewQuestionID:      func() string { return id.WithPrefix("qst") },
+		Now:                time.Now,
+		Logger:             logger,
 	})
 
 	// The handle the tools were registered against, filled in. Before
@@ -772,6 +774,15 @@ func standingDirections(
 	logger *slog.Logger,
 ) func(context.Context, domain.Run) string {
 	return func(ctx context.Context, run domain.Run) string {
+		// A worker is not having the conversation, and gets none of what the
+		// conversation is told. Not filtering but replacing: the operator's
+		// standing memories are how they want their work done, and a search
+		// that has been told how somebody likes their commits written is a
+		// search carrying instructions it has no business acting on.
+		if run.Kind == domain.RunWorker {
+			return prompt.ForDelegatedSearch()
+		}
+
 		parts := make([]string, 0, 2)
 
 		// Where this turn is going, when that changes what an answer has to

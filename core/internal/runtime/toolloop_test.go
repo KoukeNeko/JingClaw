@@ -73,7 +73,9 @@ func toolCall(id, name string, args map[string]any) provider.ToolCallRequested {
 	return provider.ToolCallRequested{ID: id, Name: name, Args: encoded}
 }
 
-func newToolHarness(t *testing.T, turns [][]provider.Event) (*runtime.Runtime, *memory.Store, *scriptedProvider) {
+func newToolHarness(
+	t *testing.T, turns [][]provider.Event,
+) (*runtime.Runtime, *memory.Store, *scriptedProvider, *tool.Registry) {
 	t.Helper()
 
 	root := t.TempDir()
@@ -131,7 +133,7 @@ func newToolHarness(t *testing.T, turns [][]provider.Event) (*runtime.Runtime, *
 		Logger:        slog.New(slog.DiscardHandler),
 	})
 
-	return rt, store, scripted
+	return rt, store, scripted, registry
 }
 
 func runTurn(t *testing.T, rt *runtime.Runtime, sessionID domain.SessionID, text string) domain.RunID {
@@ -161,7 +163,7 @@ func eventKinds(t *testing.T, store *memory.Store, sessionID domain.SessionID) [
 }
 
 func TestToolLoopExecutesAndFeedsResultsBack(t *testing.T) {
-	rt, store, scripted := newToolHarness(t, [][]provider.Event{
+	rt, store, scripted, _ := newToolHarness(t, [][]provider.Event{
 		{toolCall("call_1", "glob_files", map[string]any{"pattern": "**/*.go"})},
 		{provider.TextDelta{Text: "Found src/main.go."}, provider.Completed{StopReason: domain.StopEndTurn}},
 	})
@@ -218,7 +220,7 @@ func TestToolLoopExecutesAndFeedsResultsBack(t *testing.T) {
 // A failed tool is an observation. The model has to see the error to do
 // something different, so the loop must continue rather than abort.
 func TestToolErrorsAreFedBackToTheModel(t *testing.T) {
-	rt, store, scripted := newToolHarness(t, [][]provider.Event{
+	rt, store, scripted, _ := newToolHarness(t, [][]provider.Event{
 		{toolCall("call_1", "read_file", map[string]any{"path": "../../etc/passwd"})},
 		{toolCall("call_2", "read_file", map[string]any{"path": "src/main.go"})},
 		{provider.TextDelta{Text: "Read it."}, provider.Completed{StopReason: domain.StopEndTurn}},
@@ -276,7 +278,7 @@ func TestToolLoopStopsAtTheIterationBudget(t *testing.T) {
 		}
 	}
 
-	rt, store, _ := newToolHarness(t, turns)
+	rt, store, _, _ := newToolHarness(t, turns)
 	ctx := context.Background()
 
 	session, err := rt.CreateSession(ctx, "runaway")
@@ -311,7 +313,7 @@ func TestToolLoopStopsAtTheIterationBudget(t *testing.T) {
 // History lives in the event log, so a second turn must see the first without
 // anything being held in memory between runs.
 func TestSecondTurnSeesEarlierConversation(t *testing.T) {
-	rt, _, scripted := newToolHarness(t, [][]provider.Event{
+	rt, _, scripted, _ := newToolHarness(t, [][]provider.Event{
 		{provider.TextDelta{Text: "The file is src/main.go."}, provider.Completed{StopReason: domain.StopEndTurn}},
 		{provider.TextDelta{Text: "It defines main."}, provider.Completed{StopReason: domain.StopEndTurn}},
 	})
@@ -346,7 +348,7 @@ func TestSecondTurnSeesEarlierConversation(t *testing.T) {
 // The prompt prefix has to be byte-identical between requests for prompt
 // caching to be possible at all.
 func TestToolDeclarationsAreStableAcrossTurns(t *testing.T) {
-	rt, _, scripted := newToolHarness(t, [][]provider.Event{
+	rt, _, scripted, _ := newToolHarness(t, [][]provider.Event{
 		{provider.Completed{StopReason: domain.StopEndTurn}},
 		{provider.Completed{StopReason: domain.StopEndTurn}},
 	})
