@@ -183,11 +183,25 @@ agent send "$SEEING" \
 	"This image has three horizontal colour bands. Name them from top to bottom, in three words." \
 	--attach "$WORK/bands.png" >/dev/null
 
+# Ninety seconds, the same as the other checks that wait on a real model. A
+# picture is a large request and this runs alongside twenty-six other checks;
+# sixty was enough alone and not enough in the suite, which is the shape of a
+# limit set from one machine at rest.
 WAITED=0
 until grep -q 'run.completed\|run.failed' "$WORK/seeing"; do
 	WAITED=$((WAITED + 1))
-	[ "$WAITED" -gt 120 ] && fail "the run never finished:
+	if [ "$WAITED" -gt 180 ]; then
+		# Said separately because an empty stream and a slow model fail the
+		# same way here, and the message that printed nothing at all was the
+		# reason one failure could not be told from the other.
+		if [ -s "$WORK/seeing" ]; then
+			fail "the run never finished:
 $(cut -c1-120 "$WORK/seeing" | tail -10)"
+		else
+			fail "nothing arrived on the event stream at all; the daemon said:
+$(tail -5 "$WORK/daemon.err")"
+		fi
+	fi
 	sleep 0.5
 done
 kill "$WATCH" 2>/dev/null || true
