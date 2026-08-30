@@ -78,10 +78,24 @@ func Run(ctx context.Context) error {
 	case <-ctx.Done():
 		return nil
 	case err := <-exits(agent):
-		return fmt.Errorf("the daemon stopped: %w", err)
+		return stopped("daemon", err)
 	case err := <-exits(chat):
-		return fmt.Errorf("the gateway stopped: %w", err)
+		return stopped("gateway", err)
 	}
+}
+
+// stopped says why one of the parts is no longer running.
+//
+// A part that exits without an error was asked to: jingclaw stop signals the
+// daemon, and the daemon exiting is then the whole point rather than a
+// failure. Reporting that as one made every clean shutdown end with an error
+// line and a non-zero status.
+func stopped(part string, err error) error {
+	if err == nil {
+		fmt.Printf("The %s stopped; stopping the rest.\n", part)
+		return nil
+	}
+	return fmt.Errorf("the %s stopped: %w", part, err)
 }
 
 // alreadyRunning reports whether a daemon has published itself and is alive.
