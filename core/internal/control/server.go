@@ -425,6 +425,109 @@ func (s *Server) SubscribeEvents(
 	}
 }
 
+// SubscribeAllEvents follows every session at once.
+//
+// The same shape as SubscribeEvents and a different cursor. Deliberately a
+// separate method: an empty session id on the one above would quietly change
+// what after_seq means, from a position in one conversation to a position in
+// the log, and there is no answer to "resume after 50" when two sessions are
+// both at 50.
+func (s *Server) SubscribeAllEvents(
+	ctx context.Context,
+	req *connect.Request[controlv1.SubscribeAllEventsRequest],
+	stream *connect.ServerStream[controlv1.SubscribeAllEventsResponse],
+) error {
+	// Subscribed before the first read, so an event appended in between is
+	// not missed: it will still be in the store when the loop reads.
+	sub := s.hub.SubscribeAll()
+	defer sub.Close()
+
+	head, err := s.store.LogHead(ctx)
+	if err != nil {
+		return toConnectError(err)
+	}
+	prunedThrough, err := s.store.LogPrunedThrough(ctx)
+	if err != nil {
+		return toConnectError(err)
+	}
+
+	if err := stream.Send(&controlv1.SubscribeAllEventsResponse{
+		Value: &controlv1.SubscribeAllEventsResponse_Hello{
+			Hello: &controlv1.LogHello{
+				HeadCursor:    uint64(head),
+				PrunedThrough: uint64(prunedThrough),
+			},
+		},
+	}); err != nil {
+		return err
+	}
+
+	cursor := domain.Seq(req.Msg.GetAfterCursor())
+
+	// A client resuming from inside what has been discarded is told so rather
+	// than handed what survived. "Nothing has happened since" and "what
+	// happened is gone" are opposite answers, and a stream that cannot tell
+	// them apart loses history silently.
+	//
+	// Only a client that had actually read something: resuming from zero
+	// means "from the beginning", which is a request for whatever is left.
+	if cursor > 0 && cursor < prunedThrough {
+		return stream.Send(&controlv1.SubscribeAllEventsResponse{
+			Value: &controlv1.SubscribeAllEventsResponse_ResyncRequired{
+				ResyncRequired: &controlv1.ResyncRequired{
+					OldestSeq: uint64(prunedThrough + 1),
+					HeadSeq:   uint64(head),
+				},
+			},
+		})
+	}
+
+	ticker := time.NewTicker(heartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		// Everything available now, before going back to sleep.
+		for {
+			events, err := s.store.ListAllAfter(ctx, cursor, eventBatchSize)
+			if err != nil {
+				return toConnectError(err)
+			}
+			if len(events) == 0 {
+				break
+			}
+
+			for _, ev := range events {
+				msg, err := eventToProto(ev)
+				if err != nil {
+					return connect.NewError(connect.CodeInternal, err)
+				}
+				if err := stream.Send(&controlv1.SubscribeAllEventsResponse{
+					Value: &controlv1.SubscribeAllEventsResponse_Event{Event: msg},
+				}); err != nil {
+					return err
+				}
+				cursor = ev.GlobalSeq
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case <-sub.Notify():
+
+		case <-ticker.C:
+			if err := stream.Send(&controlv1.SubscribeAllEventsResponse{
+				Value: &controlv1.SubscribeAllEventsResponse_Heartbeat{
+					Heartbeat: &controlv1.StreamHeartbeat{HeadSeq: uint64(cursor)},
+				},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+}
+
 func toConnectError(err error) error {
 	switch {
 	case err == nil:

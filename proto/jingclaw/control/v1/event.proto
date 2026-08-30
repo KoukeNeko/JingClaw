@@ -19,6 +19,17 @@ message Event {
 
   google.protobuf.Timestamp occurred_at = 5;
 
+  // Where this event sits in the whole log, as against seq, which is where it
+  // sits in its own session.
+  //
+  // For a client watching every session at once, which cannot resume from
+  // seq: two sessions both at 50 make "I have read up to 50" mean nothing.
+  // Strictly increasing across the deployment, but not dense — pruning leaves
+  // gaps, and a cursor needs to be monotonic rather than contiguous.
+  //
+  // Zero on an event from a deployment written before positions were kept.
+  uint64 global_seq = 6;
+
   oneof payload {
     UserMessageAdded user_message_added = 10;
     RunStateChanged run_state_changed = 11;

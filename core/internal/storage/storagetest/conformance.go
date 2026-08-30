@@ -43,6 +43,9 @@ func Run(t *testing.T, newStore Factory) {
 		"HeadTracksLatest":            testHeadTracksLatest,
 		"EventsForMissingSession":     testEventsForMissingSession,
 		"SessionsHaveIndependentSeqs": testSessionsHaveIndependentSeqs,
+		"TheWholeLogHasOneOrder":      testTheWholeLogHasOneOrder,
+		"TheLogHeadTracksAppends":     testTheLogHeadTracksAppends,
+		"PruningRaisesTheWatermark":   testPruningRaisesTheWatermark,
 		"ConcurrentAppendsAreDense":   testConcurrentAppendsAreDense,
 		"MemoryRoundTrip":             testMemoryRoundTrip,
 		"MemoryScopesAreSeparate":     testMemoryScopesAreSeparate,
@@ -1102,5 +1105,108 @@ func testSupersedingClosesTheOldValidity(t *testing.T, newStore Factory) {
 	}
 	if !held {
 		t.Error("the old fact does not read as true in April, when it was")
+	}
+}
+
+// Two sessions both at seq 3 make "I have read up to 3" mean nothing, which
+// is what a console watching every session at once has to be able to say.
+func testTheWholeLogHasOneOrder(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	first := mustCreateSession(t, store, "ses_1")
+	second := mustCreateSession(t, store, "ses_2")
+
+	// Interleaved, which is the case a per-session number cannot describe.
+	said := []string{"one", "two", "three", "four"}
+	for index, text := range said {
+		session := first.ID
+		if index%2 == 1 {
+			session = second.ID
+		}
+		appendEvent(t, store, session, domain.EventAssistantTextDelta,
+			domain.AssistantTextDelta{Text: text})
+	}
+
+	everything, err := store.ListAllAfter(ctx, 0, 0)
+	if err != nil {
+		t.Fatalf("list the log: %v", err)
+	}
+	if len(everything) != len(said) {
+		t.Fatalf("the log holds %d events, want %d", len(everything), len(said))
+	}
+
+	for index, event := range everything {
+		if want := domain.Seq(index + 1); event.GlobalSeq != want {
+			t.Errorf("event %d is at %d, want %d", index, event.GlobalSeq, want)
+		}
+		if got := event.Payload.(domain.AssistantTextDelta).Text; got != said[index] {
+			t.Errorf("position %d holds %q, want %q", index+1, got, said[index])
+		}
+	}
+
+	rest, err := store.ListAllAfter(ctx, 2, 0)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if len(rest) != 2 || rest[0].GlobalSeq != 3 {
+		t.Fatalf("resuming after 2 gave %d events starting at %d, want 2 starting at 3",
+			len(rest), rest[0].GlobalSeq)
+	}
+}
+
+func testTheLogHeadTracksAppends(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	session := mustCreateSession(t, store, "ses_1")
+
+	if head, err := store.LogHead(ctx); err != nil || head != 0 {
+		t.Fatalf("an empty log's head is %d (err %v), want 0", head, err)
+	}
+
+	appendEvent(t, store, session.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{Text: "a"})
+	appendEvent(t, store, session.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{Text: "b"})
+
+	head, err := store.LogHead(ctx)
+	if err != nil {
+		t.Fatalf("log head: %v", err)
+	}
+	if head != 2 {
+		t.Errorf("the log head is %d, want 2", head)
+	}
+}
+
+// Pruning leaves gaps, which is fine. What is not fine is a client resuming
+// into one and being told nothing happened, so how far the log has been
+// discarded has to be answerable — and it must only ever rise, since sessions
+// are pruned in no particular order.
+func testPruningRaisesTheWatermark(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	first := mustCreateSession(t, store, "ses_1")
+	second := mustCreateSession(t, store, "ses_2")
+
+	appendEvent(t, store, second.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{Text: "a"})
+	appendEvent(t, store, first.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{Text: "b"})
+	appendEvent(t, store, first.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{Text: "c"})
+	appendEvent(t, store, second.ID, domain.EventAssistantTextDelta, domain.AssistantTextDelta{Text: "d"})
+
+	if through, err := store.LogPrunedThrough(ctx); err != nil || through != 0 {
+		t.Fatalf("a log that has lost nothing says %d (err %v), want 0", through, err)
+	}
+
+	// The first session holds positions 2 and 3.
+	if _, err := store.PruneEvents(ctx, first.ID, 2); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if through, err := store.LogPrunedThrough(ctx); err != nil || through != 3 {
+		t.Fatalf("the watermark is %d (err %v), want 3", through, err)
+	}
+
+	// The second session holds position 1, which is lower. The mark stays.
+	if _, err := store.PruneEvents(ctx, second.ID, 1); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if through, err := store.LogPrunedThrough(ctx); err != nil || through != 3 {
+		t.Errorf("the watermark moved to %d (err %v); it must stay at 3", through, err)
 	}
 }

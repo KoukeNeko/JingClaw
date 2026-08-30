@@ -74,6 +74,9 @@ const (
 	// SessionServiceSubscribeEventsProcedure is the fully-qualified name of the SessionService's
 	// SubscribeEvents RPC.
 	SessionServiceSubscribeEventsProcedure = "/jingclaw.control.v1.SessionService/SubscribeEvents"
+	// SessionServiceSubscribeAllEventsProcedure is the fully-qualified name of the SessionService's
+	// SubscribeAllEvents RPC.
+	SessionServiceSubscribeAllEventsProcedure = "/jingclaw.control.v1.SessionService/SubscribeAllEvents"
 	// SessionServiceInterruptRunProcedure is the fully-qualified name of the SessionService's
 	// InterruptRun RPC.
 	SessionServiceInterruptRunProcedure = "/jingclaw.control.v1.SessionService/InterruptRun"
@@ -400,6 +403,7 @@ type SessionServiceClient interface {
 	GetSessionView(context.Context, *connect.Request[v1.GetSessionViewRequest]) (*connect.Response[v1.GetSessionViewResponse], error)
 	SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error)
 	SubscribeEvents(context.Context, *connect.Request[v1.SubscribeEventsRequest]) (*connect.ServerStreamForClient[v1.SubscribeEventsResponse], error)
+	SubscribeAllEvents(context.Context, *connect.Request[v1.SubscribeAllEventsRequest]) (*connect.ServerStreamForClient[v1.SubscribeAllEventsResponse], error)
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
 	ListApprovals(context.Context, *connect.Request[v1.ListApprovalsRequest]) (*connect.Response[v1.ListApprovalsResponse], error)
 	DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error)
@@ -469,6 +473,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("SubscribeEvents")),
 			connect.WithClientOptions(opts...),
 		),
+		subscribeAllEvents: connect.NewClient[v1.SubscribeAllEventsRequest, v1.SubscribeAllEventsResponse](
+			httpClient,
+			baseURL+SessionServiceSubscribeAllEventsProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("SubscribeAllEvents")),
+			connect.WithClientOptions(opts...),
+		),
 		interruptRun: connect.NewClient[v1.InterruptRunRequest, v1.InterruptRunResponse](
 			httpClient,
 			baseURL+SessionServiceInterruptRunProcedure,
@@ -516,19 +526,20 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 
 // sessionServiceClient implements SessionServiceClient.
 type sessionServiceClient struct {
-	createSession   *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
-	listSessions    *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
-	listRuns        *connect.Client[v1.ListRunsRequest, v1.ListRunsResponse]
-	getSessionView  *connect.Client[v1.GetSessionViewRequest, v1.GetSessionViewResponse]
-	sendTurn        *connect.Client[v1.SendTurnRequest, v1.SendTurnResponse]
-	subscribeEvents *connect.Client[v1.SubscribeEventsRequest, v1.SubscribeEventsResponse]
-	interruptRun    *connect.Client[v1.InterruptRunRequest, v1.InterruptRunResponse]
-	listApprovals   *connect.Client[v1.ListApprovalsRequest, v1.ListApprovalsResponse]
-	decideApproval  *connect.Client[v1.DecideApprovalRequest, v1.DecideApprovalResponse]
-	listQuestions   *connect.Client[v1.ListQuestionsRequest, v1.ListQuestionsResponse]
-	answerQuestion  *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
-	listModels      *connect.Client[v1.ListModelsRequest, v1.ListModelsResponse]
-	setSessionModel *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
+	createSession      *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
+	listSessions       *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	listRuns           *connect.Client[v1.ListRunsRequest, v1.ListRunsResponse]
+	getSessionView     *connect.Client[v1.GetSessionViewRequest, v1.GetSessionViewResponse]
+	sendTurn           *connect.Client[v1.SendTurnRequest, v1.SendTurnResponse]
+	subscribeEvents    *connect.Client[v1.SubscribeEventsRequest, v1.SubscribeEventsResponse]
+	subscribeAllEvents *connect.Client[v1.SubscribeAllEventsRequest, v1.SubscribeAllEventsResponse]
+	interruptRun       *connect.Client[v1.InterruptRunRequest, v1.InterruptRunResponse]
+	listApprovals      *connect.Client[v1.ListApprovalsRequest, v1.ListApprovalsResponse]
+	decideApproval     *connect.Client[v1.DecideApprovalRequest, v1.DecideApprovalResponse]
+	listQuestions      *connect.Client[v1.ListQuestionsRequest, v1.ListQuestionsResponse]
+	answerQuestion     *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
+	listModels         *connect.Client[v1.ListModelsRequest, v1.ListModelsResponse]
+	setSessionModel    *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
 }
 
 // CreateSession calls jingclaw.control.v1.SessionService.CreateSession.
@@ -559,6 +570,11 @@ func (c *sessionServiceClient) SendTurn(ctx context.Context, req *connect.Reques
 // SubscribeEvents calls jingclaw.control.v1.SessionService.SubscribeEvents.
 func (c *sessionServiceClient) SubscribeEvents(ctx context.Context, req *connect.Request[v1.SubscribeEventsRequest]) (*connect.ServerStreamForClient[v1.SubscribeEventsResponse], error) {
 	return c.subscribeEvents.CallServerStream(ctx, req)
+}
+
+// SubscribeAllEvents calls jingclaw.control.v1.SessionService.SubscribeAllEvents.
+func (c *sessionServiceClient) SubscribeAllEvents(ctx context.Context, req *connect.Request[v1.SubscribeAllEventsRequest]) (*connect.ServerStreamForClient[v1.SubscribeAllEventsResponse], error) {
+	return c.subscribeAllEvents.CallServerStream(ctx, req)
 }
 
 // InterruptRun calls jingclaw.control.v1.SessionService.InterruptRun.
@@ -617,6 +633,7 @@ type SessionServiceHandler interface {
 	GetSessionView(context.Context, *connect.Request[v1.GetSessionViewRequest]) (*connect.Response[v1.GetSessionViewResponse], error)
 	SendTurn(context.Context, *connect.Request[v1.SendTurnRequest]) (*connect.Response[v1.SendTurnResponse], error)
 	SubscribeEvents(context.Context, *connect.Request[v1.SubscribeEventsRequest], *connect.ServerStream[v1.SubscribeEventsResponse]) error
+	SubscribeAllEvents(context.Context, *connect.Request[v1.SubscribeAllEventsRequest], *connect.ServerStream[v1.SubscribeAllEventsResponse]) error
 	InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error)
 	ListApprovals(context.Context, *connect.Request[v1.ListApprovalsRequest]) (*connect.Response[v1.ListApprovalsResponse], error)
 	DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error)
@@ -682,6 +699,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("SubscribeEvents")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceSubscribeAllEventsHandler := connect.NewServerStreamHandler(
+		SessionServiceSubscribeAllEventsProcedure,
+		svc.SubscribeAllEvents,
+		connect.WithSchema(sessionServiceMethods.ByName("SubscribeAllEvents")),
+		connect.WithHandlerOptions(opts...),
+	)
 	sessionServiceInterruptRunHandler := connect.NewUnaryHandler(
 		SessionServiceInterruptRunProcedure,
 		svc.InterruptRun,
@@ -738,6 +761,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceSendTurnHandler.ServeHTTP(w, r)
 		case SessionServiceSubscribeEventsProcedure:
 			sessionServiceSubscribeEventsHandler.ServeHTTP(w, r)
+		case SessionServiceSubscribeAllEventsProcedure:
+			sessionServiceSubscribeAllEventsHandler.ServeHTTP(w, r)
 		case SessionServiceInterruptRunProcedure:
 			sessionServiceInterruptRunHandler.ServeHTTP(w, r)
 		case SessionServiceListApprovalsProcedure:
@@ -783,6 +808,10 @@ func (UnimplementedSessionServiceHandler) SendTurn(context.Context, *connect.Req
 
 func (UnimplementedSessionServiceHandler) SubscribeEvents(context.Context, *connect.Request[v1.SubscribeEventsRequest], *connect.ServerStream[v1.SubscribeEventsResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.SubscribeEvents is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) SubscribeAllEvents(context.Context, *connect.Request[v1.SubscribeAllEventsRequest], *connect.ServerStream[v1.SubscribeAllEventsResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.SubscribeAllEvents is not implemented"))
 }
 
 func (UnimplementedSessionServiceHandler) InterruptRun(context.Context, *connect.Request[v1.InterruptRunRequest]) (*connect.Response[v1.InterruptRunResponse], error) {

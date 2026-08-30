@@ -82,6 +82,40 @@ message SubscribeEventsRequest {
   string client_id = 3;
 }
 
+// SubscribeAllEvents follows every session at once.
+//
+// A separate request rather than an empty session_id on the one above. That
+// would quietly change what after_seq means — from a position in one session
+// to a position in the log — and there is no answer to "resume after 50" when
+// two sessions are both at 50.
+message SubscribeAllEventsRequest {
+  // Resume point in the whole log. The server replays everything after it,
+  // then stays open. Zero means "from the beginning".
+  uint64 after_cursor = 1;
+
+  string client_id = 2;
+}
+
+// Frames carried by SubscribeAllEvents.
+message SubscribeAllEventsResponse {
+  oneof value {
+    LogHello hello = 1;
+    Event event = 2;
+    StreamHeartbeat heartbeat = 3;
+    ResyncRequired resync_required = 4;
+  }
+}
+
+// LogHello says where the whole log is when a subscription opens.
+message LogHello {
+  // The position of the last event appended anywhere.
+  uint64 head_cursor = 1;
+
+  // How far the log has been discarded. A client resuming from at or below
+  // this has missed events that are gone.
+  uint64 pruned_through = 2;
+}
+
 message InterruptRunRequest {
   RequestMeta meta = 1;
 
@@ -459,6 +493,7 @@ service SessionService {
   rpc GetSessionView(GetSessionViewRequest) returns (GetSessionViewResponse);
   rpc SendTurn(SendTurnRequest) returns (SendTurnResponse);
   rpc SubscribeEvents(SubscribeEventsRequest) returns (stream SubscribeEventsResponse);
+  rpc SubscribeAllEvents(SubscribeAllEventsRequest) returns (stream SubscribeAllEventsResponse);
   rpc InterruptRun(InterruptRunRequest) returns (InterruptRunResponse);
   rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
   rpc DecideApproval(DecideApprovalRequest) returns (DecideApprovalResponse);

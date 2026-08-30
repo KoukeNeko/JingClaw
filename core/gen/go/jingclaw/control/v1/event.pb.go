@@ -195,6 +195,16 @@ type Event struct {
 	// disconnect and to detect gaps.
 	Seq        uint64                 `protobuf:"varint,4,opt,name=seq,proto3" json:"seq,omitempty"`
 	OccurredAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
+	// Where this event sits in the whole log, as against seq, which is where it
+	// sits in its own session.
+	//
+	// For a client watching every session at once, which cannot resume from
+	// seq: two sessions both at 50 make "I have read up to 50" mean nothing.
+	// Strictly increasing across the deployment, but not dense — pruning leaves
+	// gaps, and a cursor needs to be monotonic rather than contiguous.
+	//
+	// Zero on an event from a deployment written before positions were kept.
+	GlobalSeq uint64 `protobuf:"varint,6,opt,name=global_seq,json=globalSeq,proto3" json:"global_seq,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*Event_UserMessageAdded
@@ -280,6 +290,13 @@ func (x *Event) GetOccurredAt() *timestamppb.Timestamp {
 		return x.OccurredAt
 	}
 	return nil
+}
+
+func (x *Event) GetGlobalSeq() uint64 {
+	if x != nil {
+		return x.GlobalSeq
+	}
+	return 0
 }
 
 func (x *Event) GetPayload() isEvent_Payload {
@@ -1964,7 +1981,7 @@ var File_jingclaw_control_v1_event_proto protoreflect.FileDescriptor
 
 const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\n" +
-	"\x1fjingclaw/control/v1/event.proto\x12\x13jingclaw.control.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a jingclaw/control/v1/common.proto\"\xd6\v\n" +
+	"\x1fjingclaw/control/v1/event.proto\x12\x13jingclaw.control.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a jingclaw/control/v1/common.proto\"\xf5\v\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1972,7 +1989,9 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\x06run_id\x18\x03 \x01(\tR\x05runId\x12\x10\n" +
 	"\x03seq\x18\x04 \x01(\x04R\x03seq\x12;\n" +
 	"\voccurred_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"occurredAt\x12U\n" +
+	"occurredAt\x12\x1d\n" +
+	"\n" +
+	"global_seq\x18\x06 \x01(\x04R\tglobalSeq\x12U\n" +
 	"\x12user_message_added\x18\n" +
 	" \x01(\v2%.jingclaw.control.v1.UserMessageAddedH\x00R\x10userMessageAdded\x12R\n" +
 	"\x11run_state_changed\x18\v \x01(\v2$.jingclaw.control.v1.RunStateChangedH\x00R\x0frunStateChanged\x12[\n" +

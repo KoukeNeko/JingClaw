@@ -395,6 +395,16 @@ type Event struct {
 	SessionID  SessionID
 	RunID      RunID
 	Seq        Seq
+
+	// GlobalSeq is where this event sits in the whole log, as against Seq,
+	// which is where it sits in its own session.
+	//
+	// For anything watching every session at once, which cannot resume from
+	// Seq: two sessions both at 50 make "I have read up to 50" mean nothing.
+	// Zero on an event that came from somewhere with no whole log to be
+	// positioned in.
+	GlobalSeq Seq
+
 	OccurredAt time.Time
 
 	Kind    EventKind

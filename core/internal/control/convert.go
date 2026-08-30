@@ -219,6 +219,7 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 		SessionId:  string(ev.SessionID),
 		RunId:      string(ev.RunID),
 		Seq:        uint64(ev.Seq),
+		GlobalSeq:  uint64(ev.GlobalSeq),
 		OccurredAt: timestamppb.New(ev.OccurredAt),
 	}
 

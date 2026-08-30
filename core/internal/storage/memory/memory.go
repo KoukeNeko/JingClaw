@@ -27,7 +27,15 @@ type Store struct {
 	// survives pruning: a sequence identifies an event for the life of a
 	// session, and reusing one after a prune would hand two different events
 	// the same name.
-	pruned    map[domain.SessionID]domain.Seq
+	pruned map[domain.SessionID]domain.Seq
+
+	// logSeq is the position of the last event appended anywhere, and
+	// logPruned the highest position discarded. The same pair the SQLite
+	// store keeps, because a difference between the two would be a difference
+	// in what a client is told, not merely in how it is stored.
+	logSeq    domain.Seq
+	logPruned domain.Seq
+
 	approvals map[domain.ApprovalID]domain.Approval
 	questions map[domain.QuestionID]domain.Question
 
@@ -258,6 +266,10 @@ func (s *Store) Append(ctx context.Context, event domain.Event) (domain.Seq, err
 
 	events := s.events[event.SessionID]
 	event.Seq = s.pruned[event.SessionID] + domain.Seq(len(events)) + 1
+
+	s.logSeq++
+	event.GlobalSeq = s.logSeq
+
 	s.events[event.SessionID] = append(events, event)
 
 	return event.Seq, nil
@@ -341,6 +353,11 @@ func (s *Store) PruneEvents(
 	for _, event := range events {
 		if event.Seq <= through {
 			removed++
+			// Only ever upwards: sessions are pruned in no particular order,
+			// so a later prune can be of older events.
+			if event.GlobalSeq > s.logPruned {
+				s.logPruned = event.GlobalSeq
+			}
 			continue
 		}
 		kept = append(kept, event)
@@ -580,4 +597,52 @@ func (s *Store) AnswerQuestion(
 	s.questions[id] = question
 
 	return question, nil
+}
+
+// ListAllAfter returns the whole log from a position in it.
+func (s *Store) ListAllAfter(ctx context.Context, after domain.Seq, limit int) ([]domain.Event, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var out []domain.Event
+	for _, events := range s.events {
+		for _, event := range events {
+			if event.GlobalSeq > after {
+				out = append(out, event)
+			}
+		}
+	}
+
+	// Gathered by session and then put back in the order they were written,
+	// which is what the position is for.
+	sort.Slice(out, func(i, j int) bool { return out[i].GlobalSeq < out[j].GlobalSeq })
+
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// LogHead is the position of the last event appended anywhere.
+func (s *Store) LogHead(ctx context.Context) (domain.Seq, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.logSeq, nil
+}
+
+// LogPrunedThrough is the highest position that has been discarded.
+func (s *Store) LogPrunedThrough(ctx context.Context) (domain.Seq, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.logPruned, nil
 }

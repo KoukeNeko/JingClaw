@@ -149,6 +149,26 @@ type EventStore interface {
 	// sent to the model is rebuilt from this log, and discarding an event the
 	// rebuild still needs makes the session unusable rather than smaller.
 	PruneEvents(ctx context.Context, id domain.SessionID, through domain.Seq) (int64, error)
+
+	// ListAllAfter returns events from the whole log with GlobalSeq > after,
+	// in the order they were appended. A limit of zero means all of them.
+	//
+	// For anything watching every session at once, which cannot resume from a
+	// per-session sequence: two sessions both at 50 make "I have read up to
+	// 50" mean nothing.
+	ListAllAfter(ctx context.Context, after domain.Seq, limit int) ([]domain.Event, error)
+
+	// LogHead is the position of the last event appended, across every
+	// session. Zero when nothing has been.
+	LogHead(ctx context.Context) (domain.Seq, error)
+
+	// LogPrunedThrough is the highest position that has been discarded.
+	//
+	// A client resuming from at or below it has missed events that are gone.
+	// "Nothing has happened since" and "what happened is no longer here" are
+	// opposite answers, and a stream that cannot tell them apart is one that
+	// loses history silently.
+	LogPrunedThrough(ctx context.Context) (domain.Seq, error)
 }
 
 // Store is the full persistence surface the runtime depends on.
