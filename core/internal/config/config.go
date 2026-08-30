@@ -774,24 +774,6 @@ type Server struct {
 	RuntimeDir string `koanf:"runtime_dir"`
 
 	LogLevel string `koanf:"log_level"`
-
-	// WebConsole serves the built-in console from the same address. It is the
-	// answer for a machine with no desktop on it, which is where this agent is
-	// most useful and where a native client cannot go.
-	WebConsole bool `koanf:"web_console"`
-
-	// PairingTTL is how long the code a browser exchanges for its credential
-	// stays good. It is short because the code is the part that ends up in a
-	// terminal's scrollback and in screenshots.
-	PairingTTL time.Duration `koanf:"pairing_ttl"`
-
-	// ConsoleTTL is how long a paired browser's credential lasts without
-	// being used. Zero means as long as the daemon runs.
-	//
-	// Counted from last use rather than from pairing: a console somebody
-	// works in all day should not stop halfway through the afternoon, and one
-	// nobody has touched since Tuesday should not still be open.
-	ConsoleTTL time.Duration `koanf:"console_ttl"`
 }
 
 // Defaults are what runs when nothing says otherwise.
@@ -878,11 +860,8 @@ func Defaults() Config {
 			Root: defaultWorkspace(),
 		},
 		Server: Server{
-			Addr:       "127.0.0.1:0",
-			LogLevel:   "info",
-			WebConsole: true,
-			PairingTTL: 10 * time.Minute,
-			ConsoleTTL: 7 * 24 * time.Hour,
+			Addr:     "127.0.0.1:0",
+			LogLevel: "info",
 		},
 		Gateway: Gateway{
 			Platform:        PlatformDiscord,
@@ -1720,10 +1699,6 @@ enabled = false
 # 127.0.0.1 only. A LAN address exposes the daemon to the network.
 # addr = "127.0.0.1:0"
 # log_level = "info"
-# web_console = true
-# pairing_ttl = "10m"
-# Counted from last use. Zero is as long as the daemon runs.
-# console_ttl = "168h"
 # Empty uses the platform's own locations.
 # data_dir = ""
 # runtime_dir = ""

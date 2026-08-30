@@ -31,16 +31,6 @@ const (
 
 	// ScopeGateway reaches the ingress and nothing else.
 	ScopeGateway Scope = "gateway"
-
-	// ScopeConsole is what a browser gets.
-	//
-	// It is separate from the operator's own credential for two reasons.
-	// Revoking a browser should not also change the one the CLI and the
-	// gateway are using, and a page that a person opened from a link should
-	// not be able to do everything that person can: it reads and drives
-	// sessions, and does not rewrite which channels the gateway will listen
-	// to.
-	ScopeConsole Scope = "console"
 )
 
 // servicesForScope lists the fully-qualified proto services a scope may call.
@@ -54,15 +44,10 @@ var servicesForScope = map[Scope]map[string]bool{
 		"jingclaw.control.v1.ChannelService":        true,
 		"jingclaw.control.v1.GatewayIngressService": true,
 		"jingclaw.control.v1.ArtifactService":       true,
-		"jingclaw.control.v1.ConsoleService":        true,
 		"jingclaw.control.v1.MemoryService":         true,
 	},
 	ScopeGateway: {
 		"jingclaw.control.v1.GatewayIngressService": true,
-	},
-	ScopeConsole: {
-		"jingclaw.control.v1.SessionService":  true,
-		"jingclaw.control.v1.ArtifactService": true,
 	},
 }
 
@@ -88,10 +73,7 @@ func NewToken(scope Scope) (Token, error) {
 // The Host check defends against DNS rebinding: an attacker-controlled name
 // can resolve to 127.0.0.1, so the socket alone proves nothing about who is
 // calling.
-// grants, when given, is the set of console credentials currently in force.
-// They are checked separately from the static tokens because they come and go
-// while the daemon runs: a browser pairs, and an operator revokes it.
-func AuthMiddleware(tokens []Token, grants *Grants, allowedPort string, next http.Handler) http.Handler {
+func AuthMiddleware(tokens []Token, allowedPort string, next http.Handler) http.Handler {
 	byValue := make(map[string]Scope, len(tokens))
 	for _, token := range tokens {
 		byValue[token.Value] = token.Scope
@@ -106,9 +88,6 @@ func AuthMiddleware(tokens []Token, grants *Grants, allowedPort string, next htt
 		}
 
 		scope, matched := lookupToken(byValue, provided)
-		if !matched && grants != nil && grants.Verify(provided) {
-			scope, matched = ScopeConsole, true
-		}
 		if !matched {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

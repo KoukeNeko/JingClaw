@@ -141,7 +141,6 @@ root = "$WORK/ws"
 [server]
 runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
-web_console = false
 EOF
 
 cat > "$WORK/compat.toml" <<EOF
@@ -159,7 +158,6 @@ root = "$WORK/ws"
 [server]
 runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
-web_console = false
 EOF
 
 check() {

@@ -16,7 +16,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")"
 
 FAILED=0
-for CHECK in verify-config.sh verify-console.sh verify-compaction.sh \
+for CHECK in verify-config.sh verify-api.sh verify-compaction.sh \
 	verify-mcp.sh verify-memory.sh verify-images.sh verify-artifacts.sh \
 	verify-web.sh verify-providers.sh verify-home.sh \
 	verify-telegram.sh verify-reasoning.sh verify-processes.sh \

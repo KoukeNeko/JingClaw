@@ -50,7 +50,6 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/tool/builtin"
 	memorytool "github.com/KoukeNeko/JingClaw/core/internal/tool/memory"
 	"github.com/KoukeNeko/JingClaw/core/internal/web"
-	"github.com/KoukeNeko/JingClaw/core/internal/webui"
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
@@ -427,13 +426,6 @@ func run() error {
 		return err
 	}
 
-	// Browsers get one credential each, minted when they pair and recorded so
-	// an operator can see what has been let in and revoke one of them without
-	// revoking the rest — or the credential the CLI and the gateway hold.
-	grants := control.NewGrants(cfg.Server.ConsoleTTL, time.Now,
-		func() string { return id.WithPrefix("con") })
-	pairing := control.NewPairing(grants, cfg.Server.PairingTTL, time.Now)
-
 	listener, err := net.Listen("tcp", cfg.Server.Addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", cfg.Server.Addr, err)
@@ -469,18 +461,15 @@ func run() error {
 	api.Handle(controlv1connect.NewGatewayIngressServiceHandler(
 		control.NewGatewayServer(plane.Ingress, store, time.Now)))
 	api.Handle(controlv1connect.NewArtifactServiceHandler(control.NewArtifactServer(artifacts)))
-	api.Handle(controlv1connect.NewConsoleServiceHandler(
-		control.NewConsoleServer(pairing, grants, baseURL)))
 	api.Handle(controlv1connect.NewMemoryServiceHandler(control.NewMemoryServer(store)))
 	api.Handle(controlv1connect.NewChannelServiceHandler(
 		control.NewChannelServer(store, func() string { return id.WithPrefix("bnd") }, time.Now)))
 
-	// Everything that can do something sits behind the credential check. The
-	// console's own files do not, because a browser cannot present a bearer
-	// token on the request that fetches the page it would get one from, and
-	// those files are code rather than data.
+	// Everything sits behind the credential check. There is no unauthenticated
+	// path: the browser console that needed one is gone, and the terminal
+	// client reads its credential from the discovery file like the CLI does.
 	guarded := control.AuthMiddleware(
-		[]control.Token{controlToken, gatewayToken}, grants, port, api)
+		[]control.Token{controlToken, gatewayToken}, port, api)
 
 	root := http.NewServeMux()
 	for _, service := range []string{
@@ -488,22 +477,12 @@ func run() error {
 		controlv1connect.ArtifactServiceName,
 		controlv1connect.ChannelServiceName,
 		controlv1connect.GatewayIngressServiceName,
-		controlv1connect.ConsoleServiceName,
 		controlv1connect.MemoryServiceName,
 	} {
 		root.Handle("/"+service+"/", guarded)
 	}
-	if cfg.Server.WebConsole {
-		// The one request a browser makes before it has anything to
-		// authenticate with. What protects it is that a code works once,
-		// expires in minutes, and is eighty bits wide.
-		root.Handle(control.RedeemPath,
-			control.RequireLoopbackHost(port, pairing.RedeemHandler()))
-		root.Handle("/", control.RequireLoopbackHost(port, webui.Handler()))
-	}
-
-	// h2c so a gRPC client (the Windows client will use grpc-dotnet) can reach
-	// the same endpoint as Connect and gRPC-Web over plaintext loopback.
+	// h2c so a gRPC client can reach the same endpoint as Connect and
+	// gRPC-Web over plaintext loopback.
 	handler := root
 	server := &http.Server{
 		Handler:           h2c.NewHandler(handler, &http2.Server{}),
@@ -550,19 +529,6 @@ func run() error {
 	fmt.Printf("JingClaw daemon\nListening: %s\nConfig:    %s\nProvider:  %s\nModel:     %s\nWorkspace: %s\nTools:     %s\nDatabase:  %s\nDiscovery: %s\n",
 		baseURL, describeConfigFile(configFile, createdConfig), modelProvider.Name(), selected.ID,
 		ws.Root(), describeTools(tools, servers, cfg), dbPath, discoveryPath)
-
-	if cfg.Server.WebConsole {
-		// A code rather than the credential itself. This line is going to sit
-		// in a terminal's scrollback — over SSH, on a machine somebody else
-		// can scroll back through — and a code that works once and expires in
-		// minutes is a very different thing to leave lying there.
-		code, expires, err := pairing.Issue()
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Console:   %s\n           valid once, until %s (agent console for another)\n",
-			control.ConsoleURL(baseURL, code), expires.Format("15:04:05"))
-	}
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()

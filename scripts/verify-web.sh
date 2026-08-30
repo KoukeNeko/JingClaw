@@ -91,7 +91,6 @@ root = "$WORK/ws"
 [server]
 runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
-web_console = false
 EOF
 
 "$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &

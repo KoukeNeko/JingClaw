@@ -156,10 +156,6 @@ enabled = false
 # 127.0.0.1 only. A LAN address exposes the daemon to the network.
 # addr = "127.0.0.1:0"
 # log_level = "info"
-# web_console = true
-# pairing_ttl = "10m"
-# Counted from last use. Zero is as long as the daemon runs.
-# console_ttl = "168h"
 # Empty uses the platform's own locations.
 # data_dir = ""
 # runtime_dir = ""

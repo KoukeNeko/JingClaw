@@ -19,7 +19,6 @@ func TestAuthMiddleware(t *testing.T) {
 
 	handler := control.AuthMiddleware(
 		[]control.Token{{Value: token, Scope: control.ScopeControl}},
-		nil,
 		port,
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
 	)
@@ -113,7 +112,6 @@ func TestGatewayCredentialCannotReachToolExecutingServices(t *testing.T) {
 			{Value: controlValue, Scope: control.ScopeControl},
 			{Value: gatewayValue, Scope: control.ScopeGateway},
 		},
-		nil,
 		port,
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
 	)

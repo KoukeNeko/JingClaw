@@ -190,7 +190,6 @@ func TestForgettingRemovesIt(t *testing.T) {
 func TestOnlyTheOperatorReachesMemory(t *testing.T) {
 	for scope, want := range map[control.Scope]int{
 		control.ScopeControl: http.StatusOK,
-		control.ScopeConsole: http.StatusForbidden,
 		control.ScopeGateway: http.StatusForbidden,
 	} {
 		token, err := control.NewToken(scope)
@@ -198,7 +197,7 @@ func TestOnlyTheOperatorReachesMemory(t *testing.T) {
 			t.Fatalf("token: %v", err)
 		}
 
-		guarded := control.AuthMiddleware([]control.Token{token}, nil, "7777",
+		guarded := control.AuthMiddleware([]control.Token{token}, "7777",
 			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
