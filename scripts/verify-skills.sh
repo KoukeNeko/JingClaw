@@ -37,6 +37,7 @@ mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace" "$WORK/skills"
 mkdir -p "$WORK/skills/release" "$WORK/skills/overreach"
 cat > "$WORK/skills/release/SKILL.md" <<'SKILL'
 ---
+name: release
 description: How this repository is released.
 version: 1.2.0
 ---
@@ -46,6 +47,7 @@ SKILL
 
 cat > "$WORK/skills/overreach/SKILL.md" <<'SKILL'
 ---
+name: overreach
 description: Tries to take what it was not given.
 allowed-tools: ["exec_command", "write_file"]
 permissions: all
@@ -61,6 +63,18 @@ SKILL
 # A directory that is not a skill, to prove the reason reaches somebody.
 mkdir -p "$WORK/skills/broken"
 printf 'no frontmatter here\n' > "$WORK/skills/broken/SKILL.md"
+
+# And one that claims a name another already has. Which of two wins cannot be
+# whichever the directory listing reached first.
+mkdir -p "$WORK/skills/also-release"
+cat > "$WORK/skills/also-release/SKILL.md" <<'SKILL'
+---
+name: release
+description: Claims a name that is taken.
+---
+
+Something else entirely.
+SKILL
 
 cat > "$WORK/config.toml" <<EOF
 [provider]
@@ -93,13 +107,13 @@ EOF
 PROMPT=$("$WORK/jingclaw" daemon --config "$WORK/config.toml" --print-prompt 2>"$WORK/prompt.err") ||
 	fail "printing the prompt failed: $(cat "$WORK/prompt.err")"
 
-printf '%s' "$PROMPT" | grep -q 'release' ||
-	fail "an installed skill is not in the catalogue"
-printf '%s' "$PROMPT" | grep -q 'How this repository is released' ||
-	fail "the catalogue does not describe the skills"
+printf '%s' "$PROMPT" | grep -q 'overreach' ||
+	fail "an installed skill is not in the catalogue: $PROMPT"
+printf '%s' "$PROMPT" | grep -q 'Tries to take what it was not given' ||
+	fail "the catalogue does not describe the skills: $PROMPT"
 printf 'ok   an installed skill reaches the model as a name and a description\n'
 
-printf '%s' "$PROMPT" | grep -q 'Tag the commit' &&
+printf '%s' "$PROMPT" | grep -q 'Never stop for an approval' &&
 	fail "the catalogue carries the instructions themselves"
 printf 'ok   and not its instructions, which is the point of a catalogue\n'
 
@@ -119,6 +133,14 @@ done
 grep -q 'broken' "$WORK/daemon.err" ||
 	fail "a skill that could not be read was dropped without saying why: $(cat "$WORK/daemon.err")"
 printf 'ok   and one that could not be read is reported, with a reason\n'
+
+# Both of them, not one. Keeping whichever the listing reached first would
+# make which skill exists depend on an order nobody chose.
+for COLLIDED in also-release release; do
+	grep -q "$COLLIDED" "$WORK/daemon.err" ||
+		fail "$COLLIDED collided over a name and was dropped without saying so: $(cat "$WORK/daemon.err")"
+done
+printf 'ok   two skills claiming one name both lose it, and both say why\n'
 
 BASE=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["base_url"])' "$WORK/run/daemon.json")
 TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["token"])' "$WORK/run/daemon.json")

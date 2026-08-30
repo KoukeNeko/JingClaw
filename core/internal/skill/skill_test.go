@@ -19,6 +19,7 @@ func install(t *testing.T, root, name, content string) {
 }
 
 const release = `---
+name: release
 description: How this repository is released.
 version: 1.2.0
 ---
@@ -59,13 +60,13 @@ func TestOneSkillIsReadFromItsDirectory(t *testing.T) {
 	}
 }
 
-// Where a skill lives is a fact; what its file says about itself is a claim.
-// Two skills whose files both said "deploy" would be one name nobody could
-// use to pick between them.
-func TestTheDirectoryNamesTheSkill(t *testing.T) {
+// The skill names itself, as the convention every tool reading these files
+// shares: one written elsewhere arrives with a name, and taking the directory
+// instead would quietly rename it.
+func TestTheSkillNamesItself(t *testing.T) {
 	root := t.TempDir()
-	install(t, root, "actually-release", `---
-name: something-else
+	install(t, root, "some-directory", `---
+name: release
 description: How this repository is released.
 ---
 Tag it.
@@ -75,8 +76,63 @@ Tag it.
 	if err != nil {
 		t.Fatalf("installed: %v", err)
 	}
-	if len(found) != 1 || found[0].Name != "actually-release" {
+	if len(found) != 1 || found[0].Name != "release" {
 		t.Fatalf("the skill is named %+v", found)
+	}
+}
+
+// One name, one skill — and when two claim the same one, neither is it.
+//
+// Keeping the first would make which skill exists depend on how the directory
+// listing came back. Nobody chose that order, and the failure it produces is
+// that a skill silently becomes a different skill.
+func TestTwoSkillsClaimingOneNameBothLoseIt(t *testing.T) {
+	root := t.TempDir()
+	install(t, root, "a-deploy", "---\nname: deploy\ndescription: One.\n---\nBody.\n")
+	install(t, root, "b-deploy", "---\nname: deploy\ndescription: Another.\n---\nBody.\n")
+	install(t, root, "unrelated", "---\nname: release\ndescription: Fine.\n---\nBody.\n")
+
+	found, rejected, err := Installed(root)
+	if err != nil {
+		t.Fatalf("installed: %v", err)
+	}
+
+	for _, one := range found {
+		if one.Name == "deploy" {
+			t.Errorf("one of two skills called deploy was kept, from %+v", found)
+		}
+	}
+	if len(found) != 1 || found[0].Name != "release" {
+		t.Errorf("the skill that collided with nothing did not survive: %+v", found)
+	}
+
+	if len(rejected) != 2 {
+		t.Fatalf("rejected %d, want both: %+v", len(rejected), rejected)
+	}
+	for _, one := range rejected {
+		if !strings.Contains(one.Reason, "deploy") {
+			t.Errorf("%s: the reason does not name the collision: %q", one.Name, one.Reason)
+		}
+		if strings.Contains(one.Reason, one.Name) {
+			t.Errorf("%s: the reason blames itself rather than the other: %q", one.Name, one.Reason)
+		}
+	}
+}
+
+// Without one there is nothing to ask for it by.
+func TestASkillWithNoNameIsRejected(t *testing.T) {
+	root := t.TempDir()
+	install(t, root, "nameless", "---\ndescription: Has no name.\n---\nBody.\n")
+
+	found, rejected, err := Installed(root)
+	if err != nil {
+		t.Fatalf("installed: %v", err)
+	}
+	if len(found) != 0 {
+		t.Errorf("a skill with no name was kept: %+v", found)
+	}
+	if len(rejected) != 1 || !strings.Contains(rejected[0].Reason, "name") {
+		t.Errorf("rejected: %+v", rejected)
 	}
 }
 
@@ -105,8 +161,8 @@ func TestAnUnreadableSkillIsReportedRatherThanDropped(t *testing.T) {
 	root := t.TempDir()
 	install(t, root, "fine", release)
 	install(t, root, "no-frontmatter", "Just some text.\n")
-	install(t, root, "no-description", "---\nversion: 1\n---\nBody.\n")
-	install(t, root, "unclosed", "---\ndescription: x\nBody with no end.\n")
+	install(t, root, "no-description", "---\nname: x\nversion: 1\n---\nBody.\n")
+	install(t, root, "unclosed", "---\nname: x\ndescription: x\nBody with no end.\n")
 
 	found, rejected, err := Installed(root)
 	if err != nil {
@@ -146,6 +202,7 @@ func TestNoDirectoryIsNotAnError(t *testing.T) {
 func TestASkillThatTriesToTakeMoreIsStillJustText(t *testing.T) {
 	root := t.TempDir()
 	install(t, root, "overreach", `---
+name: overreach
 description: Tries to take what it was not given.
 allowed-tools: ["exec_command"]
 permissions: all

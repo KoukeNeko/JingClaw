@@ -34,11 +34,16 @@ const FileName = "SKILL.md"
 
 // Skill is one installed pack, as it is on disk.
 type Skill struct {
-	// Name is the directory's name, not the frontmatter's.
+	// Name is what the skill calls itself, and what skill_load is given.
 	//
-	// Where a skill lives is a fact; what it says about itself is a claim.
-	// Two skills whose files both said "deploy" would be one skill with a
-	// name nobody could use to pick between them.
+	// From the frontmatter rather than the directory, because that is where
+	// the convention every tool reading these files shares puts it: a skill
+	// written for another one arrives with a name, and taking the directory
+	// instead would quietly rename it.
+	//
+	// Two skills claiming one name is a real problem and is handled where
+	// every other unreadable skill is — the second is rejected, with the
+	// reason, rather than one of them silently winning.
 	Name string
 
 	// Description is what the model sees in the catalogue, and the only part
@@ -68,6 +73,7 @@ type Skill struct {
 // how it is described; there is nothing that could change what the agent is
 // allowed to do, because there is nowhere for such a field to be honoured.
 type frontmatter struct {
+	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
 	Version     string `yaml:"version"`
 }
@@ -95,7 +101,8 @@ func Installed(root string) ([]Skill, []Rejected, error) {
 	}
 
 	var (
-		found    []Skill
+		read     []Skill
+		from     []string
 		rejected []Rejected
 	)
 
@@ -107,6 +114,31 @@ func Installed(root string) ([]Skill, []Rejected, error) {
 		one, err := Read(filepath.Join(root, entry.Name()))
 		if err != nil {
 			rejected = append(rejected, Rejected{Name: entry.Name(), Reason: err.Error()})
+			continue
+		}
+		read = append(read, one)
+		from = append(from, entry.Name())
+	}
+
+	// One name, one skill — and when two claim the same one, neither is it.
+	//
+	// Keeping the first would make which skill exists depend on how the
+	// directory listing came back, which is not something anybody chose and
+	// is not stable enough to debug. Both are refused, and both say what they
+	// collided with, so the fix is obvious and is the operator's.
+	claimants := make(map[string][]string, len(read))
+	for index, one := range read {
+		claimants[one.Name] = append(claimants[one.Name], from[index])
+	}
+
+	var found []Skill
+	for index, one := range read {
+		if others := claimants[one.Name]; len(others) > 1 {
+			rejected = append(rejected, Rejected{
+				Name: from[index],
+				Reason: fmt.Sprintf("calls itself %q, and so does %s; rename one of them",
+					one.Name, strings.Join(without(others, from[index]), ", ")),
+			})
 			continue
 		}
 		found = append(found, one)
@@ -138,6 +170,10 @@ func Read(dir string) (Skill, error) {
 	if err := yaml.Unmarshal([]byte(front), &declared); err != nil {
 		return Skill{}, fmt.Errorf("frontmatter is not readable: %w", err)
 	}
+	if strings.TrimSpace(declared.Name) == "" {
+		// Without one there is nothing to ask for it by.
+		return Skill{}, fmt.Errorf("no name")
+	}
 	if strings.TrimSpace(declared.Description) == "" {
 		// Without one there is nothing to put in the catalogue, and a skill
 		// the model cannot tell apart from the others is a skill it will
@@ -148,7 +184,7 @@ func Read(dir string) (Skill, error) {
 	sum := sha256.Sum256(raw)
 
 	return Skill{
-		Name:        filepath.Base(dir),
+		Name:        strings.TrimSpace(declared.Name),
 		Description: strings.TrimSpace(declared.Description),
 		Version:     strings.TrimSpace(declared.Version),
 		Body:        strings.TrimSpace(body),
@@ -183,4 +219,15 @@ func split(source string) (front, body string, err error) {
 	after := rest[end+1+len(fence):]
 
 	return front, strings.TrimPrefix(after, "\n"), nil
+}
+
+// without is the list less one of its members.
+func without(all []string, one string) []string {
+	rest := make([]string, 0, len(all)-1)
+	for _, each := range all {
+		if each != one {
+			rest = append(rest, each)
+		}
+	}
+	return rest
 }
