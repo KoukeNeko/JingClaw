@@ -331,8 +331,15 @@ type Run struct {
 	DeliveryTargets []*DeliveryTarget      `protobuf:"bytes,5,rep,name=delivery_targets,json=deliveryTargets,proto3" json:"delivery_targets,omitempty"`
 	CreatedAt       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	FinishedAt      *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Kind is empty for a conversation's own run and "worker" for one a tool
+	// started to answer a bounded question. A client that shows every run in a
+	// session without looking at this will show the searching as well as the
+	// conversation.
+	Kind string `protobuf:"bytes,8,opt,name=kind,proto3" json:"kind,omitempty"`
+	// Parent run, set when kind is not empty. Whose question this was.
+	ParentRunId   string `protobuf:"bytes,9,opt,name=parent_run_id,json=parentRunId,proto3" json:"parent_run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Run) Reset() {
@@ -412,6 +419,20 @@ func (x *Run) GetFinishedAt() *timestamppb.Timestamp {
 		return x.FinishedAt
 	}
 	return nil
+}
+
+func (x *Run) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *Run) GetParentRunId() string {
+	if x != nil {
+		return x.ParentRunId
+	}
+	return ""
 }
 
 type CreateSessionRequest struct {
@@ -4184,7 +4205,7 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"updated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x14\n" +
-	"\x05model\x18\x05 \x01(\tR\x05model\"\xec\x02\n" +
+	"\x05model\x18\x05 \x01(\tR\x05model\"\xa4\x03\n" +
 	"\x03Run\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -4195,7 +4216,9 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12;\n" +
 	"\vfinished_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"finishedAt\"b\n" +
+	"finishedAt\x12\x12\n" +
+	"\x04kind\x18\b \x01(\tR\x04kind\x12\"\n" +
+	"\rparent_run_id\x18\t \x01(\tR\vparentRunId\"b\n" +
 	"\x14CreateSessionRequest\x124\n" +
 	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\"O\n" +

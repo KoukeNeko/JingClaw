@@ -9,7 +9,8 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
 
-const runColumns = `id, session_id, status, origin, delivery_targets, created_at, finished_at`
+const runColumns = `id, session_id, status, origin, delivery_targets, created_at, finished_at,
+	kind, parent_run_id`
 
 func (s *Store) CreateRun(ctx context.Context, run domain.Run) error {
 	origin, err := storage.EncodeOrigin(run.Origin)
@@ -22,10 +23,11 @@ func (s *Store) CreateRun(ctx context.Context, run domain.Run) error {
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO runs (`+runColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO runs (`+runColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(run.ID), string(run.SessionID), string(run.Status),
 		string(origin), string(targets),
 		run.CreatedAt.UnixNano(), nullableTime(run.FinishedAt),
+		string(run.Kind), string(run.ParentRunID),
 	)
 	if isUniqueViolation(err) {
 		return storage.ErrDuplicateRun
@@ -111,7 +113,8 @@ func scanRun(row scanner) (domain.Run, error) {
 		finished   sql.NullInt64
 	)
 
-	if err := row.Scan(&run.ID, &run.SessionID, &run.Status, &originRaw, &targetsRaw, &created, &finished); err != nil {
+	if err := row.Scan(&run.ID, &run.SessionID, &run.Status, &originRaw, &targetsRaw,
+		&created, &finished, &run.Kind, &run.ParentRunID); err != nil {
 		return domain.Run{}, err
 	}
 

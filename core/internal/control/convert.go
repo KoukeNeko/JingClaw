@@ -179,6 +179,9 @@ func runToProto(r domain.Run) *controlv1.Run {
 		Status:    runStatusToProto(r.Status),
 		Origin:    originToProto(r.Origin),
 		CreatedAt: timestamppb.New(r.CreatedAt),
+
+		Kind:        string(r.Kind),
+		ParentRunId: string(r.ParentRunID),
 	}
 	if r.FinishedAt != nil {
 		converted.FinishedAt = timestamppb.New(*r.FinishedAt)

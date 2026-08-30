@@ -31,6 +31,15 @@ message Run {
 
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp finished_at = 7;
+
+  // Kind is empty for a conversation's own run and "worker" for one a tool
+  // started to answer a bounded question. A client that shows every run in a
+  // session without looking at this will show the searching as well as the
+  // conversation.
+  string kind = 8;
+
+  // Parent run, set when kind is not empty. Whose question this was.
+  string parent_run_id = 9;
 }
 
 message CreateSessionRequest {

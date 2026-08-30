@@ -199,7 +199,35 @@ type Run struct {
 	DeliveryTargets []DeliveryTarget
 	CreatedAt       time.Time
 	FinishedAt      *time.Time
+
+	// Kind says whether this run is the conversation or work done inside it.
+	Kind RunKind
+
+	// ParentRunID is the run that asked for this one, for a worker.
+	//
+	// Recorded rather than inferred, because after a crash the question is
+	// which run was waiting on which — and the alternative is guessing it
+	// from a parent's unfinished tool call.
+	ParentRunID RunID
 }
+
+// RunKind separates a turn of the conversation from work done inside one.
+type RunKind string
+
+const (
+	// RunConversation is a turn somebody asked for. Empty means this, so
+	// every run written before the distinction existed is one.
+	RunConversation RunKind = ""
+
+	// RunWorker is a bounded piece of work a run delegated.
+	//
+	// Its own run rather than more events in the parent's, because a run is
+	// one agent trajectory and two of them in one would make resuming, usage
+	// and status all branch-aware. And its events are deliberately not part
+	// of the conversation: keeping a search's hundred tool results out of
+	// what the model has to read again is the whole reason to delegate it.
+	RunWorker RunKind = "worker"
+)
 
 // Turn is one thing somebody said, and where the answer is owed.
 //
