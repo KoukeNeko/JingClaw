@@ -15,6 +15,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	"github.com/KoukeNeko/JingClaw/core/internal/gateway/render/tableimage"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,6 +68,10 @@ type Config struct {
 	// is well under what Discord accepts.
 	MaxAttachmentBytes int
 
+	// TablesAsImages draws a table rather than writing it out in a code
+	// block. See config.Discord for what it costs.
+	TablesAsImages bool
+
 	Logger *slog.Logger
 }
 
@@ -80,6 +86,10 @@ type Adapter struct {
 	decider Decider
 
 	client *bot.Client
+
+	// fonts overrides where the typeface for drawing tables comes from. Nil
+	// is the shared one, found in the usual places.
+	fonts func() (tableimage.Fonts, error)
 
 	// selfID is written by the Ready handler and read by the message handler,
 	// which run on different goroutines.

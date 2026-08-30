@@ -104,6 +104,21 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 		return a.postPartialAnswer(channelID, answer, body)
 	}
 
+	// A table drawn rather than written out, when this deployment asked for
+	// that. Before splitting, because it produces its own messages: an answer
+	// with a table in the middle is what was said, the picture, and what was
+	// said after, in that order.
+	//
+	// It reports whether it handled the answer. An answer with no table in it
+	// is handled the ordinary way, so turning this on changes nothing about
+	// every answer that has none.
+	if a.config.TablesAsImages {
+		posted, handled, err := a.postWithTablesDrawn(channelID, dispatch)
+		if handled || err != nil {
+			return posted, err
+		}
+	}
+
 	segments := render.Split(body, discordStyle)
 
 	// Past a few messages, an answer stops being something to read in a

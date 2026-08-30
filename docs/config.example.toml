@@ -176,6 +176,11 @@ token_file = "discord.token"
 account_id = "main"
 # Past this many, an answer is sent as a file instead.
 # max_messages = 3
+# Draw a table as a picture rather than writing it out in a code block.
+# Aligned, because the layout is decided here rather than by whatever font the
+# reader's client uses — but an answer with a table in it then arrives as
+# several messages, and a picture cannot be selected or searched.
+# tables_as_images = false
 # max_attachment_bytes = 4194304
 
 # Rooms other people can type in. Applied at startup; removing one does not

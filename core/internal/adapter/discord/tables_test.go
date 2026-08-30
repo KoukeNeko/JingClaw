@@ -1,142 +1,243 @@
 package discord
 
 import (
+	"bytes"
 	"encoding/json"
+	"image/png"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
-	"unicode"
+
+	"github.com/disgoorg/disgo"
+	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/rest"
 
 	jcgateway "github.com/KoukeNeko/JingClaw/core/internal/gateway"
-	"github.com/KoukeNeko/JingClaw/core/internal/gateway/render"
+	"github.com/KoukeNeko/JingClaw/core/internal/gateway/render/tableimage"
 )
 
-// Rendered against this adapter's own style, not a copy of it in a test.
+// sent is what the stub was asked to post, in order.
+type sent struct {
+	Content string
+	File    []byte
+}
+
+// stubDiscord stands in for the REST API and records what it is given.
 //
-// A copy drifts: the fence, the width budget and the emphasis markers are
-// configuration, and a test carrying its own version of them can pass while
-// what Discord receives is something else.
-func post(t *testing.T, text string) string {
+// The real posting path rather than a description of it: what is being
+// checked is that an answer with a table in the middle arrives as three
+// messages in the right order, and that is a fact about what reaches the
+// platform.
+func stubDiscord(t *testing.T) (*Adapter, *[]sent) {
 	t.Helper()
 
+	var (
+		mu     sync.Mutex
+		posted []sent
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record := sent{}
+
+		if strings.HasPrefix(r.Header.Get("content-type"), "multipart/") {
+			if err := r.ParseMultipartForm(8 << 20); err != nil {
+				t.Errorf("stub: read multipart: %v", err)
+			}
+			for _, headers := range r.MultipartForm.File {
+				for _, header := range headers {
+					file, err := header.Open()
+					if err != nil {
+						t.Errorf("stub: open uploaded file: %v", err)
+						continue
+					}
+					var body bytes.Buffer
+					_, _ = body.ReadFrom(file)
+					_ = file.Close()
+					record.File = body.Bytes()
+				}
+			}
+			if payload := r.MultipartForm.Value["payload_json"]; len(payload) > 0 {
+				var message struct {
+					Content string `json:"content"`
+				}
+				_ = json.Unmarshal([]byte(payload[0]), &message)
+				record.Content = message.Content
+			}
+		} else {
+			var message struct {
+				Content string `json:"content"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&message)
+			record.Content = message.Content
+		}
+
+		mu.Lock()
+		posted = append(posted, record)
+		mu.Unlock()
+
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"123456789012345678","channel_id":"1"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	// A token shaped the way the library expects: its first part is the
+	// application id in base64, and the client refuses to build without one.
+	client, err := disgo.New("MTIzNDU2Nzg5MDEyMzQ1Njc4.stub.stub",
+		bot.WithRestClientConfigOpts(rest.WithURL(server.URL)),
+	)
+	if err != nil {
+		t.Fatalf("build a client: %v", err)
+	}
+
+	return &Adapter{
+		client: client,
+		config: Config{TablesAsImages: true, Logger: slog.Default()},
+	}, &posted
+}
+
+func answerWith(t *testing.T, text string) jcgateway.Dispatch {
+	t.Helper()
 	payload, err := json.Marshal(jcgateway.MessagePayload{Text: text})
 	if err != nil {
-		t.Fatalf("encode: %v", err)
+		t.Fatal(err)
 	}
-
-	out, err := render.Dispatch(jcgateway.Dispatch{
+	return jcgateway.Dispatch{
 		Kind:    jcgateway.DispatchMessage,
 		Payload: string(payload),
-	}, discordStyle)
+		Target:  jcgateway.ConversationRef{ChannelID: "987654321098765432"},
+	}
+}
+
+const answerWithATable = "看一下這個：\n\n" +
+	"| 項目 | 數據 |\n|---|---|\n| 融資 | 200 萬 |\n\n" +
+	"所以他們還在早期。"
+
+// The shape the operator asked for: what was said, the picture, what was said
+// after — three messages, in that order.
+func TestATableArrivesBetweenTheTextAroundIt(t *testing.T) {
+	if _, err := tableimage.Load(nil); err != nil {
+		t.Skipf("no font with Chinese glyphs on this machine: %v", err)
+	}
+
+	adapter, posted := stubDiscord(t)
+
+	if _, err := adapter.Post(t.Context(), answerWith(t, answerWithATable)); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+
+	if len(*posted) != 3 {
+		t.Fatalf("posted %d messages, want 3: %+v", len(*posted), *posted)
+	}
+
+	first, middle, last := (*posted)[0], (*posted)[1], (*posted)[2]
+
+	if !strings.Contains(first.Content, "看一下這個") {
+		t.Errorf("the first message is %q", first.Content)
+	}
+	if len(first.File) != 0 {
+		t.Error("the first message carried a file")
+	}
+
+	if len(middle.File) == 0 {
+		t.Fatal("the middle message carried no picture")
+	}
+	if strings.Contains(middle.Content, "項目") {
+		t.Errorf("the table was also written out: %q", middle.Content)
+	}
+
+	if !strings.Contains(last.Content, "所以他們還在早期") {
+		t.Errorf("the last message is %q", last.Content)
+	}
+}
+
+func TestWhatIsUploadedIsAPicture(t *testing.T) {
+	if _, err := tableimage.Load(nil); err != nil {
+		t.Skipf("no font: %v", err)
+	}
+
+	adapter, posted := stubDiscord(t)
+	if _, err := adapter.Post(t.Context(), answerWith(t, answerWithATable)); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+
+	picture, err := png.Decode(bytes.NewReader((*posted)[1].File))
 	if err != nil {
-		t.Fatalf("render: %v", err)
+		t.Fatalf("what was uploaded is not a picture: %v", err)
 	}
-	return out
-}
-
-// displayWidth is what "the columns line up" means once the text is Chinese:
-// the same number of characters is a different number of columns.
-func displayWidth(text string) int {
-	total := 0
-	for _, r := range text {
-		if unicode.Is(unicode.Mn, r) {
-			continue
-		}
-		if r >= 0x1100 && (r <= 0x115F ||
-			(r >= 0x2E80 && r <= 0xA4CF) ||
-			(r >= 0xAC00 && r <= 0xD7A3) ||
-			(r >= 0xF900 && r <= 0xFAFF) ||
-			(r >= 0xFE30 && r <= 0xFE6F) ||
-			(r >= 0xFF00 && r <= 0xFF60) ||
-			(r >= 0xFFE0 && r <= 0xFFE6)) {
-			total += 2
-			continue
-		}
-		total++
-	}
-	return total
-}
-
-// Discord renders no table syntax at all, so a delimiter row is the giveaway:
-// nobody has ever wanted to read one.
-func TestNoTableSyntaxReachesDiscord(t *testing.T) {
-	got := post(t, "報告：\n\n"+
-		"| 舞台 | 台灣譯名 | 匪區誤用 |\n"+
-		"|:---|:---|:---|\n"+
-		"| 故事舞台 (Kivotos) | 奇普托斯 | 基沃托斯 |\n"+
-		"| 對策委員會 | 白子 (Shiroko) | 砂狼白子 |\n")
-
-	for _, syntax := range []string{"|:---", "|---", "---|"} {
-		if strings.Contains(got, syntax) {
-			t.Errorf("%q reached the channel:\n%s", syntax, got)
-		}
+	if picture.Bounds().Dx() == 0 || picture.Bounds().Dy() == 0 {
+		t.Error("the picture has no size")
 	}
 }
 
-// And the columns have to line up once it is a block, or it is a worse
-// version of the rows it was made from.
-func TestChineseColumnsLineUpOnDiscord(t *testing.T) {
-	got := post(t, "| 舞台 | 台灣譯名 |\n|---|---|\n"+
-		"| 故事舞台 (Kivotos) | 奇普托斯 |\n"+
-		"| 對策委員會 | 白子 |\n")
+// An answer with no table takes the ordinary path, so turning this on changes
+// nothing about every answer that has none.
+func TestAnAnswerWithNoTableIsOneMessage(t *testing.T) {
+	adapter, posted := stubDiscord(t)
 
-	if !strings.Contains(got, discordStyle.Fence) {
-		t.Fatalf("the table did not become a block:\n%s", got)
+	if _, err := adapter.Post(t.Context(), answerWith(t, "just an answer")); err != nil {
+		t.Fatalf("post: %v", err)
 	}
 
-	var widths []int
-	for _, line := range strings.Split(got, "\n") {
-		cut := strings.LastIndex(line, "│")
-		if cut < 0 {
-			continue
-		}
-		widths = append(widths, displayWidth(line[:cut]))
+	if len(*posted) != 1 {
+		t.Fatalf("posted %d messages, want 1", len(*posted))
 	}
-	if len(widths) < 3 {
-		t.Fatalf("%d aligned rows, want at least 3:\n%s", len(widths), got)
-	}
-	for _, width := range widths[1:] {
-		if width != widths[0] {
-			t.Errorf("the columns do not line up (%v):\n%s", widths, got)
-			break
-		}
+	if (*posted)[0].Content != "just an answer" {
+		t.Errorf("the message is %q", (*posted)[0].Content)
 	}
 }
 
-// The width budget is this adapter's, so a table that exceeds it must stop
-// being a grid rather than wrapping in the window.
-func TestATableWiderThanTheBudgetIsNotABlock(t *testing.T) {
-	wide := strings.Repeat("x", discordStyle.TableColumns)
-	got := post(t, "| one | two |\n|---|---|\n| "+wide+" | "+wide+" |\n")
+// Off, the answer is what it always was: one message with the table written
+// out in it.
+func TestWithTheSettingOffTheTableIsWrittenOut(t *testing.T) {
+	adapter, posted := stubDiscord(t)
+	adapter.config.TablesAsImages = false
 
-	if strings.Contains(got, discordStyle.Fence) {
-		t.Errorf("a table twice the budget was still made a block:\n%s", got)
+	if _, err := adapter.Post(t.Context(), answerWith(t, answerWithATable)); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+
+	if len(*posted) != 1 {
+		t.Fatalf("posted %d messages, want 1: %+v", len(*posted), *posted)
+	}
+	if !strings.Contains((*posted)[0].Content, "項目") {
+		t.Errorf("the table is not in the message: %q", (*posted)[0].Content)
+	}
+	if len((*posted)[0].File) != 0 {
+		t.Error("a picture was uploaded with the setting off")
 	}
 }
 
-// A table longer than a message must not be posted as two messages.
-//
-// Cutting a preformatted block closes the fence and reopens it, so one block
-// becomes two — and a table cut two rows from its end leaves a second message
-// holding nothing but its bottom rule. That is what a channel actually showed:
-// a table, then a lone line of equals signs under it.
-func TestALongBlockGoesAsAFileRatherThanInPieces(t *testing.T) {
-	var body strings.Builder
-	body.WriteString("報告江主席：\n\n```\n")
-	body.WriteString(strings.Repeat("=", 60) + "\n")
-	for i := 0; i < 40; i++ {
-		body.WriteString("Row 台灣繁中官方譯名   簡中誤用   備註說明欄位\n")
-	}
-	body.WriteString(strings.Repeat("=", 60) + "\n```\n")
-
-	text := body.String()
-	if !render.SplitsAFence(text, discordStyle) {
-		t.Fatal("this adapter's own limits do not split the block, so the case is not real")
+// A machine with no typeface that can draw the text. The answer still has to
+// arrive: what this feature may do when it cannot work is look like it did
+// before, and what it may never do is lose the answer.
+func TestWithNoFontTheAnswerStillArrives(t *testing.T) {
+	adapter, posted := stubDiscord(t)
+	adapter.fonts = func() (tableimage.Fonts, error) {
+		return tableimage.Load([]string{"/nowhere/no-such-font.ttc"})
 	}
 
-	// Which is what the posting path asks before choosing an attachment.
-	segments := render.Split(text, discordStyle)
-	if !shouldSendAsFile(jcgateway.DispatchMessage, len(segments), defaultMaxMessages) &&
-		!render.SplitsAFence(text, discordStyle) {
-		t.Error("a block that cannot survive splitting would still be posted as messages")
+	if _, err := adapter.Post(t.Context(), answerWith(t, answerWithATable)); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+
+	if len(*posted) == 0 {
+		t.Fatal("nothing arrived at all")
+	}
+
+	whole := ""
+	for _, message := range *posted {
+		if len(message.File) != 0 {
+			t.Error("a picture was uploaded with no font to draw it")
+		}
+		whole += message.Content
+	}
+
+	for _, expected := range []string{"看一下這個", "項目", "融資", "所以他們還在早期"} {
+		if !strings.Contains(whole, expected) {
+			t.Errorf("%q is missing from what arrived:\n%s", expected, whole)
+		}
 	}
 }

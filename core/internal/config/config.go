@@ -692,6 +692,20 @@ type Discord struct {
 	// would accept: the point is to be readable, not to be as large as
 	// possible.
 	MaxAttachmentBytes int `koanf:"max_attachment_bytes"`
+
+	// TablesAsImages draws a table as a picture instead of writing it out in
+	// a code block.
+	//
+	// Off by default, because it changes the shape of an answer rather than
+	// its appearance: a picture cannot sit inside a message next to text, so
+	// an answer with a table in the middle arrives as three messages instead
+	// of one. It also cannot be selected, searched, or read aloud.
+	//
+	// What it buys is a table that is actually aligned. A code block is laid
+	// out by whatever font the client happens to use, and no amount of
+	// counting columns here makes that font agree — which is why a table of
+	// Chinese and Latin text arrives bent however carefully it was measured.
+	TablesAsImages bool `koanf:"tables_as_images"`
 }
 
 // Telegram is what the Telegram adapter needs.
@@ -1693,6 +1707,11 @@ token_file = "discord.token"
 account_id = "main"
 # Past this many, an answer is sent as a file instead.
 # max_messages = 3
+# Draw a table as a picture rather than writing it out in a code block.
+# Aligned, because the layout is decided here rather than by whatever font the
+# reader's client uses — but an answer with a table in it then arrives as
+# several messages, and a picture cannot be selected or searched.
+# tables_as_images = false
 # max_attachment_bytes = 4194304
 
 # Rooms other people can type in. Applied at startup; removing one does not

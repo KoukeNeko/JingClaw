@@ -64,6 +64,7 @@ func newAdapter(cfg config.Config, into sink, decisions decider, logger *slog.Lo
 			AccountID:          cfg.Gateway.Selected().AccountID,
 			MaxMessages:        cfg.Gateway.Discord.MaxMessages,
 			MaxAttachmentBytes: cfg.Gateway.Discord.MaxAttachmentBytes,
+			TablesAsImages:     cfg.Gateway.Discord.TablesAsImages,
 			Logger:             logger,
 		}, into, decisions), nil
 

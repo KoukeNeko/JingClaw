@@ -228,3 +228,10 @@ func renderTable(table Table, style Style) string {
 	}
 	return block
 }
+
+// TableText writes a table out the way a platform without pictures gets it.
+//
+// Exported for the one caller that draws them and needs a way back: a table
+// that would not draw still has to appear, and an answer with a gap where one
+// was is worse than an answer with an unaligned one in it.
+func TableText(table Table, style Style) string { return renderTable(table, style) }
