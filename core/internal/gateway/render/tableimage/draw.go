@@ -74,6 +74,10 @@ func Draw(table Table, fonts Fonts) ([]byte, error) {
 		return nil, fmt.Errorf("tableimage: nothing to draw")
 	}
 
+	// Before anything is measured, because measuring and drawing have to see
+	// the same string.
+	table = drawableTable(table, fonts)
+
 	laid := layout(table, fonts)
 	picture := image.NewRGBA(image.Rect(0, 0, laid.width, laid.height))
 	draw.Draw(picture, picture.Bounds(), image.NewUniform(background), image.Point{}, draw.Src)
@@ -85,6 +89,25 @@ func Draw(table Table, fonts Fonts) ([]byte, error) {
 		return nil, fmt.Errorf("tableimage: encode: %w", err)
 	}
 	return out.Bytes(), nil
+}
+
+// drawableTable is the table with everything the typeface cannot draw
+// replaced.
+func drawableTable(table Table, fonts Fonts) Table {
+	cleaned := Table{
+		Header: make([]string, len(table.Header)),
+		Rows:   make([][]string, len(table.Rows)),
+	}
+	for index, text := range table.Header {
+		cleaned.Header[index] = drawable(fonts.Header, text)
+	}
+	for row, cells := range table.Rows {
+		cleaned.Rows[row] = make([]string, len(cells))
+		for index, text := range cells {
+			cleaned.Rows[row][index] = drawable(fonts.Body, text)
+		}
+	}
+	return cleaned
 }
 
 // cell is one drawn box: its text already broken into the lines it will take.
