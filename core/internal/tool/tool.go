@@ -129,6 +129,23 @@ type Capabilities struct {
 	// hostile page and then writes down what it says has laundered an
 	// instruction into durable memory, and nothing that looks only at the
 	// turn's origin can see it happen.
+	//
+	// Known hole, and the argument above is where it comes from. "A program
+	// the operator chose to run" is true of the program and not of its
+	// output: the operator chose to run a command that asks a web service a
+	// question, and what comes back was written by that service. So a run
+	// started from the console can shell out to a network-shaped command and
+	// write what it read into a memory that later carries standing authority,
+	// which is the thing this field exists to prevent. Runs from a gateway
+	// are already untrusted by origin, so the exposed path is the local one.
+	//
+	// Declaring it on exec_command would close it and cost too much: every
+	// run that listed a directory would stop being able to remember
+	// anything. The fix is to separate what a result is (provenance) from
+	// whether it may instruct (authority) and give ordinary tool results no
+	// authority at all — see docs/research/14-authority-and-provenance.md.
+	// Recorded here rather than only there because this comment is what the
+	// next person will read.
 	ForeignContent bool
 }
 
