@@ -646,3 +646,52 @@ reproduction does not trigger: an AND-OR list whose *first* command fails is
 exempt, so `[ -n "" ] && kill` is fine and `kill <dead pid>` is not. The first
 version of the diagnosis was wrong for exactly that reason, and only running it
 showed so.
+
+---
+
+## Delegated search: it works, and models do not reach for it
+
+Recorded because the next person to look at `investigate` will otherwise
+rediscover this, and because two of the four things below were found only by
+running a real model against it.
+
+**Two bugs, one of them mine and invisible.**
+
+20. An edit to the sentence above `InputSchema` took the schema with it. A tool
+    with no schema is not merely unvalidated: the schema is also what the model
+    is shown, so its arguments have to be guessed. gemma4 called `investigate`
+    four times with a field named `prompt`, was told each time that it needed a
+    question — without being told what a question was called — and gave up and
+    did the work itself. Nothing failed loudly. The registry compiles schemas at
+    registration precisely so a broken one is caught at startup, and an absent
+    one is not a broken one
+21. The worker was filtered out of its own conversation, and separately could
+    see the whole of the parent's. The first made it re-read its opening
+    question every turn until it ran out of turns; the second meant the fresh
+    context it exists for never happened. Both were in one filter that said
+    "not a worker's events" where it had to say "only this run's, if this run
+    is a worker"
+
+**And a finding that is not a bug.**
+
+Asked outright — "use investigate to find out X" — it works end to end: the
+worker runs, greps, reads two ranges, and answers with evidence and line
+numbers, and only that answer reaches the conversation.
+
+Nothing reaches for it on its own. Four sessions across gemma4:31b and
+nemotron-3-super, on workspaces of nine files and of 264, including a question
+whose answer is exactly a conclusion — which packages append to the event log
+and which only read it. The conversation made thirteen tool calls itself and
+delegated none of them.
+
+Two rewrites did not move it. The first described the cost — "when finding out
+would take many reads and greps" — which is a thing a model can only know
+afterwards: it starts with one glob, then one read, and there is never a moment
+where it decides the search is long. The second described the shape of question
+instead, which it can recognise upfront. Neither changed the behaviour.
+
+The tool is kept. It is correct, it is cheap, and it is reachable by asking.
+What is not established is that a model will find its way there by itself, and
+no amount of wording in the prompt has demonstrated otherwise. Worth retrying
+against a stronger model — `glm-5.3` and `glm-5.3-flash` both refused for want
+of a subscription, so the strongest thing tested here is a 31B.
