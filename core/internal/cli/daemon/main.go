@@ -115,8 +115,13 @@ func run(args []string) error {
 	// do I put this?" is a question the program can answer by putting it there.
 	// Only the default location, and only when it is empty: a file the operator
 	// named themselves and that is missing is a mistake, not an invitation.
+	//
+	// Not for --print-paths, which is how somebody asks a machine what a
+	// deployment there would look like. A command whose whole purpose is to
+	// report can be run on a machine to find out where things are; creating
+	// the first of them while answering is not reporting.
 	var createdConfig bool
-	if *configPath == "" {
+	if *configPath == "" && !*printPaths {
 		var err error
 		if _, createdConfig, err = config.EnsureFile(); err != nil {
 			return err

@@ -105,3 +105,24 @@ func TestAnExplicitPathStillWins(t *testing.T) {
 		t.Errorf("the database is at %s, want it under the configured %s", database, elsewhere)
 	}
 }
+
+// Asking where a deployment keeps things is a question, not the first step of
+// setting one up. Somebody running this on a machine to find out what is there
+// should be able to run it again and get the same answer.
+func TestAskingWhereThingsAreCreatesNothing(t *testing.T) {
+	root := filepath.Join(t.TempDir(), home.DirName)
+	t.Setenv(home.EnvVar, root)
+
+	if err := run([]string{"--print-paths"}); err != nil {
+		t.Fatalf("--print-paths: %v", err)
+	}
+
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		listing, _ := os.ReadDir(root)
+		names := make([]string, 0, len(listing))
+		for _, entry := range listing {
+			names = append(names, entry.Name())
+		}
+		t.Errorf("asking created %s, containing %v", root, names)
+	}
+}
