@@ -34,14 +34,17 @@ type Investigate struct {
 func (t *Investigate) Spec() tool.Spec {
 	return tool.Spec{
 		Name: "investigate",
-		Description: "Ask one bounded question about the workspace and get an answer back, " +
-			"without the searching filling this conversation. Use it when finding out would " +
-			"take many reads and greps and only the conclusion matters: which file defines " +
-			"something, how a thing is wired, whether a pattern appears anywhere. " +
-			"It starts from nothing: everything it needs must be in the question, so ask " +
-			"one that stands alone. It can only read — it cannot run, write or fetch, and " +
-			"it cannot delegate further. If the answer needs what was said earlier in this " +
-			"conversation, find it yourself instead.",
+		Description: "Hand one question about the workspace to a separate search, " +
+			"and get back its answer without the looking filling this conversation.\n\n" +
+			"Use it for a question whose answer is a conclusion rather than a file: " +
+			"which functions do X, where is Y defined, does Z appear anywhere, what " +
+			"calls into this package. If answering would mean opening several files to " +
+			"find out something you could state in a sentence, this is the tool.\n\n" +
+			"Do not use it to read a file you have already located — read_file is for " +
+			"that — or for anything needing what was said earlier here. It starts from " +
+			"nothing: it cannot see this conversation, so the question must stand alone " +
+			"and name the paths to start from if you know them. It can only read, and " +
+			"it cannot delegate again.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -53,6 +56,7 @@ func (t *Investigate) Spec() tool.Spec {
   "required": ["question"],
   "additionalProperties": false
 }`),
+
 		// It reads, and everything it can reach reads. Nothing it does needs
 		// a decision from anybody, which is the point of the tools it was
 		// given rather than a promise made here.
