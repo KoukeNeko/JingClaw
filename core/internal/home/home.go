@@ -6,9 +6,10 @@
 // workspace wherever the daemon happened to be started. Each is defensible and
 // together they are impossible to hold in your head, back up, or move.
 //
-// A .JingClaw directory collects them. When one exists it decides every path;
-// when none does, the platform locations are used exactly as before, so
-// nothing that already works changes.
+// One directory collects them, and it is always the same one. Where somebody
+// happens to be standing when they type the name does not take part: a daemon
+// whose database depended on that is one that quietly becomes two, and then
+// the settings you edited are not the settings that ran.
 package home
 
 import (
@@ -36,7 +37,7 @@ const (
 
 // Dir is a resolved JingClaw directory.
 type Dir struct {
-	// Root is the .JingClaw directory itself.
+	// Root is the directory itself.
 	Root string
 }
 

@@ -626,11 +626,11 @@ func orNone(path string) string {
 	return path
 }
 
-// initialise creates a .JingClaw directory in the working directory.
+// initialise creates this deployment's directory and stops.
 //
-// Explicit rather than automatic. A daemon that made one wherever it was
-// started would leave them scattered through a filesystem, which is the
-// problem this exists to solve rather than a way to solve it.
+// For setting one up somewhere other than the default, which means the
+// environment named it: creating one is not a question about the working
+// directory any more than finding one is.
 func initialise() error {
 	// Where a deployment lives is not a question about this directory, so
 	// neither is creating one. The environment can name somewhere else; the
