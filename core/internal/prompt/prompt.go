@@ -59,7 +59,7 @@ type StandingInstructions struct {
 // how it works come from the standing-instruction files below, which are the
 // only place they are said: a settings-shaped copy of the same thing is one
 // somebody edits while the file is what runs.
-func Build(env Environment, standing []StandingInstructions) []Layer {
+func Build(env Environment, standing []StandingInstructions, skills string) []Layer {
 	layers := []Layer{
 		{Name: "identity", Source: "built-in", Text: identity},
 		{Name: "environment", Source: "runtime", Text: environment(env)},
@@ -77,6 +77,17 @@ func Build(env Environment, standing []StandingInstructions) []Layer {
 			// Attributed so the model can say which file asked for something,
 			// and so a reader of the assembled prompt can find it.
 			Text: fmt.Sprintf("From %s:\n\n%s", file.Path, strings.TrimSpace(file.Text)),
+		})
+	}
+
+	// Last, and lowest. A catalogue says what may be asked for, which is the
+	// least authority anything in this prompt carries: an operator's file
+	// tells the agent what to do, and this tells it what it could read.
+	if strings.TrimSpace(skills) != "" {
+		layers = append(layers, Layer{
+			Name:   "skills",
+			Source: "installed",
+			Text:   strings.TrimSpace(skills),
 		})
 	}
 

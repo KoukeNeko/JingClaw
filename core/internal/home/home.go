@@ -33,6 +33,7 @@ const (
 	DataName      = "data"
 	RunName       = "run"
 	LogName       = "log"
+	SkillsName    = "skills"
 )
 
 // Dir is a resolved JingClaw directory.
@@ -96,6 +97,14 @@ func (d Dir) Data() string { return filepath.Join(d.Root, DataName) }
 
 // Run holds the discovery file, which is how a client finds the daemon.
 func (d Dir) Run() string { return filepath.Join(d.Root, RunName) }
+
+// Skills is where the instruction packs an operator has installed live.
+//
+// Beside AGENTS.md and PERSONA.md rather than in the workspace: they are
+// things the operator put here, and the workspace is what the agent may
+// change. Kept in there, a skill would be a file the agent could rewrite
+// while doing a job.
+func (d Dir) Skills() string { return filepath.Join(d.Root, SkillsName) }
 
 // Log is where a deployment that nobody is watching writes what it says.
 //

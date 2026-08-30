@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -9,6 +10,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 	"github.com/KoukeNeko/JingClaw/core/internal/prompt"
+	"github.com/KoukeNeko/JingClaw/core/internal/skill"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
@@ -19,6 +21,7 @@ func buildPrompt(
 	cfg config.Config,
 	ws *workspace.Workspace,
 	tools *tool.Registry,
+	logger *slog.Logger,
 ) ([]prompt.Layer, error) {
 	instructions, err := readStandingInstructions()
 	if err != nil {
@@ -39,7 +42,37 @@ func buildPrompt(
 			ToolNames:     names,
 		},
 		instructions,
+		skillCatalogue(logger),
 	), nil
+}
+
+// skillCatalogue lists what an operator has installed, for the prompt.
+//
+// A skill that could not be read is said about rather than dropped: one that
+// silently does not appear is an afternoon somebody spends finding out why,
+// and the reason is always in the file.
+//
+// Failing to read the directory at all is not worth refusing to start over.
+// An agent with no skills is the ordinary case, and one that will not run
+// because a directory is unreadable is worse than one that runs without them.
+func skillCatalogue(logger *slog.Logger) string {
+	dir, found := home.Resolve()
+	if !found {
+		return ""
+	}
+
+	installed, rejected, err := skill.Installed(dir.Skills())
+	if err != nil {
+		logger.Warn("could not read the installed skills", "error", err)
+		return ""
+	}
+
+	for _, one := range rejected {
+		logger.Warn("a skill could not be read and is not offered",
+			"skill", one.Name, "reason", one.Reason)
+	}
+
+	return skill.Catalogue(installed)
 }
 
 // readStandingInstructions loads instruction files a project carries.

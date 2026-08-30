@@ -385,16 +385,17 @@ const (
 	EventPlanChanged               EventKind = "plan.changed"
 	EventQuestionAsked             EventKind = "question.asked"
 	EventQuestionAnswered          EventKind = "question.answered"
+	EventSkillActivated            EventKind = "skill.activated"
 )
 
 // ToolCallID identifies one tool invocation within a run.
 type ToolCallID string
 
 type Event struct {
-	ID         EventID
-	SessionID  SessionID
-	RunID      RunID
-	Seq        Seq
+	ID        EventID
+	SessionID SessionID
+	RunID     RunID
+	Seq       Seq
 
 	// GlobalSeq is where this event sits in the whole log, as against Seq,
 	// which is where it sits in its own session.
@@ -907,6 +908,26 @@ type QuestionAnswered struct {
 	Answer     string
 	AnsweredBy RunOrigin
 }
+
+// SkillActivated records that the model asked for an installed skill and was
+// given its instructions.
+//
+// So that "why did it decide to run that" can be answered afterwards with the
+// instructions it was following, rather than with a guess about which file
+// was on disk at the time.
+type SkillActivated struct {
+	Name string
+
+	// Version is what the file claims, for a person reading a listing.
+	Version string
+
+	// Digest is what was actually read, and is the identity. A file edited
+	// without touching its version line is different instructions wearing the
+	// same number, and only this tells them apart.
+	Digest string
+}
+
+func (SkillActivated) isEventPayload() {}
 
 // PlanItem is one step of what the agent says it is going to do.
 //

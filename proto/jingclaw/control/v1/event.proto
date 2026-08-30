@@ -46,6 +46,7 @@ message Event {
     PlanChanged plan_changed = 22;
     QuestionAsked question_asked = 23;
     QuestionAnswered question_answered = 24;
+    SkillActivated skill_activated = 25;
   }
 }
 
@@ -357,4 +358,22 @@ message ConversationCompacted {
 // say which. Everything else the model sees is already derivable from here.
 message RunDirections {
   string text = 1;
+}
+
+// SkillActivated records that the model asked for an installed skill and was
+// given its instructions.
+//
+// So that "why did it decide to run that" can be answered afterwards with the
+// instructions it was following, rather than with a guess about which file
+// was on disk at the time.
+message SkillActivated {
+  string name = 1;
+
+  // Version is what the file claims, for a person reading a listing.
+  string version = 2;
+
+  // Digest is what was actually read, and is the identity. A file edited
+  // without touching its version line is different instructions wearing the
+  // same number.
+  string digest = 3;
 }

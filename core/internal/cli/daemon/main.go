@@ -46,6 +46,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/openaicompat"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
 	"github.com/KoukeNeko/JingClaw/core/internal/secret"
+	"github.com/KoukeNeko/JingClaw/core/internal/skill"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/sqlite"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool/builtin"
@@ -351,7 +352,7 @@ func run(args []string) error {
 	}
 	permissions := permission.New(profile)
 
-	layers, err := buildPrompt(cfg, ws, tools)
+	layers, err := buildPrompt(cfg, ws, tools, logger)
 	if err != nil {
 		return err
 	}
@@ -415,7 +416,11 @@ func run(args []string) error {
 	// Registered after the runtime exists, because this is the one tool whose
 	// collaborator is the runtime itself. Before it is serving, so a run
 	// cannot start without the plan being reachable.
-	tools.MustRegister(&builtin.TodoUpdate{Planner: rt}, &builtin.AskUser{})
+	tools.MustRegister(
+		&builtin.TodoUpdate{Planner: rt},
+		&builtin.AskUser{},
+		&builtin.SkillLoad{Skills: installedSkills{}, Activations: rt},
+	)
 
 	// Runs that were live when this process last stopped have nobody driving
 	// them. Resolving them before serving means clients never see a run that
@@ -1206,4 +1211,22 @@ func applyFlagOverrides(flags *flag.FlagSet, cfg *config.Config, providerName, m
 func planItemIDs() runtime.IDGenerator {
 	var counter atomic.Uint64
 	return func() string { return fmt.Sprintf("todo_%d", counter.Add(1)) }
+}
+
+// installedSkills reads what the deployment has, when it is asked rather than
+// once at startup.
+//
+// So that adding a skill is copying a directory. The catalogue in the prompt
+// is from startup, since the prompt is assembled once — but a skill added
+// while the daemon runs is still readable by name, and the next restart puts
+// it in the catalogue.
+type installedSkills struct{}
+
+func (installedSkills) Installed() ([]skill.Skill, error) {
+	dir, found := home.Resolve()
+	if !found {
+		return nil, nil
+	}
+	found2, _, err := skill.Installed(dir.Skills())
+	return found2, err
 }

@@ -13,7 +13,7 @@ func build(files ...prompt.StandingInstructions) []prompt.Layer {
 		OS:            "darwin",
 		Arch:          "arm64",
 		ToolNames:     []string{"grep", "read_file"},
-	}, files)
+	}, files, "")
 }
 
 // The identity line is the same in every deployment. A name is not a setting:

@@ -129,6 +129,12 @@ type approvalResolvedJSON struct {
 	DecidedBy  decidedByJSON `json:"decided_by,omitempty"`
 }
 
+type skillActivatedJSON struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Digest  string `json:"digest"`
+}
+
 type conversationCompactedJSON struct {
 	Summary        string `json:"summary"`
 	ThroughSeq     uint64 `json:"through_seq"`
@@ -371,6 +377,11 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			ReadForeign: p.ReadForeign,
 		})
 
+	case domain.SkillActivated:
+		return json.Marshal(skillActivatedJSON{
+			Name: p.Name, Version: p.Version, Digest: p.Digest,
+		})
+
 	case domain.ApprovalResolved:
 		return json.Marshal(approvalResolvedJSON{
 			ApprovalID: string(p.ApprovalID),
@@ -562,6 +573,15 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			Effects:     p.Effects,
 			Preview:     p.Preview,
 			ReadForeign: p.ReadForeign,
+		}, nil
+
+	case domain.EventSkillActivated:
+		var p skillActivatedJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		return domain.SkillActivated{
+			Name: p.Name, Version: p.Version, Digest: p.Digest,
 		}, nil
 
 	case domain.EventApprovalResolved:

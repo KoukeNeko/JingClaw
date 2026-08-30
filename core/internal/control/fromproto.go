@@ -151,6 +151,15 @@ func EventFromProto(in *controlv1.Event) (domain.Event, error) {
 			DecidedBy:  originFromProto(resolved.GetDecidedBy()),
 		}
 
+	case *controlv1.Event_SkillActivated:
+		activated := p.SkillActivated
+		out.Kind = domain.EventSkillActivated
+		out.Payload = domain.SkillActivated{
+			Name:    activated.GetName(),
+			Version: activated.GetVersion(),
+			Digest:  activated.GetDigest(),
+		}
+
 	case *controlv1.Event_UsageChanged:
 		out.Kind = domain.EventUsageChanged
 		out.Payload = domain.UsageChanged{Usage: usageFromProto(p.UsageChanged.GetUsage())}

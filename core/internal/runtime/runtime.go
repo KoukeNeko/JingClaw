@@ -1390,3 +1390,17 @@ func isNilOption(value any) bool {
 		return false
 	}
 }
+
+// SkillActivated records that the model read an installed skill.
+//
+// On the runtime because appending to the log is what the runtime does, and
+// because the alternative is a tool that can write events, which is a wider
+// thing to be able to do than this needs.
+func (r *Runtime) SkillActivated(
+	ctx context.Context,
+	session domain.SessionID,
+	run domain.RunID,
+	activated domain.SkillActivated,
+) error {
+	return r.append(ctx, session, run, domain.EventSkillActivated, activated)
+}

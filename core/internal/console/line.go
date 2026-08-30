@@ -188,6 +188,14 @@ func Describe(event domain.Event) (Line, bool) {
 		line.Meta = planProgress(payload.Items)
 		line.Preview = currentStep(payload.Items)
 
+	case domain.SkillActivated:
+		line.Kind = "SKILL"
+		line.Meta = payload.Name
+		// The digest rather than the version: what a run followed is what was
+		// read, and a file edited without touching its version line would
+		// otherwise look like the same instructions.
+		line.Preview = payload.Digest
+
 	case domain.ConversationCompacted:
 		line.Kind = "COMPACTED"
 		line.Preview = payload.Summary

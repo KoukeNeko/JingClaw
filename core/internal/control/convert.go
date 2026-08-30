@@ -346,6 +346,15 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 			},
 		}
 
+	case domain.SkillActivated:
+		out.Payload = &controlv1.Event_SkillActivated{
+			SkillActivated: &controlv1.SkillActivated{
+				Name:    p.Name,
+				Version: p.Version,
+				Digest:  p.Digest,
+			},
+		}
+
 	case domain.UsageChanged:
 		out.Payload = &controlv1.Event_UsageChanged{
 			UsageChanged: &controlv1.UsageChanged{Usage: usageToProto(p.Usage)},

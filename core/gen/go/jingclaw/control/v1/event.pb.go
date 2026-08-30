@@ -222,6 +222,7 @@ type Event struct {
 	//	*Event_PlanChanged
 	//	*Event_QuestionAsked
 	//	*Event_QuestionAnswered
+	//	*Event_SkillActivated
 	Payload       isEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -441,6 +442,15 @@ func (x *Event) GetQuestionAnswered() *QuestionAnswered {
 	return nil
 }
 
+func (x *Event) GetSkillActivated() *SkillActivated {
+	if x != nil {
+		if x, ok := x.Payload.(*Event_SkillActivated); ok {
+			return x.SkillActivated
+		}
+	}
+	return nil
+}
+
 type isEvent_Payload interface {
 	isEvent_Payload()
 }
@@ -505,6 +515,10 @@ type Event_QuestionAnswered struct {
 	QuestionAnswered *QuestionAnswered `protobuf:"bytes,24,opt,name=question_answered,json=questionAnswered,proto3,oneof"`
 }
 
+type Event_SkillActivated struct {
+	SkillActivated *SkillActivated `protobuf:"bytes,25,opt,name=skill_activated,json=skillActivated,proto3,oneof"`
+}
+
 func (*Event_UserMessageAdded) isEvent_Payload() {}
 
 func (*Event_RunStateChanged) isEvent_Payload() {}
@@ -534,6 +548,8 @@ func (*Event_PlanChanged) isEvent_Payload() {}
 func (*Event_QuestionAsked) isEvent_Payload() {}
 
 func (*Event_QuestionAnswered) isEvent_Payload() {}
+
+func (*Event_SkillActivated) isEvent_Payload() {}
 
 type UserMessageAdded struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
@@ -1991,11 +2007,81 @@ func (x *RunDirections) GetText() string {
 	return ""
 }
 
+// SkillActivated records that the model asked for an installed skill and was
+// given its instructions.
+//
+// So that "why did it decide to run that" can be answered afterwards with the
+// instructions it was following, rather than with a guess about which file
+// was on disk at the time.
+type SkillActivated struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Version is what the file claims, for a person reading a listing.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Digest is what was actually read, and is the identity. A file edited
+	// without touching its version line is different instructions wearing the
+	// same number.
+	Digest        string `protobuf:"bytes,3,opt,name=digest,proto3" json:"digest,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SkillActivated) Reset() {
+	*x = SkillActivated{}
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SkillActivated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SkillActivated) ProtoMessage() {}
+
+func (x *SkillActivated) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_event_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SkillActivated.ProtoReflect.Descriptor instead.
+func (*SkillActivated) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_event_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *SkillActivated) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SkillActivated) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *SkillActivated) GetDigest() string {
+	if x != nil {
+		return x.Digest
+	}
+	return ""
+}
+
 var File_jingclaw_control_v1_event_proto protoreflect.FileDescriptor
 
 const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\n" +
-	"\x1fjingclaw/control/v1/event.proto\x12\x13jingclaw.control.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a jingclaw/control/v1/common.proto\"\xf5\v\n" +
+	"\x1fjingclaw/control/v1/event.proto\x12\x13jingclaw.control.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a jingclaw/control/v1/common.proto\"\xc5\f\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -2021,7 +2107,8 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\x19assistant_reasoning_delta\x18\x15 \x01(\v2,.jingclaw.control.v1.AssistantReasoningDeltaH\x00R\x17assistantReasoningDelta\x12E\n" +
 	"\fplan_changed\x18\x16 \x01(\v2 .jingclaw.control.v1.PlanChangedH\x00R\vplanChanged\x12K\n" +
 	"\x0equestion_asked\x18\x17 \x01(\v2\".jingclaw.control.v1.QuestionAskedH\x00R\rquestionAsked\x12T\n" +
-	"\x11question_answered\x18\x18 \x01(\v2%.jingclaw.control.v1.QuestionAnsweredH\x00R\x10questionAnsweredB\t\n" +
+	"\x11question_answered\x18\x18 \x01(\v2%.jingclaw.control.v1.QuestionAnsweredH\x00R\x10questionAnswered\x12N\n" +
+	"\x0fskill_activated\x18\x19 \x01(\v2#.jingclaw.control.v1.SkillActivatedH\x00R\x0eskillActivatedB\t\n" +
 	"\apayload\"\xfe\x01\n" +
 	"\x10UserMessageAdded\x12\x1d\n" +
 	"\n" +
@@ -2133,7 +2220,11 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\rtokens_before\x18\x04 \x01(\x03R\ftokensBefore\x12!\n" +
 	"\ftokens_after\x18\x05 \x01(\x03R\vtokensAfter\"#\n" +
 	"\rRunDirections\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text*\x95\x01\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"V\n" +
+	"\x0eSkillActivated\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
+	"\x06digest\x18\x03 \x01(\tR\x06digest*\x95\x01\n" +
 	"\n" +
 	"PlanStatus\x12\x1b\n" +
 	"\x17PLAN_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +
@@ -2166,7 +2257,7 @@ func file_jingclaw_control_v1_event_proto_rawDescGZIP() []byte {
 }
 
 var file_jingclaw_control_v1_event_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_jingclaw_control_v1_event_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_jingclaw_control_v1_event_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_jingclaw_control_v1_event_proto_goTypes = []any{
 	(PlanStatus)(0),                   // 0: jingclaw.control.v1.PlanStatus
 	(QuestionKind)(0),                 // 1: jingclaw.control.v1.QuestionKind
@@ -2193,17 +2284,18 @@ var file_jingclaw_control_v1_event_proto_goTypes = []any{
 	(*StreamHeartbeat)(nil),           // 22: jingclaw.control.v1.StreamHeartbeat
 	(*ConversationCompacted)(nil),     // 23: jingclaw.control.v1.ConversationCompacted
 	(*RunDirections)(nil),             // 24: jingclaw.control.v1.RunDirections
-	(*timestamppb.Timestamp)(nil),     // 25: google.protobuf.Timestamp
-	(TrustLevel)(0),                   // 26: jingclaw.control.v1.TrustLevel
-	(*RunOrigin)(nil),                 // 27: jingclaw.control.v1.RunOrigin
-	(RunStatus)(0),                    // 28: jingclaw.control.v1.RunStatus
-	(StopReason)(0),                   // 29: jingclaw.control.v1.StopReason
-	(ApprovalStatus)(0),               // 30: jingclaw.control.v1.ApprovalStatus
-	(RememberScope)(0),                // 31: jingclaw.control.v1.RememberScope
-	(*Usage)(nil),                     // 32: jingclaw.control.v1.Usage
+	(*SkillActivated)(nil),            // 25: jingclaw.control.v1.SkillActivated
+	(*timestamppb.Timestamp)(nil),     // 26: google.protobuf.Timestamp
+	(TrustLevel)(0),                   // 27: jingclaw.control.v1.TrustLevel
+	(*RunOrigin)(nil),                 // 28: jingclaw.control.v1.RunOrigin
+	(RunStatus)(0),                    // 29: jingclaw.control.v1.RunStatus
+	(StopReason)(0),                   // 30: jingclaw.control.v1.StopReason
+	(ApprovalStatus)(0),               // 31: jingclaw.control.v1.ApprovalStatus
+	(RememberScope)(0),                // 32: jingclaw.control.v1.RememberScope
+	(*Usage)(nil),                     // 33: jingclaw.control.v1.Usage
 }
 var file_jingclaw_control_v1_event_proto_depIdxs = []int32{
-	25, // 0: jingclaw.control.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
+	26, // 0: jingclaw.control.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
 	4,  // 1: jingclaw.control.v1.Event.user_message_added:type_name -> jingclaw.control.v1.UserMessageAdded
 	6,  // 2: jingclaw.control.v1.Event.run_state_changed:type_name -> jingclaw.control.v1.RunStateChanged
 	7,  // 3: jingclaw.control.v1.Event.assistant_text_delta:type_name -> jingclaw.control.v1.AssistantTextDelta
@@ -2219,27 +2311,28 @@ var file_jingclaw_control_v1_event_proto_depIdxs = []int32{
 	14, // 13: jingclaw.control.v1.Event.plan_changed:type_name -> jingclaw.control.v1.PlanChanged
 	15, // 14: jingclaw.control.v1.Event.question_asked:type_name -> jingclaw.control.v1.QuestionAsked
 	17, // 15: jingclaw.control.v1.Event.question_answered:type_name -> jingclaw.control.v1.QuestionAnswered
-	26, // 16: jingclaw.control.v1.UserMessageAdded.trust:type_name -> jingclaw.control.v1.TrustLevel
-	27, // 17: jingclaw.control.v1.UserMessageAdded.origin:type_name -> jingclaw.control.v1.RunOrigin
-	5,  // 18: jingclaw.control.v1.UserMessageAdded.attachments:type_name -> jingclaw.control.v1.MessageAttachment
-	28, // 19: jingclaw.control.v1.RunStateChanged.status:type_name -> jingclaw.control.v1.RunStatus
-	29, // 20: jingclaw.control.v1.AssistantMessageCompleted.stop_reason:type_name -> jingclaw.control.v1.StopReason
-	11, // 21: jingclaw.control.v1.ToolCallCompleted.artifact:type_name -> jingclaw.control.v1.Artifact
-	0,  // 22: jingclaw.control.v1.PlanItem.status:type_name -> jingclaw.control.v1.PlanStatus
-	13, // 23: jingclaw.control.v1.PlanChanged.items:type_name -> jingclaw.control.v1.PlanItem
-	1,  // 24: jingclaw.control.v1.QuestionAsked.kind:type_name -> jingclaw.control.v1.QuestionKind
-	16, // 25: jingclaw.control.v1.QuestionAsked.options:type_name -> jingclaw.control.v1.QuestionOption
-	2,  // 26: jingclaw.control.v1.QuestionAnswered.status:type_name -> jingclaw.control.v1.QuestionStatus
-	27, // 27: jingclaw.control.v1.QuestionAnswered.answered_by:type_name -> jingclaw.control.v1.RunOrigin
-	30, // 28: jingclaw.control.v1.ApprovalResolved.status:type_name -> jingclaw.control.v1.ApprovalStatus
-	31, // 29: jingclaw.control.v1.ApprovalResolved.scope:type_name -> jingclaw.control.v1.RememberScope
-	27, // 30: jingclaw.control.v1.ApprovalResolved.decided_by:type_name -> jingclaw.control.v1.RunOrigin
-	32, // 31: jingclaw.control.v1.UsageChanged.usage:type_name -> jingclaw.control.v1.Usage
-	32, // [32:32] is the sub-list for method output_type
-	32, // [32:32] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	25, // 16: jingclaw.control.v1.Event.skill_activated:type_name -> jingclaw.control.v1.SkillActivated
+	27, // 17: jingclaw.control.v1.UserMessageAdded.trust:type_name -> jingclaw.control.v1.TrustLevel
+	28, // 18: jingclaw.control.v1.UserMessageAdded.origin:type_name -> jingclaw.control.v1.RunOrigin
+	5,  // 19: jingclaw.control.v1.UserMessageAdded.attachments:type_name -> jingclaw.control.v1.MessageAttachment
+	29, // 20: jingclaw.control.v1.RunStateChanged.status:type_name -> jingclaw.control.v1.RunStatus
+	30, // 21: jingclaw.control.v1.AssistantMessageCompleted.stop_reason:type_name -> jingclaw.control.v1.StopReason
+	11, // 22: jingclaw.control.v1.ToolCallCompleted.artifact:type_name -> jingclaw.control.v1.Artifact
+	0,  // 23: jingclaw.control.v1.PlanItem.status:type_name -> jingclaw.control.v1.PlanStatus
+	13, // 24: jingclaw.control.v1.PlanChanged.items:type_name -> jingclaw.control.v1.PlanItem
+	1,  // 25: jingclaw.control.v1.QuestionAsked.kind:type_name -> jingclaw.control.v1.QuestionKind
+	16, // 26: jingclaw.control.v1.QuestionAsked.options:type_name -> jingclaw.control.v1.QuestionOption
+	2,  // 27: jingclaw.control.v1.QuestionAnswered.status:type_name -> jingclaw.control.v1.QuestionStatus
+	28, // 28: jingclaw.control.v1.QuestionAnswered.answered_by:type_name -> jingclaw.control.v1.RunOrigin
+	31, // 29: jingclaw.control.v1.ApprovalResolved.status:type_name -> jingclaw.control.v1.ApprovalStatus
+	32, // 30: jingclaw.control.v1.ApprovalResolved.scope:type_name -> jingclaw.control.v1.RememberScope
+	28, // 31: jingclaw.control.v1.ApprovalResolved.decided_by:type_name -> jingclaw.control.v1.RunOrigin
+	33, // 32: jingclaw.control.v1.UsageChanged.usage:type_name -> jingclaw.control.v1.Usage
+	33, // [33:33] is the sub-list for method output_type
+	33, // [33:33] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_event_proto_init() }
@@ -2264,6 +2357,7 @@ func file_jingclaw_control_v1_event_proto_init() {
 		(*Event_PlanChanged)(nil),
 		(*Event_QuestionAsked)(nil),
 		(*Event_QuestionAnswered)(nil),
+		(*Event_SkillActivated)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2271,7 +2365,7 @@ func file_jingclaw_control_v1_event_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jingclaw_control_v1_event_proto_rawDesc), len(file_jingclaw_control_v1_event_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

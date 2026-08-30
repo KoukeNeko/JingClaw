@@ -120,6 +120,11 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			Answer:     "b",
 			AnsweredBy: domain.FromTheMachine("jingclaw-cli"),
 		},
+		domain.EventSkillActivated: domain.SkillActivated{
+			Name:    "kubernetes-rollout",
+			Version: "1.2.0",
+			Digest:  "sha256:" + strings.Repeat("ab", 32),
+		},
 		domain.EventApprovalRequested: domain.ApprovalRequested{
 			ApprovalID: "apr_1",
 			CallID:     "call_2",
