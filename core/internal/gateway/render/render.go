@@ -662,6 +662,38 @@ func formatTokens(count int64) string {
 	return fmt.Sprintf("%.1fk", float64(count)/1000)
 }
 
+// SplitsAFence reports whether splitting this text would cut through a
+// preformatted block.
+//
+// Worth knowing because the repair is ugly: the fence is closed at the cut and
+// reopened after it, which turns one block into two. A table cut two rows from
+// its end leaves a second message containing nothing but its bottom rule, and
+// somebody reading the channel sees a table that fell apart.
+//
+// A caller that can send the whole thing as a file should do that instead.
+func SplitsAFence(text string, style Style) bool {
+	if style.Fence == "" || len(text) <= style.MaxLength {
+		return false
+	}
+
+	// The segments are built the same way; what is asked here is only whether
+	// any of them ended with a fence still open.
+	remaining := text
+	for len(remaining) > 0 {
+		limit := style.SoftLength
+		if len(remaining) <= limit {
+			return false
+		}
+
+		cut := BreakPoint(remaining, limit)
+		if openFence(remaining[:cut]) != "" {
+			return true
+		}
+		remaining = strings.TrimLeft(remaining[cut:], "\n")
+	}
+	return false
+}
+
 // Split cuts text into postable segments.
 //
 // Every platform here refuses an oversized message outright, so long output
@@ -669,6 +701,8 @@ func formatTokens(count int64) string {
 // is worse than posting it in two parts. Breaks are preferred at paragraph, then line,
 // then character boundaries, and a code fence left open by a break is closed
 // and reopened so neither half renders as prose.
+//
+// That repair is a last resort rather than a good outcome. See SplitsAFence.
 func Split(text string, style Style) []string {
 	if len(text) <= style.MaxLength {
 		return []string{text}

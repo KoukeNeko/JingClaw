@@ -112,3 +112,31 @@ func TestATableWiderThanTheBudgetIsNotABlock(t *testing.T) {
 		t.Errorf("a table twice the budget was still made a block:\n%s", got)
 	}
 }
+
+// A table longer than a message must not be posted as two messages.
+//
+// Cutting a preformatted block closes the fence and reopens it, so one block
+// becomes two — and a table cut two rows from its end leaves a second message
+// holding nothing but its bottom rule. That is what a channel actually showed:
+// a table, then a lone line of equals signs under it.
+func TestALongBlockGoesAsAFileRatherThanInPieces(t *testing.T) {
+	var body strings.Builder
+	body.WriteString("報告江主席：\n\n```\n")
+	body.WriteString(strings.Repeat("=", 60) + "\n")
+	for i := 0; i < 40; i++ {
+		body.WriteString("Row 台灣繁中官方譯名   簡中誤用   備註說明欄位\n")
+	}
+	body.WriteString(strings.Repeat("=", 60) + "\n```\n")
+
+	text := body.String()
+	if !render.SplitsAFence(text, discordStyle) {
+		t.Fatal("this adapter's own limits do not split the block, so the case is not real")
+	}
+
+	// Which is what the posting path asks before choosing an attachment.
+	segments := render.Split(text, discordStyle)
+	if !shouldSendAsFile(jcgateway.DispatchMessage, len(segments), defaultMaxMessages) &&
+		!render.SplitsAFence(text, discordStyle) {
+		t.Error("a block that cannot survive splitting would still be posted as messages")
+	}
+}

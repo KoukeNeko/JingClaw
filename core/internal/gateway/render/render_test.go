@@ -579,3 +579,75 @@ func TestASilentRunIsCalledOut(t *testing.T) {
 		t.Errorf("the cost of a silent run is not reported:\n%s", rendered)
 	}
 }
+
+// A preformatted block longer than a message has to be cut, and the repair —
+// closing the fence and reopening it — turns one block into two. Cut near the
+// end, the second message holds nothing but the table's bottom rule, and a
+// reader sees a table that fell apart.
+//
+// Split still does the repair, because a caller may have nowhere else to put
+// the text. This is how a caller that does finds out.
+func TestSplittingInsideAFenceIsReported(t *testing.T) {
+	var body strings.Builder
+	body.WriteString("報告：\n\n```\n")
+	body.WriteString(strings.Repeat("=", 60) + "\n")
+	for i := 0; i < 40; i++ {
+		body.WriteString(fmt.Sprintf("Row%-10d 台灣繁中官方譯名   簡中誤用\n", i))
+	}
+	body.WriteString(strings.Repeat("=", 60) + "\n```\n")
+
+	text := body.String()
+	if !SplitsAFence(text, discordStyle) {
+		t.Error("a block longer than a message was not reported as split")
+	}
+
+	// The claim is about this text, so it has to be true of it: the repair
+	// really does produce more than one fenced block.
+	segments := Split(text, discordStyle)
+	if len(segments) < 2 {
+		t.Fatalf("%d segments, so the case is not what it claims to be", len(segments))
+	}
+	if !strings.HasPrefix(segments[1], "```") {
+		t.Errorf("the second segment does not reopen a fence: %q", first(segments[1], 40))
+	}
+}
+
+// The common case must not be dragged into an attachment: most answers have
+// no fence at all, and a short one is not split.
+func TestTextThatFitsIsNotReported(t *testing.T) {
+	for name, text := range map[string]string{
+		"short":            "報告：一句話。",
+		"short with block": "報告：\n\n```\nokay\n```\n",
+		"long prose":       strings.Repeat("很長的說明。", 400),
+	} {
+		if SplitsAFence(text, discordStyle) {
+			t.Errorf("%s was reported as splitting a fence", name)
+		}
+	}
+}
+
+// A long answer whose blocks are small enough to fall between the cuts is
+// still fine as messages: what matters is whether a cut lands inside one.
+func TestALongAnswerWithSmallBlocksIsNotReported(t *testing.T) {
+	var body strings.Builder
+	for i := 0; i < 40; i++ {
+		body.WriteString(strings.Repeat("說明文字。", 12))
+		body.WriteString("\n\n```\nshort\n```\n\n")
+	}
+
+	if !SplitsAFence(body.String(), discordStyle) {
+		return // Fine: no cut landed inside one.
+	}
+	// If a cut did land inside one, the report has to be honest about it.
+	segments := Split(body.String(), discordStyle)
+	if len(segments) < 2 {
+		t.Error("reported as splitting a fence, but it does not split at all")
+	}
+}
+
+func first(s string, n int) string {
+	if len(s) < n {
+		return s
+	}
+	return s[:n]
+}

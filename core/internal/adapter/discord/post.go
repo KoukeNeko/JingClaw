@@ -113,7 +113,8 @@ func (a *Adapter) Post(ctx context.Context, dispatch jcgateway.Dispatch) ([]stri
 	// Only for the agent's own answers. An approval is short, and a status
 	// line is bounded where it is rendered; turning either into an attachment
 	// would hide the thing somebody has to act on.
-	if shouldSendAsFile(dispatch.Kind, len(segments), a.maxMessages()) {
+	if shouldSendAsFile(dispatch.Kind, len(segments), a.maxMessages()) ||
+		render.SplitsAFence(body, discordStyle) {
 		return a.finishAsFile(channelID, dispatch, body)
 	}
 
@@ -355,6 +356,15 @@ func (a *Adapter) clearStatus(run domain.RunID) {
 // Only the agent's own answers are eligible. An approval is the thing somebody
 // has to act on and a status line is short by construction; turning either
 // into a file would hide it behind a download.
+// shouldSendAsFile is when an answer stops being something to read in a
+// channel.
+//
+// Two ways that happens. Past a few messages it becomes something to scroll
+// past for the rest of the day. And a preformatted block that has to be cut
+// comes out as two blocks — a table cut near its end leaves a second message
+// holding only its bottom rule — so a file is better than the repair. That
+// second case is asked separately, at the call site, because it needs the
+// text rather than the number of pieces it came to.
 func shouldSendAsFile(kind jcgateway.DispatchKind, segments, maxMessages int) bool {
 	return kind == jcgateway.DispatchMessage && segments > maxMessages
 }
