@@ -87,6 +87,13 @@ func shortSession(id domain.SessionID) string {
 	return "#" + text
 }
 
+// Clip shortens text to what a line of the log shows of a payload.
+//
+// Exported so a listing shows as much of a command as the log does. Two
+// widths for the same thing would mean an approval looked one way as it
+// happened and another way when asked about.
+func Clip(text string) string { return clip(text, previewWidth) }
+
 // clip shortens text to a number of display cells.
 //
 // Cells rather than bytes or runes: a Chinese character occupies two columns

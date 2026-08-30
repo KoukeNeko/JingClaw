@@ -95,6 +95,12 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 				{ID: "todo_1", Title: "找出 failing test 的原因", Status: domain.PlanCompleted},
 				{ID: "todo_2", Title: "改掉 timeout", Status: domain.PlanInProgress},
 				{ID: "todo_3", Title: "跑一次測試確認", Status: domain.PlanPending},
+				// Filled in, because a field left empty in every sample is a
+				// field no round trip ever checks.
+				{
+					ID: "todo_4", Title: "改用 context deadline",
+					Status: domain.PlanAbandoned, Note: "換成上一步就夠了",
+				},
 			},
 		},
 		domain.EventQuestionAsked: domain.QuestionAsked{

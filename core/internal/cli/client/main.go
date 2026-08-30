@@ -961,19 +961,7 @@ func dial() (controlv1connect.SessionServiceClient, error) {
 }
 
 func authenticated() (*http.Client, string, error) {
-	path, err := discovery.PathIn(runtimeDir)
-	if err != nil {
-		return nil, "", err
-	}
-
-	d, err := discovery.Read(path)
-	if err != nil {
-		return nil, "", fmt.Errorf("%w (is jingclaw running?)", err)
-	}
-
-	return &http.Client{
-		Transport: &bearerTransport{token: d.Token, base: http.DefaultTransport},
-	}, d.BaseURL, nil
+	return authenticatedIn(runtimeDir)
 }
 
 type bearerTransport struct {
@@ -1106,4 +1094,34 @@ func describeOrigin(origin *controlv1.RunOrigin) string {
 		return strings.ToLower(strings.TrimPrefix(kind.String(), "RUN_ORIGIN_KIND_"))
 	}
 	return "unrecorded"
+}
+
+// Dial returns a client for the daemon publishing itself in runtimeDir.
+//
+// Exported for the console, which is another client of the same daemon and
+// has no reason to reimplement finding one. An explicit directory rather than
+// the package variable the subcommands share: something that is not one of
+// them has nothing to set it.
+func Dial(where string) (controlv1connect.SessionServiceClient, error) {
+	httpClient, baseURL, err := authenticatedIn(where)
+	if err != nil {
+		return nil, err
+	}
+	return controlv1connect.NewSessionServiceClient(httpClient, baseURL), nil
+}
+
+func authenticatedIn(where string) (*http.Client, string, error) {
+	path, err := discovery.PathIn(where)
+	if err != nil {
+		return nil, "", err
+	}
+
+	found, err := discovery.Read(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w (is jingclaw running?)", err)
+	}
+
+	return &http.Client{
+		Transport: &bearerTransport{token: found.Token, base: http.DefaultTransport},
+	}, found.BaseURL, nil
 }

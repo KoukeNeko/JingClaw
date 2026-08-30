@@ -11,15 +11,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/cli/console"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
+	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
 // readyTimeout is how long a daemon gets to publish itself before starting it
@@ -56,7 +61,15 @@ func Run(ctx context.Context) error {
 	// commonly has an installed copy and a freshly built one, and a gateway
 	// from the other copy is the hardest kind of wrong: both processes are
 	// correct, and they are not the same program.
-	agent, err := start(ctx, self, "daemon")
+	// Where the parts write. When somebody is watching, that is a file: the
+	// console owns the bottom line of the terminal, and a part writing to the
+	// same stream lands in the middle of whatever is being typed. Without a
+	// terminal — under a service, or piped — there is no console and no line
+	// to protect, so they write where they always did.
+	output, closeOutput, watching := where()
+	defer closeOutput()
+
+	agent, err := start(ctx, self, "daemon", output)
 	if err != nil {
 		return err
 	}
@@ -66,11 +79,15 @@ func Run(ctx context.Context) error {
 		return err
 	}
 
-	chat, err := start(ctx, self, "gateway")
+	chat, err := start(ctx, self, "gateway", output)
 	if err != nil {
 		return err
 	}
 	defer terminate(chat)
+
+	if watching {
+		return watch(ctx, agent, chat)
+	}
 
 	fmt.Println("JingClaw is running. Press Ctrl-C to stop it.")
 
@@ -82,6 +99,60 @@ func Run(ctx context.Context) error {
 	case err := <-exits(chat):
 		return stopped("gateway", err)
 	}
+}
+
+// where says what the parts should write to, and whether anybody is looking.
+//
+// A file under the deployment when this is a terminal, so the console has the
+// screen to itself and there is still somewhere to look when something goes
+// wrong. Standard error otherwise, which is what a service captures.
+func where() (io.Writer, func(), bool) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return os.Stderr, func() {}, false
+	}
+
+	dir, found := home.Resolve()
+	if !found {
+		return os.Stderr, func() {}, false
+	}
+	if err := os.MkdirAll(dir.Log(), 0o700); err != nil {
+		return os.Stderr, func() {}, false
+	}
+
+	path := filepath.Join(dir.Log(), "jingclaw.log")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		// Not worth refusing to start over. Sharing the screen is worse than
+		// a console, and better than nothing running at all.
+		return os.Stderr, func() {}, false
+	}
+	return file, func() { _ = file.Close() }, true
+}
+
+// watch runs the console until it is closed or a part stops.
+func watch(ctx context.Context, agent, chat *exec.Cmd) error {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+
+	// A part stopping ends the console too: what it was showing has gone.
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-exits(agent):
+			stop()
+		case <-exits(chat):
+			stop()
+		}
+	}()
+
+	if err := console.Run(ctx, "", console.StopsIt); err != nil {
+		// The console failing is not the parts failing. They keep running,
+		// and saying so is more use than an error nobody can act on.
+		fmt.Fprintln(os.Stderr, "the console stopped:", err)
+		fmt.Println("JingClaw is still running. Press Ctrl-C to stop it.")
+		<-ctx.Done()
+	}
+	return nil
 }
 
 // stopped says why one of the parts is no longer running.
@@ -134,10 +205,10 @@ func alive(pid int) bool {
 	return process.Signal(syscall.Signal(0)) == nil
 }
 
-func start(ctx context.Context, self, part string) (*exec.Cmd, error) {
+func start(ctx context.Context, self, part string, output io.Writer) (*exec.Cmd, error) {
 	command := exec.CommandContext(ctx, self, part)
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
+	command.Stdout = output
+	command.Stderr = output
 
 	// Its own process group, so a Ctrl-C in this terminal reaches this
 	// program and lets it stop the parts in order, rather than arriving at
