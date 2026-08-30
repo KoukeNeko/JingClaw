@@ -25,6 +25,10 @@ var telegramStyle = render.Style{
 	MaxLength:   maxMessageLength,
 	SoftLength:  softMessageLength,
 	WorkingLine: true,
+
+	// No fence and no table width: this adapter sends plain text, so a
+	// monospaced block would show its own backticks. Tables become rows.
+	TableColumns: 0,
 }
 
 const (

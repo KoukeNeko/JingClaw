@@ -42,6 +42,11 @@ var discordStyle = render.Style{
 	Bold:          "**",
 	Italic:        "_",
 	Fence:         "```",
+
+	// Wider than this and a code block wraps in a normal Discord window,
+	// which turns an aligned table into a worse version of the rows it was
+	// made from.
+	TableColumns: 76,
 }
 
 // Post delivers one dispatch and returns the ids Discord gave the messages.

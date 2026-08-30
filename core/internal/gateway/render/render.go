@@ -48,6 +48,15 @@ type Style struct {
 	// Fence opens and closes a block of output meant to be read as output.
 	// Empty where the platform would show the fence itself.
 	Fence string
+
+	// TableColumns is how wide a fixed-width table may be before it stops
+	// being one. Zero means this platform shows no fixed-width text at all,
+	// and every table becomes rows.
+	//
+	// A width rather than a "supports tables" flag, because no platform here
+	// renders table syntax: the question is only whether a monospaced block
+	// will line up, and that is a question about how much room there is.
+	TableColumns int
 }
 
 func (s Style) bold(text string) string   { return s.Bold + text + s.Bold }
@@ -84,7 +93,7 @@ func Dispatch(dispatch jcgateway.Dispatch, style Style) (string, error) {
 		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
 			return "", fmt.Errorf("render: could not decode message payload: %w", err)
 		}
-		return NormalizeText(payload.Text), nil
+		return renderTables(NormalizeText(payload.Text), style), nil
 
 	case jcgateway.DispatchQuestion:
 		var payload jcgateway.QuestionPayload
