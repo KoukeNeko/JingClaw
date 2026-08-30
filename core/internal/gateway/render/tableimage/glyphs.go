@@ -90,17 +90,21 @@ func invisible(r rune) bool {
 	return unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Mn, r)
 }
 
-// substitutes are the marks a table actually uses, in a form a CJK typeface
-// has.
+// substitutes are the marks that no typeface here can draw, in a form one of
+// them can.
 //
-// ○ and × rather than ✓ and ✗, and not as a compromise: they are the
-// conventional yes and no in Chinese and Japanese writing, and they are the
-// ones these typefaces are certain to carry. The tick and cross are Dingbats,
-// which PingFang and Hiragino do not cover at all — checked, not assumed.
+// Shorter than it was, because the chain reaches further than one face did: ✓
+// ✗ ⚠ → are drawn as themselves now, from whichever typeface has them. What
+// is left is emoji, and emoji genuinely cannot be drawn — the colour formats
+// they live in are bitmap and layered-vector tables this rasterizer does not
+// read, and the one font on a Mac that has ✅ is one of them.
 //
-// Deliberately short. This is for the handful of marks that turn up in a
-// status column, not an attempt to describe every emoji as text; anything not
-// here becomes a space, which reads as absence instead of as damage.
+// ○ and × rather than ticks, and not as a compromise: they are the
+// conventional yes and no in Chinese and Japanese writing, which is the
+// writing these tables are usually in.
+//
+// Deliberately short. Anything not here becomes a space, which reads as
+// absence instead of as damage.
 var substitutes = map[rune]rune{
 	'✅': '○', // white heavy check mark
 	'✔': '○',
@@ -121,8 +125,5 @@ var substitutes = map[rune]rune{
 	'🟡': '△', // partly, which is the third of the three CJK marks
 	'🟠': '△',
 
-	'→': '→', // already present in these faces; here so the intent is on record
-	'—': '—',
 	'•': '·',
-	'…': '…',
 }

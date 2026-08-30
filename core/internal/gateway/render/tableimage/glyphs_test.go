@@ -203,7 +203,8 @@ func TestAModifierLeavesNoGapWhereItHadNoWidth(t *testing.T) {
 		said string
 		want string
 	}{
-		{"⚠️ 其他通路", "! 其他通路"},
+		// The sign survives; only the selector after it goes.
+		{"⚠️ 其他通路", "⚠ 其他通路"},
 		{"✅️ yes", "○ yes"},
 		{"\U0001F44D\U0001F3FD ok", "ok"},
 	} {
