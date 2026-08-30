@@ -36,6 +36,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
 	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
+	"github.com/KoukeNeko/JingClaw/core/internal/mcp/mcpauth"
 	"github.com/KoukeNeko/JingClaw/core/internal/permission"
 	"github.com/KoukeNeko/JingClaw/core/internal/process"
 	"github.com/KoukeNeko/JingClaw/core/internal/prompt"
@@ -277,13 +278,21 @@ func run(args []string) error {
 		&builtin.ListProcesses{Processes: processes},
 	)
 
+	// Where sessions somebody signed in with are kept. Opened even when no
+	// server uses OAuth, because it is a directory and the alternative is a
+	// nil that every path below has to remember.
+	sessions, err := mcpauth.Open(mcpauth.DefaultDir())
+	if err != nil {
+		return err
+	}
+
 	// Tool servers are started before the prompt is assembled, because what
 	// they offer is part of what the agent can do and the prompt says so.
 	//
 	// They are child processes of this daemon, so they are shut down with it;
 	// the defer is registered immediately, before anything else can fail and
 	// leave them running.
-	servers := mcp.Start(rootCtx, mcpServers(cfg), mcp.Limits{
+	servers := mcp.Start(rootCtx, mcpServers(cfg, sessions), mcp.Limits{
 		StartTimeout: cfg.MCP.StartTimeout,
 		CallTimeout:  cfg.MCP.CallTimeout,
 		MaxOutput:    cfg.MCP.MaxOutput,
@@ -952,7 +961,7 @@ func webSearcher(cfg config.Config) (web.Searcher, error) {
 	}
 }
 
-func mcpServers(cfg config.Config) []mcp.ServerConfig {
+func mcpServers(cfg config.Config, sessions *mcpauth.Store) []mcp.ServerConfig {
 	servers := make([]mcp.ServerConfig, 0, len(cfg.MCP.Servers))
 
 	for _, configured := range cfg.MCP.Servers {
@@ -972,6 +981,9 @@ func mcpServers(cfg config.Config) []mcp.ServerConfig {
 			Env:     configured.Env,
 			PassEnv: configured.PassEnv,
 			Level:   level,
+
+			OAuth:    configured.OAuth,
+			Sessions: sessions,
 		})
 	}
 
@@ -991,8 +1003,17 @@ func describeTools(registry *tool.Registry, servers *mcp.Manager, cfg config.Con
 		return described
 	}
 
-	return fmt.Sprintf("%s (%d from %d of %d mcp servers)",
+	said := fmt.Sprintf("%s (%d from %d of %d mcp servers",
 		described, servers.ToolCount(), servers.Connected(), wanted)
+
+	// On the startup line rather than only in a warning above it. This is the
+	// line somebody reads to know what the agent can do, and a server missing
+	// because nobody has signed in belongs in the same sentence as the ones
+	// that are there.
+	if waiting := servers.NeedLogin(); len(waiting) > 0 {
+		said += fmt.Sprintf("; %s need: jingclaw mcp login <name>", strings.Join(waiting, ", "))
+	}
+	return said + ")"
 }
 
 // contextWindow settles how much room a run has.

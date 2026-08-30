@@ -595,6 +595,14 @@ type MCPServer struct {
 	// defaults to execute, which is the honest floor for a call that makes
 	// another program on this machine act.
 	Level string `koanf:"level"`
+
+	// OAuth says this server is behind an authorization server, so a person
+	// has to sign in to it once with "jingclaw mcp login <name>".
+	//
+	// The daemon never starts that flow itself. It has no browser and nobody
+	// is watching it, so a server whose session has run out is reported as
+	// needing one rather than blocking a run on a page no one will open.
+	OAuth bool `koanf:"oauth"`
 }
 
 // Process bounds what long-running programs may keep.
@@ -1305,6 +1313,15 @@ func (c Config) serverProblems() []Problem {
 			})
 		}
 
+		if server.OAuth && server.URL == "" {
+			problems = append(problems, Problem{
+				Key: where + ".oauth", Value: "true",
+				Why: "is set on a server that runs as a command",
+				Fix: "Only a url server authorizes this way; give a command its " +
+					"credentials through env or pass_env.",
+			})
+		}
+
 		if server.Level != "" && !toolLevels[server.Level] {
 			problems = append(problems, Problem{
 				Key: where + ".level", Value: quote(server.Level),
@@ -1783,6 +1800,13 @@ enabled = false
 # pass_env = ["HOME"]
 # What this server's tools count as to the policy engine.
 # level = "execute"
+# Says the server is behind an authorization server, so somebody signs in once
+# with "jingclaw mcp login <name>". Only for a url server: a command is given
+# its credentials through env or pass_env. The daemon never opens a browser
+# itself — nobody is watching it — so a session that has run out is reported
+# rather than blocking a run on a page no one will see. "jingclaw mcp list"
+# says which servers need one.
+# oauth = false
 
 # ── Interfaces ──────────────────────────────────────────────
 

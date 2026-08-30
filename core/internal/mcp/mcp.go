@@ -27,6 +27,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
+	"github.com/KoukeNeko/JingClaw/core/internal/mcp/mcpauth"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 )
 
@@ -80,6 +81,20 @@ type ServerConfig struct {
 	// Level is what this server's tools count as when the policy engine looks
 	// at them. It comes from configuration rather than from the server.
 	Level tool.Level
+
+	// OAuth says this server authorizes with OAuth, so the daemon should
+	// present whatever somebody signed in with.
+	//
+	// Only meaningful with a URL. MCP is explicit that a server spoken to
+	// over a pipe should not use this profile: a child process gets its
+	// credentials from the environment it was started with, and there is no
+	// address for an authorization server to protect.
+	OAuth bool
+
+	// Sessions is where signed-in sessions are kept. Nil means this daemon
+	// has nowhere to keep one, which makes an OAuth server unreachable rather
+	// than unauthenticated.
+	Sessions *mcpauth.Store
 }
 
 // transportFor decides how to reach a server, and refuses anything ambiguous.
@@ -104,10 +119,31 @@ func transportFor(cfg ServerConfig) (sdk.Transport, error) {
 	}
 
 	if hasURL {
-		return &sdk.StreamableClientTransport{
+		transport := &sdk.StreamableClientTransport{
 			Endpoint:   cfg.URL,
 			HTTPClient: &http.Client{Transport: headerTransport(cfg.Headers)},
-		}, nil
+		}
+		if cfg.OAuth {
+			if cfg.Sessions == nil {
+				return nil, fmt.Errorf(
+					"mcp: %s authorizes with oauth but there is nowhere to keep a session", cfg.Name)
+			}
+			// The daemon's side: it presents what somebody signed in with and
+			// refuses to start a flow of its own, because there is nobody
+			// here to finish one.
+			transport.OAuthHandler = &mcpauth.Stored{Server: cfg.Name, Store: cfg.Sessions}
+		}
+		return transport, nil
+	}
+
+	if cfg.OAuth {
+		// Said rather than ignored. A server spoken to over a pipe takes its
+		// credentials from the environment it was started with, and quietly
+		// dropping the setting would leave somebody waiting for a sign-in
+		// prompt that is never coming.
+		return nil, fmt.Errorf(
+			"mcp: %s runs as a command, which does not authorize with oauth; "+
+				"give it a credential through env or pass_env", cfg.Name)
 	}
 
 	command := exec.Command(cfg.Command, cfg.Args...)

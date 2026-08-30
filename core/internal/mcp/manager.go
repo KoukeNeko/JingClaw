@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
+	"github.com/KoukeNeko/JingClaw/core/internal/mcp/mcpauth"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 )
 
@@ -14,6 +15,10 @@ import (
 type Manager struct {
 	servers []*Server
 	logger  *slog.Logger
+
+	// needLogin names servers that answered, said they wanted authorizing,
+	// and had nothing stored to present.
+	needLogin []string
 }
 
 // Start connects every configured server.
@@ -35,6 +40,18 @@ func Start(
 	for _, cfg := range configs {
 		server, err := Connect(ctx, cfg, limits, artifacts, logger)
 		if err != nil {
+			// A server nobody has signed in to is not a broken one, and
+			// saying "did not start" about it sends whoever reads this
+			// looking for a fault. What it needs is a person and a browser,
+			// once, and the line says so.
+			var login *mcpauth.NeedsLogin
+			if errors.As(err, &login) {
+				logger.Warn("an mcp server needs authorizing",
+					"server", cfg.Name,
+					"fix", "jingclaw mcp login "+cfg.Name)
+				manager.needLogin = append(manager.needLogin, cfg.Name)
+				continue
+			}
 			logger.Error("an mcp server did not start", "server", cfg.Name, "error", err)
 			continue
 		}
@@ -64,6 +81,13 @@ func (m *Manager) Register(registry *tool.Registry) error {
 
 // Connected is how many servers are answering, for a banner that says so.
 func (m *Manager) Connected() int { return len(m.servers) }
+
+// NeedLogin names the servers waiting on somebody to sign in.
+//
+// Kept apart from the ones that failed, because the two ask different things
+// of whoever is reading. A server that could not start is a fault to
+// investigate; this is a command to run.
+func (m *Manager) NeedLogin() []string { return m.needLogin }
 
 // ToolCount is how many tools those servers contributed.
 func (m *Manager) ToolCount() int {
