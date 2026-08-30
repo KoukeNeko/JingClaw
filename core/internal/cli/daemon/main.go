@@ -476,7 +476,7 @@ func run(args []string) error {
 
 	api := http.NewServeMux()
 	api.Handle(controlv1connect.NewSessionServiceHandler(
-		control.NewServer(rt, store, hub, artifacts, modelProvider, selected.ID)))
+		control.NewServer(rt, store, hub, artifacts, modelProvider, selected.ID, processes)))
 	api.Handle(controlv1connect.NewGatewayIngressServiceHandler(
 		control.NewGatewayServer(plane.Ingress, store, time.Now)))
 	api.Handle(controlv1connect.NewArtifactServiceHandler(control.NewArtifactServer(artifacts)))

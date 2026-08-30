@@ -57,6 +57,9 @@ func (s *session) run(ctx context.Context, line string) bool {
 	case "sessions":
 		s.showSessions(ctx)
 
+	case "processes":
+		s.showProcesses(ctx)
+
 	case "focus":
 		s.focus(command.Arg(0))
 
@@ -264,4 +267,46 @@ func (s *session) focusedOn() domain.SessionID {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.focused
+}
+
+// showProcesses lists what the agent has left running.
+//
+// Across every session, or one when the console is focused: a program started
+// an hour ago in a conversation nobody is looking at is exactly the one worth
+// being told about.
+func (s *session) showProcesses(ctx context.Context) {
+	sessions, err := s.daemon.ListSessions(ctx, connect.NewRequest(&controlv1.ListSessionsRequest{}))
+	if err != nil {
+		s.say("could not list the sessions: " + err.Error())
+		return
+	}
+
+	found := 0
+	for _, session := range sessions.Msg.GetSessions() {
+		if focused := s.focusedOn(); focused != "" && domain.SessionID(session.GetId()) != focused {
+			continue
+		}
+
+		listed, err := s.daemon.ListProcesses(ctx, connect.NewRequest(
+			&controlv1.ListProcessesRequest{SessionId: session.GetId()}))
+		if err != nil {
+			s.say("could not read what is running: " + err.Error())
+			return
+		}
+
+		for _, one := range listed.Msg.GetProcesses() {
+			found++
+			state := "running"
+			if !one.GetRunning() {
+				state = fmt.Sprintf("exit %d", one.GetExitCode())
+			}
+			s.say(fmt.Sprintf("  %s  pid %-7d %-10s %s",
+				one.GetId(), one.GetPid(), state,
+				console.Clip(one.GetProgram()+" "+strings.Join(one.GetArgs(), " "))))
+		}
+	}
+
+	if found == 0 {
+		s.say("nothing is running.")
+	}
 }

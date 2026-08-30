@@ -84,7 +84,7 @@ func newHarness(t *testing.T, chunkDelay time.Duration) harness {
 
 	mux := http.NewServeMux()
 	mux.Handle(controlv1connect.NewSessionServiceHandler(
-		control.NewServer(rt, store, hub, artifacts, offline, fake.ModelID)))
+		control.NewServer(rt, store, hub, artifacts, offline, fake.ModelID, nil)))
 
 	// The port is unknown until the test server starts, so host validation is
 	// exercised separately in TestAuthMiddleware.

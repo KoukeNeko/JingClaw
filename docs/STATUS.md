@@ -1,0 +1,648 @@
+# Where JingClaw is
+
+Updated 2026-08-31.
+
+## Done
+
+**M0 — walking skeleton.** Proto contract, event log, runtime, Connect API,
+CLI, loopback auth with scoped credentials, discovery file. The FakeProvider
+harness is still in use and should stay.
+
+**M1a — usable for a day of work.**
+
+| Item | State |
+|---|---|
+| SQLite persistence, restart resume | done |
+| Provider (Gemini/Gemma; fake for offline) | done |
+| Context builder, token budget, compaction | done |
+| Permission engine and durable approvals | done |
+| Artifact store | done |
+| Built-in tools: read / glob / grep / write / edit / exec / read_artifact | done |
+| `AGENTS.md` loading, layered system prompt | done |
+| MCP stdio tool servers | done |
+
+The plan also listed Anthropic and OpenAI/Ollama providers. Only Gemini is
+implemented, because that is the key this deployment has; the provider
+abstraction is what the others plug into.
+
+**M1b — Discord gateway.** Verified live against a real bot: mention → run →
+tools → reply posted back to the thread.
+
+**Cross-session memory.** Off by default. `remember` / `recall`, provenance on
+every entry, correction by invalidation, real deletion, and `agent memory list`
+so a person can see everything the agent believes and where each belief came
+from. Gateway-origin memories are permanently untrusted and never become
+standing directions. Researched first: `docs/research/05-memory.md`.
+
+**Reading the web.** Off by default. `web_read` returns a page's visible text
+and links and can do nothing else — no clicking, typing, signing in or
+submitting, which are a separate capability that does not exist yet. Pages are
+fetched by driving a real browser, because a plain HTTP request now gets a
+challenge page from a large part of the web and gets nothing at all from
+anything that renders client-side.
+
+Measured rather than assumed: it fetches live pages end to end through a real
+model, and it does **not** get past Cloudflare/DataDome-class protection —
+g2.com and indeed.com answer 403 in headless, headed and humanized modes alike
+(cloakbrowser 0.3.30). The backend is behind a `web.Fetcher` interface for
+exactly this reason.
+
+The guarantees that do not depend on the backend: addresses are refused by what
+they resolve to rather than how they are spelled, on every resolved address,
+and again inside the browser for wherever a redirect leads; results open with
+their provenance and a statement that the text is somebody else's; and the
+gate depends on who chose the address — unattended locally, an operator
+approval from a chat channel.
+
+**Provider backends.** Gemini, Ollama (local and cloud, through its own API),
+and any OpenAI-compatible endpoint behind a named dialect profile —
+generic / vllm / lmstudio / llamacpp / openrouter / groq / together.
+Researched first: `docs/research/06-provider-backends.md`.
+
+The load-bearing part is not the protocol but the context window. A model
+trained for 128k is routinely loaded with 4k, so a window now carries its
+provenance and the order of belief is operator, then a server reporting what it
+has loaded, then a catalogue, then the model's own maximum. `verify-providers.sh`
+drives both adapters against servers reporting exactly that mismatch.
+
+Reasoning is its own event, never assistant text: backends expose it under three
+different field names and one of them inline, and folded into the answer it
+would be posted wherever the answer goes. `resource_exhausted` is its own error
+kind, because a machine out of memory is not an account out of allowance.
+
+**Provider failures.** Retry had never once run against Gemini: the wrapper
+watched `Generate`, and that adapter returns a lazy stream, so every retryable
+failure arrived at `Recv` instead. Five of twenty-eight runs in the live
+deployment failed on rate limits, none retried. Retry now covers a stream that
+failed before emitting anything, and never one that has already produced output.
+
+A server's stated delay is honoured in full rather than capped, since asking
+again early earns the same refusal; a delay beyond the request's budget ends it
+with a reason instead. 429 is split by Google's structured quota details into a
+minute's rate limit and a spent allowance, on the quota identifier rather than
+the English message.
+
+**A channel as a console.** "Discord" was one trust level and is not. A binding
+names `gateway.channels` or `gateway.consoles`, and which list it is in decides
+its powers — there is no profile field to misspell or set to the one meant for
+somebody at the machine. A console reads and fetches unattended, answers its own
+approvals in the channel (`pending`, `approve <id>`, `deny <id>`), and hands over
+stored output on request (`artifact <id>`, pull never push). Neither list can run
+programs: channel permissions settle who is in the room, not whether an account
+still belongs to its owner.
+
+Channels are declared in the configuration and applied at startup. Removing one
+does not unbind it; the startup log names every bound channel the file does not.
+
+**Session views.** `GetSessionView` answers what a session looks like without
+replaying its log: assembled messages, the tools each turn asked for, what it is
+blocked on, and a sequence number to subscribe from.
+
+**MCP over Streamable HTTP.** A server is a child process or an HTTP endpoint,
+never both, with headers for the credential. What its tools may do still comes
+from the configuration rather than from the server.
+
+**A `.JingClaw` directory.** Configuration, workspace, database, runtime files
+and credentials in one place, found by walking up from the working directory.
+`JINGCLAW_HOME=none` says explicitly that there is none, which is what every
+check sets so that none of them can reach the operator's own deployment.
+
+**Event retention.** Pruning only ever removes what compaction has already
+folded, and a client resuming below the oldest kept sequence is told to resync
+rather than handed a gap it cannot see.
+
+**A second gateway platform.** Telegram, which is what shows whether the
+abstraction holds. `gatewayd` was typed to `*discord.Adapter`, so nothing said
+what a platform owed the gateway; it is now two methods, and the platform comes
+from the configuration.
+
+Telegram disagrees with Discord about enough to be worth it: a mention is a
+byte range counted in UTF-16 rather than a token, a status line has to be text
+because a bot may only react with a fixed set of emoji, and an upload is
+multipart where everything else is JSON. Two things fell out of the exercise —
+the daemon was reading Discord's configuration section to pace the projector,
+which has no platform, and the Discord adapter's own status-line path had no
+caller at all.
+
+The dispatch rendering moved out of the Discord adapter with it. The wording of
+a run summary is not a Discord decision; what a platform decides is how long a
+message may be, how a subdued line is marked, and whether emphasis renders.
+
+**Reasoning, shown where it may be seen.** Both local adapters produce it and
+the runtime dropped it, so a user who turned thinking on saw nothing. It now
+travels under its own event kind, which is what lets each place decide: the
+projector refuses it — console channel included, since a platform account is
+somebody's account — and the CLI shows it apart from the answer.
+
+**Long-running programs.** `start_process`, `process_io`, `stop_process`: a dev
+server, a REPL, an installer that asks a question. A process belongs to its
+session rather than its run, so a run that starts a server and ends does not
+take the server with it; nothing else would end them, so closing the session
+does and so does stopping the daemon. A pseudo-terminal where there is one, and
+an honest report that there is not where there is not.
+
+**Reviewing a call before allowing it.** An approval carried the arguments and
+nothing else, so allowing an edit meant reading nine hundred characters of
+old text against nine hundred and fifty of new. The tool that defined the
+arguments now renders them — a diff for an edit, the command line for an
+execution — and the CLI shows that rendering rather than the raw call. The exact arguments stay one click away: a decision made against a
+rendering that disagreed with the call would be a decision about something
+else.
+
+**Artifacts, everywhere and after the fact.** The id was on the event and not
+in the session view, so reopening a session lost every way to the build log
+explaining the failure being shown. All three clients can now open one inline
+and save it whole.
+
+**A credential per paired browser.** Pairing handed out one shared credential:
+a page paired last week still worked, nothing said what had been let in, and
+revoking one browser meant revoking every one. Each pairing now mints its own,
+listed with when it was paired and last used, revocable one at a time or all
+at once, expiring from last use rather than from pairing.
+
+**Channels in the GUI.** What is bound, what each channel may do in words
+rather than as a profile name, who may trigger work there, and a way to unbind
+one without editing a file and restarting.
+
+**A model per session.** One model per daemon is wrong for a machine where the
+small one fits in memory and the large one does not. A session may name its
+own; the provider stays fixed, because a conversation carries blocks only its
+own provider can read back. The run summary names the model that actually
+answered rather than the daemon's default — a line naming the wrong one is
+worse than no line, since it is what somebody reads to work out why an answer
+was poor.
+
+**The tools the plan called M1 and the agent did not have.** All six.
+
+`todo_update` keeps a plan as agent state: patch-style operations, because a
+model asked to rewrite the list drops ids it does not think matter and revives
+steps it already finished, and none of that is visible as an error. It is put
+back in front of the model every turn, survives a restart, and every client
+shows it.
+
+`ask_user` parks the run and the answer comes back as the result of the call
+that asked. `awaiting_input`, not `awaiting_approval` — every client offers a
+different control for the two. Not built on approvals: an approval asks
+whether something may happen, and this asks what a person wants.
+
+`apply_patch` changes several files as one thing, working out all of them
+before writing any, so a patch that cannot apply cleanly changes nothing. Both
+editing tools now go through one engine, which the plan asked for.
+
+`git_status` and `git_diff` read the repository without an approval, which is
+what they are for: "what have I changed" is the question before and after
+every edit, and going through `exec_command` asked every time. The arguments
+are fixed here — a tool that ran whatever git subcommand the model named, at
+read level, would be most of a shell. `--no-ext-diff` and `--no-textconv`
+matter: a diff otherwise runs a program the repository being read configured.
+
+`web_search` finds an address rather than reading one somebody named. Its own
+switch, off by default, because letting the agent choose where to go is a
+different thing to be trusted with.
+
+`list_processes` closes the gap the process tools left behind.
+
+**Trust means what it said.** `Memory.Trust` was documented as "the least
+trusted thing that contributed" and was the trust of the turn's origin, so a
+local turn in which the model read a hostile page and wrote down what it said
+produced a memory recorded as the operator's own word — eligible to become a
+standing instruction. A tool now declares whether its results carry somebody
+else's words, the completion event records it, and the conversation's trust is
+derived from the log, bounded by the call's own position.
+
+This is the hole OpenClaw documents in its own architecture and has not
+closed. Its structural rule — trust is promotion eligibility, not a retrieval
+score — is the part worth having, and JingClaw already had it; what was wrong
+was the trust value being fed into it.
+
+**Memory keeps two timelines.** `valid_from` / `valid_until` beside
+`created_at` / `invalidated_at`, so a fact can stop being true without anybody
+having been wrong about it. A correction now records both moments: when this
+agent stopped carrying the old memory, and when the thing it described stopped
+being true. Those are rarely the same, and one timeline has to lose one of
+them.
+
+An inactivity expiry was built here and removed after review. It retired a
+memory nobody had recalled in ninety days, which is anti-correlated with its
+own purpose: corpus rot is caused by near-duplicates, and those are recalled
+constantly and never expired, while a correct, important, cold fact — the
+production namespace of a service nobody has deployed since spring — died on
+schedule. It also let retrieval frequency decide truth, and made a read a
+write. Nothing is forgotten now for being unpopular.
+
+OpenClaw reaches the same place from the other direction: its FAQ says memory
+files persist until deleted, and it uses a ranking half-life rather than
+expiry. Zep is the one that models valid time properly.
+
+**A lookup that misses is tried again with other words.** Memory is searched by
+word, and the way that fails is silent: "prefer reusing an existing component
+over building a second one" and "should I add a new modal?" are the same
+subject with no word in common, so the index returns nothing and reports
+nothing missing. When a search comes back empty the model is asked for the
+vocabulary the same note might have been written in, and the search runs once
+more with those words added to the original. Results found that way are
+labelled, because they answer a question near the one that was asked.
+
+The cost is one small completion, paid only on a search that already failed —
+a search that matched never reaches the provider. What comes back is used as
+search terms and nothing else: it is quoted the way any model-written query is,
+so it cannot become MATCH syntax, and the scopes a turn may read are still
+decided by the turn rather than by anything in the answer.
+
+This is the cheap half of what a vector index would buy. It does not survive
+the provider being unreachable, and it cannot rank by meaning — it only widens
+what is matched. Embeddings remain the thing most likely to be missed later.
+
+Two things it does not do. Its tokens are not counted in the run's usage,
+which is the same gap compaction's summary call already has: both go straight
+to the provider rather than through the turn that reports usage. And it cannot
+help a memory written in Chinese, because the search index behind it cannot
+find one at all — fts5's default tokenizer reads a run of Han characters as a
+single token, so 「元件」 matches nothing in a memory containing 「既有的元件」.
+Expansion then fires on every such lookup and pays for a call that cannot
+help. That is a defect in the index, not in this, and it is open.
+
+**Approving from a channel, by name.** A room can now hold three separate
+powers: being in it, being allowed to ask the agent for something, and being
+allowed to permit what it asks. `approvers` and `approver_roles` sit beside
+`users` and `roles` in a channel's entry, empty meaning nobody, and nothing
+about being allowed to ask implies being allowed to permit.
+
+The press arrives on the gateway ingress rather than on the session service,
+and that is the whole shape of it: `SessionService.DecideApproval` settles
+anything by id and belongs to an operator's client, while the new
+`GatewayIngressService.DeliverDecision` only reports that a named person
+pressed something in a named channel and lets the daemon decide whether that
+counts. A gateway that could answer that question itself would be a bot token
+that can approve. `verify-approval-buttons.sh` checks that the gateway
+credential is refused by the first and accepted by the second.
+
+Typing is still not enough in a shared room, and does not become enough: a
+message says which account posted it, and that is all. A button press is
+delivered by the platform with the presser's authenticated identity attached,
+which is a different claim — the same distinction OpenClaw's Discord
+CVE-2026-27484 got wrong in the other direction.
+
+`ConsoleRuntime` became `DecidingRuntime` in the process, because an ordinary
+channel can now decide and the old name had stopped being true. The gateway
+also briefly grew a dependency on the runtime, for one error value; the value
+moved to `domain` and `internal/architecture` now has a test that fails if the
+dependency comes back.
+
+**Tables reach a channel readable.** No platform here renders Markdown table
+syntax, so a model's table arrived as a wall of bars — worse in Chinese, where
+the columns do not line up even in a monospaced font unless the padding is
+computed by display width rather than by counting characters.
+
+A table is now found by parsing rather than by splitting on bars, because a
+cell may hold an escaped one or a code span containing one, and splitting
+turns that row into more cells than it has, silently. Narrow tables become an
+aligned block; wide ones become one paragraph per row, labelled with the
+header so a row still says what its values mean.
+
+Padding is by grapheme cluster and East Asian width: "中" is one code point
+and two columns, a flag is two regional indicators and one glyph, and an
+escape sequence is bytes and no columns. len, the rune count and the code
+point count are three different numbers and none of them is this one.
+
+The alignment is the best a sender can do rather than something the receiver
+guarantees. Discord's Latin code face is monospace, but a CJK glyph may come
+from a fallback font and standard emoji differ by client — desktop and Android
+use Twemoji, iOS uses Apple's. So a table whose alignment must be exact does
+not belong in a message at all. Where emoji are in play, put them in the last
+column or write the status as a word.
+
+A block longer than a message goes as a file rather than in pieces. Cutting a
+preformatted block closes the fence and reopens it, so one block becomes two —
+and a table cut two rows from its end leaves a second message holding nothing
+but its bottom rule, which is what a channel actually showed. `Split` still
+does the repair, because a caller may have nowhere else to put the text;
+`SplitsAFence` is how a caller that does find out. Found by looking at Discord,
+not by a test: the table this came from was one the model had preformatted
+itself, so nothing in the table renderer was involved.
+
+The Discord assertions live in the adapter and read its own style rather than
+a copy of it in a test: the fence, the width budget and the emphasis markers
+are configuration, and a test carrying its own version can pass while what the
+channel receives is something else.
+
+**One client, and it is the terminal.** The embedded web console, the macOS
+client and the Windows placeholder are removed. Conversation happens in
+Discord; a client's job is to watch and to decide, and three implementations of
+that — one of them a `.gitkeep` — were three chances for the same event log to
+be folded into three different screens.
+
+What went with them: the pairing flow, `ScopeConsole`, `ConsoleService`, and
+`server.web_console` / `pairing_ttl` / `console_ttl`. There is now no
+unauthenticated path into the daemon at all; the browser needed one because it
+could not present a bearer token on the request that fetched the page.
+
+`verify-console.sh` became `verify-api.sh`. Its browser-specific checks went,
+and five did not: an uncredentialed call is refused, a rebound host is refused
+even with a credential, a gateway credential reaches only the ingress, and
+Connect works as both plain JSON and length-prefixed frames. Those were never
+about the browser, and the TUI will use the same transport. The removal was
+done test-first — the new assertions were written and watched to fail before
+the code went — because a test edited alongside the code it checks relaxes
+with it and nobody notices.
+
+`fixtures/session-view.json` stays, with the JS and Swift checks gone. It is
+the recorded behaviour of the session view rather than a cross-language
+contract now, and the TUI will be the next thing checked against it. Writing
+it again later from the implementation would make it a copy of the code
+instead of evidence.
+
+Not done: the TUI itself. Between now and it, `agent` is the only way to see
+a session from this machine.
+
+**One deployment, wherever it is started from.** A deployment used to be found
+by walking up from the working directory looking for `.JingClaw`, falling back
+to the platform's own location, with an extra rule for the XDG convention on
+macOS. Three rules produced one path, and which one applied depended on where
+somebody typed the daemon's name.
+
+That cost three failures in one day, none of which looked like a failure: an
+approval button that did not appear because the config being edited was not the
+config being read; "are you sure you changed it?"; and a provider switch that
+did nothing. Two directories both looked real, only one was live, and nothing
+said so.
+
+Now: `--config`, then `$JINGCLAW_HOME`, then `~/.jingclaw`, on every platform.
+The working directory does not take part. `verify-home.sh` starts the same
+deployment from three directories — two of them with a decoy `.jingclaw` above
+them — and requires `--print-paths` to agree. Putting the walk back fails it.
+
+The workspace is fixed too. It used to be the working directory when there was
+no deployment directory, which handed a fresh install the contents of the first
+project somebody started it from. OpenClaw reached the same layout after the
+same confusion, and its docs say plainly that two workspace directories caused
+"auth/state drift because only one workspace is actually active".
+
+**Identity is files, not settings.** `agent.name`, `agent.persona`,
+`agent.instructions` and `agent.instruction_files` are gone. `AGENTS.md` and
+`PERSONA.md` are created by `--init` and read every run; the names are fixed.
+Each setting had been a second place to say the same thing, and a second place
+is one somebody edits while the first is what runs. Asked independently, the
+same conclusion came back: Hermes has `SOUL.md` *and* `agent.system_prompt`
+*and* `personalities`, three ways to change one thing, and that is the part of
+it not worth copying.
+
+**A starter, not a reference.** `config.example.toml` went from 405 lines to
+215, prose from 203 lines to 56, with every setting still present. The rule
+kept: a comment earns its place only when deleting it would make somebody
+editing that line more likely to get it wrong. The rest is
+`docs/configuration.md`. The file moved under `docs/` as well — a template
+sitting where a config file could be read is one somebody will edit and then
+wonder why nothing changed.
+
+Sections are ordered by what somebody is looking for rather than by how the
+code grew: agent and provider, then workspace and durable state, then
+capabilities, then interfaces.
+
+**Each backend keeps its own credential and model.** `[model]` is
+`[provider]`, `provider =` is `backend =`, and `api_key_env`, `api_key_file`
+and `model` moved from the shared section into `[provider.gemini]`,
+`[provider.ollama]` and `[provider.openai_compat]`. Shared, only one backend
+could be set up at a time: switching meant editing the key settings too, and
+switching back meant editing them again from memory. Now switching is one line.
+
+**Shutdown that waits.** One deadline covered both phases, and a held-open
+stream made http shutdown consume all of it, so the runtime was asked to drain
+with none left and was never actually waited for. Each phase has its own
+window now; stopping went from ten seconds to two.
+
+**One program you open.** `agentd`, `gatewayd` and `agent` were three binaries
+that had to be started in the right order by hand, with a shell script holding
+them together. They are now subcommands of one `jingclaw`, and running it with
+no arguments starts the daemon and the gateway and stays with them — the shape
+a game server has. It stops what it started and leaves alone what it found:
+run it twice and the second says so rather than putting a second daemon on the
+same database. `restart-agentd.sh` is gone; it existed because there was no
+executable.
+
+Still two processes. The gateway holds somebody else's bot token and a socket
+to the internet, and the process that owns the shell, the workspace and the
+event log must not go down with it.
+
+**A service, for when nobody is at the keyboard.** `jingclaw service
+install/uninstall/status` writes a launchd job rather than handing somebody an
+XML block to edit a path into. Its PATH is asked of the login shell in a clean
+environment, not taken from the installing process: a service inherits nothing,
+and the process installing it may be an editor or an agent carrying directories
+that will not exist next week.
+
+Not verified end to end, deliberately. Loading the job would change the login
+session of whoever ran the check — a second daemon on their own database, or a
+service they already had replaced — and a check that does that is worse than a
+gap. `verify-service.sh` proves the description instead: launchd can parse it,
+it names the executable that printed it, its PATH has the tools the agent runs.
+
+**The console.** One scrolling log across every session and a line to type
+at, which is what opening JingClaw gives you. The log has a position of its
+own (`global_seq`) so a console that reconnects can say how far through it has
+read — a per-session number cannot answer that, and a timestamp is not a
+position: a clock that goes backwards puts an event behind a cursor that has
+already passed it.
+
+Drawn the way a game server's console is, and for the same reason: the log and
+the person typing both want the terminal, so a log line erases the input line,
+writes itself, and puts the input line back. Verified through a real pty,
+since raw mode and redrawing the bottom row do not happen against a pipe.
+
+**Skills.** Instruction packs an operator installs by copying a directory in.
+The catalogue in the prompt is names and descriptions; the instructions
+themselves arrive only when the model asks for one by name. What holds it up
+is that a skill can make the model want to do something and can never make the
+runtime allow it, and the check installs a skill that tries — it declares
+permissions, demands no approvals, and tells the model to ignore everything
+before it, and the write it asks for still stops for a person.
+
+**Tables as pictures, for a chat channel.** Off by default. A code block is
+laid out by whatever font the reader's client has, so a table of Chinese and
+Latin arrives bent however carefully its columns were counted; a picture is
+the layout rather than a description of one. An answer with a table in the
+middle becomes three messages, because an attachment sits below the content
+rather than inside it.
+
+**A line for the console.** `internal/console` turns an event into one line:
+fields in a fixed order with the payload last, because the payload is the only
+one that can be arbitrarily long and cutting from the right takes the session
+and the state with it. An approval shows the command it was asked with and
+never a summary of it. Clipping counts what the terminal draws, not bytes or
+runes. No terminal, no state, no dependency — the rest of the console can be
+argued about without this changing.
+
+## Not done
+
+**Built but nothing uses it**
+
+- `ShellFor` in `internal/tool/builtin/exec.go`. See the hole below.
+
+**Known holes**
+
+- **Trust does not survive the run it was earned in.** A tool that returns
+  somebody else's words lowers the trust of everything written after it in
+  that run. It does not follow the words out of the run: the agent reads a
+  page, writes what it said into a file, and the human approves that write —
+  approving "write this file", not "this content is trustworthy". A later run
+  reads the file back with `read_file`, which returns no foreign content, and
+  what the page said is now something the agent may make a standing
+  instruction. The taint is per-run and the workspace is not, so any tool that
+  persists is a way across. Closing it means provenance on the bytes rather
+  than on the run, which is a larger change than the one that made run-level
+  trust work.
+
+- ~~**A stale client resolves the old way.**~~ Fixed by there being one
+  binary: a client cannot be built from a different revision than the daemon
+  it talks to when they are the same file. The supervisor also starts its
+  parts from `os.Executable()` rather than the name on PATH, so an installed
+  copy and a freshly built one cannot be mixed.
+
+- **Nothing is sandboxed.** There is no seatbelt, bubblewrap, landlock or
+  seccomp anywhere: an approved `exec_command` runs with the daemon's own
+  privileges. That is a deliberate shape rather than an oversight — the
+  boundary here is approval, not containment — but the two stop different
+  things. Approval stops what should not be done; a sandbox stops what is
+  being done from reaching further than it said. An approved `npm test` can
+  still read `~/.ssh`. Claude Code and Codex have OS-native sandboxes;
+  OpenHands and OpenClaw use containers.
+
+- **A tool's declared effects are not this call's effects.** The lines under
+  "This will" come from the tool's static capabilities, not from the arguments
+  in front of the person: every `exec_command` reads the same four whatever it
+  is about to run. Conservative, and safe while every approval is one-time —
+  but it means those lines carry no information, which is how people learn to
+  click through them. If a remembered "allow always" is ever added, this stops
+  being a blemish and becomes the hole, because what somebody remembers is
+  something they never actually read.
+
+- **`ShellFor` is built and unused.** It settles which shell a future shell
+  mode would run. Nothing calls it, so the compound-command bypasses other
+  agents have shipped cannot happen here: `exec_command` takes a program and
+  an argument list and never spawns a shell. The day that changes, per-segment
+  authorization stops being unnecessary and becomes required.
+
+- **Content pasted by the operator.** A tool that returns somebody else's
+  words now lowers the trust of everything written after it in that run, so a
+  page the agent read cannot become something it believes. What is still not
+  covered is the operator pasting third-party text into their own turn: there
+  is no tool call to attribute it to. OpenClaw documents the same limit —
+  "the current runtime does not propagate content origin within an owner
+  turn" — and has not closed it either.
+
+**Never exercised against the real thing**
+
+- **Telegram.** The adapter has run only against a stub that answers whatever
+  it is asked, so a wrong method name or a missing field would pass. It is
+  written from the documented API and has never been near the real one, which
+  needs a bot token this session must not ask for
+- The console channel has had no message typed into it; that needs somebody's
+  own account, not the bot's
+- `openai_compat` has run against Ollama's `/v1` and nothing else. vLLM,
+  LM Studio and llama.cpp are still stand-ins written from documentation
+- The 429 handling was rebuilt from Google's documented error shape and has
+  not seen a real rate limit since
+- **Brave search.** Written from the documented response shape and run only
+  against a stub, which answers whatever it is asked. It needs a subscription
+  token this session must not ask for
+- ConPTY. The Windows build reports honestly that it gave out pipes rather
+  than a terminal, and that path has not been run on Windows at all
+
+**Not started**
+
+- Subagents. Four decisions to make before any code: whose run, whose
+  approval, what context, whose budget.
+- Subagents: no code at all, and four decisions to make first — whose run,
+  whose approval, what context, whose budget
+- Anthropic and OpenAI's own APIs; the abstraction is there, the adapters are not
+- Ollama structured output (`format`), and its model-pull progress
+- No client shows a running process; the three tools are model-facing only
+- MCP OAuth, for a server that wants it
+
+## Defects that only end-to-end testing found
+
+Kept because the pattern is the point: every one was in an assembly seam
+rather than in logic a unit test was looking at.
+
+1. Usage events flooding the log — needed time-bounded coalescing
+2. Coalescing then lost buffered text on interrupt
+3. Gemini thought signatures dropped when the conversation was rebuilt
+4. `NewApprovalID` nil — segfault mid-conversation
+5. `agentd` never wired the projector: runs completed, Discord got nothing
+6. Discord self-identity race: connected, logged fine, ignored everything
+7. The storage codec did not know the compaction payload — worked in memory,
+   dropped on SQLite
+8. A mistyped field name on an approval was read as a deny and reported as
+   success; found within minutes of writing a second client
+
+Two were found by reading rather than running: the daemon deleting a
+replacement's discovery file, and compaction summarising its own summary.
+
+Two were found by a person using it on a phone, which no test would have:
+
+9. Every Discord mention started a new session, so the agent had no memory of
+   anything — the conversation key was the arriving message's id
+10. The status line was keyed by channel, so a new run edited the line the
+    previous run had left at the bottom of the previous answer
+
+Three came out of writing a second implementation of something, which is the
+same lesson in a different form:
+
+11. Retry had never once run against Gemini. The wrapper watched `Generate`,
+    and that adapter returns a lazy stream, so every retryable failure arrived
+    at `Recv`. Five of twenty-eight live runs failed on rate limits, none
+    retried
+12. A test wrote a fixture to the path `.JingClaw` resolution had made the
+    operator's real configuration, and passed while doing it. Every check now
+    sets `JINGCLAW_HOME=none`, and a guard test fails if that goes away
+13. The shared-fixture check named the fields it compared, in both the JS and
+    the Swift client. A field added to the fixtures was therefore exempt from
+    every client at once — a gap in the one place whose whole purpose is
+    catching gaps. Both now fail on a field they do not know about
+
+And two were found by a check that was passing for the wrong reason:
+
+14. `swift test | tail` in the parity check reported the pipeline's last
+    command, so it always passed; and its `[ -d macos ]` guard matched an
+    empty directory
+15. A process check matched "listening on 3000" in the echoed tool arguments
+    rather than in the program's output, so it would have passed against a
+    process that printed nothing
+
+And one by opening the page, which nothing else would have found:
+
+16. An approval names its id `approval_id` on the event and `id` in the
+    session view and the listing. The console read only the first, so every
+    approval it drew from a view keyed to undefined — two waiting approvals
+    collapsed into one row, Allow sent an empty id, and the row carried
+    neither the arguments nor the effects. A person opening a session where
+    something was already waiting was being asked to allow a call they could
+    not see and could not actually allow
+
+And three from merging three programs into one, which is an assembly seam by
+definition:
+
+17. The client subcommands put their read-the-configuration step on the shared
+    root command. Cobra runs the nearest one it finds walking up from whatever
+    was invoked, so it also ran for the daemon — which reads its configuration
+    from a flag of its own, and refused to start anywhere without a default
+    location. Twenty-two of twenty-six checks failed on it at once, all with
+    the same message, which is what made it look like a configuration problem
+    rather than a wiring one
+18. Under `set -e`, killing a process that has already exited ends the cleanup
+    function where it stands, skipping the rest of the killing and the removal
+    of the work directory. A check whose daemon never started left its Telegram
+    stub holding a fixed port; the next check to want that port talked to the
+    stub of a run that was over. It answered `getMe`, so the gateway logged
+    that it had connected, and it had already delivered its one update, so it
+    returned nothing forever. The symptom was a message that never became a
+    run — which reads as a broken gateway, not as leftovers
+19. The supervisor treated any part exiting as a failure and wrapped a nil
+    error, so every clean `jingclaw stop` ended with
+    `error: the daemon stopped: %!w(<nil>)` and a non-zero status
+
+Two of those three came from a plain `set -e` rule that the obvious minimal
+reproduction does not trigger: an AND-OR list whose *first* command fails is
+exempt, so `[ -n "" ] && kill` is fine and `kill <dead pid>` is not. The first
+version of the diagnosis was wrong for exactly that reason, and only running it
+showed so.

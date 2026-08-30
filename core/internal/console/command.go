@@ -47,6 +47,7 @@ var known = []struct {
 	{Verb: "questions", Aliases: []string{"asked"}, What: "what the agent has stopped to ask"},
 	{Verb: "answer", Takes: "<id> <text>", What: "answer a question it is waiting on"},
 	{Verb: "sessions", Aliases: []string{"ls"}, What: "the conversations there are"},
+	{Verb: "processes", Aliases: []string{"ps"}, What: "programs the agent has running"},
 	{Verb: "focus", Takes: "[session]", What: "show one session only, or all of them again"},
 	{Verb: "interrupt", Takes: "<session>", What: "ask a run to stop"},
 	{Verb: "help", Aliases: []string{"?"}, What: "this"},

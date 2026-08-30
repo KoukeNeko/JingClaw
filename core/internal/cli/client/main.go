@@ -96,7 +96,7 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand(),
 		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand(),
 		newArtifactCommand(), newMemoryCommand(),
-		newQuestionsCommand(), newAnswerCommand())
+		newQuestionsCommand(), newAnswerCommand(), newProcessesCommand())
 	return root
 }
 
@@ -1124,4 +1124,46 @@ func authenticatedIn(where string) (*http.Client, string, error) {
 	return &http.Client{
 		Transport: &bearerTransport{token: found.Token, base: http.DefaultTransport},
 	}, found.BaseURL, nil
+}
+
+// newProcessesCommand lists what the agent has left running.
+//
+// The three process tools belong to the model, and until this there was no
+// way for a person to see what they had started: a server put up an hour ago
+// was visible only to the agent that put it there.
+func newProcessesCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "processes <session-id>",
+		Short: "List programs the agent has running",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := dial()
+			if err != nil {
+				return err
+			}
+
+			resp, err := client.ListProcesses(cmd.Context(),
+				connect.NewRequest(&controlv1.ListProcessesRequest{SessionId: args[0]}))
+			if err != nil {
+				return err
+			}
+
+			running := resp.Msg.GetProcesses()
+			if len(running) == 0 {
+				fmt.Fprintln(cmd.ErrOrStderr(), "nothing running")
+				return nil
+			}
+
+			for _, one := range running {
+				state := "running"
+				if !one.GetRunning() {
+					state = fmt.Sprintf("exit %d", one.GetExitCode())
+				}
+				fmt.Printf("%s  pid %-7d %-10s %s %s\n",
+					one.GetId(), one.GetPid(), state,
+					one.GetProgram(), strings.Join(one.GetArgs(), " "))
+			}
+			return nil
+		},
+	}
 }

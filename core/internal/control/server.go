@@ -16,9 +16,12 @@ import (
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/media"
+	"github.com/KoukeNeko/JingClaw/core/internal/process"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
@@ -74,6 +77,19 @@ type Server struct {
 	// is what a session with no choice of its own uses.
 	models       Models
 	defaultModel string
+
+	// processes is what the agent has left running, for a person watching.
+	// Nil when the process tools are switched off.
+	processes Processes
+}
+
+// Processes reports what the agent has left running.
+//
+// An interface, and allowed to be nil: a deployment with the process tools
+// switched off has nothing to report, and asking should say so rather than
+// need a manager that manages nothing.
+type Processes interface {
+	List(sessionID string) []process.State
 }
 
 func NewServer(
@@ -83,11 +99,45 @@ func NewServer(
 	artifacts AttachmentStore,
 	models Models,
 	defaultModel string,
+	processes Processes,
 ) *Server {
 	return &Server{
 		rt: rt, store: store, hub: hub, artifacts: artifacts,
-		models: models, defaultModel: defaultModel,
+		models: models, defaultModel: defaultModel, processes: processes,
 	}
+}
+
+// ListProcesses is what the agent has left running.
+//
+// The three process tools are the model's, and until now nothing showed a
+// person what they had left behind: a server started an hour ago was visible
+// only to the agent that started it.
+func (s *Server) ListProcesses(
+	ctx context.Context,
+	req *connect.Request[controlv1.ListProcessesRequest],
+) (*connect.Response[controlv1.ListProcessesResponse], error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.processes == nil {
+		return connect.NewResponse(&controlv1.ListProcessesResponse{}), nil
+	}
+
+	running := s.processes.List(req.Msg.GetSessionId())
+	out := make([]*controlv1.RunningProcess, 0, len(running))
+	for _, one := range running {
+		out = append(out, &controlv1.RunningProcess{
+			Id:        string(one.ID),
+			SessionId: req.Msg.GetSessionId(),
+			Program:   one.Program,
+			Args:      one.Args,
+			Pid:       int32(one.PID),
+			StartedAt: timestamppb.New(one.StartedAt),
+			Running:   one.Running,
+			ExitCode:  int32(one.ExitCode),
+		})
+	}
+	return connect.NewResponse(&controlv1.ListProcessesResponse{Processes: out}), nil
 }
 
 func (s *Server) CreateSession(

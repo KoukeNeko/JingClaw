@@ -129,6 +129,20 @@ while [ ! -f "$WORK/workspace/still-running" ]; do
 done
 printf 'ok   and it is still running after the call returned\n'
 
+# And a person can see it. The three process tools are the model's; until this
+# there was no way to find out what they had left behind, so a server started
+# an hour ago was visible only to the agent that started it.
+RUNNING=$("$WORK/jingclaw" --config "$WORK/config.toml" processes "$SESSION" 2>&1) ||
+	fail "asking what is running failed: $RUNNING"
+
+printf '%s' "$RUNNING" | grep -q "$PROCESS" ||
+	fail "the running program is not in the listing: $RUNNING"
+printf '%s' "$RUNNING" | grep -q 'running' ||
+	fail "the listing does not say it is running: $RUNNING"
+printf '%s' "$RUNNING" | grep -qE 'pid [0-9]+' ||
+	fail "the listing gives no pid, so nobody can find it themselves: $RUNNING"
+printf 'ok   and somebody who is not the agent can see it, with its pid\n'
+
 # The run ends and the program does not. This is the whole difference between
 # these tools and exec_command.
 WAITED=0

@@ -148,6 +148,9 @@ type controlv1connectSessionService interface {
 	ListQuestions(
 		context.Context, *connect.Request[controlv1.ListQuestionsRequest],
 	) (*connect.Response[controlv1.ListQuestionsResponse], error)
+	ListProcesses(
+		context.Context, *connect.Request[controlv1.ListProcessesRequest],
+	) (*connect.Response[controlv1.ListProcessesResponse], error)
 	AnswerQuestion(
 		context.Context, *connect.Request[controlv1.AnswerQuestionRequest],
 	) (*connect.Response[controlv1.AnswerQuestionResponse], error)

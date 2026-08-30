@@ -170,6 +170,39 @@ message ListQuestionsRequest {
   string session_id = 1;
 }
 
+// ListProcesses is what start_process has running, for somebody watching.
+//
+// The three process tools are the model's, and nothing showed a person what
+// they had left running — so a server the agent started an hour ago was
+// visible only to the agent.
+message ListProcessesRequest {
+  string session_id = 1;
+}
+
+message ListProcessesResponse {
+  repeated RunningProcess processes = 1;
+}
+
+message RunningProcess {
+  string id = 1;
+  string session_id = 2;
+
+  string program = 3;
+  repeated string args = 4;
+
+  // PID is the operating system's number for it, so somebody at the machine
+  // can find it themselves.
+  int32 pid = 5;
+
+  google.protobuf.Timestamp started_at = 6;
+
+  bool running = 7;
+
+  // ExitCode is meaningful only once it has ended. Negative means it was
+  // killed by a signal rather than returning.
+  int32 exit_code = 8;
+}
+
 message ListQuestionsResponse {
   repeated Question questions = 1;
 }
@@ -503,6 +536,9 @@ service SessionService {
 
   // ListQuestions is what the agent has asked and nobody has answered.
   rpc ListQuestions(ListQuestionsRequest) returns (ListQuestionsResponse);
+
+  // ListProcesses is what the agent has left running.
+  rpc ListProcesses(ListProcessesRequest) returns (ListProcessesResponse);
 
   // AnswerQuestion unblocks a run that stopped to ask.
   rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);

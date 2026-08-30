@@ -89,6 +89,9 @@ const (
 	// SessionServiceListQuestionsProcedure is the fully-qualified name of the SessionService's
 	// ListQuestions RPC.
 	SessionServiceListQuestionsProcedure = "/jingclaw.control.v1.SessionService/ListQuestions"
+	// SessionServiceListProcessesProcedure is the fully-qualified name of the SessionService's
+	// ListProcesses RPC.
+	SessionServiceListProcessesProcedure = "/jingclaw.control.v1.SessionService/ListProcesses"
 	// SessionServiceAnswerQuestionProcedure is the fully-qualified name of the SessionService's
 	// AnswerQuestion RPC.
 	SessionServiceAnswerQuestionProcedure = "/jingclaw.control.v1.SessionService/AnswerQuestion"
@@ -409,6 +412,8 @@ type SessionServiceClient interface {
 	DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error)
 	// ListQuestions is what the agent has asked and nobody has answered.
 	ListQuestions(context.Context, *connect.Request[v1.ListQuestionsRequest]) (*connect.Response[v1.ListQuestionsResponse], error)
+	// ListProcesses is what the agent has left running.
+	ListProcesses(context.Context, *connect.Request[v1.ListProcessesRequest]) (*connect.Response[v1.ListProcessesResponse], error)
 	// AnswerQuestion unblocks a run that stopped to ask.
 	AnswerQuestion(context.Context, *connect.Request[v1.AnswerQuestionRequest]) (*connect.Response[v1.AnswerQuestionResponse], error)
 	// ListModels is what this daemon's provider offers, and which one a session
@@ -503,6 +508,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("ListQuestions")),
 			connect.WithClientOptions(opts...),
 		),
+		listProcesses: connect.NewClient[v1.ListProcessesRequest, v1.ListProcessesResponse](
+			httpClient,
+			baseURL+SessionServiceListProcessesProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("ListProcesses")),
+			connect.WithClientOptions(opts...),
+		),
 		answerQuestion: connect.NewClient[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse](
 			httpClient,
 			baseURL+SessionServiceAnswerQuestionProcedure,
@@ -537,6 +548,7 @@ type sessionServiceClient struct {
 	listApprovals      *connect.Client[v1.ListApprovalsRequest, v1.ListApprovalsResponse]
 	decideApproval     *connect.Client[v1.DecideApprovalRequest, v1.DecideApprovalResponse]
 	listQuestions      *connect.Client[v1.ListQuestionsRequest, v1.ListQuestionsResponse]
+	listProcesses      *connect.Client[v1.ListProcessesRequest, v1.ListProcessesResponse]
 	answerQuestion     *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
 	listModels         *connect.Client[v1.ListModelsRequest, v1.ListModelsResponse]
 	setSessionModel    *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
@@ -597,6 +609,11 @@ func (c *sessionServiceClient) ListQuestions(ctx context.Context, req *connect.R
 	return c.listQuestions.CallUnary(ctx, req)
 }
 
+// ListProcesses calls jingclaw.control.v1.SessionService.ListProcesses.
+func (c *sessionServiceClient) ListProcesses(ctx context.Context, req *connect.Request[v1.ListProcessesRequest]) (*connect.Response[v1.ListProcessesResponse], error) {
+	return c.listProcesses.CallUnary(ctx, req)
+}
+
 // AnswerQuestion calls jingclaw.control.v1.SessionService.AnswerQuestion.
 func (c *sessionServiceClient) AnswerQuestion(ctx context.Context, req *connect.Request[v1.AnswerQuestionRequest]) (*connect.Response[v1.AnswerQuestionResponse], error) {
 	return c.answerQuestion.CallUnary(ctx, req)
@@ -639,6 +656,8 @@ type SessionServiceHandler interface {
 	DecideApproval(context.Context, *connect.Request[v1.DecideApprovalRequest]) (*connect.Response[v1.DecideApprovalResponse], error)
 	// ListQuestions is what the agent has asked and nobody has answered.
 	ListQuestions(context.Context, *connect.Request[v1.ListQuestionsRequest]) (*connect.Response[v1.ListQuestionsResponse], error)
+	// ListProcesses is what the agent has left running.
+	ListProcesses(context.Context, *connect.Request[v1.ListProcessesRequest]) (*connect.Response[v1.ListProcessesResponse], error)
 	// AnswerQuestion unblocks a run that stopped to ask.
 	AnswerQuestion(context.Context, *connect.Request[v1.AnswerQuestionRequest]) (*connect.Response[v1.AnswerQuestionResponse], error)
 	// ListModels is what this daemon's provider offers, and which one a session
@@ -729,6 +748,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("ListQuestions")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceListProcessesHandler := connect.NewUnaryHandler(
+		SessionServiceListProcessesProcedure,
+		svc.ListProcesses,
+		connect.WithSchema(sessionServiceMethods.ByName("ListProcesses")),
+		connect.WithHandlerOptions(opts...),
+	)
 	sessionServiceAnswerQuestionHandler := connect.NewUnaryHandler(
 		SessionServiceAnswerQuestionProcedure,
 		svc.AnswerQuestion,
@@ -771,6 +796,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceDecideApprovalHandler.ServeHTTP(w, r)
 		case SessionServiceListQuestionsProcedure:
 			sessionServiceListQuestionsHandler.ServeHTTP(w, r)
+		case SessionServiceListProcessesProcedure:
+			sessionServiceListProcessesHandler.ServeHTTP(w, r)
 		case SessionServiceAnswerQuestionProcedure:
 			sessionServiceAnswerQuestionHandler.ServeHTTP(w, r)
 		case SessionServiceListModelsProcedure:
@@ -828,6 +855,10 @@ func (UnimplementedSessionServiceHandler) DecideApproval(context.Context, *conne
 
 func (UnimplementedSessionServiceHandler) ListQuestions(context.Context, *connect.Request[v1.ListQuestionsRequest]) (*connect.Response[v1.ListQuestionsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.ListQuestions is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) ListProcesses(context.Context, *connect.Request[v1.ListProcessesRequest]) (*connect.Response[v1.ListProcessesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.ListProcesses is not implemented"))
 }
 
 func (UnimplementedSessionServiceHandler) AnswerQuestion(context.Context, *connect.Request[v1.AnswerQuestionRequest]) (*connect.Response[v1.AnswerQuestionResponse], error) {
