@@ -133,17 +133,18 @@ func rememberScopeFromProto(scope controlv1.RememberScope) domain.RememberScope 
 
 func approvalToProto(a domain.Approval) *controlv1.Approval {
 	return &controlv1.Approval{
-		Id:         string(a.ID),
-		SessionId:  string(a.SessionID),
-		RunId:      string(a.RunID),
-		ToolCallId: string(a.ToolCallID),
-		ToolName:   a.ToolName,
-		Arguments:  a.Arguments,
-		Summary:    a.Summary,
-		Effects:    a.Effects,
-		Preview:    a.Preview,
-		Status:     approvalStatusToProto(a.Status),
-		CreatedAt:  timestamppb.New(a.CreatedAt),
+		Id:          string(a.ID),
+		SessionId:   string(a.SessionID),
+		RunId:       string(a.RunID),
+		ToolCallId:  string(a.ToolCallID),
+		ToolName:    a.ToolName,
+		Arguments:   a.Arguments,
+		Summary:     a.Summary,
+		Effects:     a.Effects,
+		Preview:     a.Preview,
+		Status:      approvalStatusToProto(a.Status),
+		CreatedAt:   timestamppb.New(a.CreatedAt),
+		ReadForeign: a.ReadForeign,
 	}
 }
 
@@ -322,13 +323,14 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 	case domain.ApprovalRequested:
 		out.Payload = &controlv1.Event_ApprovalRequested{
 			ApprovalRequested: &controlv1.ApprovalRequested{
-				ApprovalId: string(p.ApprovalID),
-				CallId:     string(p.CallID),
-				ToolName:   p.ToolName,
-				Arguments:  p.Arguments,
-				Summary:    p.Summary,
-				Effects:    p.Effects,
-				Preview:    p.Preview,
+				ApprovalId:  string(p.ApprovalID),
+				CallId:      string(p.CallID),
+				ToolName:    p.ToolName,
+				Arguments:   p.Arguments,
+				Summary:     p.Summary,
+				Effects:     p.Effects,
+				Preview:     p.Preview,
+				ReadForeign: p.ReadForeign,
 			},
 		}
 

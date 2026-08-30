@@ -1,0 +1,13 @@
+-- Whether the run had read somebody else's words before it asked for this.
+--
+-- The person deciding cannot see it any other way. A request to run a command
+-- looks the same whether the agent arrived at it or a web page suggested it,
+-- and only the log knows which. Saying so is not a judgement about the call;
+-- it is the one fact about it that is invisible in the asking.
+--
+-- Default false, which is what an approval written before this was recorded
+-- honestly says: not "nothing was read", but "this was not being tracked".
+-- The two are only distinguishable by the row's age, and nothing here needs
+-- to make that distinction — an old pending approval is a rarity, and one
+-- decided long ago is history rather than a question.
+ALTER TABLE approvals ADD COLUMN read_foreign INTEGER NOT NULL DEFAULT 0;

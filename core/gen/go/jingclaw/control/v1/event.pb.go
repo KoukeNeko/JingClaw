@@ -1535,7 +1535,14 @@ type ApprovalRequested struct {
 	// Alongside arguments rather than replacing them: the arguments are what
 	// will actually run, and a decision made against a rendering that disagreed
 	// with them would be a decision about something else.
-	Preview       string `protobuf:"bytes,7,opt,name=preview,proto3" json:"preview,omitempty"`
+	Preview string `protobuf:"bytes,7,opt,name=preview,proto3" json:"preview,omitempty"`
+	// Whether the run had taken in text somebody else wrote before it asked
+	// for this.
+	//
+	// Not a judgement about the call. It is the one thing a person deciding
+	// cannot see for themselves: the request looks the same whether the agent
+	// arrived at it or a page it read suggested it, and only the log knows.
+	ReadForeign   bool `protobuf:"varint,8,opt,name=read_foreign,json=readForeign,proto3" json:"read_foreign,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1617,6 +1624,13 @@ func (x *ApprovalRequested) GetPreview() string {
 		return x.Preview
 	}
 	return ""
+}
+
+func (x *ApprovalRequested) GetReadForeign() bool {
+	if x != nil {
+		return x.ReadForeign
+	}
+	return false
 }
 
 type ApprovalResolved struct {
@@ -2085,7 +2099,7 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\x06status\x18\x03 \x01(\x0e2#.jingclaw.control.v1.QuestionStatusR\x06status\x12\x16\n" +
 	"\x06answer\x18\x04 \x01(\tR\x06answer\x12?\n" +
 	"\vanswered_by\x18\x06 \x01(\v2\x1e.jingclaw.control.v1.RunOriginR\n" +
-	"answeredByJ\x04\b\x05\x10\x06\"\xd6\x01\n" +
+	"answeredByJ\x04\b\x05\x10\x06\"\xf9\x01\n" +
 	"\x11ApprovalRequested\x12\x1f\n" +
 	"\vapproval_id\x18\x01 \x01(\tR\n" +
 	"approvalId\x12\x17\n" +
@@ -2094,7 +2108,8 @@ const file_jingclaw_control_v1_event_proto_rawDesc = "" +
 	"\targuments\x18\x04 \x01(\tR\targuments\x12\x18\n" +
 	"\asummary\x18\x05 \x01(\tR\asummary\x12\x18\n" +
 	"\aeffects\x18\x06 \x03(\tR\aeffects\x12\x18\n" +
-	"\apreview\x18\a \x01(\tR\apreview\"\xa5\x02\n" +
+	"\apreview\x18\a \x01(\tR\apreview\x12!\n" +
+	"\fread_foreign\x18\b \x01(\bR\vreadForeign\"\xa5\x02\n" +
 	"\x10ApprovalResolved\x12\x1f\n" +
 	"\vapproval_id\x18\x01 \x01(\tR\n" +
 	"approvalId\x12\x17\n" +

@@ -12,7 +12,8 @@ import (
 )
 
 const approvalColumns = `id, session_id, run_id, tool_call_id, tool_name, arguments,
-	summary, effects, preview, status, scope, created_at, decided_at, decided_by`
+	summary, effects, preview, status, scope, created_at, decided_at, decided_by,
+	read_foreign`
 
 func (s *Store) CreateApproval(ctx context.Context, approval domain.Approval) error {
 	effects, err := json.Marshal(approval.Effects)
@@ -21,12 +22,13 @@ func (s *Store) CreateApproval(ctx context.Context, approval domain.Approval) er
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO approvals (`+approvalColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO approvals (`+approvalColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(approval.ID), string(approval.SessionID), string(approval.RunID),
 		string(approval.ToolCallID), approval.ToolName, approval.Arguments,
 		approval.Summary, string(effects), approval.Preview,
 		string(approval.Status), string(approval.Scope),
 		approval.CreatedAt.UnixNano(), nullableTime(approval.DecidedAt), storedOrigin{approval.DecidedBy},
+		approval.ReadForeign,
 	)
 	if isUniqueViolation(err) {
 		return storage.ErrApprovalDecided
@@ -155,7 +157,7 @@ func scanApproval(row scanner) (domain.Approval, error) {
 		&approval.ID, &approval.SessionID, &approval.RunID,
 		&approval.ToolCallID, &approval.ToolName, &approval.Arguments,
 		&approval.Summary, &effectsRaw, &approval.Preview, &approval.Status, &approval.Scope,
-		&created, &decided, &decidedBy,
+		&created, &decided, &decidedBy, &approval.ReadForeign,
 	); err != nil {
 		return domain.Approval{}, err
 	}

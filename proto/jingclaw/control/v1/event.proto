@@ -287,6 +287,13 @@ message ApprovalRequested {
   // will actually run, and a decision made against a rendering that disagreed
   // with them would be a decision about something else.
   string preview = 7;
+  // Whether the run had taken in text somebody else wrote before it asked
+  // for this.
+  //
+  // Not a judgement about the call. It is the one thing a person deciding
+  // cannot see for themselves: the request looks the same whether the agent
+  // arrived at it or a page it read suggested it, and only the log knows.
+  bool read_foreign = 8;
 }
 
 message ApprovalResolved {

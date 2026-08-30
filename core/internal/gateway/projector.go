@@ -177,6 +177,11 @@ type ApprovalPayload struct {
 	Summary    string   `json:"summary"`
 	Effects    []string `json:"effects,omitempty"`
 
+	// ReadForeign says the run had taken in text somebody else wrote before
+	// it asked for this. Carried because the person deciding cannot see it
+	// any other way, and it does not change what they are being asked.
+	ReadForeign bool `json:"read_foreign,omitempty"`
+
 	// Route is how a decision may be made where this is going.
 	//
 	// Carried rather than worked out by whatever renders the message: which
@@ -388,11 +393,12 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 
 	case domain.ApprovalRequested:
 		return p.enqueue(ctx, run, target, DispatchApproval, ApprovalPayload{
-			ApprovalID: string(payload.ApprovalID),
-			ToolName:   payload.ToolName,
-			Summary:    payload.Summary,
-			Effects:    payload.Effects,
-			Route:      p.approvalRoute(ctx, target),
+			ApprovalID:  string(payload.ApprovalID),
+			ToolName:    payload.ToolName,
+			Summary:     payload.Summary,
+			Effects:     payload.Effects,
+			ReadForeign: payload.ReadForeign,
+			Route:       p.approvalRoute(ctx, target),
 		})
 
 	case domain.QuestionAsked:

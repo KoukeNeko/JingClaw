@@ -427,9 +427,29 @@ func (r *Runtime) conversationTrust(
 		return trust, nil
 	}
 
-	events, err := r.opts.Store.ListAfter(ctx, run.SessionID, 0, 0)
+	read, err := r.hasReadForeign(ctx, run, before)
 	if err != nil {
 		return trust, err
+	}
+	if read {
+		return domain.TrustUntrusted, nil
+	}
+
+	return trust, nil
+}
+
+// hasReadForeign reports whether a run has taken in text somebody else wrote.
+//
+// Read from the log rather than tracked in memory, like everything else here,
+// so a run resumed in another process reaches the same answer. Before is the
+// point being asked about: a call is judged on what had been read when it was
+// made, not on what was read afterwards.
+func (r *Runtime) hasReadForeign(
+	ctx context.Context, run domain.Run, before domain.Seq,
+) (bool, error) {
+	events, err := r.opts.Store.ListAfter(ctx, run.SessionID, 0, 0)
+	if err != nil {
+		return false, err
 	}
 
 	for _, event := range events {
@@ -437,9 +457,21 @@ func (r *Runtime) conversationTrust(
 			continue
 		}
 		if completed, ok := event.Payload.(domain.ToolCallCompleted); ok && completed.Foreign {
-			return domain.TrustUntrusted, nil
+			return true, nil
 		}
 	}
+	return false, nil
+}
 
-	return trust, nil
+// readForeignSoFar asks the same question about everything a run has done up
+// to now, rather than up to a point in it.
+//
+// For a call being decided, where "so far" is the whole of it: nothing after
+// this moment has happened yet.
+func (r *Runtime) readForeignSoFar(ctx context.Context, run domain.Run) (bool, error) {
+	head, err := r.opts.Store.Head(ctx, run.SessionID)
+	if err != nil {
+		return false, err
+	}
+	return r.hasReadForeign(ctx, run, head+1)
 }

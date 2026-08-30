@@ -63,19 +63,33 @@ func (r *Runtime) requestApproval(
 	call tool.Call,
 	outcome permission.Outcome,
 ) error {
+	// What the person deciding cannot see for themselves. Asked of the log
+	// before the approval is written, so it describes the run as it was when
+	// the call was made.
+	//
+	// A failure here is not worth refusing the approval over: the call still
+	// has to be decided, and the alternative to an unmarked request is no
+	// request at all.
+	readForeign, err := r.readForeignSoFar(ctx, run)
+	if err != nil {
+		r.opts.Logger.Warn("could not tell whether this run had read anything foreign",
+			"run_id", string(run.ID), "error", err)
+	}
+
 	approval := domain.Approval{
-		ID:         domain.ApprovalID(r.opts.NewApprovalID()),
-		SessionID:  run.SessionID,
-		RunID:      run.ID,
-		ToolCallID: domain.ToolCallID(call.ID),
-		ToolName:   call.Name,
-		Arguments:  string(call.Arguments),
-		Summary:    outcome.Summary,
-		Effects:    outcome.Effects,
-		Preview:    previewOf(registered, call),
-		Status:     domain.ApprovalPending,
-		Scope:      domain.RememberOnce,
-		CreatedAt:  r.opts.Now(),
+		ID:          domain.ApprovalID(r.opts.NewApprovalID()),
+		SessionID:   run.SessionID,
+		RunID:       run.ID,
+		ToolCallID:  domain.ToolCallID(call.ID),
+		ToolName:    call.Name,
+		Arguments:   string(call.Arguments),
+		Summary:     outcome.Summary,
+		Effects:     outcome.Effects,
+		Preview:     previewOf(registered, call),
+		ReadForeign: readForeign,
+		Status:      domain.ApprovalPending,
+		Scope:       domain.RememberOnce,
+		CreatedAt:   r.opts.Now(),
 	}
 
 	if err := r.opts.Store.CreateApproval(ctx, approval); err != nil {
@@ -84,13 +98,14 @@ func (r *Runtime) requestApproval(
 
 	return r.append(ctx, run.SessionID, run.ID, domain.EventApprovalRequested,
 		domain.ApprovalRequested{
-			ApprovalID: approval.ID,
-			CallID:     approval.ToolCallID,
-			ToolName:   approval.ToolName,
-			Arguments:  approval.Arguments,
-			Summary:    approval.Summary,
-			Effects:    approval.Effects,
-			Preview:    approval.Preview,
+			ApprovalID:  approval.ID,
+			CallID:      approval.ToolCallID,
+			ToolName:    approval.ToolName,
+			Arguments:   approval.Arguments,
+			Summary:     approval.Summary,
+			Effects:     approval.Effects,
+			Preview:     approval.Preview,
+			ReadForeign: approval.ReadForeign,
 		})
 }
 

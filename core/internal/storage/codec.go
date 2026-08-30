@@ -110,13 +110,14 @@ type questionAnsweredJSON struct {
 }
 
 type approvalRequestedJSON struct {
-	ApprovalID string   `json:"approval_id"`
-	CallID     string   `json:"call_id"`
-	ToolName   string   `json:"tool_name"`
-	Arguments  string   `json:"arguments"`
-	Summary    string   `json:"summary,omitempty"`
-	Effects    []string `json:"effects,omitempty"`
-	Preview    string   `json:"preview,omitempty"`
+	ApprovalID  string   `json:"approval_id"`
+	CallID      string   `json:"call_id"`
+	ToolName    string   `json:"tool_name"`
+	Arguments   string   `json:"arguments"`
+	Summary     string   `json:"summary,omitempty"`
+	Effects     []string `json:"effects,omitempty"`
+	Preview     string   `json:"preview,omitempty"`
+	ReadForeign bool     `json:"read_foreign,omitempty"`
 }
 
 type approvalResolvedJSON struct {
@@ -360,13 +361,14 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 
 	case domain.ApprovalRequested:
 		return json.Marshal(approvalRequestedJSON{
-			ApprovalID: string(p.ApprovalID),
-			CallID:     string(p.CallID),
-			ToolName:   p.ToolName,
-			Arguments:  p.Arguments,
-			Summary:    p.Summary,
-			Effects:    p.Effects,
-			Preview:    p.Preview,
+			ApprovalID:  string(p.ApprovalID),
+			CallID:      string(p.CallID),
+			ToolName:    p.ToolName,
+			Arguments:   p.Arguments,
+			Summary:     p.Summary,
+			Effects:     p.Effects,
+			Preview:     p.Preview,
+			ReadForeign: p.ReadForeign,
 		})
 
 	case domain.ApprovalResolved:
@@ -552,13 +554,14 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
 		}
 		return domain.ApprovalRequested{
-			ApprovalID: domain.ApprovalID(p.ApprovalID),
-			CallID:     domain.ToolCallID(p.CallID),
-			ToolName:   p.ToolName,
-			Arguments:  p.Arguments,
-			Summary:    p.Summary,
-			Effects:    p.Effects,
-			Preview:    p.Preview,
+			ApprovalID:  domain.ApprovalID(p.ApprovalID),
+			CallID:      domain.ToolCallID(p.CallID),
+			ToolName:    p.ToolName,
+			Arguments:   p.Arguments,
+			Summary:     p.Summary,
+			Effects:     p.Effects,
+			Preview:     p.Preview,
+			ReadForeign: p.ReadForeign,
 		}, nil
 
 	case domain.EventApprovalResolved:

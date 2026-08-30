@@ -122,6 +122,9 @@ func (s *session) showApprovals(ctx context.Context) {
 		if effects := approval.GetEffects(); len(effects) > 0 {
 			s.say("      " + strings.Join(effects, ", "))
 		}
+		if approval.GetReadForeign() {
+			s.say("      this run read text from outside this machine")
+		}
 	}
 }
 

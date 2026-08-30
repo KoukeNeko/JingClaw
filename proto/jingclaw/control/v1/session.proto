@@ -144,6 +144,9 @@ message Approval {
 
   // The call rendered for whoever is deciding. See ApprovalRequested.preview.
   string preview = 11;
+  // Whether the run had taken in text somebody else wrote before it asked
+  // for this. See ApprovalRequested.read_foreign.
+  bool read_foreign = 12;
 }
 
 // Question is a paused run waiting for an answer from a person.

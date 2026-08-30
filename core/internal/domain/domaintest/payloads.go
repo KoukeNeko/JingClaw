@@ -128,6 +128,9 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			Summary:    "git push",
 			Effects:    []string{"network", "destructive"},
 			Preview:    "git push",
+			// True, so the round trip checks the field rather than the zero
+			// value it would otherwise always carry.
+			ReadForeign: true,
 		},
 		domain.EventApprovalResolved: domain.ApprovalResolved{
 			ApprovalID: "apr_1",

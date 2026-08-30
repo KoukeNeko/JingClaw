@@ -738,6 +738,18 @@ type Approval struct {
 	// disagreed with them would be a decision about something else.
 	Preview string
 
+	// ReadForeign says this run had taken in text somebody else wrote before
+	// it asked for this.
+	//
+	// Not a judgement about the call, which may be perfectly ordinary. It is
+	// the one thing a person deciding cannot see for themselves: the request
+	// in front of them looks the same whether the agent thought of it or a
+	// web page suggested it, and only the log knows which.
+	//
+	// It does not gate anything. What it does is put the question in front of
+	// the person already being asked one.
+	ReadForeign bool
+
 	Status ApprovalStatus
 	Scope  RememberScope
 
@@ -769,6 +781,10 @@ type ApprovalRequested struct {
 	// Preview is the call rendered for review, where the tool could render
 	// one. See Approval.Preview.
 	Preview string
+
+	// ReadForeign says this run had taken in text somebody else wrote before
+	// it asked for this. See Approval.ReadForeign.
+	ReadForeign bool
 }
 
 // ErrApprovalDecided is returned when a decision arrives for something that

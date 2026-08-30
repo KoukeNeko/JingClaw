@@ -59,6 +59,16 @@ func approvalEmbed(payload jcgateway.ApprovalPayload) discord.Embed {
 		Description: "```\n" + payload.Summary + "\n```",
 	}
 
+	// Said before what it will do, because it changes how to read that. A
+	// command that deletes a directory is one thing when the agent thought of
+	// it and another when something it read asked for it.
+	if payload.ReadForeign {
+		embed.Fields = append(embed.Fields, discord.EmbedField{
+			Name:  "Before this",
+			Value: "This run read text from outside this machine.",
+		})
+	}
+
 	if len(payload.Effects) > 0 {
 		var effects strings.Builder
 		for _, effect := range payload.Effects {

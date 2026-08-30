@@ -1110,7 +1110,10 @@ type Approval struct {
 	Status     ApprovalStatus         `protobuf:"varint,9,opt,name=status,proto3,enum=jingclaw.control.v1.ApprovalStatus" json:"status,omitempty"`
 	CreatedAt  *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// The call rendered for whoever is deciding. See ApprovalRequested.preview.
-	Preview       string `protobuf:"bytes,11,opt,name=preview,proto3" json:"preview,omitempty"`
+	Preview string `protobuf:"bytes,11,opt,name=preview,proto3" json:"preview,omitempty"`
+	// Whether the run had taken in text somebody else wrote before it asked
+	// for this. See ApprovalRequested.read_foreign.
+	ReadForeign   bool `protobuf:"varint,12,opt,name=read_foreign,json=readForeign,proto3" json:"read_foreign,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1220,6 +1223,13 @@ func (x *Approval) GetPreview() string {
 		return x.Preview
 	}
 	return ""
+}
+
+func (x *Approval) GetReadForeign() bool {
+	if x != nil {
+		return x.ReadForeign
+	}
+	return false
 }
 
 // Question is a paused run waiting for an answer from a person.
@@ -4032,7 +4042,7 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\"N\n" +
 	"\x14InterruptRunResponse\x126\n" +
-	"\x06status\x18\x01 \x01(\x0e2\x1e.jingclaw.control.v1.RunStatusR\x06status\"\xf3\x02\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1e.jingclaw.control.v1.RunStatusR\x06status\"\x96\x03\n" +
 	"\bApproval\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -4048,7 +4058,8 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x18\n" +
-	"\apreview\x18\v \x01(\tR\apreview\"\x90\x03\n" +
+	"\apreview\x18\v \x01(\tR\apreview\x12!\n" +
+	"\fread_foreign\x18\f \x01(\bR\vreadForeign\"\x90\x03\n" +
 	"\bQuestion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +

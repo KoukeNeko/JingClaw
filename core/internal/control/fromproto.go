@@ -129,13 +129,14 @@ func EventFromProto(in *controlv1.Event) (domain.Event, error) {
 		asked := p.ApprovalRequested
 		out.Kind = domain.EventApprovalRequested
 		out.Payload = domain.ApprovalRequested{
-			ApprovalID: domain.ApprovalID(asked.GetApprovalId()),
-			CallID:     domain.ToolCallID(asked.GetCallId()),
-			ToolName:   asked.GetToolName(),
-			Arguments:  asked.GetArguments(),
-			Summary:    asked.GetSummary(),
-			Effects:    asked.GetEffects(),
-			Preview:    asked.GetPreview(),
+			ApprovalID:  domain.ApprovalID(asked.GetApprovalId()),
+			CallID:      domain.ToolCallID(asked.GetCallId()),
+			ToolName:    asked.GetToolName(),
+			Arguments:   asked.GetArguments(),
+			Summary:     asked.GetSummary(),
+			Effects:     asked.GetEffects(),
+			Preview:     asked.GetPreview(),
+			ReadForeign: asked.GetReadForeign(),
 		}
 
 	case *controlv1.Event_ApprovalResolved:
