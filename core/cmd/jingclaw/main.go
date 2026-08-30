@@ -16,6 +16,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/client"
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/daemon"
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/gateway"
+	"github.com/KoukeNeko/JingClaw/core/internal/cli/service"
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/supervise"
 )
 
@@ -63,6 +64,7 @@ func root() *cobra.Command {
 	})
 
 	cmd.AddCommand(supervise.Commands()...)
+	cmd.AddCommand(service.Commands()...)
 
 	// And everything a client can ask a running daemon, which is most of the
 	// subcommands there are.

@@ -31,6 +31,7 @@ const (
 	WorkspaceName = "workspace"
 	DataName      = "data"
 	RunName       = "run"
+	LogName       = "log"
 )
 
 // Dir is a resolved JingClaw directory.
@@ -94,6 +95,13 @@ func (d Dir) Data() string { return filepath.Join(d.Root, DataName) }
 
 // Run holds the discovery file, which is how a client finds the daemon.
 func (d Dir) Run() string { return filepath.Join(d.Root, RunName) }
+
+// Log is where a deployment that nobody is watching writes what it says.
+//
+// Only a service needs this. Run from a terminal the parts write to that
+// terminal, and a second copy on disk would be one more thing to remember to
+// look at.
+func (d Dir) Log() string { return filepath.Join(d.Root, LogName) }
 
 // SecretFile is where a named credential lives.
 func (d Dir) SecretFile(name string) string { return filepath.Join(d.Root, name) }
