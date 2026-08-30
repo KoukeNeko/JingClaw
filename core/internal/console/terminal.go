@@ -33,15 +33,24 @@ const prompt = "> "
 type Screen struct {
 	out io.Writer
 
+	// columns is how wide the terminal is, for working out how many rows the
+	// input line occupies. Zero means unknown, and then it is assumed to fit
+	// on one — which is what it does until somebody types past the edge.
+	columns func() int
+
 	mu      sync.Mutex
 	editing []rune
 	at      int
-	drawn   bool
+	drawn   int
 }
 
 // NewScreen writes to out, which is expected to be a terminal.
-func NewScreen(out io.Writer) *Screen {
-	return &Screen{out: out}
+//
+// columns reports the terminal's width, and is asked each time rather than
+// remembered because a window can be resized while this is running. Nil is
+// allowed and means "assume the input fits on one row".
+func NewScreen(out io.Writer, columns func() int) *Screen {
+	return &Screen{out: out, columns: columns}
 }
 
 // Log writes a line above whatever is being typed.
@@ -52,7 +61,8 @@ func (s *Screen) Log(line string) {
 	defer s.mu.Unlock()
 
 	s.erase()
-	_, _ = fmt.Fprintln(s.out, line)
+	_, _ = fmt.Fprint(s.out, line)
+	s.newline()
 	s.draw()
 }
 
@@ -121,7 +131,8 @@ func (s *Screen) Take() string {
 
 	s.erase()
 	if line != "" {
-		_, _ = fmt.Fprintln(s.out, prompt+line)
+		_, _ = fmt.Fprint(s.out, prompt+line)
+		s.newline()
 	}
 	s.draw()
 
@@ -154,17 +165,29 @@ func (s *Screen) Close() {
 
 // erase removes the input line from the screen. What is being typed is
 // untouched: it lives in s.editing, and only its drawing goes.
+//
+// Every row of it. A long command wraps, and erasing the current line clears
+// the last row of it and leaves the rest on the screen — so the next thing
+// written lands underneath half a command that is no longer being typed.
 func (s *Screen) erase() {
-	if !s.drawn {
+	if s.drawn == 0 {
 		return
 	}
+
+	// From the last row back to the first, clearing each.
+	for row := s.drawn; row > 1; row-- {
+		_, _ = fmt.Fprint(s.out, "\r"+ansi.EraseEntireLine+ansi.CursorUp(1))
+	}
 	_, _ = fmt.Fprint(s.out, "\r"+ansi.EraseEntireLine)
-	s.drawn = false
+
+	s.drawn = 0
 }
 
 // draw writes the input line and leaves the cursor where it belongs.
 func (s *Screen) draw() {
-	_, _ = fmt.Fprint(s.out, prompt+string(s.editing))
+	// From the left, always. The cursor is wherever the last thing written
+	// left it, and in raw mode that is not the start of the line.
+	_, _ = fmt.Fprint(s.out, "\r"+prompt+string(s.editing))
 
 	// Back to where the cursor actually is, when it is not at the end. Counted
 	// in what the terminal draws rather than in runes, since a Chinese
@@ -173,8 +196,35 @@ func (s *Screen) draw() {
 	if behind := ansi.GraphemeWidth.StringWidth(string(s.editing[s.at:])); behind > 0 {
 		_, _ = fmt.Fprint(s.out, ansi.CursorLeft(behind))
 	}
-	s.drawn = true
+
+	s.drawn = s.rows()
 }
+
+// rows is how many lines of the terminal the input line takes up.
+func (s *Screen) rows() int {
+	width := 0
+	if s.columns != nil {
+		width = s.columns()
+	}
+	if width <= 0 {
+		return 1
+	}
+
+	drawn := ansi.GraphemeWidth.StringWidth(prompt + string(s.editing))
+	if drawn == 0 {
+		return 1
+	}
+	return (drawn + width - 1) / width
+}
+
+// newline ends a line and returns to the left.
+//
+// Written out rather than left to Fprintln, because this runs in raw mode:
+// the terminal's habit of turning a line feed into a carriage return and a
+// line feed is one of the things raw mode turns off, so "\n" alone moves down
+// a row and stays in whatever column it was in. Every line after the first
+// then starts wherever the previous one ended.
+func (s *Screen) newline() { _, _ = fmt.Fprint(s.out, "\r\n") }
 
 // redraw is erase and draw, for when the line itself changed.
 func (s *Screen) redraw() {

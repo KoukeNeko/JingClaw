@@ -16,7 +16,7 @@ func typing(screen *Screen, text string) {
 // half-way through a command must not take the command with it.
 func TestALogLineDoesNotDisturbWhatIsBeingTyped(t *testing.T) {
 	var out strings.Builder
-	screen := NewScreen(&out)
+	screen := NewScreen(&out, nil)
 
 	screen.Prompt()
 	typing(screen, "approve abc")
@@ -40,7 +40,7 @@ func TestALogLineDoesNotDisturbWhatIsBeingTyped(t *testing.T) {
 // typing is left looking at a blank bottom row.
 func TestTheInputLineComesBackAfterALogLine(t *testing.T) {
 	var out strings.Builder
-	screen := NewScreen(&out)
+	screen := NewScreen(&out, nil)
 
 	screen.Prompt()
 	typing(screen, "deny xyz")
@@ -55,7 +55,7 @@ func TestTheInputLineComesBackAfterALogLine(t *testing.T) {
 
 func TestTakeReturnsTheLineAndClearsIt(t *testing.T) {
 	var out strings.Builder
-	screen := NewScreen(&out)
+	screen := NewScreen(&out, nil)
 
 	screen.Prompt()
 	typing(screen, "  pending  ")
@@ -72,20 +72,20 @@ func TestTakeReturnsTheLineAndClearsIt(t *testing.T) {
 // reads as a conversation rather than as effects with no causes.
 func TestWhatWasEnteredIsEchoedAbove(t *testing.T) {
 	var out strings.Builder
-	screen := NewScreen(&out)
+	screen := NewScreen(&out, nil)
 
 	screen.Prompt()
 	typing(screen, "approve abc")
 	screen.Take()
 
-	if !strings.Contains(out.String(), prompt+"approve abc\n") {
+	if !strings.Contains(out.String(), prompt+"approve abc\r\n") {
 		t.Errorf("the command was not echoed:\n%q", out.String())
 	}
 }
 
 func TestBackspaceRemovesTheCharacterBefore(t *testing.T) {
 	var out strings.Builder
-	screen := NewScreen(&out)
+	screen := NewScreen(&out, nil)
 
 	screen.Prompt()
 	typing(screen, "denyy")
@@ -98,7 +98,7 @@ func TestBackspaceRemovesTheCharacterBefore(t *testing.T) {
 
 func TestBackspaceAtTheStartDoesNothing(t *testing.T) {
 	var out strings.Builder
-	screen := NewScreen(&out)
+	screen := NewScreen(&out, nil)
 
 	screen.Prompt()
 	screen.Backspace()
@@ -111,7 +111,7 @@ func TestBackspaceAtTheStartDoesNothing(t *testing.T) {
 // Typing in the middle inserts there rather than at the end.
 func TestInsertingHappensAtTheCursor(t *testing.T) {
 	var out strings.Builder
-	screen := NewScreen(&out)
+	screen := NewScreen(&out, nil)
 
 	screen.Prompt()
 	typing(screen, "aprove")
@@ -127,7 +127,7 @@ func TestInsertingHappensAtTheCursor(t *testing.T) {
 
 func TestTheCursorStopsAtBothEnds(t *testing.T) {
 	var out strings.Builder
-	screen := NewScreen(&out)
+	screen := NewScreen(&out, nil)
 
 	screen.Prompt()
 	typing(screen, "ab")
@@ -152,7 +152,7 @@ func TestTheCursorStopsAtBothEnds(t *testing.T) {
 // the two really do run at once.
 func TestLoggingWhileTypingIsSafe(t *testing.T) {
 	var out strings.Builder
-	screen := NewScreen(&out)
+	screen := NewScreen(&out, nil)
 	screen.Prompt()
 
 	var wait sync.WaitGroup
@@ -173,5 +173,91 @@ func TestLoggingWhileTypingIsSafe(t *testing.T) {
 
 	if editing := screen.Editing(); len(editing) != 200 {
 		t.Errorf("typed 200 characters and the line holds %d", len(editing))
+	}
+}
+
+// In raw mode the terminal does not turn a line feed into a carriage return
+// and a line feed. A bare "\n" moves down a row and stays in the column it
+// was in, so every line after the first starts wherever the last one ended —
+// which is how the prompt ends up in the middle of the screen.
+func TestEveryLineEndsWithACarriageReturn(t *testing.T) {
+	var out strings.Builder
+	screen := NewScreen(&out, nil)
+
+	screen.Prompt()
+	screen.Log("first")
+	screen.Log("second")
+
+	written := out.String()
+	for at, r := range written {
+		if r != '\n' {
+			continue
+		}
+		if at == 0 || written[at-1] != '\r' {
+			t.Fatalf("a line feed at %d has no carriage return before it: %q", at, written)
+		}
+	}
+	if !strings.Contains(written, "\r\n") {
+		t.Errorf("nothing ended a line at all: %q", written)
+	}
+}
+
+// The prompt starts at the left however the last thing written left the
+// cursor.
+func TestTheInputLineStartsAtTheLeft(t *testing.T) {
+	var out strings.Builder
+	screen := NewScreen(&out, nil)
+
+	screen.Prompt()
+	screen.Log("a log line")
+
+	written := out.String()
+	last := strings.LastIndex(written, prompt)
+	if last <= 0 {
+		t.Fatalf("no prompt was drawn: %q", written)
+	}
+	if written[last-1] != '\r' {
+		t.Errorf("the prompt was drawn without returning to the left first: %q", written[last-2:])
+	}
+}
+
+// A command long enough to wrap takes more than one row, and erasing it has
+// to clear every one of them: clearing the last leaves the rest on screen,
+// and the next thing written lands under half a command nobody is typing.
+func TestAWrappedInputLineIsErasedInFull(t *testing.T) {
+	var out strings.Builder
+	// Twenty columns, so a short command already wraps.
+	screen := NewScreen(&out, func() int { return 20 })
+
+	screen.Prompt()
+	typing(screen, strings.Repeat("x", 45))
+
+	out.Reset()
+	screen.Log("something happened")
+
+	// Three rows of "> " plus 45 characters at twenty columns, so two moves
+	// up and three erases.
+	written := out.String()
+	if ups := strings.Count(written, "\x1b[A"); ups != 2 {
+		t.Errorf("moved up %d times to erase three rows: %q", ups, written)
+	}
+	if erases := strings.Count(written, "\x1b[2K"); erases < 3 {
+		t.Errorf("erased %d rows of a three-row input line: %q", erases, written)
+	}
+}
+
+// One row needs no moving about, which is every command short enough to fit.
+func TestAShortInputLineIsErasedWithoutMovingUp(t *testing.T) {
+	var out strings.Builder
+	screen := NewScreen(&out, func() int { return 80 })
+
+	screen.Prompt()
+	typing(screen, "approve abc")
+
+	out.Reset()
+	screen.Log("something happened")
+
+	if strings.Contains(out.String(), "\x1b[A") {
+		t.Errorf("moved up to erase a line that fits on one row: %q", out.String())
 	}
 }

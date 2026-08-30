@@ -66,7 +66,16 @@ func Run(ctx context.Context, runtimeDir string, leaving Leaving) error {
 	}
 	defer restore()
 
-	screen := console.NewScreen(os.Stdout)
+	// Asked each time rather than remembered: a window can be resized while
+	// this is running, and a stale width means the input line is erased by
+	// the wrong number of rows.
+	screen := console.NewScreen(os.Stdout, func() int {
+		width, _, err := term.GetSize(int(os.Stdout.Fd()))
+		if err != nil {
+			return 0
+		}
+		return width
+	})
 	defer screen.Close()
 
 	session := &session{
