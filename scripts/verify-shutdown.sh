@@ -18,6 +18,12 @@ go build -o "$WORK/jingclaw" ./cmd/jingclaw
 DAEMON=""
 ATTACH=""
 cleanup() {
+	# Best effort from here. Killing something that has already exited fails,
+	# and under set -e that failure ends this function where it stands: the
+	# parts after it are not stopped and the work directory is not removed. A
+	# check whose daemon died would then leave its stub holding a port, and the
+	# next check to want that port would talk to the stub of a run that is over.
+	set +e
 	# The status of the last command in a trap becomes the script's, so each
 	# of these is allowed to fail: a process that has already gone is the
 	# normal case here, not a reason to report the check as failed.

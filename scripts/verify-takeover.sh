@@ -18,6 +18,12 @@ go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
+	# Best effort from here. Killing something that has already exited fails,
+	# and under set -e that failure ends this function where it stands: the
+	# parts after it are not stopped and the work directory is not removed. A
+	# check whose daemon died would then leave its stub holding a port, and the
+	# next check to want that port would talk to the stub of a run that is over.
+	set +e
 	[ -n "$DAEMON" ] && kill "$DAEMON" 2>/dev/null
 	wait 2>/dev/null
 	rm -rf "$WORK"
