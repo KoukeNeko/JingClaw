@@ -16,8 +16,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -61,7 +60,7 @@ data_dir = "$WORK/data"
 EOF
 
 start_daemon() {
-	"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+	"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 	DAEMON=$!
 
 	WAITED=0
@@ -77,10 +76,10 @@ start_daemon() {
 approve_everything() {
 	WAITED=0
 	while [ "$WAITED" -lt 150 ]; do
-		WAITING=$("$WORK/agent" --config "$WORK/config.toml" approvals "$1" 2>/dev/null |
+		WAITING=$("$WORK/jingclaw" --config "$WORK/config.toml" approvals "$1" 2>/dev/null |
 			grep -o 'apr_[A-Za-z0-9]*' | head -1 || true)
 		if [ -n "$WAITING" ]; then
-			"$WORK/agent" --config "$WORK/config.toml" approve "$WAITING" >/dev/null 2>&1 || true
+			"$WORK/jingclaw" --config "$WORK/config.toml" approve "$WAITING" >/dev/null 2>&1 || true
 		fi
 		WAITED=$((WAITED + 1))
 		sleep 0.2
@@ -89,17 +88,17 @@ approve_everything() {
 
 start_daemon
 
-SESSION=$("$WORK/agent" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
-"$WORK/agent" --config "$WORK/config.toml" attach "$SESSION" --output >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" --output >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 0.3
 
 approve_everything "$SESSION" &
 APPROVER=$!
 
-"$WORK/agent" --config "$WORK/config.toml" send "$SESSION" "start the dev server" >/dev/null
+"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "start the dev server" >/dev/null
 
 WAITED=0
 while ! grep -q 'started sh as' "$WORK/events" 2>/dev/null; do

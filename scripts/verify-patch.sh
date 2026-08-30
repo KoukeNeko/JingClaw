@@ -12,8 +12,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 ATTACH=""
@@ -67,7 +66,7 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -77,10 +76,10 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-SESSION=$("$WORK/agent" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
-"$WORK/agent" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 0.3
 
@@ -90,11 +89,11 @@ sleep 0.3
 approve_everything() {
 	WAITED=0
 	while [ "$WAITED" -lt 200 ]; do
-		LISTING=$("$WORK/agent" --config "$WORK/config.toml" approvals "$1" 2>/dev/null || true)
+		LISTING=$("$WORK/jingclaw" --config "$WORK/config.toml" approvals "$1" 2>/dev/null || true)
 		WAITING=$(printf '%s' "$LISTING" | grep -o 'apr_[A-Za-z0-9]*' | head -1 || true)
 		if [ -n "$WAITING" ]; then
 			printf '%s\n' "$LISTING" >> "$WORK/reviews"
-			"$WORK/agent" --config "$WORK/config.toml" approve "$WAITING" >/dev/null 2>&1 || true
+			"$WORK/jingclaw" --config "$WORK/config.toml" approve "$WAITING" >/dev/null 2>&1 || true
 			echo "$WAITING" >> "$WORK/approved"
 		fi
 		WAITED=$((WAITED + 1))
@@ -106,7 +105,7 @@ approve_everything() {
 approve_everything "$SESSION" &
 APPROVER=$!
 
-"$WORK/agent" --config "$WORK/config.toml" send "$SESSION" "rename oldName to newName" >/dev/null
+"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "rename oldName to newName" >/dev/null
 
 WAITED=0
 while ! grep -q 'run.completed\|run.failed' "$WORK/events" 2>/dev/null; do

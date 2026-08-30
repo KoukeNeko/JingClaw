@@ -18,8 +18,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -71,7 +70,7 @@ users = ["$ASKER", "$APPROVER", "$STRANGER"]
 approvers = ["$APPROVER"]
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0

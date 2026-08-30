@@ -102,9 +102,12 @@ func (d Dir) SecretFile(name string) string { return filepath.Join(d.Root, name)
 //
 // For running against a deployment without being inside it, and for a test
 // that must not pick up whatever happens to exist above the package it lives
-// in. Set to "none" to say there is no directory at all, which is how a test
+// in. Set to None to say there is no directory at all, which is how a test
 // asserts the behaviour of a machine that has never had one.
 const EnvVar = "JINGCLAW_HOME"
+
+// None is the value of EnvVar that means there is no deployment directory.
+const None = "none"
 
 // Resolve settles which deployment this process belongs to.
 //
@@ -118,7 +121,7 @@ const EnvVar = "JINGCLAW_HOME"
 func Resolve() (Dir, bool) {
 	switch named := strings.TrimSpace(os.Getenv(EnvVar)); named {
 	case "":
-	case "none":
+	case None:
 		return Dir{}, false
 	default:
 		absolute, err := filepath.Abs(named)

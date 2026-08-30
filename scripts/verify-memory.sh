@@ -17,8 +17,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -53,7 +52,7 @@ data_dir = "$WORK/data"
 EOF
 
 start() {
-	"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+	"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 	DAEMON=$!
 
 	WAITED=0
@@ -64,7 +63,7 @@ start() {
 	done
 }
 
-agent() { "$WORK/agent" --config "$WORK/config.toml" "$@"; }
+agent() { "$WORK/jingclaw" --config "$WORK/config.toml" "$@"; }
 
 start
 
@@ -73,7 +72,7 @@ OFF=$(mktemp -d)
 mkdir -p "$OFF/run" "$OFF/data" "$OFF/ws"
 sed -e "s|$WORK/run|$OFF/run|" -e "s|$WORK/data|$OFF/data|" -e "s|$WORK/ws|$OFF/ws|" \
 	-e 's|^enabled = true|enabled = false|' "$WORK/config.toml" > "$OFF/config.toml"
-"$WORK/agentd" --config "$OFF/config.toml" --print-prompt > "$OFF/prompt" 2>&1 ||
+"$WORK/jingclaw" daemon --config "$OFF/config.toml" --print-prompt > "$OFF/prompt" 2>&1 ||
 	fail "the daemon will not start with memory off"
 grep -q 'remember' "$OFF/prompt" &&
 	fail "the remember tool is offered with memory turned off"
@@ -82,7 +81,7 @@ printf 'ok   memory is off unless somebody turns it on\n'
 
 # 2. The tools exist when it is on, and remembering is not unattended.
 agent --config "$WORK/config.toml" session create >/dev/null
-"$WORK/agentd" --config "$WORK/config.toml" --print-prompt > "$WORK/prompt" 2>&1 || true
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" --print-prompt > "$WORK/prompt" 2>&1 || true
 grep -q 'remember' "$WORK/prompt" || fail "the remember tool is missing with memory on"
 grep -q 'recall' "$WORK/prompt" || fail "the recall tool is missing with memory on"
 printf 'ok   the tools are there when it is on\n'

@@ -17,8 +17,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/gatewayd" ./cmd/gatewayd
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 GATEWAY=""
@@ -152,7 +151,7 @@ workspace_id = "default"
 users = ["$USER_ID"]
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -164,7 +163,7 @@ done
 printf 'ok   the daemon accepts a telegram binding\n'
 
 TELEGRAM_BOT_TOKEN=stub-token \
-	"$WORK/gatewayd" --config "$WORK/config.toml" >"$WORK/gw.out" 2>"$WORK/gw.err" &
+	"$WORK/jingclaw" gateway --config "$WORK/config.toml" >"$WORK/gw.out" 2>"$WORK/gw.err" &
 GATEWAY=$!
 
 WAITED=0

@@ -14,8 +14,7 @@ set -eu
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -42,7 +41,7 @@ unset JINGCLAW_HOME
 HOME_DIR="$HOME/.jingclaw"
 
 cd "$WORK/project"
-"$WORK/agentd" --init >"$WORK/init.out" 2>&1 || fail "--init failed:
+"$WORK/jingclaw" daemon --init >"$WORK/init.out" 2>&1 || fail "--init failed:
 $(cat "$WORK/init.out")"
 
 for PLACE in config.toml workspace data run; do
@@ -68,7 +67,7 @@ printf 'ok   and not in the directory it was run from\n'
 
 # Creating over an existing one is refused: a "create" that adopts whatever was
 # there is how a fresh deployment ends up on another one's database.
-if "$WORK/agentd" --init >/dev/null 2>&1; then
+if "$WORK/jingclaw" daemon --init >/dev/null 2>&1; then
 	fail "a second --init was allowed over an existing directory"
 fi
 printf 'ok   it refuses to create one over another\n'
@@ -81,11 +80,11 @@ for DECOY in "$WORK/project" "$WORK/project/deep"; do
 	: > "$DECOY/.jingclaw/config.toml"
 done
 
-EXPECTED=$(cd "$WORK/project" && "$WORK/agentd" --print-paths 2>&1) ||
+EXPECTED=$(cd "$WORK/project" && "$WORK/jingclaw" daemon --print-paths 2>&1) ||
 	fail "--print-paths failed: $EXPECTED"
 
 for FROM in "$WORK/project/deep/nested" "$WORK/elsewhere"; do
-	ACTUAL=$(cd "$FROM" && "$WORK/agentd" --print-paths 2>&1) ||
+	ACTUAL=$(cd "$FROM" && "$WORK/jingclaw" daemon --print-paths 2>&1) ||
 		fail "--print-paths failed in $FROM: $ACTUAL"
 	[ "$ACTUAL" = "$EXPECTED" ] || fail "starting in $FROM resolved differently:
 $ACTUAL
@@ -98,7 +97,7 @@ printf 'ok   three starting directories, one set of paths\n'
 # Every path is inside the deployment, including the workspace: "whatever you
 # happened to be standing in" is not a workspace.
 cd "$WORK/elsewhere"
-REPORTED=$("$WORK/agentd" --print-paths 2>&1)
+REPORTED=$("$WORK/jingclaw" daemon --print-paths 2>&1)
 printf '%s\n' "$REPORTED" | while IFS= read -r LINE; do
 	VALUE=$(printf '%s' "$LINE" | sed -n 's/.*: *//p')
 	case "$VALUE" in
@@ -110,7 +109,7 @@ printf 'ok   and every one of them is inside it\n'
 
 # The daemon agrees with what it printed, and a client elsewhere finds it.
 cd "$WORK/project/deep/nested"
-"$WORK/agentd" >"$WORK/out" 2>"$WORK/err" &
+"$WORK/jingclaw" daemon >"$WORK/out" 2>"$WORK/err" &
 DAEMON=$!
 
 WAITED=0
@@ -135,7 +134,7 @@ done
 printf 'ok   the running daemon resolved everything inside it\n'
 
 cd "$WORK/elsewhere"
-SESSION=$("$WORK/agent" session create 2>&1 | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" session create 2>&1 | tr -d '\r\n')
 case "$SESSION" in
 ses_*) ;;
 *) fail "a client started elsewhere could not find the daemon: $SESSION" ;;

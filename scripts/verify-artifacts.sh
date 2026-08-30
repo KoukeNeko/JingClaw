@@ -16,8 +16,7 @@ cd "$(dirname "$0")/../core"
 
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 ATTACH=""
@@ -90,7 +89,7 @@ data_dir = "$WORK/data"
 log_level = "info"
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -100,11 +99,11 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-SESSION=$("$WORK/agent" --config "$WORK/config.toml" session create | tr -d '\r\n')
-"$WORK/agent" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
+"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 
-"$WORK/agent" --config "$WORK/config.toml" send "$SESSION" \
+"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" \
 	"Run: /bin/cat big.txt   — then tell me in one sentence how many lines it printed." >/dev/null
 
 # Everything the run asks for is approved, for as long as it keeps asking. An
@@ -115,10 +114,10 @@ WAITED=0
 while [ "$WAITED" -lt 240 ]; do
 	grep -q 'run.completed\|run.failed' "$WORK/events" && break
 
-	APPROVAL=$("$WORK/agent" --config "$WORK/config.toml" approvals "$SESSION" 2>/dev/null |
+	APPROVAL=$("$WORK/jingclaw" --config "$WORK/config.toml" approvals "$SESSION" 2>/dev/null |
 		grep -o 'apr_[A-Za-z0-9]*' | head -1 || true)
 	if [ -n "$APPROVAL" ]; then
-		"$WORK/agent" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null 2>&1 &&
+		"$WORK/jingclaw" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null 2>&1 &&
 			APPROVED=$((APPROVED + 1))
 	fi
 
@@ -158,7 +157,7 @@ grep -o '\[[0-9]* bytes kept as sha256-[0-9a-f]\{64\}\]' "$WORK/events" | sort -
 		CLAIMED=$(printf '%s' "$LINE" | grep -o '[0-9]*' | head -1)
 		KEPT=$(printf '%s' "$LINE" | grep -o 'sha256-[0-9a-f]\{64\}')
 
-		"$WORK/agent" --config "$WORK/config.toml" artifact get "$KEPT" > "$WORK/whole.txt" ||
+		"$WORK/jingclaw" --config "$WORK/config.toml" artifact get "$KEPT" > "$WORK/whole.txt" ||
 			fail "fetching $KEPT failed"
 
 		ACTUAL=$(wc -c < "$WORK/whole.txt" | tr -d ' ')
@@ -171,7 +170,7 @@ printf 'ok   every artifact comes back at the size the log recorded\n'
 #    by construction what a 2000-byte excerpt of a 130 KB output cannot show.
 grep -o 'sha256-[0-9a-f]\{64\}' "$WORK/events" | sort -u |
 	while read -r KEPT; do
-		"$WORK/agent" --config "$WORK/config.toml" artifact get "$KEPT" > "$WORK/whole.txt"
+		"$WORK/jingclaw" --config "$WORK/config.toml" artifact get "$KEPT" > "$WORK/whole.txt"
 		if grep -q 'line-2000-padding' "$WORK/whole.txt"; then
 			FOUND=1
 			break
@@ -183,7 +182,7 @@ grep -q 'line-2000-padding' "$WORK/whole.txt" ||
 printf 'ok   the middle the excerpt cut is in the artifact\n'
 
 # 4. A window of it.
-"$WORK/agent" --config "$WORK/config.toml" artifact get "$ID" --offset 0 --limit 6 > "$WORK/window.txt"
+"$WORK/jingclaw" --config "$WORK/config.toml" artifact get "$ID" --offset 0 --limit 6 > "$WORK/window.txt"
 [ "$(wc -c < "$WORK/window.txt" | tr -d ' ')" = 6 ] ||
 	fail "a six-byte window returned $(wc -c < "$WORK/window.txt") bytes"
 printf 'ok   a window of it can be asked for\n'

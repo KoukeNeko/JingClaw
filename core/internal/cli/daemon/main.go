@@ -1,9 +1,10 @@
-// Command agentd is the JingClaw agent daemon.
+// Package daemon is the agent daemon: the process that owns the workspace,
+// the event log and the tools.
 //
 // It owns every piece of durable state: sessions, runs, the event log and, in
 // later milestones, tools and permissions. Control clients (GUI, CLI, web) are
 // projections of it, so closing one never stops work that is already running.
-package main
+package daemon
 
 import (
 	"context"
@@ -66,36 +67,40 @@ const (
 	httpDrainGrace = 2 * time.Second
 )
 
-func main() {
-	if err := run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("agentd exited", "error", err)
-		os.Exit(1)
+// Main runs the daemon. Args are the arguments after the subcommand name.
+func Main(args []string) error {
+	if err := run(args); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
 	}
+	return nil
 }
 
-func run() error {
+func run(args []string) error {
+	flags := flag.NewFlagSet("jingclaw daemon", flag.ContinueOnError)
 	var (
-		configPath  = flag.String("config", "", "configuration file; defaults to the one in the config directory")
-		printPrompt = flag.Bool("print-prompt", false, "print the assembled system prompt with its sources and exit")
-		printConfig = flag.Bool("print-config", false, "print an example configuration file and exit")
-		listModels  = flag.Bool("list-models", false, "print the provider's available models and exit")
-		initHere    = flag.Bool("init", false, "create a "+home.DirName+" directory here and exit")
-		printPaths  = flag.Bool("print-paths", false, "print where this deployment keeps things and exit")
+		configPath  = flags.String("config", "", "configuration file; defaults to the one in the config directory")
+		printPrompt = flags.Bool("print-prompt", false, "print the assembled system prompt with its sources and exit")
+		printConfig = flags.Bool("print-config", false, "print an example configuration file and exit")
+		listModels  = flags.Bool("list-models", false, "print the provider's available models and exit")
+		initHere    = flags.Bool("init", false, "create a "+home.DirName+" directory here and exit")
+		printPaths  = flags.Bool("print-paths", false, "print where this deployment keeps things and exit")
 
 		// Every flag below has a setting of the same meaning in the
 		// configuration file, and exists only so one run can differ from it.
 		// They carry no defaults of their own: the file already holds those,
 		// and a second copy here would be one more place for them to disagree.
-		providerName = flag.String("provider", "", "model provider: gemini, ollama, openai_compat, or fake")
-		model        = flag.String("model", "", "model to use")
-		addr         = flag.String("addr", "", "loopback address to listen on; port 0 picks a free one")
-		dataDir      = flag.String("data-dir", "", "directory for the database")
-		workspaceDir = flag.String("workspace", "", "directory the agent may read; tools cannot reach outside it")
-		maxIters     = flag.Int("max-iterations", 0, "cap on tool iterations per run")
+		providerName = flags.String("provider", "", "model provider: gemini, ollama, openai_compat, or fake")
+		model        = flags.String("model", "", "model to use")
+		addr         = flags.String("addr", "", "loopback address to listen on; port 0 picks a free one")
+		dataDir      = flags.String("data-dir", "", "directory for the database")
+		workspaceDir = flags.String("workspace", "", "directory the agent may read; tools cannot reach outside it")
+		maxIters     = flags.Int("max-iterations", 0, "cap on tool iterations per run")
 	)
 	// Retained so existing invocations keep working.
-	devFake := flag.Bool("dev-fake", false, "alias for --provider=fake")
-	flag.Parse()
+	devFake := flags.Bool("dev-fake", false, "alias for --provider=fake")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
 
 	if *printConfig {
 		fmt.Print(config.Example)
@@ -126,7 +131,7 @@ func run() error {
 	// Flags win over the file, which wins over the defaults it was seeded
 	// with. Only a flag the operator actually typed counts, so an unset flag
 	// does not overwrite a configured value with a default.
-	applyFlagOverrides(&cfg, providerName, model, workspaceDir, dataDir, addr, maxIters)
+	applyFlagOverrides(flags, &cfg, providerName, model, workspaceDir, dataDir, addr, maxIters)
 	if *devFake {
 		cfg.Provider.Backend = "fake"
 	}
@@ -1113,9 +1118,9 @@ func printModels(ctx context.Context, p provider.Provider) error {
 // Only flags the operator actually passed are considered: taking an unset
 // flag's zero value would silently replace a configured setting with a
 // default, which looks exactly like the configuration being ignored.
-func applyFlagOverrides(cfg *config.Config, providerName, model, workspaceDir, dataDir, addr *string, maxIters *int) {
+func applyFlagOverrides(flags *flag.FlagSet, cfg *config.Config, providerName, model, workspaceDir, dataDir, addr *string, maxIters *int) {
 	passed := make(map[string]bool)
-	flag.Visit(func(f *flag.Flag) { passed[f.Name] = true })
+	flags.Visit(func(f *flag.Flag) { passed[f.Name] = true })
 
 	if passed["provider"] {
 		cfg.Provider.Backend = *providerName

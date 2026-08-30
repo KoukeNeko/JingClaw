@@ -18,8 +18,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 ATTACH=""
@@ -71,7 +70,7 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -81,7 +80,7 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-A() { "$WORK/agent" --config "$WORK/config.toml" "$@"; }
+A() { "$WORK/jingclaw" --config "$WORK/config.toml" "$@"; }
 
 SESSION=$(A session create | tr -d '\r\n')
 A attach --output "$SESSION" >"$WORK/events" 2>&1 &

@@ -13,10 +13,9 @@ cd "$(dirname "$0")/../core"
 
 
 WORK=$(mktemp -d)
-BIN="$WORK/agentd"
-CLI="$WORK/agent"
-go build -o "$BIN" ./cmd/agentd
-go build -o "$CLI" ./cmd/agent
+BIN="$WORK/jingclaw daemon"
+CLI="$WORK/jingclaw"
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -52,7 +51,7 @@ data_dir = "$WORK/data"
 log_level = "info"
 EOF
 
-"$BIN" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+$BIN --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0

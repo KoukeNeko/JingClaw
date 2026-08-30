@@ -1,4 +1,5 @@
-// Command agent is the JingClaw command-line client.
+// Package client is the command-line client: what a person or a script uses
+// to look at a daemon and decide things.
 //
 // It is a control-plane client and nothing more: it holds no runtime, no
 // provider and no state. Everything it shows comes from the daemon's event
@@ -6,7 +7,7 @@
 // consistent world instead of three divergent ones.
 //
 // This binary must never import internal/runtime. A test enforces it.
-package main
+package client
 
 import (
 	"context"
@@ -38,11 +39,29 @@ const clientName = "jingclaw-cli"
 // exactly this one value and nothing else from the file.
 var runtimeDir string
 
-func main() {
-	if err := newRootCommand().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+// AddTo gives a parent command everything a client needs: the subcommands,
+// the --config flag they share, and the step that reads it before any of them
+// runs.
+//
+// All three together, because they are one thing. A parent that adopted the
+// commands without the flag would offer every one of them and have none of
+// them able to find a daemon that was told to publish itself somewhere else.
+//
+// The read-the-config step goes on each adopted command rather than on the
+// parent. Cobra runs the nearest one it finds walking up from whatever was
+// invoked, so a step left on a shared parent also runs for that parent's other
+// children — and the daemon, which is one of them, would then have its
+// configuration read twice: once here from the default location, before its
+// own --config was ever looked at.
+func AddTo(parent *cobra.Command) {
+	client := newRootCommand()
+
+	parent.PersistentFlags().AddFlagSet(client.PersistentFlags())
+	adopted := client.Commands()
+	for _, command := range adopted {
+		command.PersistentPreRunE = client.PersistentPreRunE
 	}
+	parent.AddCommand(adopted...)
 }
 
 func newRootCommand() *cobra.Command {

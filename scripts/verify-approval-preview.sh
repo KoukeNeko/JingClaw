@@ -13,8 +13,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -58,7 +57,7 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -68,14 +67,14 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-SESSION=$("$WORK/agent" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
-"$WORK/agent" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 0.3
 
-"$WORK/agent" --config "$WORK/config.toml" send "$SESSION" "raise the timeout" >/dev/null
+"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "raise the timeout" >/dev/null
 
 WAITED=0
 while ! grep -q 'approval.requested' "$WORK/events" 2>/dev/null; do
@@ -86,7 +85,7 @@ done
 printf 'ok   an edit stops and asks\n'
 
 # 1. What a person reviewing it is shown.
-LISTED=$("$WORK/agent" --config "$WORK/config.toml" approvals "$SESSION")
+LISTED=$("$WORK/jingclaw" --config "$WORK/config.toml" approvals "$SESSION")
 printf '%s' "$LISTED" | grep -q -- '-timeout := 30' ||
 	fail "the review does not show what is being removed:
 $LISTED"
@@ -121,7 +120,7 @@ printf 'ok   alongside the exact arguments, not instead of them\n'
 
 # 4. Approving it does what the review said it would.
 APPROVAL=$(printf '%s' "$LISTED" | grep -o 'apr_[A-Za-z0-9]*' | head -1)
-"$WORK/agent" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null
+"$WORK/jingclaw" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null
 
 WAITED=0
 while ! grep -q 'timeout := 120' "$WORK/ws/settings.go" 2>/dev/null; do

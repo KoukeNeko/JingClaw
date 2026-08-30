@@ -14,8 +14,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -70,7 +69,7 @@ workspace_id = "default"
 users = ["$PERSON"]
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -107,7 +106,7 @@ printf 'ok   a message from a channel starts a run\n'
 # 1. The same session is there for somebody at the machine, by its own id and
 #    in the list. A conversation only the channel can see is one nobody can
 #    take over.
-LISTED=$("$WORK/agent" --config "$WORK/config.toml" session list)
+LISTED=$("$WORK/jingclaw" --config "$WORK/config.toml" session list)
 printf '%s' "$LISTED" | grep -q "$SESSION" ||
 	fail "the channel's session is not in the local list:
 $LISTED"
@@ -135,7 +134,7 @@ printf 'ok   carrying what was said in the channel\n'
 # 3. The approval the channel cannot answer. A request from chat and its
 #    approval from the same chat is one unbroken chain: whoever holds that
 #    account holds both halves.
-LISTED=$("$WORK/agent" --config "$WORK/config.toml" approvals "$SESSION")
+LISTED=$("$WORK/jingclaw" --config "$WORK/config.toml" approvals "$SESSION")
 APPROVAL=$(printf '%s' "$LISTED" | grep -o 'apr_[A-Za-z0-9]*' | head -1)
 [ -n "$APPROVAL" ] || fail "nothing is waiting: $LISTED"
 
@@ -145,7 +144,7 @@ $LISTED"
 printf 'ok   what it would change is reviewable at the machine\n'
 
 # 4. Decided from the control plane, and the work goes on.
-"$WORK/agent" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null
+"$WORK/jingclaw" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null
 
 WAITED=0
 while ! grep -q 'timeout := 120' "$WORK/ws/settings.go" 2>/dev/null; do

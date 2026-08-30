@@ -17,9 +17,9 @@ cd "$(dirname "$0")/../core"
 
 
 WORK=$(mktemp -d)
-BIN="$WORK/agentd"
+BIN="$WORK/jingclaw daemon"
 SERVER="$WORK/mcp-server"
-go build -o "$BIN" ./cmd/agentd
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 go test -c ./internal/mcp -o "$SERVER"
 
 DAEMON=""
@@ -56,7 +56,7 @@ JINGCLAW_TEST_MCP_SERVER = "1"
 EOF
 
 # 1. The tools reach the prompt the model is given.
-PROMPT=$("$BIN" --config "$WORK/config.toml" --print-prompt 2>"$WORK/prompt.err") ||
+PROMPT=$($BIN --config "$WORK/config.toml" --print-prompt 2>"$WORK/prompt.err") ||
 	fail "printing the prompt failed: $(cat "$WORK/prompt.err")"
 
 printf '%s' "$PROMPT" | grep -q 'mcp_helper_echo' ||
@@ -70,7 +70,7 @@ printf '%s' "$PROMPT" | grep -q 'mcp_helper_read_file' &&
 printf 'ok   namespacing keeps read_file meaning read_file\n'
 
 # 2. The daemon starts the child and says how many answered.
-"$BIN" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+$BIN --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0

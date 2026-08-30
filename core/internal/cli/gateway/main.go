@@ -1,4 +1,5 @@
-// Command gatewayd carries traffic between a messaging platform and agentd.
+// Package gateway carries traffic between a messaging platform and the
+// daemon.
 //
 // It is a separate process on purpose. It holds somebody else's bot token and
 // runs a library that keeps a socket open to the internet; if that library
@@ -6,7 +7,7 @@
 // the workspace and the event log must not go down with it. The credential it
 // uses reaches the ingress and nothing else, so being compromised means "can
 // deliver messages inward", not "can execute tools".
-package main
+package gateway
 
 import (
 	"context"
@@ -32,20 +33,24 @@ import (
 
 const clientName = "jingclaw-gatewayd"
 
-func main() {
-	if err := run(); err != nil && !errors.Is(err, context.Canceled) {
-		slog.Error("gatewayd exited", "error", err)
-		os.Exit(1)
+// Main runs the gateway. Args are the arguments after the subcommand name.
+func Main(args []string) error {
+	if err := run(args); err != nil && !errors.Is(err, context.Canceled) {
+		return err
 	}
+	return nil
 }
 
-func run() error {
+func run(args []string) error {
+	flags := flag.NewFlagSet("jingclaw gateway", flag.ContinueOnError)
 	var (
-		configPath = flag.String("config", "", "configuration file; defaults to the one in the config directory")
-		platform   = flag.String("platform", "", "messaging platform to serve; overrides the configuration")
-		accountID  = flag.String("account", "", "bot account name within JingClaw; overrides the configuration")
+		configPath = flags.String("config", "", "configuration file; defaults to the one in the config directory")
+		platform   = flags.String("platform", "", "messaging platform to serve; overrides the configuration")
+		accountID  = flags.String("account", "", "bot account name within JingClaw; overrides the configuration")
 	)
-	flag.Parse()
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
 
 	// The gateway reads the same file as the daemon, so a deployment is
 	// described in one place rather than in two that can disagree.
@@ -62,7 +67,7 @@ func run() error {
 		return err
 	}
 
-	flag.Visit(func(f *flag.Flag) {
+	flags.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "platform":
 			cfg.Gateway.Platform = *platform

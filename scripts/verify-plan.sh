@@ -13,8 +13,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 ATTACH=""
@@ -56,7 +55,7 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -70,14 +69,14 @@ done
 TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["token"])' "$WORK/run/daemon.json")
 BASE="http://127.0.0.1:7806"
 
-SESSION=$("$WORK/agent" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
-"$WORK/agent" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 0.3
 
-"$WORK/agent" --config "$WORK/config.toml" send "$SESSION" "fix the failing test" >/dev/null
+"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "fix the failing test" >/dev/null
 
 WAITED=0
 while ! grep -q 'run.completed\|run.failed' "$WORK/events" 2>/dev/null; do
@@ -117,7 +116,7 @@ printf 'ok   and a client opening the session afterwards sees it\n'
 #    the daemon was updated, which is exactly when somebody is watching.
 kill "$DAEMON"
 wait "$DAEMON" 2>/dev/null || true
-"$WORK/agentd" --config "$WORK/config.toml" >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -140,10 +139,10 @@ printf 'ok   and survives a restart\n'
 # That the plan is actually put in front of the model is checked in Go, where
 # the provider request can be read: nothing outside the daemon can see a system
 # prompt, so asserting it from here would be asserting that a turn ran.
-"$WORK/agent" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events2" 2>&1 &
+"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events2" 2>&1 &
 ATTACH=$!
 sleep 0.3
-"$WORK/agent" --config "$WORK/config.toml" send "$SESSION" "carry on" >/dev/null
+"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "carry on" >/dev/null
 
 WAITED=0
 while ! grep -q 'run.completed\|run.failed' "$WORK/events2" 2>/dev/null; do

@@ -13,8 +13,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 ATTACH=""
@@ -51,7 +50,7 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -64,14 +63,14 @@ done
 TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["token"])' "$WORK/run/daemon.json")
 BASE="http://127.0.0.1:7810"
 
-SESSION=$("$WORK/agent" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
-"$WORK/agent" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 0.3
 
-"$WORK/agent" --config "$WORK/config.toml" send "$SESSION" "migrate the database" >/dev/null
+"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "migrate the database" >/dev/null
 
 # 1. The run stops, and says it is waiting for an answer rather than for an
 #    approval: every client offers a different control for the two.
@@ -85,7 +84,7 @@ done
 printf 'ok   the run stops and says it is waiting for an answer\n'
 
 # 2. What was asked is visible, with the options.
-ASKED=$("$WORK/agent" --config "$WORK/config.toml" questions "$SESSION")
+ASKED=$("$WORK/jingclaw" --config "$WORK/config.toml" questions "$SESSION")
 printf '%s' "$ASKED" | grep -q 'Which migration strategy' ||
 	fail "the question is not listed: $ASKED"
 printf '%s' "$ASKED" | grep -q 'upgrade in place' ||
@@ -108,7 +107,7 @@ printf 'ok   an answer that was not on offer is refused\n'
 # 4. The real answer resumes the run and reaches the model as the result of
 #    the call that asked. This is what makes it different from the person
 #    simply sending another turn.
-"$WORK/agent" --config "$WORK/config.toml" answer "$QUESTION" b >/dev/null 2>&1
+"$WORK/jingclaw" --config "$WORK/config.toml" answer "$QUESTION" b >/dev/null 2>&1
 
 WAITED=0
 while ! grep -q 'run.completed\|run.failed' "$WORK/events" 2>/dev/null; do
@@ -127,7 +126,7 @@ $(cut -c1-160 "$WORK/events" | tail -10)"
 printf 'ok   and the model is told what was chosen\n'
 
 # 5. Nothing is left waiting.
-STILL=$("$WORK/agent" --config "$WORK/config.toml" questions "$SESSION" 2>&1)
+STILL=$("$WORK/jingclaw" --config "$WORK/config.toml" questions "$SESSION" 2>&1)
 printf '%s' "$STILL" | grep -q 'nothing waiting' ||
 	fail "the answered question is still listed: $STILL"
 printf 'ok   and nothing is left waiting\n'

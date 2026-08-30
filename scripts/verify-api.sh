@@ -19,8 +19,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -45,7 +44,7 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -62,7 +61,7 @@ GATEWAY=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["gatewa
 # The scopes a credential can have. Named here so that removing one is a
 # change to this line rather than something that quietly widens what the
 # remaining ones reach.
-[ -z "$("$WORK/agentd" --print-config | grep -E '^\s*#?\s*(web_console|pairing_ttl|console_ttl)')" ] ||
+[ -z "$("$WORK/jingclaw" daemon --print-config | grep -E '^\s*#?\s*(web_console|pairing_ttl|console_ttl)')" ] ||
 	fail "the configuration still offers a browser console"
 printf 'ok   no browser console is configurable\n'
 
@@ -103,7 +102,7 @@ SESSION=$(curl -s -X POST \
 [ -n "$SESSION" ] || fail "creating a session over JSON produced no id"
 printf 'ok   a unary call works as plain JSON over POST\n'
 
-"$WORK/agent" --config "$WORK/config.toml" send "$SESSION" "hello from the terminal" >/dev/null
+"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "hello from the terminal" >/dev/null
 sleep 1
 
 # 5. A streaming call: the request is enveloped too, and the answer comes back

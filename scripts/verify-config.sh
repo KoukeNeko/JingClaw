@@ -15,10 +15,9 @@ cd "$(dirname "$0")/../core"
 
 
 WORK=$(mktemp -d)
-BIN="$WORK/agentd"
-CLI="$WORK/agent"
-go build -o "$BIN" ./cmd/agentd
-go build -o "$CLI" ./cmd/agent
+BIN="$WORK/jingclaw daemon"
+CLI="$WORK/jingclaw"
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -36,7 +35,7 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 # deployment at all and so nowhere to put the file.
 FRESH="$WORK/fresh-home"
 mkdir -p "$FRESH"
-HOME="$FRESH" JINGCLAW_HOME= "$BIN" --print-prompt >/dev/null 2>&1 || true
+HOME="$FRESH" JINGCLAW_HOME= $BIN --print-prompt >/dev/null 2>&1 || true
 CREATED=$(find "$FRESH" -name config.toml | head -1)
 [ -n "$CREATED" ] || fail "no configuration file was created"
 # The header rather than any one setting. Which settings are shown
@@ -49,7 +48,7 @@ printf 'ok   creates a configuration file when there is none\n'
 # The settings it shows live are at their defaults, so a file somebody has read
 # and not edited behaves exactly as one they never opened. Without this, the
 # example is a set of choices nobody made.
-HOME="$FRESH" JINGCLAW_HOME= "$BIN" --print-config > "$WORK/regenerated" 2>/dev/null ||
+HOME="$FRESH" JINGCLAW_HOME= $BIN --print-config > "$WORK/regenerated" 2>/dev/null ||
 	fail "the created file could not be read back"
 diff -q "$CREATED" "$WORK/regenerated" >/dev/null ||
 	fail "reading the created file back produces different settings:
@@ -69,7 +68,7 @@ log_level = "verbose"
 [provider]
 backend = "openai"
 EOF
-if "$BIN" --config "$WORK/wrong.toml" >"$WORK/out" 2>&1; then
+if $BIN --config "$WORK/wrong.toml" >"$WORK/out" 2>&1; then
 	fail "agentd started with three broken settings"
 fi
 for EXPECTED in "$WORK/wrong.toml" 'server.addr = "0.0.0.0:9977"' loopback \
@@ -98,7 +97,7 @@ data_dir = "$WORK/data"
 log_level = "warn"
 EOF
 
-"$BIN" --config "$WORK/good.toml" >"$WORK/daemon.log" 2>&1 &
+$BIN --config "$WORK/good.toml" >"$WORK/daemon.log" 2>&1 &
 DAEMON=$!
 
 WAITED=0

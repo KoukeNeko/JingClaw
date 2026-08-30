@@ -21,7 +21,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 SERVER=""
@@ -110,7 +110,7 @@ start() {
 	rm -rf "$WORK/run" "$WORK/data"
 	mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
 
-	"$WORK/agentd" --config "$WORK/$NAME.toml" >"$WORK/$NAME.out" 2>"$WORK/$NAME.err" &
+	"$WORK/jingclaw" daemon --config "$WORK/$NAME.toml" >"$WORK/$NAME.out" 2>"$WORK/$NAME.err" &
 	DAEMON=$!
 
 	WAITED=0
@@ -188,7 +188,7 @@ printf 'ok   openai_compat: the endpoint is read and the loaded context wins\n'
 
 # A misconfiguration has to be refused at startup rather than on a first turn.
 sed 's/profile = "vllm"/profile = "vlm"/' "$WORK/compat.toml" > "$WORK/typo.toml"
-if "$WORK/agentd" --config "$WORK/typo.toml" >"$WORK/typo.out" 2>&1; then
+if "$WORK/jingclaw" daemon --config "$WORK/typo.toml" >"$WORK/typo.out" 2>&1; then
 	fail "a misspelled profile was accepted"
 fi
 grep -q "profile" "$WORK/typo.out" || fail "the refusal does not name the setting:

@@ -14,8 +14,7 @@ export JINGCLAW_HOME=none
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
-go build -o "$WORK/agentd" ./cmd/agentd
-go build -o "$WORK/agent" ./cmd/agent
+go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
 cleanup() {
@@ -41,7 +40,7 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 EOF
 
-"$WORK/agentd" --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -51,11 +50,11 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-SESSION=$("$WORK/agent" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
 # 1. What is on offer comes from the provider, with the one in use marked.
-LISTED=$("$WORK/agent" --config "$WORK/config.toml" session model "$SESSION" 2>&1)
+LISTED=$("$WORK/jingclaw" --config "$WORK/config.toml" session model "$SESSION" 2>&1)
 printf '%s' "$LISTED" | grep -q 'fake-echo' ||
 	fail "the provider's models were not offered: $LISTED"
 printf '%s' "$LISTED" | grep -q '^\* fake-echo' ||
@@ -78,7 +77,7 @@ printf '%s' "$BEFORE" | grep -q '"current":"fake-echo"' ||
 printf 'ok   a session that never chose uses the daemon default\n'
 
 # 3. Choosing one is recorded on the session, and reported back.
-"$WORK/agent" --config "$WORK/config.toml" session model "$SESSION" a-different-model >/dev/null 2>&1
+"$WORK/jingclaw" --config "$WORK/config.toml" session model "$SESSION" a-different-model >/dev/null 2>&1
 AFTER=$(read_model "$SESSION")
 printf '%s' "$AFTER" | grep -q '"current":"a-different-model"' ||
 	fail "the choice was not recorded: $AFTER"
@@ -88,7 +87,7 @@ printf 'ok   choosing one changes that session and not the daemon\n'
 
 # 4. Another session is unaffected. A per-session choice that leaked into every
 #    session would be a configuration change with no way back.
-OTHER=$("$WORK/agent" --config "$WORK/config.toml" session create | tr -d '\r\n')
+OTHER=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
 OTHER_MODEL=$(read_model "$OTHER")
 printf '%s' "$OTHER_MODEL" | grep -q '"current":"fake-echo"' ||
 	fail "the choice leaked into another session: $OTHER_MODEL"
@@ -98,7 +97,7 @@ printf 'ok   and leaves every other session alone\n'
 #    would be a setting somebody has to make again after every crash.
 kill "$DAEMON"
 wait "$DAEMON" 2>/dev/null || true
-"$WORK/agentd" --config "$WORK/config.toml" >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon --config "$WORK/config.toml" >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -116,7 +115,7 @@ printf 'ok   and survives a restart\n'
 
 # 6. Setting it back to nothing returns to the default, rather than needing a
 #    separate call nobody would find.
-"$WORK/agent" --config "$WORK/config.toml" session model "$SESSION" "" >/dev/null 2>&1
+"$WORK/jingclaw" --config "$WORK/config.toml" session model "$SESSION" "" >/dev/null 2>&1
 CLEARED=$(read_model "$SESSION")
 printf '%s' "$CLEARED" | grep -q '"current":"fake-echo"' ||
 	fail "clearing the choice did not go back to the default: $CLEARED"
