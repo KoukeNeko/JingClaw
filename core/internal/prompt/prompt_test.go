@@ -121,7 +121,7 @@ func TestLayersAreOrderedFromIdentityOutwards(t *testing.T) {
 		prompt.StandingInstructions{Path: "AGENTS.md", Text: "Do not add dependencies."},
 	)
 
-	want := []string{"identity", "environment", "contract", "standing instructions"}
+	want := []string{"identity", "environment", "contract", "formatting", "standing instructions"}
 	if len(layers) != len(want) {
 		t.Fatalf("got %d layers, want %d", len(layers), len(want))
 	}

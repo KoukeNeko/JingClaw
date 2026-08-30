@@ -64,6 +64,7 @@ func Build(env Environment, standing []StandingInstructions) []Layer {
 		{Name: "identity", Source: "built-in", Text: identity},
 		{Name: "environment", Source: "runtime", Text: environment(env)},
 		{Name: "contract", Source: "built-in", Text: contract},
+		{Name: "formatting", Source: "built-in", Text: formatting},
 	}
 
 	for _, file := range standing {
@@ -126,6 +127,40 @@ func environment(env Environment) string {
 
 	return out.String()
 }
+
+// formatting is how to write an answer that will be read in a chat window.
+//
+// Separate from the contract above, which states things the model cannot
+// change by being told otherwise. This is a request about presentation, and
+// the model may well ignore it — the gateway is written not to depend on it.
+//
+// It exists because a model that draws its own table pads the columns by
+// counting characters, and in Chinese every character is two columns wide, so
+// the result is always crooked. The gateway can re-align a Markdown table; it
+// deliberately cannot touch anything inside a fence, because a fence means
+// verbatim and rewriting a test failure or a diff would turn output somebody
+// is reading into something that only looks like it.
+//
+// "When you are presenting information yourself" is doing real work in the
+// wording. A flat "never write ASCII tables" would have the model tidy up a
+// table it was asked to quote, which is the same fidelity problem from the
+// other direction.
+const formatting = `How to format an answer:
+
+When you are presenting information yourself, put tables in ordinary Markdown
+with pipes, outside any code fence, and do not pad the cells to line them up:
+
+| Name | Status |
+|---|---|
+| Example | Ready |
+
+Do not draw tables out of +---+ borders or padded | ... | columns. Something
+reading this will lay the columns out; padding them here only makes them
+crooked, because a Chinese character is two columns wide and a space is one.
+
+Code fences are for material that is already exactly what it is: code, logs,
+command output, diffs, test output. Keep the whitespace of those unchanged,
+including a table that came out of a program.`
 
 // contract describes how the runtime behaves.
 //

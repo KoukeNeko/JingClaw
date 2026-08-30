@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,10 @@ type Projector struct {
 
 	NewID func() string
 	Now   func() time.Time
+
+	// Logger records what an answer looked like, never what it said. Left
+	// nil, the default logger is used.
+	Logger *slog.Logger
 
 	// WorkingInterval is the least time between "what it is doing now" lines.
 	// Every tool call producing one would exceed what a platform will accept
@@ -312,6 +317,7 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		text := p.take(payload.MessageID)
 		if strings.TrimSpace(text) != "" {
 			p.record(run.ID).said = true
+			p.noteFormatting(run, text)
 		}
 		if strings.TrimSpace(text) == "" {
 			// A turn that only asked for tools has nothing to say yet.
@@ -412,6 +418,28 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 }
 
 // observeState reports only the transitions a reader would notice.
+// noteFormatting records that the model drew a table inside a fence.
+//
+// Recorded and not repaired. The prompt asks for Markdown tables outside
+// fences, and the gateway lays those out; a table drawn inside a fence stays
+// exactly as written, because a fence means verbatim and no grammar tells a
+// drawn table apart from a program's output. This is how an operator finds
+// out whether the asking works, rather than whether it feels like it works.
+//
+// The text itself is never logged: it is somebody's conversation.
+func (p *Projector) noteFormatting(run domain.Run, text string) {
+	if !DrawsATableInAFence(text) {
+		return
+	}
+
+	logger := p.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Info("the model drew a table inside a fence, which is left as written",
+		"run_id", string(run.ID), "session_id", string(run.SessionID))
+}
+
 func (p *Projector) observeState(
 	ctx context.Context,
 	run domain.Run,
