@@ -9,14 +9,16 @@
 # path, so this drives the real fetcher against real addresses.
 set -eu
 
-# The operator's own deployment must not decide anything here: a check that
-# reached it would read its settings and, worse, write to its database. Stated
-# rather than relied on.
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
+
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -36,7 +38,7 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 # 1. The address guard, which runs before anything opens a connection.
 go test ./internal/web/ ./internal/permission/ >/dev/null 2>&1 ||
@@ -89,9 +91,6 @@ fake_delay = "0s"
 enabled = true
 backend = "browser"
 timeout = "45s"
-
-[workspace]
-root = "$WORK/ws"
 
 [server]
 runtime_dir = "$WORK/run"

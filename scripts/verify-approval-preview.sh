@@ -8,11 +8,15 @@
 # guessing at it.
 set -eu
 
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -31,8 +35,8 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
-printf 'timeout := 30\n' > "$WORK/ws/settings.go"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+printf 'timeout := 30\n' > "$WORK/workspace/settings.go"
 
 cat > "$WORK/config.toml" <<EOF
 [provider]
@@ -55,8 +59,6 @@ args = '{"path":"settings.go","edits":[{"old_text":"timeout := 30","new_text":"t
 [[provider.fake_script]]
 text = "Done."
 
-[workspace]
-root = "$WORK/ws"
 [server]
 addr = "127.0.0.1:7796"
 runtime_dir = "$WORK/run"
@@ -107,7 +109,7 @@ printf 'ok   naming the file it would change\n'
 
 # 2. A preview must not be the edit happening early. Nothing has been decided,
 #    so the file has to be untouched.
-BEFORE=$(cat "$WORK/ws/settings.go")
+BEFORE=$(cat "$WORK/workspace/settings.go")
 [ "$BEFORE" = "timeout := 30" ] ||
 	fail "the file changed before anybody approved: $BEFORE"
 printf 'ok   and nothing was changed by rendering it\n'
@@ -129,9 +131,9 @@ APPROVAL=$(printf '%s' "$LISTED" | grep -o 'apr_[A-Za-z0-9]*' | head -1)
 "$WORK/jingclaw" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null
 
 WAITED=0
-while ! grep -q 'timeout := 120' "$WORK/ws/settings.go" 2>/dev/null; do
+while ! grep -q 'timeout := 120' "$WORK/workspace/settings.go" 2>/dev/null; do
 	WAITED=$((WAITED + 1))
-	[ "$WAITED" -gt 100 ] && fail "approving it did not make the change: $(cat "$WORK/ws/settings.go")
+	[ "$WAITED" -gt 100 ] && fail "approving it did not make the change: $(cat "$WORK/workspace/settings.go")
 $(cut -c1-160 "$WORK/events" | tail -10)"
 	sleep 0.1
 done

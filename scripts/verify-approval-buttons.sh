@@ -13,11 +13,15 @@
 # itself, the bot token would be an approval.
 set -eu
 
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -42,7 +46,7 @@ ASKER=900000000000000013
 APPROVER=900000000000000014
 STRANGER=900000000000000015
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 cat > "$WORK/config.toml" <<EOF
 [provider]
@@ -58,8 +62,6 @@ args = '{"path":"notes.md","content":"written"}'
 [[provider.fake_script]]
 text = "Done."
 
-[workspace]
-root = "$WORK/ws"
 [server]
 addr = "127.0.0.1:7836"
 runtime_dir = "$WORK/run"
@@ -170,7 +172,7 @@ printf '%s' "$ALLOWED" | grep -q 'DECISION_OUTCOME_RECORDED' ||
 printf 'ok   the named approver decides it\n'
 
 WAITED=0
-while [ ! -f "$WORK/ws/notes.md" ]; do
+while [ ! -f "$WORK/workspace/notes.md" ]; do
 	WAITED=$((WAITED + 1))
 	[ "$WAITED" -gt 200 ] && fail "the run did not continue after approval"
 	sleep 0.1

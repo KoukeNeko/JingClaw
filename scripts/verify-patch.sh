@@ -7,11 +7,15 @@
 # not build, and the model's next read gets the mixture.
 set -eu
 
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -34,9 +38,9 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
-printf 'x := oldName()\n' > "$WORK/ws/caller.go"
-printf 'func oldName() int { return 1 }\n' > "$WORK/ws/defn.go"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+printf 'x := oldName()\n' > "$WORK/workspace/caller.go"
+printf 'func oldName() int { return 1 }\n' > "$WORK/workspace/defn.go"
 
 cat > "$WORK/config.toml" <<EOF
 [provider]
@@ -64,8 +68,6 @@ args = '{"operations":[{"op":"update","path":"caller.go","edits":[{"old_text":"o
 [[provider.fake_script]]
 text = "Renamed."
 
-[workspace]
-root = "$WORK/ws"
 [server]
 addr = "127.0.0.1:7812"
 runtime_dir = "$WORK/run"
@@ -129,9 +131,9 @@ kill "$APPROVER" 2>/dev/null || true
 APPROVER=""
 
 # Every file changed.
-grep -q 'newName()' "$WORK/ws/caller.go" || fail "caller.go was not updated"
-grep -q 'func newName()' "$WORK/ws/defn.go" || fail "defn.go was not updated"
-[ -f "$WORK/ws/notes/why.md" ] || fail "the new file was not created"
+grep -q 'newName()' "$WORK/workspace/caller.go" || fail "caller.go was not updated"
+grep -q 'func newName()' "$WORK/workspace/defn.go" || fail "defn.go was not updated"
+[ -f "$WORK/workspace/notes/why.md" ] || fail "the new file was not created"
 printf 'ok   and every file in it changed, including a new one\n'
 
 # One approval, not one per file. This is what makes the patch worth having

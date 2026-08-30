@@ -11,11 +11,15 @@
 # removed: it retired exactly the memories that were not the problem.
 set -eu
 
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -34,7 +38,7 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 cat > "$WORK/config.toml" <<EOF
 [provider]
 backend = "fake"
@@ -56,8 +60,6 @@ text = "Noted."
 
 [memory]
 enabled = true
-[workspace]
-root = "$WORK/ws"
 [server]
 addr = "127.0.0.1:7830"
 runtime_dir = "$WORK/run"

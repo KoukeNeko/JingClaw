@@ -13,11 +13,15 @@
 # particular machine adds in .zshrc, and there is nothing portable to assert.
 set -eu
 
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
 cleanup() {
 	set +e
 	rm -rf "$WORK"

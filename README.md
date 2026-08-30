@@ -77,9 +77,13 @@ one that has never had one.
 that needs the discovery file can ask rather than reimplement the rules and then
 drift from them.
 
-The workspace defaults to *inside* the directory rather than beside it, so a
-deployment set up to try the thing out cannot reach the project it was set up
-in. Point `[workspace] root` at your code to work on that.
+The workspace is *inside* the directory rather than beside it, and is not a
+setting. Where the agent may read and write is one answer in one place: a
+second way to say it would be a second place for the two to disagree, and
+which one ran would depend on which file was edited last.
+
+So a deployment cannot reach the project it was set up in. To work on your own
+code, put it in the workspace.
 
 ### What it can do
 
@@ -309,9 +313,9 @@ jingclaw daemon --provider=gemini --model=gemma-4-31b-it
 jingclaw gateway
 ```
 
-`--workspace` is the only directory tools can reach. Paths are resolved and
-symlink-checked against it before any I/O, so neither traversal nor a symlink
-pointing elsewhere gets out.
+`~/.jingclaw/workspace` is the only directory tools can reach. Paths are
+resolved and symlink-checked against it before any I/O, so neither traversal
+nor a symlink pointing elsewhere gets out.
 
 Reads run unattended; anything that modifies the workspace stops for a
 decision:

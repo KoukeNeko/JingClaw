@@ -5,8 +5,8 @@
 # setting which moves where the daemon publishes itself is honoured.
 set -eu
 
-# The operator's own deployment must not decide anything here: a check that
-# reached it would read its settings and, worse, write to its database. Each
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse. Each
 # command below is pointed at a throwaway home instead — "none" would say
 # there is no deployment at all, and then there is nowhere to create the file
 # this file is about.
@@ -62,8 +62,11 @@ $(diff "$CREATED" "$WORK/regenerated" | head -20)"
 printf 'ok   what it writes live is what it would have defaulted to anyway\n'
 
 # The rest name their own configuration, so they need a deployment to belong
-# to rather than the operator's.
+# to rather than the operator's. The workspace comes with it: where the agent
+# may read and write is a fact about the deployment rather than a setting, so
+# a deployment without one is a daemon that cannot start.
 export JINGCLAW_HOME="$WORK/deployment/.jingclaw"
+mkdir -p "$JINGCLAW_HOME/workspace"
 
 # 2. A wrong setting is explained, not stack-traced.
 cat > "$WORK/wrong.toml" <<'EOF'
@@ -84,7 +87,7 @@ done
 printf 'ok   names the file and every wrong setting, not just the first\n'
 
 # 3. The configured runtime_dir is where clients are told to look.
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 cat > "$WORK/good.toml" <<EOF
 [agent]
 name = "設定檔測試"
@@ -93,9 +96,6 @@ max_iterations = 3
 [provider]
 backend = "fake"
 fake_delay = "1ms"
-
-[workspace]
-root = "$WORK/ws"
 
 [server]
 runtime_dir = "$WORK/run"

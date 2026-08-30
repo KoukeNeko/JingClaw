@@ -93,7 +93,6 @@ func run(args []string) error {
 		model        = flags.String("model", "", "model to use")
 		addr         = flags.String("addr", "", "loopback address to listen on; port 0 picks a free one")
 		dataDir      = flags.String("data-dir", "", "directory for the database")
-		workspaceDir = flags.String("workspace", "", "directory the agent may read; tools cannot reach outside it")
 		maxIters     = flags.Int("max-iterations", 0, "cap on tool iterations per run")
 	)
 	// Retained so existing invocations keep working.
@@ -136,7 +135,7 @@ func run(args []string) error {
 	// Flags win over the file, which wins over the defaults it was seeded
 	// with. Only a flag the operator actually typed counts, so an unset flag
 	// does not overwrite a configured value with a default.
-	applyFlagOverrides(flags, &cfg, providerName, model, workspaceDir, dataDir, addr, maxIters)
+	applyFlagOverrides(flags, &cfg, providerName, model, dataDir, addr, maxIters)
 	if *devFake {
 		cfg.Provider.Backend = "fake"
 	}
@@ -204,12 +203,17 @@ func run(args []string) error {
 		return err
 	}
 
-	ws, err := workspace.Open(cfg.Workspace.Root)
+	workspaceDir, err := ensureWorkspace()
 	if err != nil {
 		return err
 	}
 
-	artifacts, err := artifact.Open(artifactDir(cfg, dbPath), cfg.Artifacts.MaxBytes)
+	ws, err := workspace.Open(workspaceDir)
+	if err != nil {
+		return err
+	}
+
+	artifacts, err := artifact.Open(artifactDir(dbPath), cfg.Artifacts.MaxBytes)
 	if err != nil {
 		return err
 	}
@@ -609,9 +613,9 @@ func reportPaths(cfg config.Config, configFile string) error {
 	for _, line := range [][2]string{
 		{"home", root},
 		{"config", orNone(configFile)},
-		{"workspace", cfg.Workspace.Root},
+		{"workspace", workspaceRoot()},
 		{"database", database},
-		{"artifacts", artifactDir(cfg, database)},
+		{"artifacts", artifactDir(database)},
 		{"discovery", discoveryPath},
 	} {
 		fmt.Printf("%-10s %s\n", line[0], line[1])
@@ -807,11 +811,48 @@ func isTemporary(path string) (string, bool) {
 	return "", false
 }
 
-func artifactDir(cfg config.Config, dbPath string) string {
-	if cfg.Artifacts.Dir != "" {
-		return cfg.Artifacts.Dir
-	}
+// artifactDir is where stored output goes: beside the database.
+//
+// Not a setting. The database and the output it refers to are one body of
+// state, and letting them be put in different places makes backing up or
+// moving a deployment a thing you can do half of.
+func artifactDir(dbPath string) string {
 	return filepath.Join(filepath.Dir(dbPath), "artifacts")
+}
+
+// workspaceRoot is what the agent may read and write.
+//
+// The deployment's own directory, always. Never the working directory —
+// "whatever you happened to be standing in" is not a setting, and as a
+// default it hands a fresh install the contents of the first project
+// somebody starts it from.
+func workspaceRoot() string {
+	if dir, found := home.Resolve(); found {
+		return dir.Workspace()
+	}
+	return ""
+}
+
+// ensureWorkspace makes the directory the agent works in, and returns it.
+//
+// Somebody has to. It stopped being a setting an operator points at something
+// that already exists, and became a fact about the deployment — so a fresh
+// install has a workspace for the same reason it has a configuration file:
+// because starting created one.
+//
+// Opening still refuses a path that is not there. That check is about a
+// deployment whose directory was moved or removed while it was not running,
+// which is worth failing over rather than quietly making a new empty one.
+func ensureWorkspace() (string, error) {
+	root := workspaceRoot()
+	if root == "" {
+		return "", fmt.Errorf("%s is set to none, so there is no workspace", home.EnvVar)
+	}
+
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("create the workspace at %s: %w", root, err)
+	}
+	return root, nil
 }
 
 // mcpServers turns the configured servers into what the mcp package needs.
@@ -1123,7 +1164,7 @@ func printModels(ctx context.Context, p provider.Provider) error {
 // Only flags the operator actually passed are considered: taking an unset
 // flag's zero value would silently replace a configured setting with a
 // default, which looks exactly like the configuration being ignored.
-func applyFlagOverrides(flags *flag.FlagSet, cfg *config.Config, providerName, model, workspaceDir, dataDir, addr *string, maxIters *int) {
+func applyFlagOverrides(flags *flag.FlagSet, cfg *config.Config, providerName, model, dataDir, addr *string, maxIters *int) {
 	passed := make(map[string]bool)
 	flags.Visit(func(f *flag.Flag) { passed[f.Name] = true })
 
@@ -1132,9 +1173,6 @@ func applyFlagOverrides(flags *flag.FlagSet, cfg *config.Config, providerName, m
 	}
 	if passed["model"] {
 		cfg.Provider.SetModel(*model)
-	}
-	if passed["workspace"] {
-		cfg.Workspace.Root = *workspaceDir
 	}
 	if passed["data-dir"] {
 		cfg.Server.DataDir = *dataDir

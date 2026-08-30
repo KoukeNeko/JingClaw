@@ -8,11 +8,15 @@
 # terminal.
 set -eu
 
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -33,7 +37,7 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 # A page that tries to plant a permanent instruction. Served locally so the
 # check needs no network and no real victim.
@@ -97,8 +101,6 @@ enabled = true
 [web]
 enabled = true
 backend = "browser"
-[workspace]
-root = "$WORK/ws"
 [server]
 addr = "127.0.0.1:7840"
 runtime_dir = "$WORK/run"

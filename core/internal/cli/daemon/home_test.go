@@ -34,7 +34,7 @@ func TestTheDirectoryDecidesEveryPath(t *testing.T) {
 		t.Errorf("the configuration is at %s, want %s", configFile, dir.ConfigFile())
 	}
 
-	if got := config.Defaults().Workspace.Root; got != dir.Workspace() {
+	if got := workspaceRoot(); got != dir.Workspace() {
 		t.Errorf("the workspace is %s, want %s", got, dir.Workspace())
 	}
 }
@@ -75,7 +75,7 @@ func TestTheWorkspaceIsNeverTheWorkingDirectory(t *testing.T) {
 	t.Setenv(home.EnvVar, root)
 	t.Chdir(t.TempDir())
 
-	got := config.Defaults().Workspace.Root
+	got := workspaceRoot()
 	if got == "." {
 		t.Fatal("the workspace defaulted to the working directory")
 	}

@@ -8,11 +8,6 @@
 # visible within seconds of actually running the thing.
 set -eu
 
-# The operator's own deployment must not decide anything here: a check that
-# reached it would read its settings and, worse, write to its database. Stated
-# rather than relied on.
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")"
 
 FAILED=0

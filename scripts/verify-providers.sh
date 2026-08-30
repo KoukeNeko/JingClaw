@@ -13,14 +13,16 @@
 # that mismatch, and the check is that the smaller number wins.
 set -eu
 
-# The operator's own deployment must not decide anything here: a check that
-# reached it would read its settings and, worse, write to its database. Stated
-# rather than relied on.
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
+
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -114,7 +116,7 @@ PORT=$(cat "$WORK/port")
 start() {
 	NAME=$1
 	rm -rf "$WORK/run" "$WORK/data"
-	mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+	mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 	"$WORK/jingclaw" daemon --config "$WORK/$NAME.toml" >"$WORK/$NAME.out" 2>"$WORK/$NAME.err" &
 	DAEMON=$!
@@ -141,9 +143,6 @@ model = "qwen3:8b"
 base_url = "http://127.0.0.1:$PORT"
 keep_alive = "30m"
 
-[workspace]
-root = "$WORK/ws"
-
 [server]
 runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
@@ -157,9 +156,6 @@ backend = "openai_compat"
 base_url = "http://127.0.0.1:$PORT/v1"
 profile = "vllm"
 name = "stand-in"
-
-[workspace]
-root = "$WORK/ws"
 
 [server]
 runtime_dir = "$WORK/run"

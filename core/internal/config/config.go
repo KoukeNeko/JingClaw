@@ -51,7 +51,6 @@ type Config struct {
 	MCP       MCP       `koanf:"mcp"`
 	Process   Process   `koanf:"process"`
 	Delivery  Delivery  `koanf:"delivery"`
-	Workspace Workspace `koanf:"workspace"`
 	Server    Server    `koanf:"server"`
 	Gateway   Gateway   `koanf:"gateway"`
 }
@@ -393,10 +392,6 @@ type Tools struct {
 // and given no way to reach it. With one, the excerpt it sees is a starting
 // point and the whole of it is a tool call away.
 type Artifacts struct {
-	// Dir holds the content. Empty puts it beside the database, which is where
-	// the rest of this daemon's durable state already lives.
-	Dir string `koanf:"dir"`
-
 	// MaxBytes bounds one artifact. Something larger is a file that belongs in
 	// the workspace, not output that was captured.
 	MaxBytes int64 `koanf:"max_bytes"`
@@ -757,10 +752,6 @@ type Channel struct {
 	ApproverRoles []string `koanf:"approver_roles"`
 }
 
-type Workspace struct {
-	Root string `koanf:"root"`
-}
-
 type Server struct {
 	// Addr must stay on the loopback interface. This API can run programs, and
 	// Validate refuses anything else rather than trusting that whoever wrote
@@ -855,9 +846,6 @@ func Defaults() Config {
 			TextFlushBytes:     240,
 			TextFlushInterval:  200 * time.Millisecond,
 			UsageFlushInterval: 2 * time.Second,
-		},
-		Workspace: Workspace{
-			Root: defaultWorkspace(),
 		},
 		Server: Server{
 			Addr:     "127.0.0.1:0",
@@ -1493,20 +1481,6 @@ func EnsureFile() (path string, created bool, err error) {
 	return path, true, nil
 }
 
-// defaultWorkspace is what the agent may touch when nothing says otherwise.
-//
-// Inside the deployment's own directory, so that an agent set up to try the
-// thing out cannot reach the project it was set up in. Never the working
-// directory: "whatever you happened to be standing in" is not a setting, and
-// as a default it hands a fresh install the contents of the first project
-// somebody starts it from.
-func defaultWorkspace() string {
-	if dir, found := home.Resolve(); found {
-		return dir.Workspace()
-	}
-	return ""
-}
-
 // DefaultPath is where the configuration lives when none is given.
 //
 // One answer, from one place. The platform-native directory, the XDG
@@ -1617,15 +1591,17 @@ backend = "fake"
 # Events kept behind a fold. Below zero keeps everything and grows forever.
 # keep_after_fold = 200
 
-# ── Workspace and durable state ─────────────────────────────
-
-[workspace]
-# What the agent may read and write. Nothing outside it is reachable.
-# root = "."
+# ── Durable state ───────────────────────────────────────────
+#
+# Where things live is not a setting. The agent reads and writes one
+# directory, the deployment's own workspace, and nothing outside it is
+# reachable; stored output goes beside the database. Two ways to say where
+# something is would be two places for them to disagree, and the answer to
+# "which one ran" would depend on which file somebody edited last.
 
 [artifacts]
-# Empty puts them beside the database.
-# dir = ""
+# How large one piece of stored output may be, and how large one image put in
+# front of the model may be.
 # max_bytes = 67108864
 # max_image_bytes = 8388608
 

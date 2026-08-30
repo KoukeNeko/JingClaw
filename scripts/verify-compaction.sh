@@ -4,15 +4,17 @@
 # an event, and goes on serving turns.
 set -eu
 
-# The operator's own deployment must not decide anything here: a check that
-# reached it would read its settings and, worse, write to its database. Stated
-# rather than relied on.
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
+
 BIN="$WORK/jingclaw daemon"
 CLI="$WORK/jingclaw"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
@@ -32,7 +34,7 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 cat > "$WORK/config.toml" <<EOF
 [provider]
 backend = "fake"
@@ -47,9 +49,6 @@ compact_at = 0.7
 keep_fraction = 0.3
 # No margin, so the check sees pruning happen rather than a default hiding it.
 keep_after_fold = 0
-
-[workspace]
-root = "$WORK/ws"
 
 [server]
 runtime_dir = "$WORK/run"

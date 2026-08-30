@@ -13,6 +13,8 @@
 # how a fixture stops being evidence and becomes a copy of the code.
 set -eu
 
+# No deployment at all: this check starts nothing and only runs tests, and
+# saying so keeps it from reading the operator's settings by accident.
 export JINGCLAW_HOME=none
 
 cd "$(dirname "$0")/.."

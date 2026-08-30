@@ -74,15 +74,17 @@ backend = "fake"
 # Events kept behind a fold. Below zero keeps everything and grows forever.
 # keep_after_fold = 200
 
-# ── Workspace and durable state ─────────────────────────────
-
-[workspace]
-# What the agent may read and write. Nothing outside it is reachable.
-# root = "."
+# ── Durable state ───────────────────────────────────────────
+#
+# Where things live is not a setting. The agent reads and writes one
+# directory, the deployment's own workspace, and nothing outside it is
+# reachable; stored output goes beside the database. Two ways to say where
+# something is would be two places for them to disagree, and the answer to
+# "which one ran" would depend on which file somebody edited last.
 
 [artifacts]
-# Empty puts them beside the database.
-# dir = ""
+# How large one piece of stored output may be, and how large one image put in
+# front of the model may be.
 # max_bytes = 67108864
 # max_image_bytes = 8388608
 

@@ -9,11 +9,15 @@
 # mean starting again.
 set -eu
 
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -36,8 +40,8 @@ CHANNEL=900000000000000001
 TENANT=900000000000000002
 PERSON=900000000000000003
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
-printf 'timeout := 30\n' > "$WORK/ws/settings.go"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+printf 'timeout := 30\n' > "$WORK/workspace/settings.go"
 
 cat > "$WORK/config.toml" <<EOF
 [provider]
@@ -58,8 +62,6 @@ args = '{"path":"settings.go","edits":[{"old_text":"timeout := 30","new_text":"t
 [[provider.fake_script]]
 text = "Done."
 
-[workspace]
-root = "$WORK/ws"
 [server]
 addr = "127.0.0.1:7797"
 runtime_dir = "$WORK/run"
@@ -153,7 +155,7 @@ printf 'ok   what it would change is reviewable at the machine\n'
 "$WORK/jingclaw" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null
 
 WAITED=0
-while ! grep -q 'timeout := 120' "$WORK/ws/settings.go" 2>/dev/null; do
+while ! grep -q 'timeout := 120' "$WORK/workspace/settings.go" 2>/dev/null; do
 	WAITED=$((WAITED + 1))
 	[ "$WAITED" -gt 200 ] && fail "approving from the machine did not resume the channel's run"
 	sleep 0.1

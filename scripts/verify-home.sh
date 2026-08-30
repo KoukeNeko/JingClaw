@@ -147,4 +147,38 @@ ses_*) ;;
 esac
 printf 'ok   a client started anywhere finds the same daemon\n'
 
+# A machine that has never had one. Everything the daemon needs has to be
+# there afterwards, because there was nothing to prepare it: the workspace
+# stopped being a setting an operator points at something existing, so
+# starting is what creates it.
+UNTOUCHED=$(mktemp -d)
+HOME="$UNTOUCHED" JINGCLAW_HOME= "$WORK/jingclaw" daemon >"$WORK/fresh.out" 2>"$WORK/fresh.err" &
+FRESH_DAEMON=$!
+
+WAITED=0
+while [ ! -f "$UNTOUCHED/.jingclaw/run/daemon.json" ]; do
+	WAITED=$((WAITED + 1))
+	if [ "$WAITED" -gt 150 ]; then
+		kill "$FRESH_DAEMON" 2>/dev/null
+		fail "a machine with no deployment could not start one: $(cat "$WORK/fresh.err")"
+	fi
+	sleep 0.1
+done
+
+for MADE in config.toml workspace data run; do
+	[ -e "$UNTOUCHED/.jingclaw/$MADE" ] ||
+		fail "starting on a fresh machine did not make $MADE"
+done
+kill "$FRESH_DAEMON" 2>/dev/null
+wait "$FRESH_DAEMON" 2>/dev/null
+
+# And nothing outside it. A deployment that scattered anything is one that
+# cannot be moved or backed up by copying a directory.
+OUTSIDE=$(find "$UNTOUCHED" -maxdepth 1 -mindepth 1 ! -name ".jingclaw" | head -3)
+[ -z "$OUTSIDE" ] || fail "it also made things outside the deployment: $OUTSIDE"
+
+rm -rf "$UNTOUCHED"
+printf 'ok   a machine that never had one gets everything, and nothing else\n'
+
+
 printf 'PASS: one deployment, wherever it is started from\n'

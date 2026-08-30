@@ -9,13 +9,16 @@
 # asking.
 set -eu
 
-# The operator's own deployment must not decide anything here: a check that
-# reached it would read its settings and, worse, write to its database.
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
+
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -31,7 +34,7 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 # Somebody else's words, from a tool server rather than a web page. Every
 # tool a server provides declares that its results carry them, because the
@@ -60,8 +63,6 @@ args = '{"path":"notes.md","content":"done"}'
 [[provider.fake_script]]
 text = "Done."
 
-[workspace]
-root = "$WORK/ws"
 [server]
 addr = "127.0.0.1:7784"
 runtime_dir = "$WORK/run"
@@ -147,15 +148,13 @@ args = '{"path":"plain.md","content":"done"}'
 [[provider.fake_script]]
 text = "Done."
 
-[workspace]
-root = "$WORK/ws"
 [server]
 addr = "127.0.0.1:7783"
 runtime_dir = "$WORK/run2"
 data_dir = "$WORK/data2"
 EOF
 mkdir -p "$WORK/run2" "$WORK/data2"
-printf 'something already on this machine\n' > "$WORK/ws/already-here.md"
+printf 'something already on this machine\n' > "$WORK/workspace/already-here.md"
 
 kill "$DAEMON" 2>/dev/null
 wait "$DAEMON" 2>/dev/null

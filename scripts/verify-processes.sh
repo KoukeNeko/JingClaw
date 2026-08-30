@@ -11,11 +11,15 @@
 # check slow and make it fail for reasons that have nothing to do with this.
 set -eu
 
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -34,7 +38,7 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 # The script: start something that keeps running, read what it printed, read
 # again, then answer. Written here rather than driven turn by turn because a
@@ -57,8 +61,6 @@ args = '{"program":"sh","args":["-c","echo listening on 3000; (while true; do to
 [[provider.fake_script]]
 text = "It is up."
 
-[workspace]
-root = "$WORK/ws"
 [server]
 addr = "127.0.0.1:7795"
 runtime_dir = "$WORK/run"
@@ -120,7 +122,7 @@ PROCESS=$(sed -n 's/.*started sh as \(prc_[A-Za-z0-9]*\).*/\1/p' "$WORK/events" 
 # It is still there after the call that started it returned. This is the
 # difference between these tools and exec_command, and it is the whole point.
 WAITED=0
-while [ ! -f "$WORK/ws/still-running" ]; do
+while [ ! -f "$WORK/workspace/still-running" ]; do
 	WAITED=$((WAITED + 1))
 	[ "$WAITED" -gt 100 ] && fail "the program is not running after the call returned"
 	sleep 0.1
@@ -144,9 +146,9 @@ wait "$APPROVER" 2>/dev/null || true
 wait "$ATTACH" 2>/dev/null || true
 
 sleep 0.5
-rm -f "$WORK/ws/still-running"
+rm -f "$WORK/workspace/still-running"
 sleep 0.5
-[ -f "$WORK/ws/still-running" ] || fail "the program stopped when the run ended"
+[ -f "$WORK/workspace/still-running" ] || fail "the program stopped when the run ended"
 printf 'ok   the run ends and the program does not\n'
 
 # Nothing outlives the daemon. A process nobody can name any more keeps a port

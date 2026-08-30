@@ -8,14 +8,16 @@
 # image to a real model and asks a question only the picture answers.
 set -eu
 
-# The operator's own deployment must not decide anything here: a check that
-# reached it would read its settings and, worse, write to its database. Stated
-# rather than relied on.
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
+
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -33,7 +35,7 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 # Three colour bands, and nothing in the filename or the text says which.
 python3 - "$WORK/bands.png" <<'PY'
@@ -68,9 +70,6 @@ fake_delay = "0s"
 # Configured but not selected, so the switch below is one line.
 [provider.gemini]
 model = "gemma-4-31b-it"
-
-[workspace]
-root = "$WORK/ws"
 
 [server]
 runtime_dir = "$WORK/run"

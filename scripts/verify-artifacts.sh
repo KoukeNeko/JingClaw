@@ -7,15 +7,17 @@
 # and the id got all the way out" — and only a model calls tools.
 set -eu
 
-# The operator's own deployment must not decide anything here: a check that
-# reached it would read its settings and, worse, write to its database. Stated
-# rather than relied on.
-export JINGCLAW_HOME=none
-
 cd "$(dirname "$0")/../core"
 
 
 WORK=$(mktemp -d)
+
+# A deployment of this check's own, so it cannot reach the operator's: reading
+# their settings would be bad and writing to their database would be worse.
+# Where the agent may read and write is this directory's workspace, which is
+# why the check has to have one rather than simply having none.
+export JINGCLAW_HOME="$WORK"
+
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DAEMON=""
@@ -62,12 +64,12 @@ if ! have_credential; then
 	exit 0
 fi
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/ws"
+mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 # A file with a distinctive line in the middle, so "the excerpt dropped it but
 # the artifact kept it" is something the test can actually check.
-awk 'BEGIN { for (i = 0; i < 4000; i++) print "line-" i "-padding-padding-padding" }' > "$WORK/ws/big.txt"
-grep -q 'line-2000-padding' "$WORK/ws/big.txt" || fail "the fixture is wrong"
+awk 'BEGIN { for (i = 0; i < 4000; i++) print "line-" i "-padding-padding-padding" }' > "$WORK/workspace/big.txt"
+grep -q 'line-2000-padding' "$WORK/workspace/big.txt" || fail "the fixture is wrong"
 
 cat > "$WORK/config.toml" <<EOF
 [agent]
@@ -85,9 +87,6 @@ model = "gemma-4-31b-it"
 
 [tools]
 max_command_output = 2000
-
-[workspace]
-root = "$WORK/ws"
 
 [server]
 runtime_dir = "$WORK/run"
