@@ -122,6 +122,7 @@ type Provider struct {
 	Gemini       Gemini       `koanf:"gemini"`
 	Ollama       Ollama       `koanf:"ollama"`
 	OpenAICompat OpenAICompat `koanf:"openai_compat"`
+	Anthropic    Anthropic    `koanf:"anthropic"`
 }
 
 // Model is what the selected backend will answer with.
@@ -137,6 +138,8 @@ func (p Provider) Model() string {
 		return p.Ollama.Model
 	case "openai_compat":
 		return p.OpenAICompat.Model
+	case "anthropic":
+		return p.Anthropic.Model
 	case "fake":
 		return p.FakeModel
 	}
@@ -153,6 +156,8 @@ func (p *Provider) SetModel(model string) {
 		p.Ollama.Model = model
 	case "openai_compat":
 		p.OpenAICompat.Model = model
+	case "anthropic":
+		p.Anthropic.Model = model
 	case "fake":
 		p.FakeModel = model
 	}
@@ -230,6 +235,22 @@ type Ollama struct {
 }
 
 // OpenAICompat configures an endpoint that speaks the OpenAI chat protocol.
+// Anthropic is the Messages API.
+//
+// Its own backend rather than a dialect of the OpenAI-compatible one: the
+// wire format differs in kind rather than in detail — content is typed blocks
+// in both directions, a tool result is a block in a user message, and the
+// stream is named events with indices.
+type Anthropic struct {
+	Model string `koanf:"model"`
+
+	APIKeyEnv  []string `koanf:"api_key_env"`
+	APIKeyFile string   `koanf:"api_key_file"`
+
+	// BaseURL overrides the service, for a gateway or a proxy in front of it.
+	BaseURL string `koanf:"base_url"`
+}
+
 type OpenAICompat struct {
 	// Model is what this backend answers with. Per backend, like the
 	// credential above and for the same reason: a model name means nothing
@@ -1123,7 +1144,7 @@ func (c Config) choiceProblems() []Problem {
 		problems = append(problems, Problem{
 			Key: "provider.backend", Value: quote(c.Provider.Backend),
 			Why: "is not a provider that exists",
-			Fix: `Use "gemini", "ollama", "openai_compat", or "fake" for the offline provider.`,
+			Fix: `Use "gemini", "anthropic", "ollama", "openai_compat", or "fake" for the offline provider.`,
 		})
 	}
 	// Each provider is checked only when it is the one selected. Refusing a
@@ -1447,6 +1468,7 @@ var (
 	profileNames  = map[string]bool{"local": true, "gateway": true}
 	providerNames = map[string]bool{
 		"fake": true, "gemini": true, "ollama": true, "openai_compat": true,
+		"anthropic": true,
 	}
 	platformNames = map[string]bool{"discord": true, "telegram": true}
 
@@ -1620,6 +1642,15 @@ backend = "fake"
 # num_ctx = 0
 # "" leaves the model's own setting alone; "true" or "false" overrides it.
 # think = ""
+
+[provider.anthropic]
+# The Messages API. Its own backend rather than a dialect of the one below:
+# the wire format differs in kind, not in detail.
+# model = "claude-sonnet-4-5"
+# api_key_env = ["ANTHROPIC_API_KEY"]
+# api_key_file = ""
+# For a gateway or a proxy in front of the service.
+# base_url = ""
 
 [provider.openai_compat]
 # model = ""

@@ -54,6 +54,15 @@ backend = "fake"
 # "" leaves the model's own setting alone; "true" or "false" overrides it.
 # think = ""
 
+[provider.anthropic]
+# The Messages API. Its own backend rather than a dialect of the one below:
+# the wire format differs in kind, not in detail.
+# model = "claude-sonnet-4-5"
+# api_key_env = ["ANTHROPIC_API_KEY"]
+# api_key_file = ""
+# For a gateway or a proxy in front of the service.
+# base_url = ""
+
 [provider.openai_compat]
 # model = ""
 # api_key_env = []

@@ -40,6 +40,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/process"
 	"github.com/KoukeNeko/JingClaw/core/internal/prompt"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider/anthropic"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/gemini"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/ollama"
@@ -1041,6 +1042,37 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 		}
 
 		p, err := gemini.New(ctx, gemini.Config{APIKey: apiKey.Reveal()})
+		if err != nil {
+			return nil, err
+		}
+
+		return provider.WithRetry(p, retryPolicy(cfg)), nil
+
+	case "anthropic":
+		keyFiles, err := secret.DefaultFiles(cfg.Provider.Anthropic.APIKeyFile)
+		if err != nil {
+			return nil, err
+		}
+
+		apiKey, err := secret.Load(secret.LoadOptions{
+			EnvVars: cfg.Provider.Anthropic.APIKeyEnv,
+			Files:   keyFiles,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !apiKey.IsSet() {
+			return nil, fmt.Errorf(
+				"no Anthropic API key: set %s, or write it with mode 600 to one of: %s",
+				strings.Join(cfg.Provider.Anthropic.APIKeyEnv, " or "),
+				strings.Join(keyFiles, ", "))
+		}
+
+		p, err := anthropic.New(anthropic.Config{
+			APIKey:  apiKey.Reveal(),
+			Model:   cfg.Provider.Anthropic.Model,
+			BaseURL: cfg.Provider.Anthropic.BaseURL,
+		})
 		if err != nil {
 			return nil, err
 		}

@@ -75,6 +75,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     "capabilities": ["completion", "tools"]}]})
         elif self.path == "/api/ps":
             self._send({"models": [{"model": "qwen3:8b", "context_length": LOADED}]})
+        elif self.path == "/anthropic/models":
+            # The Messages API reports no context length, which is itself
+            # worth pinning: an adapter that invented one would be wrong
+            # quietly.
+            self._send({"data": [{"id": "claude-stand-in",
+                                  "display_name": "Claude stand-in"}]})
         elif self.path.endswith("/models"):
             self._send({"data": [{"id": "local-model", "max_model_len": LOADED,
                                   "meta": {"n_ctx_train": TRAINED}}]})
@@ -187,6 +193,45 @@ printf 'ok   ollama: the catalogue is read and the loaded context wins\n'
 start compat
 check compat "openai_compat/stand-in"
 printf 'ok   openai_compat: the endpoint is read and the loaded context wins\n'
+
+# Anthropic. Only that the wiring holds — configuration reaching the adapter
+# and the catalogue being read — because this has never been run against the
+# real service: nobody here has a key for it. What the unit tests cover is the
+# wire format; what this covers is that the daemon can be told to use it.
+cat > "$WORK/anthropic.toml" <<EOF
+[provider]
+backend = "anthropic"
+
+[provider.anthropic]
+model = "claude-stand-in"
+base_url = "http://127.0.0.1:$PORT/anthropic"
+api_key_file = "anthropic.key"
+
+[server]
+runtime_dir = "$WORK/run"
+data_dir = "$WORK/data"
+log_level = "info"
+EOF
+# Beside the deployment, which is where a credential is looked for: naming an
+# absolute path here would have it appended to that directory rather than used.
+printf 'not-a-real-key\n' > "$JINGCLAW_HOME/anthropic.key"
+chmod 600 "$JINGCLAW_HOME/anthropic.key"
+
+start anthropic
+grep -q '"model":"claude-stand-in"' "$WORK/anthropic.err" ||
+	fail "anthropic: the configured model did not reach the adapter:
+$(cat "$WORK/anthropic.err")"
+printf 'ok   anthropic: the endpoint is read and the model reaches the adapter\n'
+
+# And no key is refused at startup rather than on a first turn.
+sed 's|api_key_file = .*|api_key_file = "not-there.key"|' "$WORK/anthropic.toml" \
+	> "$WORK/nokey.toml"
+if "$WORK/jingclaw" daemon --config "$WORK/nokey.toml" >"$WORK/nokey.out" 2>&1; then
+	fail "anthropic started with no key"
+fi
+grep -qi "api key" "$WORK/nokey.out" ||
+	fail "the refusal does not say what is missing: $(cat "$WORK/nokey.out")"
+printf 'ok   anthropic: no key is refused at startup, and says so\n'
 
 # A misconfiguration has to be refused at startup rather than on a first turn.
 sed 's/profile = "vllm"/profile = "vlm"/' "$WORK/compat.toml" > "$WORK/typo.toml"
