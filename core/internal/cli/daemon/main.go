@@ -359,6 +359,17 @@ func run(args []string) error {
 	}
 	permissions := permission.New(profile)
 
+	// Registered before the prompt is assembled, because the prompt lists the
+	// tools and a tool the model is never told about is one it will not use.
+	// What they need is the runtime, which needs the prompt, so they are given
+	// a handle to it and it is filled in below.
+	later := &theRuntime{}
+	tools.MustRegister(
+		&builtin.TodoUpdate{Planner: later},
+		&builtin.AskUser{},
+		&builtin.SkillLoad{Skills: installedSkills{}, Activations: later},
+	)
+
 	layers, err := buildPrompt(cfg, ws, tools, logger)
 	if err != nil {
 		return err
@@ -420,14 +431,10 @@ func run(args []string) error {
 		Logger:          logger,
 	})
 
-	// Registered after the runtime exists, because this is the one tool whose
-	// collaborator is the runtime itself. Before it is serving, so a run
-	// cannot start without the plan being reachable.
-	tools.MustRegister(
-		&builtin.TodoUpdate{Planner: rt},
-		&builtin.AskUser{},
-		&builtin.SkillLoad{Skills: installedSkills{}, Activations: rt},
-	)
+	// The handle the tools were registered against, filled in. Before
+	// anything serves, so no run can reach a tool whose collaborator is still
+	// missing.
+	later.is = rt
 
 	// Runs that were live when this process last stopped have nobody driving
 	// them. Resolving them before serving means clients never see a run that
