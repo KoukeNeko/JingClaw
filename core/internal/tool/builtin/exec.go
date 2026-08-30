@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
+	"github.com/KoukeNeko/JingClaw/core/internal/sandbox"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
@@ -36,6 +37,26 @@ type ExecCommand struct {
 	// one is derived: inheriting the daemon's would hand every command its API
 	// keys.
 	Env []string
+
+	// Confine says what a command may reach. Nil runs it unconfined, which is
+	// what a deployment that has not asked for a sandbox gets and is what
+	// this did before there was one.
+	//
+	// Set, it must work. A sandbox that runs the command anyway when it
+	// cannot confine it is worse than none, because somebody believes there
+	// is one — so an unavailable backend refuses the call rather than
+	// quietly widening it.
+	Confine *Confinement
+}
+
+// Confinement is the sandbox this deployment asked for.
+type Confinement struct {
+	// Policy is everything but the workspace, which changes per call.
+	Policy sandbox.Policy
+
+	// Environment points a command's caches and home at the sandbox's own,
+	// so confining writes does not mean forbidding a compiler to build.
+	Environment []string
 }
 
 func (t *ExecCommand) Spec() tool.Spec {
@@ -122,7 +143,29 @@ func (t *ExecCommand) Execute(ctx context.Context, call tool.Call) (tool.Result,
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	command := exec.CommandContext(runCtx, args.Program, args.Args...)
+	program, arguments := args.Program, args.Args
+	if t.Confine != nil {
+		// The workspace is added here rather than configured, because which
+		// directory a command may write is a fact about this call.
+		policy := t.Confine.Policy
+		policy.Writable = append(append([]string(nil), policy.Writable...), t.Workspace.Root())
+
+		wrapped, wrappedArgs, done, err := sandbox.Wrap(policy, program, arguments)
+		if err != nil {
+			// Refused rather than run. This is the failure the whole feature
+			// turns on: an operator who asked for confinement and a machine
+			// that cannot provide it must not get commands running as though
+			// they had never asked.
+			return tool.Result{}, tool.Errorf(tool.CodeUnsupported,
+				"Turn off [sandbox] enabled to run without confinement.",
+				"cannot confine this command: %v", err)
+		}
+		defer done()
+
+		program, arguments = wrapped, wrappedArgs
+	}
+
+	command := exec.CommandContext(runCtx, program, arguments...)
 	command.Dir = workingDir
 	command.Env = t.environment()
 
@@ -229,10 +272,19 @@ func (t *ExecCommand) result(
 // would hand an API key to every command the model decides to run, so only the
 // variables a build actually needs are forwarded.
 func (t *ExecCommand) environment() []string {
-	if len(t.Env) > 0 {
-		return t.Env
+	base := t.Env
+	if len(base) == 0 {
+		base = minimalEnvironment(false)
 	}
-	return minimalEnvironment(false)
+	if t.Confine == nil {
+		return base
+	}
+
+	// The sandbox's own directories win. Every one of these has a default
+	// under the real home, and left alone a compiler writes there and a
+	// package manager reads credentials from beside it — which would make
+	// hiding the real home either impossible or a list of exceptions.
+	return append(base, t.Confine.Environment...)
 }
 
 // minimalEnvironment is what a child process is given.

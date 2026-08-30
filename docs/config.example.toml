@@ -88,6 +88,26 @@ backend = "fake"
 # max_bytes = 67108864
 # max_image_bytes = 8388608
 
+[sandbox]
+# Confine what a command run by exec_command can reach: it may write to the
+# workspace and to this deployment's own caches, and nothing else on the
+# machine. Approving a command says somebody meant to run it; it cannot say
+# what a build's dependencies will do, and this is the difference.
+#
+# Off by default because it changes what commands can do. On, it is not
+# advisory: a machine that cannot confine refuses to run the command rather
+# than running it unprotected.
+#
+# macOS only so far.
+# enabled = false
+# Let confined commands open connections. Off suits a build or a test, which
+# is most of what an agent runs.
+# network = false
+# Directories a confined command may not read. Confining writes says nothing
+# about reads, and having no network only means it cannot send today what it
+# read today.
+# hidden = ["~/.ssh", "~/.aws"]
+
 [memory]
 # What the agent carries between sessions. A retrieval memory is written
 # unattended; a standing one goes in front of the model every turn and stops

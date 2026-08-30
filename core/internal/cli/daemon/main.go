@@ -45,6 +45,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/ollama"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/openaicompat"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
+	"github.com/KoukeNeko/JingClaw/core/internal/sandbox"
 	"github.com/KoukeNeko/JingClaw/core/internal/secret"
 	"github.com/KoukeNeko/JingClaw/core/internal/skill"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/sqlite"
@@ -242,6 +243,11 @@ func run(args []string) error {
 	editFile := builtin.NewEditFile(ws, observed, locks)
 
 	tools := tool.NewRegistry()
+	confine, err := confinement(cfg, logger)
+	if err != nil {
+		return err
+	}
+
 	tools.MustRegister(
 		&builtin.ReadFile{Workspace: ws, Observer: observed, Limits: limits},
 		&builtin.GlobFiles{Workspace: ws, Limits: limits},
@@ -249,7 +255,7 @@ func run(args []string) error {
 		writeFile,
 		editFile,
 		builtin.NewApplyPatch(ws, observed, locks),
-		&builtin.ExecCommand{Workspace: ws, Limits: limits, Artifacts: artifacts},
+		&builtin.ExecCommand{Workspace: ws, Limits: limits, Artifacts: artifacts, Confine: confine},
 		&builtin.ReadArtifact{Artifacts: artifacts, Limits: limits},
 		&builtin.GitStatus{Workspace: ws},
 		&builtin.GitDiff{Workspace: ws, Artifacts: artifacts},
@@ -1229,4 +1235,68 @@ func (installedSkills) Installed() ([]skill.Skill, error) {
 	}
 	found2, _, err := skill.Installed(dir.Skills())
 	return found2, err
+}
+
+// confinement is the sandbox this deployment asked for, or nil for none.
+//
+// Refusing at startup rather than at the first command. An operator who
+// turned this on and whose machine cannot provide it should be told while
+// they are still looking, not hours later inside a tool result the model
+// paraphrases.
+func confinement(cfg config.Config, logger *slog.Logger) (*builtin.Confinement, error) {
+	if !cfg.Sandbox.Enabled {
+		return nil, nil
+	}
+	if !sandbox.Available() {
+		// Said at startup rather than at the first command, and said as a
+		// refusal: the alternative is a deployment that believes it is
+		// confining and is not.
+		return nil, errors.New(
+			"[sandbox] enabled is on and this machine cannot confine a command: " +
+				"macOS is the only one implemented so far. Turn it off, or run it there")
+	}
+
+	dir, found := home.Resolve()
+	if !found {
+		return nil, fmt.Errorf("[sandbox] enabled needs a deployment directory to keep its caches in")
+	}
+
+	dirs, err := sandbox.Under(filepath.Join(dir.Root, "sandbox"))
+	if err != nil {
+		return nil, err
+	}
+
+	// The deployment's own directory, always. Its credentials are in there,
+	// and a confined command that could read them would be confined against
+	// writing and not against the thing worth protecting.
+	hidden := append([]string{dir.Root}, expandHomes(cfg.Sandbox.Hidden)...)
+
+	logger.Info("commands are confined",
+		"writable", dirs.Writable(), "network", cfg.Sandbox.Network, "hidden", hidden)
+
+	return &builtin.Confinement{
+		Policy: sandbox.Policy{
+			Writable:   dirs.Writable(),
+			Unreadable: hidden,
+			Network:    cfg.Sandbox.Network,
+		},
+		Environment: dirs.Environment(),
+	}, nil
+}
+
+// expandHomes turns a leading ~ into the real home directory.
+//
+// Written by hand in a configuration file, "~/.ssh" is what somebody means
+// and what no part of Go expands on their behalf.
+func expandHomes(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if after, found := strings.CutPrefix(path, "~/"); found {
+			if where, err := os.UserHomeDir(); err == nil {
+				path = filepath.Join(where, after)
+			}
+		}
+		out = append(out, path)
+	}
+	return out
 }

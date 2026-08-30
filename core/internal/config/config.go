@@ -46,6 +46,7 @@ type Config struct {
 	Context   Context   `koanf:"context"`
 	Tools     Tools     `koanf:"tools"`
 	Artifacts Artifacts `koanf:"artifacts"`
+	Sandbox   Sandbox   `koanf:"sandbox"`
 	Memory    Memory    `koanf:"memory"`
 	Web       Web       `koanf:"web"`
 	MCP       MCP       `koanf:"mcp"`
@@ -391,6 +392,41 @@ type Tools struct {
 // Without a store, truncation is destruction: the model is told there was more
 // and given no way to reach it. With one, the excerpt it sees is a starting
 // point and the whole of it is a tool call away.
+// Sandbox confines what an approved command can reach.
+//
+// A human approval and this answer different questions. Approving says
+// somebody meant to run a build; it cannot say what the build's dependencies
+// will do, and for anything with a package manager in it that is most of what
+// runs. So the two are worth having together.
+type Sandbox struct {
+	// Enabled confines every command run by exec_command.
+	//
+	// Off by default. It changes what a command can do, and a deployment that
+	// gets it without asking finds out when something it relied on stops
+	// working.
+	//
+	// On, it is not advisory: a machine that cannot confine refuses to run
+	// the command. A sandbox that runs it anyway is one somebody believes in
+	// and does not have.
+	Enabled bool `koanf:"enabled"`
+
+	// Network allows confined commands to open connections.
+	//
+	// Off by default, because most of what an agent runs is a build or a test
+	// and neither needs one. A single setting rather than an exception per
+	// command: a list of programs that may reach the network becomes, one
+	// entry at a time, a network anybody may reach.
+	Network bool `koanf:"network"`
+
+	// Hidden are directories a confined command may not read.
+	//
+	// Confining writes says nothing about reads. A command that cannot write
+	// outside the workspace can still open ~/.ssh, and having no network only
+	// means it cannot send what it found today — it can print it, or leave it
+	// somewhere a later command with a network will find.
+	Hidden []string `koanf:"hidden"`
+}
+
 type Artifacts struct {
 	// MaxBytes bounds one artifact. Something larger is a file that belongs in
 	// the workspace, not output that was captured.
@@ -1618,6 +1654,26 @@ backend = "fake"
 # front of the model may be.
 # max_bytes = 67108864
 # max_image_bytes = 8388608
+
+[sandbox]
+# Confine what a command run by exec_command can reach: it may write to the
+# workspace and to this deployment's own caches, and nothing else on the
+# machine. Approving a command says somebody meant to run it; it cannot say
+# what a build's dependencies will do, and this is the difference.
+#
+# Off by default because it changes what commands can do. On, it is not
+# advisory: a machine that cannot confine refuses to run the command rather
+# than running it unprotected.
+#
+# macOS only so far.
+# enabled = false
+# Let confined commands open connections. Off suits a build or a test, which
+# is most of what an agent runs.
+# network = false
+# Directories a confined command may not read. Confining writes says nothing
+# about reads, and having no network only means it cannot send today what it
+# read today.
+# hidden = ["~/.ssh", "~/.aws"]
 
 [memory]
 # What the agent carries between sessions. A retrieval memory is written
