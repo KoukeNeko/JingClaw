@@ -139,6 +139,11 @@ type Capabilities struct {
 	// which is the thing this field exists to prevent. Runs from a gateway
 	// are already untrusted by origin, so the exposed path is the local one.
 	//
+	// A missing layer rather than an open door: running a command and writing
+	// a standing memory are both approvals, so somebody sees the text. What
+	// they do not see is that it came from outside, which is exactly what
+	// this field would have told them.
+	//
 	// Declaring it on exec_command would close it and cost too much: every
 	// run that listed a directory would stop being able to remember
 	// anything. The fix is to separate what a result is (provenance) from
