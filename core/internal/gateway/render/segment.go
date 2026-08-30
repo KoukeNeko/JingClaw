@@ -3,6 +3,7 @@ package render
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	jcgateway "github.com/KoukeNeko/JingClaw/core/internal/gateway"
@@ -41,7 +42,7 @@ type Segment struct {
 // a message with nothing in it, which platforms refuse and readers would not
 // want if they did not.
 func Segments(text string) []Segment {
-	found := Tables(text)
+	found := allTables(text)
 	if len(found) == 0 {
 		return []Segment{{Kind: SegmentText, Text: text}}
 	}
@@ -87,4 +88,33 @@ func DispatchSegments(dispatch jcgateway.Dispatch, style Style) ([]Segment, erro
 		return nil, fmt.Errorf("render: could not decode message payload: %w", err)
 	}
 	return Segments(NormalizeText(payload.Text)), nil
+}
+
+// allTables is every table in the text, however it was written.
+//
+// Markdown ones, and ones the model drew inside a fence despite being asked
+// not to. The second kind is only looked for here — where the answer is
+// becoming pictures anyway — and never where a fence would be rewritten as
+// different text.
+func allTables(text string) []TableAt {
+	found := append(Tables(text), DrawnTables(text)...)
+
+	// In the order they appear, since they are cut out in sequence and two
+	// lists concatenated are not.
+	sort.Slice(found, func(i, j int) bool { return found[i].Start < found[j].Start })
+
+	// Overlapping is not possible between the two kinds — a Markdown table is
+	// outside a fence and a drawn one is inside — but a caller that cut one
+	// out from inside another would produce nonsense, so it is checked rather
+	// than assumed.
+	kept := found[:0]
+	end := -1
+	for _, at := range found {
+		if at.Start < end {
+			continue
+		}
+		kept = append(kept, at)
+		end = at.End
+	}
+	return kept
 }

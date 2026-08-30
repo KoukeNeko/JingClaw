@@ -241,3 +241,74 @@ func TestWithNoFontTheAnswerStillArrives(t *testing.T) {
 		}
 	}
 }
+
+// The table the model actually drew, copied from a channel. It ignored the
+// instruction and boxed the table itself, which is the case this whole path
+// had to grow to cover: what reaches the reader is what the model wrote, not
+// what it was asked to write.
+const modelDrewItsOwn = "以下為江總督整理：\n\n```text\n" +
+	"+---------------+------------------------+\n" +
+	"| 時間節點      | ARR（年經常性營收）    |\n" +
+	"+---------------+------------------------+\n" +
+	"| 2025 年 7 月  | 30 萬美元（~960萬）    |\n" +
+	"| 2025 年 11 月 | 50 萬美元（~1600萬）   |\n" +
+	"+---------------+------------------------+\n" +
+	"```\n\n所以還在早期。\n"
+
+func TestATableTheModelDrewAlsoBecomesAPicture(t *testing.T) {
+	if _, err := tableimage.Load(nil); err != nil {
+		t.Skipf("no font: %v", err)
+	}
+
+	adapter, posted := stubDiscord(t)
+	if _, err := adapter.Post(t.Context(), answerWith(t, modelDrewItsOwn)); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+
+	if len(*posted) != 3 {
+		t.Fatalf("posted %d messages, want 3: %+v", len(*posted), *posted)
+	}
+
+	if !strings.Contains((*posted)[0].Content, "以下為江總督整理") {
+		t.Errorf("the first message is %q", (*posted)[0].Content)
+	}
+	if len((*posted)[1].File) == 0 {
+		t.Fatal("the drawn table did not become a picture")
+	}
+	if strings.Contains((*posted)[1].Content, "+---") {
+		t.Errorf("the boxes were posted as well: %q", (*posted)[1].Content)
+	}
+	if !strings.Contains((*posted)[2].Content, "所以還在早期") {
+		t.Errorf("the last message is %q", (*posted)[2].Content)
+	}
+}
+
+// The reason fences are otherwise left alone. A program's output that happens
+// to look like a table must arrive as the bytes it is.
+func TestProgramOutputIsStillPostedAsText(t *testing.T) {
+	adapter, posted := stubDiscord(t)
+
+	output := "查詢結果：\n\n```\nmysql> select * from people;\n" +
+		"+----+-------+\n| id | name  |\n+----+-------+\n|  1 | ada   |\n+----+-------+\n" +
+		"1 row in set (0.00 sec)\n```\n"
+
+	if _, err := adapter.Post(t.Context(), answerWith(t, output)); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+
+	for _, message := range *posted {
+		if len(message.File) != 0 {
+			t.Error("a program's output was turned into a picture")
+		}
+	}
+
+	whole := ""
+	for _, message := range *posted {
+		whole += message.Content
+	}
+	for _, expected := range []string{"mysql>", "1 row in set", "| id | name"} {
+		if !strings.Contains(whole, expected) {
+			t.Errorf("%q did not survive:\n%s", expected, whole)
+		}
+	}
+}

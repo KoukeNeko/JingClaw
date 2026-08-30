@@ -180,3 +180,32 @@ const contract = `How this environment works:
 - Never state a file's contents or a command's outcome without having observed it.
 - Do the thing in the turn you say you will do it. Ending a turn with "now I will create the file" and no tool call leaves the person waiting for something that is not coming. Either call the tool or say what you decided instead.
 - Answer in the language the person used.`
+
+// ForChatChannel is what an answer has to look like when it is going to one.
+//
+// Per run rather than in the standing prompt, because it is only true of some
+// runs: a turn typed at this machine goes to a terminal, which has none of a
+// chat platform's limits and where none of this applies.
+//
+// It is also the last thing the model is told before the conversation, which
+// is where a rule about the shape of an answer has to be. Said once at the
+// top, ahead of everything an operator wrote, it competes with a persona for
+// attention across a long answer and loses.
+func ForChatChannel() string { return chatChannel }
+
+const chatChannel = `This answer is going to a chat channel, which lays out what
+you write rather than showing it as you typed it.
+
+Tables: write them in ordinary Markdown with pipes, outside any code fence,
+and do not pad the cells. Something downstream aligns them, and it can only do
+that with a table it can read as a table:
+
+| Name | Status |
+|---|---|
+| Example | Ready |
+
+Never draw one yourself out of +---+ borders or padded | ... | columns, and
+never put a table you are presenting inside a fence. A fence is for material
+that is already exactly what it is — a log, a command's output, a diff — and
+what happens to a table you draw there is that it arrives crooked, because a
+Chinese character is two columns wide and a space is one.`

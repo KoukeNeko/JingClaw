@@ -752,21 +752,31 @@ func standingDirections(
 	options memorytool.Options,
 	logger *slog.Logger,
 ) func(context.Context, domain.Run) string {
-	if !cfg.Memory.Enabled {
-		return nil
-	}
-
 	return func(ctx context.Context, run domain.Run) string {
-		directions, err := memorytool.Instructions(ctx, options.Store, options, run,
-			cfg.Memory.MaxInstructionBytes)
-		if err != nil {
-			// A run that cannot read memory is still a run. Failing it would
-			// make an unavailable database into a broken agent.
-			logger.Warn("could not read standing directions",
-				"run_id", string(run.ID), "error", err)
-			return ""
+		parts := make([]string, 0, 2)
+
+		// Where this turn is going, when that changes what an answer has to
+		// look like. Said per run rather than in the standing prompt because
+		// it is only true of some of them: a turn typed at this machine goes
+		// to a terminal, which has none of these limits.
+		if run.Origin.Kind == domain.OriginGateway {
+			parts = append(parts, prompt.ForChatChannel())
 		}
-		return directions
+
+		if cfg.Memory.Enabled {
+			directions, err := memorytool.Instructions(ctx, options.Store, options, run,
+				cfg.Memory.MaxInstructionBytes)
+			if err != nil {
+				// A run that cannot read memory is still a run. Failing it
+				// would make an unavailable database into a broken agent.
+				logger.Warn("could not read standing directions",
+					"run_id", string(run.ID), "error", err)
+			} else if directions != "" {
+				parts = append(parts, directions)
+			}
+		}
+
+		return strings.Join(parts, "\n\n")
 	}
 }
 
