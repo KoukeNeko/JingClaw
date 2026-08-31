@@ -47,9 +47,7 @@ func Run(ctx context.Context) error {
 	if running, err := alreadyRunning(); err != nil {
 		return err
 	} else if running {
-		fmt.Println("JingClaw is already running; watching it.")
-		<-ctx.Done()
-		return nil
+		return attach(ctx)
 	}
 
 	self, err := os.Executable()
@@ -145,7 +143,7 @@ func watch(ctx context.Context, agent, chat *exec.Cmd) error {
 		}
 	}()
 
-	if err := console.Run(ctx, "", console.StopsIt); err != nil {
+	if err := console.Run(ctx, "", howLeavingWorks(false)); err != nil {
 		// The console failing is not the parts failing. They keep running,
 		// and saying so is more use than an error nobody can act on.
 		fmt.Fprintln(os.Stderr, "the console stopped:", err)
@@ -154,6 +152,115 @@ func watch(ctx context.Context, agent, chat *exec.Cmd) error {
 	}
 	return nil
 }
+
+// attach watches a deployment this command did not start.
+//
+// A console rather than a wait. "Watching it" said and then nothing drawn is
+// worse than saying nothing: the terminal looks attached to something and is
+// attached to a signal handler, and the way to find out is to notice that
+// hours have passed with no output.
+func attach(ctx context.Context) error {
+	fmt.Println("JingClaw is already running; watching it.")
+	sayIfTheBuildDidNotReachIt()
+
+	if !canAttach(term.IsTerminal(int(os.Stdin.Fd()))) {
+		// Nothing to draw on, so there is nothing better to do than wait —
+		// which is what a service wants anyway.
+		<-ctx.Done()
+		return nil
+	}
+
+	if err := console.Run(ctx, "", howLeavingWorks(true)); err != nil {
+		// The console failing is not the parts failing. They keep running,
+		// and saying so is more use than an error nobody can act on.
+		fmt.Fprintln(os.Stderr, "the console stopped:", err)
+		fmt.Println("JingClaw is still running.")
+		<-ctx.Done()
+	}
+	return nil
+}
+
+// sayIfTheBuildDidNotReachIt warns when what is running predates this build.
+//
+// The wrapper script builds first, and then this attaches to whatever it
+// finds. Both halves are working as intended and together they are a trap:
+// the screen says a build finished, the deployment answering is the one from
+// before it, and a change that landed in between is simply not there. What
+// happens next is somebody deciding the change does not work.
+//
+// Times rather than versions, because the file this compares is the one that
+// was just written and the deployment publishes when it started. Nothing is
+// claimed when either is unreadable.
+func sayIfTheBuildDidNotReachIt() {
+	built, ok := whenBuilt()
+	if !ok {
+		return
+	}
+	started, ok := whenItStarted()
+	if !ok {
+		return
+	}
+	if !buildIsNewerThanWhatIsRunning(built, started) {
+		return
+	}
+
+	fmt.Printf("Note: this build is newer than what is running "+
+		"(built %s, running since %s).\n",
+		built.Format(time.Kitchen), started.Format(time.Kitchen))
+	fmt.Println("      Run `stop` and start again to run the code you just built.")
+}
+
+// buildIsNewerThanWhatIsRunning is the comparison, kept apart so it can be
+// checked without a filesystem.
+func buildIsNewerThanWhatIsRunning(built, started time.Time) bool {
+	if built.IsZero() || started.IsZero() {
+		return false
+	}
+	return built.After(started)
+}
+
+// whenBuilt is when this executable was last written.
+func whenBuilt() (time.Time, bool) {
+	self, err := os.Executable()
+	if err != nil {
+		return time.Time{}, false
+	}
+	info, err := os.Stat(self)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return info.ModTime(), true
+}
+
+// whenItStarted is when the running deployment published itself.
+func whenItStarted() (time.Time, bool) {
+	path, err := discovery.Path()
+	if err != nil {
+		return time.Time{}, false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return info.ModTime(), true
+}
+
+// howLeavingWorks is what quitting the console means.
+//
+// Its own function because it is the one part of attaching that can be
+// checked without a terminal, and because getting it backwards is silent: a
+// console that stopped a deployment it found would end somebody else's
+// session, and one that left its own running would leave two daemons for the
+// next start to find.
+func howLeavingWorks(foundAlreadyRunning bool) console.Leaving {
+	if foundAlreadyRunning {
+		return console.LeavesItRunning
+	}
+	return console.StopsIt
+}
+
+// canAttach says whether there is anything to draw a console on.
+func canAttach(isTerminal bool) bool { return isTerminal }
 
 // stopped says why one of the parts is no longer running.
 //
