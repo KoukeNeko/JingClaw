@@ -75,6 +75,17 @@ func (t *WebSearch) Spec() tool.Spec {
 }`),
 		Level: tool.LevelNetworkRead,
 		Capabilities: tool.Capabilities{
+			// Titles and snippets, written by whoever owns each page. Less
+			// of somebody else's words than a whole page is, and not a
+			// different kind of thing: a snippet is chosen by the page to be
+			// read, which is exactly the position an injected instruction
+			// wants to be in.
+			//
+			// This was missing while web_read had it, which is the same
+			// mistake as the one about commands: a tool was judged by how
+			// much it returns rather than by whose words they are.
+			ForeignContent: true,
+
 			Network:      true,
 			Idempotent:   true,
 			ParallelSafe: true,
