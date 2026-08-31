@@ -571,6 +571,10 @@ func run(args []string) error {
 		"context_window_from", string(windowSource),
 		"workspace", ws.Root(),
 		"permission_profile", permissions.Profile(),
+		// What this machine will actually enforce, rather than whether it was
+		// asked for. On Linux the two are not the same: the filesystem rules
+		// and the network rules arrived four kernel versions apart.
+		"confinement", describeConfinement(cfg),
 		"config_file", configFile,
 		"database", dbPath,
 		"discovery", discoveryPath,
@@ -1329,8 +1333,10 @@ func confinement(cfg config.Config, logger *slog.Logger) (*builtin.Confinement, 
 		// refusal: the alternative is a deployment that believes it is
 		// confining and is not.
 		return nil, errors.New(
-			"[sandbox] enabled is on and this machine cannot confine a command: " +
-				"macOS is the only one implemented so far. Turn it off, or run it there")
+			"[sandbox] enabled is on and this machine cannot confine a command. " +
+				"macOS uses sandbox-exec, which every Mac has; Linux uses landlock, " +
+				"which needs a kernel that has it enabled. Nowhere else is " +
+				"implemented. Turn it off, or run it somewhere it works")
 	}
 
 	dir, found := home.Resolve()
@@ -1376,4 +1382,12 @@ func expandHomes(paths []string) []string {
 		out = append(out, path)
 	}
 	return out
+}
+
+// describeConfinement says what commands will actually be held to.
+func describeConfinement(cfg config.Config) string {
+	if !cfg.Sandbox.Enabled {
+		return "off"
+	}
+	return sandbox.Describe()
 }

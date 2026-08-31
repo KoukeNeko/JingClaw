@@ -19,9 +19,10 @@
 package sandbox
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
-	"strings"
 )
 
 // Policy is what one execution is allowed to reach.
@@ -42,55 +43,65 @@ type Policy struct {
 	Network bool
 }
 
-// Profile renders the policy as a Seatbelt profile.
+// Directories is where a confined command may write, beside the workspace.
 //
-// Deliberately not deny-by-default. A profile that starts by forbidding
-// everything and then permits what a compiler, a package manager, the
-// keychain, the trust daemon and the Mach bootstrap server each need is not a
-// small file, and every deployment that grows one grows it by finding out
-// what broke. Starting from allow and subtracting the two things that matter
-// — writing anywhere, and the network — is a policy somebody can read.
-func Profile(policy Policy) (string, error) {
-	var out strings.Builder
-
-	out.WriteString("(version 1)\n\n")
-	out.WriteString(";; Written by JingClaw. What it subtracts is what matters:\n")
-	out.WriteString(";; nothing outside the workspace may be written, and\n")
-	out.WriteString(";; nothing at all may be reached over the network.\n")
-	out.WriteString("(allow default)\n\n")
-
-	if !policy.Network {
-		out.WriteString(";; No sockets of any kind.\n(deny network*)\n\n")
-	}
-
-	out.WriteString(";; The filesystem is readable and not writable.\n")
-	out.WriteString("(deny file-write*)\n\n")
-
-	// Re-opening the null device is common enough that forbidding it breaks
-	// ordinary programs for no gain.
-	out.WriteString("(allow file-write* (literal \"/dev/null\"))\n")
-
-	for _, dir := range policy.Writable {
-		resolved, err := resolve(dir)
-		if err != nil {
-			return "", err
-		}
-		out.WriteString("(allow file-write* (subpath " + quote(resolved) + "))\n")
-	}
-
-	if len(policy.Unreadable) > 0 {
-		out.WriteString("\n;; Not shown to it at all.\n")
-		for _, dir := range policy.Unreadable {
-			resolved, err := resolve(dir)
-			if err != nil {
-				return "", err
-			}
-			out.WriteString("(deny file-read* (subpath " + quote(resolved) + "))\n")
-		}
-	}
-
-	return out.String(), nil
+// Its own, rather than the caller's real ones. A build cache is a directory a
+// compiler must write to, and the usual answer is to allow ~/.cache — which
+// is the first hole in a policy that then acquires one for every tool. These
+// belong to the deployment, and pointing the tools at them is what makes
+// hiding the real home practical rather than merely strict.
+type Directories struct {
+	Home  string
+	Temp  string
+	Cache string
 }
+
+// Under lays out the sandbox's own directories beneath a root, making them.
+func Under(root string) (Directories, error) {
+	dirs := Directories{
+		Home:  filepath.Join(root, "home"),
+		Temp:  filepath.Join(root, "tmp"),
+		Cache: filepath.Join(root, "cache"),
+	}
+
+	for _, dir := range []string{dirs.Home, dirs.Temp, dirs.Cache} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return Directories{}, fmt.Errorf("sandbox: create %s: %w", dir, err)
+		}
+	}
+	return dirs, nil
+}
+
+// Environment is what a confined command is told about where things are.
+//
+// Every one of these has a default under the real home, and left alone a
+// compiler writes there and a package manager reads credentials from beside
+// it. Pointing them into the sandbox is what makes the confinement something
+// other than a list of exceptions.
+func (d Directories) Environment() []string {
+	return []string{
+		"HOME=" + d.Home,
+		"TMPDIR=" + d.Temp,
+		"XDG_CACHE_HOME=" + d.Cache,
+		"GOCACHE=" + filepath.Join(d.Cache, "go-build"),
+		"GOMODCACHE=" + filepath.Join(d.Cache, "go-mod"),
+		"npm_config_cache=" + filepath.Join(d.Cache, "npm"),
+	}
+}
+
+// Writable is where a confined command may write.
+func (d Directories) Writable() []string {
+	return []string{d.Home, d.Temp, d.Cache}
+}
+
+// ErrUnavailable says this machine cannot confine anything.
+//
+// Returned rather than shrugged off. A sandbox that runs the command anyway
+// when it cannot confine it is worse than no sandbox, because the operator
+// believes there is one — so an unavailable backend is a refusal, and every
+// caller has to decide what to do about it rather than being able to not
+// notice.
+var ErrUnavailable = errors.New("sandbox: not available on this machine")
 
 // resolve is the path the kernel will see.
 //
@@ -117,11 +128,16 @@ func resolve(dir string) (string, error) {
 	return real, nil
 }
 
-// quote writes a path as a Seatbelt string literal.
+// Describe says what this machine will actually enforce.
 //
-// A path may contain a quote or a backslash — a directory called `it's "here"`
-// is unusual and legal — and one written raw would end the string early and
-// leave the rest of it as profile syntax.
-func quote(path string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(path) + `"`
+// For the line an operator reads at startup. "Confinement: on" is not enough
+// on Linux, where what is available depends on the kernel: the filesystem
+// rules and the network rules arrived four versions apart, and a deployment
+// that asked for both and got one should be able to see that before it
+// matters.
+func Describe() string {
+	if !Available() {
+		return "not available here"
+	}
+	return describeBackend()
 }

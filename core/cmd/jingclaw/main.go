@@ -22,6 +22,10 @@ import (
 )
 
 func main() {
+	// Before anything else, because this process may not be the program at
+	// all: it may be one started to confine a command and then become it.
+	confineIfAsked()
+
 	if err := root().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

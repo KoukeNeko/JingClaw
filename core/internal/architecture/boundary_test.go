@@ -4,6 +4,7 @@
 package architecture_test
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -153,4 +154,40 @@ func packageDeps(t *testing.T, pkg string) map[string]bool {
 		}
 	}
 	return deps
+}
+
+// TestTheSandboxCompilesEverywhereItClaimsTo is what keeps a platform from
+// losing its answer silently.
+//
+// The package is split by build tag, and a split is a place where a function
+// can exist on one platform and not another — which does not fail here, and
+// does not fail in tests, and fails when somebody builds for the platform
+// that lost it. Adding a backend means adding a file, and forgetting one
+// means the whole program stops building for that platform.
+//
+// Only the sandbox, and deliberately: the rest of the program has a
+// pre-existing gap on Windows that this is not the place to argue about.
+func TestTheSandboxCompilesEverywhereItClaimsTo(t *testing.T) {
+	// The caller, not only the package. Building the sandbox alone would
+	// catch a file that does not compile and miss the thing that actually
+	// happens: a platform where one of the three functions was never
+	// written, which fails at whoever uses it.
+	const caller = "github.com/KoukeNeko/JingClaw/core/internal/tool/builtin"
+
+	for _, target := range []struct{ os, arch string }{
+		{"darwin", "arm64"},
+		{"darwin", "amd64"},
+		{"linux", "amd64"},
+		{"linux", "arm64"},
+		{"windows", "amd64"},
+	} {
+		build := exec.Command("go", "build", "-buildvcs=false", "-o", os.DevNull, caller)
+		build.Env = append(os.Environ(), "GOOS="+target.os, "GOARCH="+target.arch)
+
+		if out, err := build.CombinedOutput(); err != nil {
+			t.Errorf("what uses the sandbox does not build for %s/%s;\n"+
+				"a backend is missing one of Available, Wrap or LooksConfined:\n%s",
+				target.os, target.arch, out)
+		}
+	}
 }

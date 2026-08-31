@@ -20,6 +20,7 @@ for CHECK in verify-config.sh verify-api.sh verify-compaction.sh \
 	verify-memory-time.sh verify-memory-trust.sh verify-memory-expand.sh \
 	verify-approval-buttons.sh verify-tables.sh verify-service.sh verify-log-cursor.sh \
 	verify-console.sh verify-foreign-approval.sh verify-skills.sh verify-sandbox.sh \
+	verify-sandbox-linux.sh \
 	verify-investigate.sh verify-mcp-oauth.sh verify-schedule.sh \
 	verify-command-trust.sh verify-skills-install.sh \
 	verify-parity.sh; do
