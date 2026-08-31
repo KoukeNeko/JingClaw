@@ -24,11 +24,13 @@ func Commands() []*cobra.Command {
 			"decides; it does not send turns. Leaving the panel does not\n" +
 			"stop anything.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			daemon, err := client.Dial(runtimeDir)
+			daemon, artifacts, err := client.DialForPanel(runtimeDir)
 			if err != nil {
 				return err
 			}
-			return tui.Run(cmd.Context(), tui.Options{Sessions: tui.Over(daemon)})
+			return tui.Run(cmd.Context(), tui.Options{
+				Sessions: tui.Over(daemon, artifacts),
+			})
 		},
 	}
 	command.Flags().StringVar(&runtimeDir, "runtime-dir", "",

@@ -31,18 +31,42 @@ trap cleanup EXIT
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+
+# Large enough that the result is stored rather than sent inline, which is
+# what makes it something the panel can offer to open.
+python3 -c '
+import sys
+with open(sys.argv[1], "w") as out:
+    for line in range(60000):
+        out.write("line %d of a build log nobody wants truncated\n" % line)
+' "$WORK/workspace/big.txt"
 cat > "$WORK/config.toml" <<EOF
 [provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
 
-# A call that stops to ask, so there is a real decision on the screen rather
-# than one this check invented.
+# One run that stops twice and then leaves something behind: a decision, a
+# question, and a stored result. None of them are states this check invented,
+# and the script advances on tool results, so each step is reached only
+# because the panel actually settled the one before it.
 [[provider.fake_script]]
 text = "Writing it."
 tool = "write_file"
 args = '{"path":"notes.md","content":"written"}'
+
+[[provider.fake_script]]
+text = "I need to know something first."
+tool = "ask_user"
+args = '{"prompt":"Which branch should this go on?","kind":"text"}'
+
+# Then a call whose output is too large to have been sent inline and so ends
+# up in the store. That is the only kind the panel can offer to open, and it
+# stops for a decision of its own on the way.
+[[provider.fake_script]]
+text = "Reading the big one."
+tool = "exec_command"
+args = '{"program":"cat","args":["big.txt"]}'
 
 [[provider.fake_script]]
 text = "Done."
@@ -84,6 +108,30 @@ ASKED=$(call ListApprovals "{\"sessionId\":\"$SESSION\"}" |
 
 # Drives the panel through a pty and collects what it drew. Keys rather than
 # commands, because that is the whole interface: there is nothing to type at.
+# A stand-in for the machine's opener, ahead of the real one on PATH, so this
+# check records what would have been opened rather than launching a reader on
+# somebody's desktop. Intercepted through PATH rather than through a setting,
+# because a way to override the opener that exists only for checks is a way to
+# override the opener.
+mkdir -p "$WORK/bin"
+for NAME in open xdg-open; do
+	cat > "$WORK/bin/$NAME" <<'OPENER'
+#!/bin/sh
+printf '%s\n' "$1" >> "$OPENED_LOG"
+OPENER
+	chmod +x "$WORK/bin/$NAME"
+done
+OPENED_LOG="$WORK/opened"
+export OPENED_LOG
+
+# The panel writes what it opens under the system temporary directory, which
+# outlives a run. Pointed at this check's own so a file left by the last run
+# is not the one being examined — and, since a write only sets the mode of a
+# file it creates, so that a stale file cannot make a wrong mode look right.
+TMPDIR="$WORK/tmp"
+mkdir -p "$TMPDIR"
+export TMPDIR
+
 cat > "$WORK/drive.py" <<'DRIVE'
 import fcntl, os, pty, select, struct, subprocess, sys, termios, time
 
@@ -104,9 +152,19 @@ if pid == 0:
 # the child's first size message carries it.
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 100, 0, 0))
 
+ANSWER = os.environ.get("PANEL_ANSWER", "")
+
 seen = bytearray()
-deadline = time.time() + 30
-pressed = False
+deadline = time.time() + 60
+
+# One stage at a time, each waiting for what the one before it produced.
+# Sending on a timer instead would make every failure look like the panel
+# ignoring a key, whichever step actually broke.
+stage = 0
+
+def press(keys, settle):
+	os.write(fd, keys)
+	time.sleep(settle)
 
 while time.time() < deadline:
 	ready, _, _ = select.select([fd], [], [], 0.5)
@@ -119,17 +177,34 @@ while time.time() < deadline:
 			break
 		seen.extend(chunk)
 
-	# Once the list has drawn, press the keys one at a time so each redraw
-	# lands in the capture separately.
-	if not pressed and b"Sessions" in seen:
+	if stage == 0 and b"Sessions" in seen:
 		time.sleep(1.0)
-		for key in keys:
-			os.write(fd, key.encode().decode("unicode_escape").encode("latin-1"))
-			time.sleep(1.0)
-		pressed = True
+		press(b"\r", 2.0)
+		stage = 1
+
+	elif stage == 1 and b"waiting on you: write_file" in seen:
+		press(b"a", 3.0)
+		stage = 2
+
+	elif stage == 2 and b"it asked:" in seen:
+		press(ANSWER.encode() + b"\r", 3.0)
+		# The call after the question stops for a decision of its own.
+		press(b"a", 3.0)
+		stage = 3
+
+		# Two turns from outside, sent here rather than later so that a
+		# failure in the step below reads as that step failing. The scripted
+		# run has used its whole script by now, so these echo rather than
+		# starting it over and asking again.
 		if after:
 			subprocess.run(["/bin/sh", "-c", after], check=False)
-		deadline = time.time() + 12
+			time.sleep(6.0)
+			deadline = time.time() + 20
+
+	elif stage == 3 and b"(output stored)" in seen:
+		press(b"o", 3.0)
+		stage = 4
+		deadline = time.time() + 5
 
 try:
 	os.write(fd, b"\x03")
@@ -163,6 +238,7 @@ DRIVE
 # sent one turn, and would then sit there stale for the rest of the session.
 LIVE="a turn sent while the panel was watching"
 LIVE_AGAIN="and then a second one"
+TYPED="the-branch-somebody-typed"
 
 # statusOf reads how one request ended, out of the log rather than out of the
 # pending list. A settled request leaves that list whichever way it was
@@ -174,7 +250,8 @@ statusOf() {
 		 where kind='approval.resolved'
 		   and json_extract(payload,'\$.approval_id')='$1';"
 }
-PANEL_KEYS='\r,a' \
+
+PATH="$WORK/bin:$PATH" PANEL_ANSWER="$TYPED" PANEL_KEYS='\r,a' \
 	PANEL_AFTER="curl -s -X POST -H 'content-type: application/json' \
 		-H 'authorization: Bearer $TOKEN' \
 		-d '{\"sessionId\":\"$SESSION\",\"text\":\"$LIVE\"}' \
@@ -187,7 +264,10 @@ PANEL_KEYS='\r,a' \
 	RUNTIME_DIR="$WORK/run" python3 "$WORK/drive.py" "$WORK/jingclaw" > "$WORK/screen" 2>&1 || true
 
 [ -s "$WORK/screen" ] || fail "the panel drew nothing at all"
-if [ -n "${PANEL_DEBUG:-}" ]; then cat -v "$WORK/screen"; fi
+if [ -n "${PANEL_DEBUG:-}" ]; then
+	sqlite3 -readonly "$WORK/data/jingclaw.db" \
+		"select seq, kind, substr(payload,1,90) from events order by global_seq;" >&2
+fi
 
 grep -q "Sessions" "$WORK/screen" ||
 	fail "the panel did not draw a session list: $(head -c 400 "$WORK/screen")"
@@ -231,6 +311,47 @@ SETTLED=$(statusOf "$ASKED")
 [ "$SETTLED" = "allowed" ] ||
 	fail "the allow key settled the request as $SETTLED"
 printf 'ok   allowing from the panel settles it, as an allow\n'
+
+# The question, which is the other half of deciding: a run parked on a person
+# is as stuck as one parked on an approval, and a panel that could not answer
+# it would send somebody to a chat client to type one word.
+grep -q "it asked:" "$WORK/screen" ||
+	fail "the panel never drew the question the run stopped on: $(tail -c 800 "$WORK/screen")"
+printf 'ok   a question a run stopped on is drawn\n'
+
+ANSWERED=$(sqlite3 -readonly "$WORK/data/jingclaw.db" \
+	"select json_extract(payload,'\$.answer') from events where kind='question.answered';")
+[ -n "$ANSWERED" ] ||
+	fail "the panel drew the question and the run is still waiting on it"
+[ "$ANSWERED" = "$TYPED" ] ||
+	fail "the run was unblocked with $ANSWERED rather than what was typed"
+printf 'ok   and what is typed at it reaches the run\n'
+
+# Stored output, handed to the machine rather than drawn. A terminal is a
+# poor image viewer and a worse PDF reader, and what a person wants when a
+# build fails is the log in the thing they read logs in.
+grep -q "(output stored)" "$WORK/screen" ||
+	fail "a call whose output was stored is not marked as such: $(tail -c 800 "$WORK/screen")"
+printf 'ok   a call that stored output is marked\n'
+
+[ -s "$WORK/opened" ] ||
+	fail "pressing open handed nothing to the machine"
+HANDED=$(tail -1 "$WORK/opened")
+[ -f "$HANDED" ] ||
+	fail "the machine was handed $HANDED, which is not there"
+grep -q "line 59999 of a build log" "$HANDED" ||
+	fail "what was handed over is not the stored output: $(head -c 200 "$HANDED")"
+printf 'ok   and pressing open writes it out and hands it over\n'
+
+case "$HANDED" in
+	*.txt) ;;
+	*) fail "the file was named $HANDED, whose extension is not the media type's" ;;
+esac
+# Never executable. A mode is not a judgement about the contents, and this is
+# the difference between opening a document and running one.
+[ -x "$HANDED" ] &&
+	fail "the file handed to the machine is executable: $HANDED"
+printf 'ok   named for what it is, and not executable\n'
 
 # Alternate screen, entered and left. A panel that took the screen and did not
 # give it back leaves a terminal somebody has to close the window on.

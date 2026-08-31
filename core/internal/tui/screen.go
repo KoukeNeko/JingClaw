@@ -23,6 +23,9 @@ type Screen struct {
 	// ActiveRun is the run in flight, empty when none is.
 	ActiveRun domain.RunID
 
+	// Asked is what a run stopped to ask a person, in the order asked.
+	Asked []Asked
+
 	Plan []PlanStep
 
 	// HeadSeq is the last event folded in, which is where the panel resumes
@@ -56,6 +59,10 @@ type ToolCall struct {
 	// there was none. The id and not the bytes: the panel fetches it only if
 	// somebody asks to see it.
 	Artifact string
+
+	// MediaType is what kind of thing that output is, which decides whether
+	// it may be handed to the machine at all.
+	MediaType string
 }
 
 // Waiting is one call the agent stopped to ask about.
@@ -81,6 +88,25 @@ type Waiting struct {
 	// cannot see for themselves: the request looks the same whether the agent
 	// arrived at it or a page it read suggested it, and only the log knows.
 	ReadForeign bool
+}
+
+// Asked is one question a run parked itself on.
+type Asked struct {
+	ID     domain.QuestionID
+	Prompt string
+	Kind   domain.QuestionKind
+
+	// Options is the fixed set, when the question offers one. A panel that
+	// asked for free text against a question with options would let somebody
+	// type an answer the run then rejects.
+	Options []Option
+}
+
+// Option is one answer a question offers.
+type Option struct {
+	ID     string
+	Label  string
+	Detail string
 }
 
 // PlanStep is one step of what the agent said it would do.
@@ -120,11 +146,12 @@ func Fold(screen Screen, event domain.Event) Screen {
 			ToolCall{ID: string(payload.CallID), Name: payload.Name})
 
 	case domain.ToolCallCompleted:
-		artifact := ""
+		stored := ToolCall{}
 		if payload.Artifact != nil {
-			artifact = payload.Artifact.ID
+			stored.Artifact = payload.Artifact.ID
+			stored.MediaType = payload.Artifact.MediaType
 		}
-		markCompleted(screen.Messages, string(payload.CallID), payload.IsError, artifact)
+		markCompleted(screen.Messages, string(payload.CallID), payload.IsError, stored)
 
 	case domain.ApprovalRequested:
 		screen.Waiting = append(screen.Waiting, Waiting{
@@ -139,6 +166,20 @@ func Fold(screen Screen, event domain.Event) Screen {
 
 	case domain.ApprovalResolved:
 		screen.Waiting = without(screen.Waiting, payload.ApprovalID)
+
+	case domain.QuestionAsked:
+		asked := Asked{
+			ID: payload.QuestionID, Prompt: payload.Prompt, Kind: payload.Kind,
+		}
+		for _, option := range payload.Options {
+			asked.Options = append(asked.Options, Option{
+				ID: option.ID, Label: option.Label, Detail: option.Detail,
+			})
+		}
+		screen.Asked = append(screen.Asked, asked)
+
+	case domain.QuestionAnswered:
+		screen.Asked = answered(screen.Asked, payload.QuestionID)
 
 	case domain.ConversationCompacted:
 		// What came before the fold is a summary now. The notice replaces it
@@ -202,7 +243,7 @@ func last(messages []Message) *Message {
 // By id and not by name. Tools run at the same time and need not come back in
 // the order they went out, so a search by name lands the result on whichever
 // call it reaches first — drawing a failure against a call that succeeded.
-func markCompleted(messages []Message, id string, failed bool, artifact string) {
+func markCompleted(messages []Message, id string, failed bool, stored ToolCall) {
 	for message := len(messages) - 1; message >= 0; message-- {
 		calls := messages[message].ToolCalls
 		for call := len(calls) - 1; call >= 0; call-- {
@@ -211,10 +252,25 @@ func markCompleted(messages []Message, id string, failed bool, artifact string) 
 			}
 			calls[call].Completed = true
 			calls[call].IsError = failed
-			calls[call].Artifact = artifact
+			calls[call].Artifact = stored.Artifact
+			calls[call].MediaType = stored.MediaType
 			return
 		}
 	}
+}
+
+// answered drops one question, keeping the order of the rest.
+func answered(questions []Asked, done domain.QuestionID) []Asked {
+	kept := make([]Asked, 0, len(questions))
+	for _, question := range questions {
+		if question.ID != done {
+			kept = append(kept, question)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // without drops one request, keeping the order of the rest.

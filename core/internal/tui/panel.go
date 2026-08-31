@@ -19,6 +19,14 @@ const (
 	inASession
 )
 
+// answerPrompt marks the one line a person may type at.
+//
+// Only drawn while a run is parked on a question. A panel with a permanent
+// input invites a turn to be typed into it, and a turn typed here would be a
+// run with no origin — no platform authenticated anybody, and nowhere to
+// answer. The CLI keeps "send" for when somebody means it.
+const answerPrompt = "> "
+
 // crashAfter is long enough for the first frame to have reached the terminal,
 // which is what the staged failure is there to happen after.
 const crashAfter = 200 * time.Millisecond
@@ -35,12 +43,21 @@ type panel struct {
 	ctx      context.Context
 	sessions Sessions
 
+	// opener is what hands a file to the machine, and where the file goes.
+	// Held so a check can watch what would be opened without anything being
+	// launched.
+	opener Opener
+	into   string
+
 	where  where
 	list   []Summary
 	cursor int
 
 	open   domain.SessionID
 	screen Screen
+
+	// typing is the answer being written, empty when nothing is.
+	typing string
 
 	// updates is the open stream for the session being shown, nil when none
 	// is open.
@@ -57,8 +74,8 @@ type panel struct {
 }
 
 // newPanel is a panel that has not asked for anything yet.
-func newPanel(ctx context.Context, sessions Sessions) panel {
-	return panel{ctx: ctx, sessions: sessions}
+func newPanel(ctx context.Context, sessions Sessions, opener Opener, into string) panel {
+	return panel{ctx: ctx, sessions: sessions, opener: opener, into: into}
 }
 
 // Messages the panel sends itself.
@@ -159,6 +176,13 @@ func (p panel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 // pressed is every key the panel answers to.
 func (p panel) pressed(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// A question in front of somebody turns the panel into a line to type at.
+	// The keys that decide are single letters, and a person answering "add
+	// the flag" must not allow a call by writing it.
+	if p.isAnswering() {
+		return p.typed(key)
+	}
+
 	switch key.String() {
 	case "ctrl+c":
 		return p, tea.Quit
@@ -222,9 +246,71 @@ func (p panel) pressed(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "i":
 		return p, p.interrupt()
+
+	case "o":
+		return p, p.openTheNewestOutput()
 	}
 
 	return p, nil
+}
+
+// isAnswering says whether the next keystroke is text rather than a command.
+func (p panel) isAnswering() bool {
+	return p.where == inASession && len(p.screen.Asked) > 0
+}
+
+// typed puts a keystroke into the answer being written.
+//
+// Escape and ctrl+c still mean what they mean: a person who opened a session
+// by mistake must be able to leave it without answering a question they know
+// nothing about.
+func (p panel) typed(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "ctrl+c":
+		return p, tea.Quit
+
+	case "esc":
+		return p.leaveTheSession(), nil
+
+	case "enter":
+		return p.sendTheAnswer()
+
+	case "backspace":
+		if p.typing != "" {
+			runes := []rune(p.typing)
+			p.typing = string(runes[:len(runes)-1])
+		}
+		return p, nil
+	}
+
+	// Text rather than the key's name: a key with no text behind it — an
+	// arrow, a function key — would otherwise be typed into the answer as the
+	// word for it.
+	p.typing += key.Text
+	return p, nil
+}
+
+// sendTheAnswer unblocks the run, when there is anything to send.
+//
+// Nothing for an empty line. A run parked on a question is unblocked by an
+// answer, and "" is one it cannot act on: sending it turns a run waiting on a
+// person into a run that carried on with nothing.
+func (p panel) sendTheAnswer() (tea.Model, tea.Cmd) {
+	if strings.TrimSpace(p.typing) == "" || p.sessions == nil {
+		return p, nil
+	}
+
+	sessions, ctx := p.sessions, p.ctx
+	answer := Answer{ID: p.screen.Asked[0].ID, Text: p.typing}
+
+	// Cleared here rather than when the daemon replies. The next question
+	// would otherwise open with the previous answer already in it, and enter
+	// would send it before anybody had read what was being asked.
+	p.typing = ""
+
+	return p, func() tea.Msg {
+		return decided{err: sessions.Answer(ctx, answer)}
+	}
 }
 
 // decide answers the request at the front of the queue.
@@ -256,6 +342,63 @@ func (p panel) interrupt() tea.Cmd {
 	}
 }
 
+// openTheNewestOutput writes stored output out and hands it to the machine.
+//
+// Not rendered here. A terminal is a poor image viewer and a worse PDF
+// reader, and the program that already knows how to open a file is the one
+// the person configured for it.
+//
+// The newest, which is the one being read about: a run that has just failed
+// has its log at the bottom of the screen, and offering a cursor over every
+// call a session ever made would be a second selection to keep in step with
+// what is drawn.
+func (p panel) openTheNewestOutput() tea.Cmd {
+	stored, found := newestOutput(p.screen.Messages)
+	if p.where != inASession || !found || p.sessions == nil || p.opener == nil {
+		return nil
+	}
+
+	extension, openable := extensionFor(stored.MediaType)
+	if !openable {
+		// Refused rather than opened as something else. An artifact is
+		// whatever a tool produced, which includes whatever a page the run
+		// read suggested it produce, and handing that to the machine's
+		// default program for it is running somebody else's file.
+		return func() tea.Msg {
+			return decided{err: fmt.Errorf(
+				"tui: %s is a %s, which this panel will not hand to the machine",
+				stored.Artifact, stored.MediaType)}
+		}
+	}
+
+	sessions, ctx, opener, into := p.sessions, p.ctx, p.opener, p.into
+	return func() tea.Msg {
+		data, err := sessions.ReadArtifact(ctx, stored.Artifact)
+		if err != nil {
+			return decided{err: err}
+		}
+
+		path, err := writeForOpening(into, stored.Artifact, extension, data)
+		if err != nil {
+			return decided{err: err}
+		}
+		return decided{err: opener.Open(ctx, path)}
+	}
+}
+
+// newestOutput is the last call in the session that stored anything.
+func newestOutput(messages []Message) (ToolCall, bool) {
+	for message := len(messages) - 1; message >= 0; message-- {
+		calls := messages[message].ToolCalls
+		for call := len(calls) - 1; call >= 0; call-- {
+			if calls[call].Artifact != "" {
+				return calls[call], true
+			}
+		}
+	}
+	return ToolCall{}, false
+}
+
 // leaveTheSession goes back to the list and stops watching.
 //
 // The stream is dropped rather than kept warm. Holding it would mean the
@@ -266,6 +409,7 @@ func (p panel) leaveTheSession() panel {
 	p.open = ""
 	p.screen = Screen{}
 	p.updates = nil
+	p.typing = ""
 	return p
 }
 
@@ -348,6 +492,9 @@ func (p panel) View() tea.View {
 	switch p.where {
 	case inASession:
 		drawTheSession(drawn, p.screen)
+		if p.isAnswering() {
+			fmt.Fprintf(drawn, "\n%s%s\n", answerPrompt, p.typing)
+		}
 	default:
 		drawTheList(drawn, p.list, p.cursor)
 	}
@@ -367,7 +514,16 @@ func (p panel) View() tea.View {
 // screen there is nothing to go back from.
 func (p panel) keys() string {
 	if p.where == inASession {
+		// While there is a line to type at, the decision keys are not
+		// offered: they are letters, and letters are going into the answer.
+		if p.isAnswering() {
+			return "enter answers · esc back · ctrl+c quit"
+		}
+
 		keys := "esc back · ctrl+c quit"
+		if _, found := newestOutput(p.screen.Messages); found {
+			keys = "o open output · " + keys
+		}
 		if p.screen.ActiveRun != "" {
 			keys = "i interrupt · " + keys
 		}
@@ -417,6 +573,23 @@ func drawTheSession(drawn *strings.Builder, screen Screen) {
 
 	if len(screen.Waiting) > 0 {
 		drawWhatIsWaiting(drawn, screen.Waiting)
+	}
+	if len(screen.Asked) > 0 {
+		drawWhatWasAsked(drawn, screen.Asked[0])
+	}
+}
+
+// drawWhatWasAsked shows the question a run parked itself on.
+func drawWhatWasAsked(drawn *strings.Builder, asked Asked) {
+	fmt.Fprintf(drawn, "\nit asked: %s\n", asked.Prompt)
+
+	// The options as offered. A question with a fixed set answered in free
+	// text is one the run rejects, and the person typing finds out after.
+	for _, option := range asked.Options {
+		fmt.Fprintf(drawn, "  · %s\n", option.Label)
+		if option.Detail != "" {
+			fmt.Fprintf(drawn, "    %s\n", option.Detail)
+		}
 	}
 }
 
@@ -469,11 +642,23 @@ func drawTheTurn(drawn *strings.Builder, message Message) {
 	}
 
 	for _, call := range message.ToolCalls {
-		fmt.Fprintf(drawn, "  %s %s\n", howItWent(call), call.Name)
+		fmt.Fprintf(drawn, "  %s %s%s\n", howItWent(call), call.Name, whatItLeft(call))
 	}
 	if len(message.ToolCalls) > 0 {
 		drawn.WriteString("\n")
 	}
+}
+
+// whatItLeft marks a call whose output was too large to have been sent.
+//
+// Said at all because otherwise the only way to reach a build log is to know
+// it exists. Said briefly because most calls leave nothing, and a column of
+// mostly-empty annotations is one nobody reads.
+func whatItLeft(call ToolCall) string {
+	if call.Artifact == "" {
+		return ""
+	}
+	return "  (output stored)"
 }
 
 func howItWent(call ToolCall) string {

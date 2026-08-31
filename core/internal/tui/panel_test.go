@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -246,12 +247,20 @@ type recordingSessions struct {
 	updates  chan Update
 
 	decision    Decision
+	answer      Answer
+	answered    int
 	interrupted domain.RunID
 
 	// asked counts what was sent, because a run id of "" is both what an
 	// interrupt of a quiet session would carry and what this field holds
 	// when nothing was sent at all.
 	asked int
+
+	// artifact is what ReadArtifact hands back, and opener/into are where a
+	// check watches the file go.
+	artifact string
+	opener   *recordingOpener
+	into     string
 
 	// refuse is what Decide and Interrupt answer with, so a panel can be
 	// checked on what it does when the daemon says no.
@@ -264,6 +273,25 @@ func (r *recordingSessions) Decide(_ context.Context, decision Decision) error {
 	}
 	r.decision = decision
 	return nil
+}
+
+func (r *recordingSessions) Answer(_ context.Context, answer Answer) error {
+	if r.refuse != nil {
+		return r.refuse
+	}
+	r.answer = answer
+	r.answered++
+	return nil
+}
+
+func (r *recordingSessions) ReadArtifact(_ context.Context, id string) ([]byte, error) {
+	if r.refuse != nil {
+		return nil, r.refuse
+	}
+	if r.opener != nil {
+		r.opener.wanted = id
+	}
+	return []byte(r.artifact), nil
 }
 
 func (r *recordingSessions) Interrupt(_ context.Context, run domain.RunID) error {
@@ -297,7 +325,14 @@ func (r *recordingSessions) Watch(
 func start(t *testing.T, sessions Sessions, message tea.Msg) tea.Model {
 	t.Helper()
 
-	var model tea.Model = newPanel(context.Background(), sessions)
+	recording, _ := sessions.(*recordingSessions)
+	var opener Opener
+	into := ""
+	if recording != nil && recording.opener != nil {
+		opener, into = recording.opener, recording.into
+	}
+
+	var model tea.Model = newPanel(context.Background(), sessions, opener, into)
 	model = after(model, tea.WindowSizeMsg{Width: 80, Height: 24})
 	return after(model, message)
 }
@@ -353,6 +388,10 @@ func runCommand(t *testing.T, command tea.Cmd) tea.Msg {
 	}
 	return command()
 }
+
+// errRefused stands for the daemon saying no, for the checks that only care
+// that a refusal reaches the screen.
+var errRefused = errors.New("the daemon would not have it")
 
 // secondOf is the command half of what Update returns, for the checks that
 // only care what it did rather than what it drew.

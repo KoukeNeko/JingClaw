@@ -29,8 +29,17 @@ type Sessions interface {
 	// Decide answers one request the agent stopped to ask about.
 	Decide(ctx context.Context, decision Decision) error
 
+	// Answer unblocks a run that stopped to ask a person something.
+	Answer(ctx context.Context, answer Answer) error
+
 	// Interrupt stops a run that is still going.
 	Interrupt(ctx context.Context, run domain.RunID) error
+
+	// ReadArtifact is stored output, read back whole.
+	//
+	// Whole because what it is for is handing to another program, and half a
+	// build log is a file that opens and says the wrong thing.
+	ReadArtifact(ctx context.Context, id string) ([]byte, error)
 
 	// Watch is what happens after that sequence, until the context ends.
 	//
@@ -57,6 +66,12 @@ type Decision struct {
 	Scope  domain.RememberScope
 }
 
+// Answer is what somebody typed, against the question it answers.
+type Answer struct {
+	ID   domain.QuestionID
+	Text string
+}
+
 // Update is one thing that happened while watching.
 //
 // Three outcomes in one message because they arrive on one channel and the
@@ -77,14 +92,24 @@ type Update struct {
 // clientName identifies this panel to the daemon's stream bookkeeping.
 const clientName = "tui"
 
+// maxArtifactBytes bounds what the panel will write out to be opened.
+//
+// Generous, because the thing this exists for is a build log nobody wants
+// truncated, and bounded because "whatever a tool produced" is not a size.
+const maxArtifactBytes = 64 << 20
+
 // overTheControlPlane is the Sessions the panel actually runs against.
 type overTheControlPlane struct {
-	daemon controlv1connect.SessionServiceClient
+	daemon    controlv1connect.SessionServiceClient
+	artifacts controlv1connect.ArtifactServiceClient
 }
 
-// Over adapts a control-plane client to what the panel needs.
-func Over(daemon controlv1connect.SessionServiceClient) Sessions {
-	return overTheControlPlane{daemon: daemon}
+// Over adapts control-plane clients to what the panel needs.
+func Over(
+	daemon controlv1connect.SessionServiceClient,
+	artifacts controlv1connect.ArtifactServiceClient,
+) Sessions {
+	return overTheControlPlane{daemon: daemon, artifacts: artifacts}
 }
 
 func (over overTheControlPlane) List(ctx context.Context) ([]Summary, error) {
@@ -131,17 +156,17 @@ func screenOf(view *controlv1.GetSessionViewResponse) Screen {
 			Reasoning: message.GetReasoning(),
 		}
 		for _, call := range message.GetToolCalls() {
-			artifact := ""
-			if stored := call.GetArtifact(); stored != nil {
-				artifact = stored.GetId()
-			}
-			drawn.ToolCalls = append(drawn.ToolCalls, ToolCall{
+			shown := ToolCall{
 				ID:        call.GetCallId(),
 				Name:      call.GetName(),
 				Completed: call.GetCompleted(),
 				IsError:   call.GetIsError(),
-				Artifact:  artifact,
-			})
+			}
+			if stored := call.GetArtifact(); stored != nil {
+				shown.Artifact = stored.GetId()
+				shown.MediaType = stored.GetMediaType()
+			}
+			drawn.ToolCalls = append(drawn.ToolCalls, shown)
 		}
 		screen.Messages = append(screen.Messages, drawn)
 	}
@@ -156,6 +181,19 @@ func screenOf(view *controlv1.GetSessionViewResponse) Screen {
 			Effects:     asked.GetEffects(),
 			ReadForeign: asked.GetReadForeign(),
 		})
+	}
+	for _, question := range view.GetPendingQuestions() {
+		asked := Asked{
+			ID:     domain.QuestionID(question.GetId()),
+			Prompt: question.GetPrompt(),
+			Kind:   questionKindOf(question.GetKind()),
+		}
+		for _, option := range question.GetOptions() {
+			asked.Options = append(asked.Options, Option{
+				ID: option.GetId(), Label: option.GetLabel(), Detail: option.GetDetail(),
+			})
+		}
+		screen.Asked = append(screen.Asked, asked)
 	}
 	for _, step := range view.GetPlan() {
 		screen.Plan = append(screen.Plan, PlanStep{
@@ -290,4 +328,57 @@ func (over overTheControlPlane) Interrupt(ctx context.Context, run domain.RunID)
 		return fmt.Errorf("tui: interrupting %s: %w", run, err)
 	}
 	return nil
+}
+
+// questionKindOf says what shape of answer a question wants.
+//
+// Anything unrecognised is text, because a panel that offered no way to
+// answer would leave the run parked with nothing anybody could do about it.
+func questionKindOf(kind controlv1.QuestionKind) domain.QuestionKind {
+	if kind == controlv1.QuestionKind_QUESTION_KIND_CHOICE {
+		return domain.QuestionChoice
+	}
+	return domain.QuestionText
+}
+
+func (over overTheControlPlane) Answer(ctx context.Context, answer Answer) error {
+	_, err := over.daemon.AnswerQuestion(ctx, connect.NewRequest(
+		&controlv1.AnswerQuestionRequest{
+			QuestionId: string(answer.ID),
+			Answer:     answer.Text,
+		}))
+	if err != nil {
+		return fmt.Errorf("tui: answering %s: %w", answer.ID, err)
+	}
+	return nil
+}
+
+func (over overTheControlPlane) ReadArtifact(ctx context.Context, id string) ([]byte, error) {
+	if over.artifacts == nil {
+		return nil, fmt.Errorf("tui: this panel cannot reach stored output")
+	}
+
+	stream, err := over.artifacts.ReadArtifact(ctx, connect.NewRequest(
+		&controlv1.ReadArtifactRequest{Id: id, Limit: maxArtifactBytes}))
+	if err != nil {
+		return nil, fmt.Errorf("tui: reading %s: %w", id, err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	var read []byte
+	for stream.Receive() {
+		read = append(read, stream.Msg().GetChunk()...)
+		if len(read) > maxArtifactBytes {
+			// Said rather than truncated. A log cut off at an arbitrary point
+			// opens and says the wrong thing, and nothing on the screen would
+			// show that the end is missing.
+			return nil, fmt.Errorf(
+				"tui: %s is larger than this panel will write out (%d bytes)",
+				id, maxArtifactBytes)
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("tui: reading %s: %w", id, err)
+	}
+	return read, nil
 }

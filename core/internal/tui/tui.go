@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -34,6 +35,14 @@ type Options struct {
 
 	// Input is where keys come from. Empty is the real terminal.
 	Input io.Reader
+
+	// Opener hands stored output to whatever the machine opens it with.
+	// Empty is the platform's own.
+	Opener Opener
+
+	// Into is where output is written before being opened. Empty is a
+	// directory of this run's own under the system temporary directory.
+	Into string
 
 	// PanicForTest makes the panel fail once it is drawing.
 	//
@@ -72,7 +81,19 @@ func Run(ctx context.Context, opts Options) (err error) {
 		output = os.Stdout
 	}
 
-	starting := newPanel(ctx, opts.Sessions)
+	opener := opts.Opener
+	if opener == nil {
+		opener = theMachine{}
+	}
+	into := opts.Into
+	if into == "" {
+		// Its own directory, so what one panel wrote out is not read by the
+		// next thing to look in the system temporary directory, and so the
+		// files are together when somebody goes looking for them.
+		into = filepath.Join(os.TempDir(), "jingclaw-panel")
+	}
+
+	starting := newPanel(ctx, opts.Sessions, opener, into)
 	starting.panicNow = opts.PanicForTest
 
 	program := tea.NewProgram(starting, programOptions(ctx, opts)...)

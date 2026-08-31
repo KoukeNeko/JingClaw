@@ -50,3 +50,25 @@ func TestEveryScopeCrossesToTheWireIntact(t *testing.T) {
 		}
 	}
 }
+
+// A question keeps the shape of answer it wants.
+//
+// A choice drawn as free text lets somebody type an answer the run then
+// rejects, and they find out after the run has already refused it.
+func TestAQuestionKeepsTheShapeOfAnswerItWants(t *testing.T) {
+	for _, crossing := range []struct {
+		kind   controlv1.QuestionKind
+		wanted domain.QuestionKind
+	}{
+		{controlv1.QuestionKind_QUESTION_KIND_CHOICE, domain.QuestionChoice},
+		{controlv1.QuestionKind_QUESTION_KIND_TEXT, domain.QuestionText},
+
+		// Unrecognised is text. A panel offering no way to answer would leave
+		// the run parked with nothing anybody could do about it.
+		{controlv1.QuestionKind_QUESTION_KIND_UNSPECIFIED, domain.QuestionText},
+	} {
+		if got := questionKindOf(crossing.kind); got != crossing.wanted {
+			t.Errorf("%v arrived as %q, wanted %q", crossing.kind, got, crossing.wanted)
+		}
+	}
+}
