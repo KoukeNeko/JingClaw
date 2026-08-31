@@ -74,6 +74,18 @@ model = "gemma-4-31b-it"
 [server]
 runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
+
+# A room, so a message can arrive the way one from a chat platform does. The
+# ingress refuses a channel it has no binding for, which is the point of the
+# binding and not something to work around.
+[gateway]
+platform = "discord"
+[gateway.discord]
+account_id = "main"
+[[gateway.discord.channels]]
+channel_ids = ["c1"]
+tenant_id = "t1"
+workspace_id = "default"
 EOF
 
 start() {
@@ -137,6 +149,61 @@ if len(payload) > 4000:
     raise SystemExit(1)
 PY
 printf 'ok   the event names the picture rather than carrying it\n'
+
+# 3b. The other door in, which is the one people actually use.
+#
+# Everything above goes through SendTurn, and a picture from a chat platform
+# does not: it arrives at the gateway ingress, in a message whose bytes the
+# adapter fetched. That path was silently dropping every attachment — the
+# field did not exist on the wire — and every check in this file passed the
+# whole time, because none of them came in through that door.
+BASE=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["base_url"])' "$WORK/run/daemon.json")
+GATEWAY=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["gateway_token"])' "$WORK/run/daemon.json")
+PICTURE=$(python3 -c 'import base64,sys;print(base64.b64encode(open(sys.argv[1],"rb").read()).decode())' "$WORK/bands.png")
+
+FROM_CHAT=$(curl -s -X POST -H 'content-type: application/json' \
+	-H "authorization: Bearer $GATEWAY" -d "{
+		\"meta\": {\"clientId\": \"verify\"},
+		\"message\": {
+			\"platform\": \"discord\", \"accountId\": \"main\",
+			\"tenantId\": \"t1\", \"channelId\": \"c1\",
+			\"platformMessageId\": \"m1\", \"idempotencyKey\": \"picture-1\",
+			\"principalId\": \"p1\", \"principalDisplayName\": \"somebody\",
+			\"text\": \"look at this\", \"trigger\": \"MESSAGE_TRIGGER_MENTION\",
+			\"attachments\": [{
+				\"id\": \"a1\", \"name\": \"bands.png\",
+				\"contentType\": \"image/png\", \"size\": 0,
+				\"data\": \"$PICTURE\"
+			}]
+		}
+	}" "$BASE/jingclaw.control.v1.GatewayIngressService/DeliverInbound")
+
+CHAT_SESSION=$(printf '%s' "$FROM_CHAT" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+[ -n "$CHAT_SESSION" ] || fail "the message from a chat platform started nothing: $FROM_CHAT"
+sleep 1
+
+python3 - "$DB" "$CHAT_SESSION" <<'FROMCHAT' || exit 1
+import json, sqlite3, sys
+
+con = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)
+rows = con.execute(
+	"SELECT payload FROM events WHERE kind='user.message' AND session_id=?",
+	(sys.argv[2],)).fetchall()
+
+if not rows:
+	print("FAIL: the message from a chat platform is not in the log", file=sys.stderr)
+	raise SystemExit(1)
+
+for (payload,) in rows:
+	for attachment in json.loads(payload).get("attachments") or []:
+		if attachment.get("artifact_id", "").startswith("sha256-"):
+			raise SystemExit(0)
+
+print("FAIL: a picture sent from a chat platform reached the log with no attachment",
+	file=sys.stderr)
+raise SystemExit(1)
+FROMCHAT
+printf 'ok   and a picture from a chat platform survives the trip in\n'
 
 # 4. The half that only a model can answer.
 # Finds the operator's own credential and puts it in the environment.

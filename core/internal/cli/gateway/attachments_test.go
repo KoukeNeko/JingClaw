@@ -54,3 +54,32 @@ func TestAFileSurvivesTheTripInward(t *testing.T) {
 		t.Error("a message with no files was given some")
 	}
 }
+
+// And the whole message carries them, not only the converter.
+//
+// Checked at the call site because that is a separate thing to get wrong. The
+// converter above can be right while nothing asks it, and the shape of the
+// original defect — files fetched, then absent from what went inward — is
+// exactly what an unwired call site looks like from the outside.
+func TestTheMessageThatGoesInwardCarriesTheFiles(t *testing.T) {
+	sent := gateway.InboundMessage{
+		Conversation: gateway.ConversationRef{Platform: "discord", ChannelID: "chan_1"},
+		Principal:    gateway.Principal{ID: "someone"},
+		Text:         "look at this",
+		Attachments: []gateway.Attachment{{
+			ID: "att_1", Name: "screenshot.png",
+			ContentType: "image/png", Size: 4, Data: []byte{1, 2, 3, 4},
+		}},
+	}
+
+	going := inboundToProto(sent)
+
+	if len(going.GetAttachments()) != 1 {
+		t.Fatalf("the message going inward carries %d files, not 1",
+			len(going.GetAttachments()))
+	}
+	if got := going.GetAttachments()[0]; got.GetName() != "screenshot.png" ||
+		string(got.GetData()) != "\x01\x02\x03\x04" {
+		t.Errorf("the file on the message did not survive: %+v", got)
+	}
+}
