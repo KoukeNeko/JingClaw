@@ -746,3 +746,49 @@ attaches to has been recorded, so counting only the log made the threshold
 mean one more than it said and the number in the sentence one less than the
 truth. Invisible in the behaviour, wrong in the words, and found only because
 one real run stopped at exactly six calls.
+
+---
+
+## Pictures in a conversation, and the one bound nothing enforces
+
+A picture sent on the first turn is in front of the model on every turn after
+it. The bytes are not in the event — an image is large and the log is replayed
+each turn, so a conversation carrying copies of everything ever sent would
+stop working long before the context window did — so the event holds a
+reference and the bytes are read back out of the artifact store each time.
+
+That raised a fair question: does re-sending a picture confuse the model about
+when it arrived? It does not, and the reason is worth writing down rather than
+rediscovering. Every provider re-sends the whole history on every request, and
+each of them documents reading images from earlier turns as the ordinary case.
+The model sees a position in a sequence; it has no way to know whether this is
+the first time those bytes were transmitted or the tenth. What would change
+the meaning is inserting the same picture again at the newest turn, which is
+not what happens here.
+
+Two things were considered and are deliberately not done.
+
+**Labelling an image as historical.** There is no such convention at
+Anthropic, OpenAI or Google, and adding one at rebuild time would edit the
+conversation history after the fact and break the cached prefix — which is
+currently worth 96–98% of the input on a long session. If a picture ever needs
+a stable name, the place to give it one is when it first enters the log, never
+on the way out. Turn numbers are the wrong name anyway: compaction and forking
+do not preserve them.
+
+**Dropping images by age.** Rejected in favour of dropping by relevance, if it
+is ever needed. A picture somebody is still asking about is worth its tokens
+on turn twenty; one that has become background is not worth them on turn two.
+Age is a weak signal for that and a token budget is the real trigger.
+
+**The bound nothing enforces.** Anthropic accepts at most 100 images in one
+request, and there is no check anywhere that counts them. A session where
+somebody posts a hundred pictures would rebuild a request the provider
+refuses, and what reaches them would be the same unhelpful "something went
+wrong at the model" that an empty turn used to produce. Nobody has hit it.
+The fix, when somebody does, is to keep the most recent and describe the rest,
+not to fail.
+
+Sources are in the answer that produced this: Anthropic's vision guide,
+OpenAI's images and prompt-caching guides, and Gemini's image-understanding
+and token-counting pages.
