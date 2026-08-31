@@ -233,7 +233,7 @@ func foldEvents(events []domain.Event) ([]ViewMessage, domain.RunID) {
 			byMessage = map[domain.MessageID]int{}
 			byCall = map[domain.ToolCallID]struct{ message, call int }{}
 			index := appendMessage("", domain.RoleAssistant, event)
-			messages[index].Text = "[earlier turns were folded into a summary]"
+			messages[index].Text = domain.FoldNotice
 
 		case domain.RunStateChanged:
 			if payload.Status.IsTerminal() {

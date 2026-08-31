@@ -443,6 +443,15 @@ const (
 	EventSkillActivated            EventKind = "skill.activated"
 )
 
+// FoldNotice stands where a compaction folded turns away.
+//
+// One string for every client that draws a session, because the alternative
+// is each of them wording it differently and a reader learning a new phrase
+// per surface for the same thing. What it has to convey is that the turns
+// were replaced rather than lost — a session that simply started shorter
+// reads as the agent having forgotten.
+const FoldNotice = "[earlier turns were folded into a summary]"
+
 // ToolCallID identifies one tool invocation within a run.
 type ToolCallID string
 
