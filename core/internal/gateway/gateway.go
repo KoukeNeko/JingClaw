@@ -254,7 +254,22 @@ type Binding struct {
 	CreatedAt time.Time
 }
 
+// OpenToTheRoom reports whether this binding names nobody, and so accepts
+// whoever the platform lets into the channel.
+//
+// Its own method because two places ask it: the check itself, and the startup
+// line that tells an operator which channels are open. A deployment that
+// widened by accident should be able to see it having happened rather than
+// find out from who turns up.
+func (b Binding) OpenToTheRoom() bool {
+	return len(b.AllowedPrincipals) == 0 && len(b.AllowedClaims) == 0
+}
+
 // MayApprove reports whether this person may answer an approval here.
+//
+// Never open to the room, however the binding is written. An empty list here
+// means nobody, because "anyone in this channel may authorise a tool call" is
+// not something an operator says by leaving a field out.
 //
 // The principal must be one the platform authenticated, never one read out of
 // a message or a tool argument: the whole value of a button over a typed
@@ -278,11 +293,32 @@ func (b Binding) MayApprove(principal Principal) bool {
 }
 
 // Permits reports whether a principal may trigger work through this binding.
+//
+// A binding naming nobody defers to the platform: whoever the room lets in
+// may speak to the agent. That is not the absence of a rule, it is a
+// different rule — the channel's own membership — and it is the one an
+// operator has usually already set up. Naming people here as well means
+// keeping two lists in step, and the way that fails is somebody being added
+// to the room and silently ignored.
+//
+// It widens what a channel accepts, so it is worth being plain about what it
+// does not widen:
+//
+//   - The gateway profile is unchanged. Whoever gets in still cannot run a
+//     command, and everything that could act still stops for an approval.
+//   - MayApprove is unchanged, and deliberately: an empty approver list still
+//     means nobody. "Anyone in the room may talk to it" and "anyone in the
+//     room may authorise what it does" are different sentences, and only the
+//     first one is being said here.
 func (b Binding) Permits(principal Principal) bool {
 	// A bot triggering the agent is how two automations talk each other into
 	// an unbounded loop, so it is refused regardless of any allowlist.
 	if principal.IsBot {
 		return false
+	}
+
+	if b.OpenToTheRoom() {
+		return true
 	}
 
 	for _, allowed := range b.AllowedPrincipals {

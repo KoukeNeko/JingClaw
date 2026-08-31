@@ -227,12 +227,18 @@ account_id = "main"
 # channel_ids = ["111111111111111111"]
 # tenant_id = "222222222222222222"
 # workspace_id = "default"
-# Who may ask. Both empty is nobody, which is the right default for a room.
+# Who may ask. Both empty means whoever the platform lets into the channel,
+# because the channel already has a membership and keeping a second list in
+# step with it is how somebody gets added to the room and silently ignored.
+# They still get the gateway profile: no commands, and anything that acts
+# stops for an approval.
 # users = ["333333333333333333"]
 # roles = []
-# Who may approve, by pressing a button on the message. A separate list:
-# asking for something and permitting it are different powers. Both empty is
-# nobody, and the message then says to decide it elsewhere.
+# Who may approve, by pressing a button on the message. A separate list, and
+# it does not follow the rule above: both empty is nobody, and the message
+# then says to decide it elsewhere. "Anyone in this room may talk to it" and
+# "anyone in this room may authorise what it does" are different sentences,
+# and leaving a field out says only the first.
 # approvers = ["333333333333333333"]
 # approver_roles = []
 

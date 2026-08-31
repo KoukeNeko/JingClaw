@@ -334,13 +334,11 @@ func (c Channel) problems(where string, seen map[string]string) []Problem {
 		seen[id] = where
 	}
 
-	if len(c.Users) == 0 && len(c.Roles) == 0 {
-		problems = append(problems, Problem{
-			Key: where + ".users", Value: "[]",
-			Why: "is empty, and so is roles, which permits nobody",
-			Fix: "List the accounts or roles that may trigger work here.",
-		})
-	}
+	// Naming nobody is not a mistake here: it defers to the channel's own
+	// membership, which the same person set up on the platform. Refusing to
+	// start over it was the old rule, and it outlived the rule it enforced —
+	// a daemon that would not run because a list was empty, after the empty
+	// list had been given a meaning.
 
 	return problems
 }
@@ -1845,12 +1843,18 @@ account_id = "main"
 # channel_ids = ["111111111111111111"]
 # tenant_id = "222222222222222222"
 # workspace_id = "default"
-# Who may ask. Both empty is nobody, which is the right default for a room.
+# Who may ask. Both empty means whoever the platform lets into the channel,
+# because the channel already has a membership and keeping a second list in
+# step with it is how somebody gets added to the room and silently ignored.
+# They still get the gateway profile: no commands, and anything that acts
+# stops for an approval.
 # users = ["333333333333333333"]
 # roles = []
-# Who may approve, by pressing a button on the message. A separate list:
-# asking for something and permitting it are different powers. Both empty is
-# nobody, and the message then says to decide it elsewhere.
+# Who may approve, by pressing a button on the message. A separate list, and
+# it does not follow the rule above: both empty is nobody, and the message
+# then says to decide it elsewhere. "Anyone in this room may talk to it" and
+# "anyone in this room may authorise what it does" are different sentences,
+# and leaving a field out says only the first.
 # approvers = ["333333333333333333"]
 # approver_roles = []
 
@@ -1882,3 +1886,13 @@ token_file = "telegram.token"
 # text_flush_interval = "200ms"
 # usage_flush_interval = "2s"
 `
+
+// CheckChannelForTest is one channel's problems, for a test that wants to ask
+// about a channel rather than about a whole file.
+//
+// Exported for that and nothing else. The rule it exists to check — that a
+// channel naming nobody is accepted — is the kind that gets re-added by
+// somebody tidying up, and the test that stops them has to be able to ask.
+func CheckChannelForTest(channel Channel, where string) []Problem {
+	return channel.problems(where, map[string]string{})
+}

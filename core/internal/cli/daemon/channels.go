@@ -71,10 +71,21 @@ func applyChannels(
 				}
 				declared[channelID] = true
 
+				// Who may speak here, said outright. A binding naming
+				// nobody accepts whoever the platform lets into the room,
+				// which is a reasonable thing to mean and a bad thing to
+				// discover from who turns up.
+				who := fmt.Sprintf("%d named", len(binding.AllowedPrincipals)+len(binding.AllowedClaims))
+				if binding.OpenToTheRoom() {
+					who = "anyone the platform lets in"
+				}
+
 				logger.Info("channel bound from the configuration",
 					"channel_id", channelID,
 					"profile", list.profile,
 					"workspace_id", channel.WorkspaceID,
+					"who_may_speak", who,
+					"who_may_approve", len(binding.ApprovingPrincipals)+len(binding.ApprovingClaims),
 				)
 			}
 		}

@@ -158,18 +158,28 @@ func TestUnboundChannelIsRefused(t *testing.T) {
 	}
 }
 
-// A binding with nobody on its allowlist permits nobody. An empty list must
-// not read as "everyone".
-func TestEmptyAllowlistPermitsNobody(t *testing.T) {
+// A binding with nobody on its allowlist defers to the room.
+//
+// This used to be the opposite, and the reason it was is worth keeping: an
+// empty list must not quietly read as "everyone" through carelessness. What
+// changed is that it is not careless — a channel already has a membership,
+// decided on the platform by the same person who wrote the binding, and
+// naming people twice means keeping two lists in step. The way that fails is
+// somebody being added to the room and silently ignored, which is what
+// prompted this.
+//
+// What did not change is beside it: TestAnEmptyListNeverMeansAnyoneMayApprove
+// in gateway_test.go. Being allowed to ask is not being allowed to permit.
+func TestAnEmptyAllowlistDefersToTheRoom(t *testing.T) {
 	ingress, store, runtime, _ := newIngress(t)
 	bindChannel(t, store)
 
-	_, err := ingress.Accept(context.Background(), message("m1", "do something", discordPrincipal("user_1")))
-	if !errors.Is(err, gateway.ErrNotPermitted) {
-		t.Fatalf("got %v, want ErrNotPermitted", err)
+	if _, err := ingress.Accept(context.Background(),
+		message("m1", "do something", discordPrincipal("user_1"))); err != nil {
+		t.Fatalf("somebody the room let in was refused: %v", err)
 	}
-	if len(runtime.turns) != 0 {
-		t.Error("work started for a principal on no allowlist")
+	if len(runtime.turns) != 1 {
+		t.Errorf("started %d turns, want one", len(runtime.turns))
 	}
 }
 

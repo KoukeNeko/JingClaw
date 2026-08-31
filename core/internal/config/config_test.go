@@ -479,16 +479,6 @@ func TestADeclaredChannelIsChecked(t *testing.T) {
 			mutate:  func(c *config.Channel) { c.ChannelIDs = []string{"111", ""} },
 			mention: "channel_ids",
 		},
-		{
-			// Silently permitting nobody is a channel that looks configured
-			// and answers no one.
-			name: "nobody allowed",
-			mutate: func(c *config.Channel) {
-				c.Users = nil
-				c.Roles = nil
-			},
-			mention: "users",
-		},
 	}
 
 	for _, test := range tests {
@@ -560,5 +550,30 @@ func TestAChannelProblemSaysWhichEntry(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "gateway.discord.consoles[0]") {
 		t.Errorf("the error does not say which entry: %v", err)
+	}
+}
+
+// TestAChannelNamingNobodyIsAccepted is the rule that replaced one this file
+// used to enforce.
+//
+// Refusing to start over an empty list was right while an empty list meant
+// nobody: a channel that looked configured and answered no one is worth
+// refusing. It now means the channel's own membership, so the daemon that
+// would not start was enforcing a rule that had been removed from underneath
+// it — which is how somebody ends up with a program that will not run and a
+// message about a field they set on purpose.
+func TestAChannelNamingNobodyIsAccepted(t *testing.T) {
+	channel := config.Channel{
+		ChannelIDs:  []string{"111111111111111111"},
+		TenantID:    "222222222222222222",
+		WorkspaceID: "default",
+	}
+
+	problems := config.CheckChannelForTest(channel, "gateway.discord.channels[0]")
+	for _, problem := range problems {
+		if strings.Contains(problem.Key, "users") || strings.Contains(problem.Key, "roles") {
+			t.Errorf("a channel deferring to its room was refused: %s — %s",
+				problem.Key, problem.Why)
+		}
 	}
 }
