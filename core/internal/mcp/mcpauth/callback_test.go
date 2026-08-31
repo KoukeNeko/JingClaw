@@ -14,15 +14,25 @@ import (
 func listening(t *testing.T) (*Callback, string) {
 	t.Helper()
 
+	// Before Listen, and before anything can call Fetch. Fetch opens the
+	// authorization page in whatever browser this machine uses, which is the
+	// whole point of it and exactly wrong here: every test below calls Fetch,
+	// and without this each one opens a tab pointing at as.example.
+	//
+	// The switch existed already, added so a check could run without a window
+	// appearing on somebody's screen, and then was not used by the tests it
+	// was added for. Somebody found this by wondering why Safari kept opening.
+	t.Setenv(NoBrowser, "1")
+
 	callback, err := Listen()
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	t.Cleanup(func() { _ = callback.Close() })
 
-	// No Announce: this is a test, nothing should be printed, and a shared
-	// variable written from two sign-ins at once is a race in the harness
-	// rather than in what it is checking.
+	// No Announce either: nothing should be printed, and a shared variable
+	// written from two sign-ins at once is a race in the harness rather than
+	// in what it is checking.
 	return callback, callback.RedirectURL()
 }
 
@@ -302,4 +312,38 @@ func authorizationArgs(url string) *auth.AuthorizationArgs {
 		url += "?state=the-state"
 	}
 	return &auth.AuthorizationArgs{URL: url}
+}
+
+// TestNothingHereOpensABrowser is the check whose absence let this happen.
+//
+// Fetch opens the authorization page, which is what it is for and exactly
+// wrong in a test: every case in this file calls Fetch, so a helper that did
+// not turn it off opened a tab per call, at a domain reserved for
+// documentation. It ran that way for a while, and the way it was found was
+// somebody wondering why Safari kept opening.
+//
+// A comment in the helper said it did not open one. A comment cannot be run.
+func TestNothingHereOpensABrowser(t *testing.T) {
+	// The helper every other test uses. If it stops turning the switch off,
+	// this is what says so.
+	listening(t)
+
+	if !suppressed() {
+		t.Fatal("the tests in this file will open a browser tab on every Fetch")
+	}
+}
+
+// TestTheSwitchIsWhatDecides keeps the check above from passing for the wrong
+// reason: it has to be the switch doing it, not something else.
+func TestTheSwitchIsWhatDecides(t *testing.T) {
+	t.Setenv(NoBrowser, "")
+
+	if suppressed() {
+		t.Error("browsers are suppressed with the switch unset, so setting it proves nothing")
+	}
+
+	t.Setenv(NoBrowser, "1")
+	if !suppressed() {
+		t.Error("the switch does not turn it off")
+	}
 }

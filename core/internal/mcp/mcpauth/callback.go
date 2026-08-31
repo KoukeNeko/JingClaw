@@ -260,6 +260,14 @@ func page(title, said string) string {
 		"<h1>" + title + "</h1><p>" + said + "</p>"
 }
 
+// suppressed reports whether opening a browser has been turned off.
+//
+// Its own function so a test can assert the switch works, rather than
+// assert that a browser did not open — which cannot be observed from here,
+// and whose absence is what went unnoticed while every run of these tests
+// opened a tab.
+func suppressed() bool { return os.Getenv(NoBrowser) != "" }
+
 // NoBrowser stops this opening one, for a machine where that is wrong.
 //
 // A check that signs in has to be able to run without a browser window
@@ -276,7 +284,7 @@ const NoBrowser = "JINGCLAW_NO_BROWSER"
 //
 // Failure is ignored on purpose — see Fetch.
 func openBrowser(open string) {
-	if os.Getenv(NoBrowser) != "" {
+	if suppressed() {
 		return
 	}
 
