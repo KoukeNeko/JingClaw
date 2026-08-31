@@ -70,7 +70,7 @@ func Cases() []Case {
 					{Role: RoleUser, Text: "read it"},
 					{
 						Role: RoleAssistant, Text: "Looking.",
-						ToolCalls: []ToolCall{{Name: "read_file", Completed: true}},
+						ToolCalls: []ToolCall{{ID: "call_1", Name: "read_file", Completed: true}},
 					},
 				},
 				HeadSeq: 5,
@@ -94,7 +94,7 @@ func Cases() []Case {
 					{
 						Role: RoleAssistant, Text: "One test failed.",
 						ToolCalls: []ToolCall{
-							{Name: "exec_command", Completed: true, Artifact: "art_1"},
+							{ID: "call_1", Name: "exec_command", Completed: true, Artifact: "art_1"},
 						},
 					},
 				},
@@ -146,11 +146,43 @@ func Cases() []Case {
 					{
 						Role: RoleAssistant,
 						ToolCalls: []ToolCall{
-							{Name: "exec_command", Completed: true, IsError: true},
+							{ID: "call_1", Name: "exec_command", Completed: true, IsError: true},
 						},
 					},
 				},
 				HeadSeq: 4,
+			},
+		},
+		{
+			Name: "two calls of one tool come back to the right places",
+			Why: "Tools run at the same time and need not return in the " +
+				"order they were asked for, so a client matching a result " +
+				"on the tool's name puts the failure on whichever call it " +
+				"reaches first and reports a result against a call that " +
+				"did not produce it.",
+			Events: []Event{
+				user(1, "msg_1", "read both"),
+				toolRequested(2, "call_1", "read_file"),
+				toolRequested(3, "call_2", "read_file"),
+				// The first one back first, which is the whole case. A search
+				// by name walks the calls backwards and reaches call_2, so
+				// this failure lands on the call that had not answered yet.
+				toolCompleted(4, "call_1", "read_file", true),
+				toolCompleted(5, "call_2", "read_file", false),
+				completed(6, "msg_2"),
+			},
+			Expected: State{
+				Messages: []Message{
+					{Role: RoleUser, Text: "read both"},
+					{
+						Role: RoleAssistant,
+						ToolCalls: []ToolCall{
+							{ID: "call_1", Name: "read_file", Completed: true, IsError: true},
+							{ID: "call_2", Name: "read_file", Completed: true},
+						},
+					},
+				},
+				HeadSeq: 6,
 			},
 		},
 		{
@@ -169,7 +201,7 @@ func Cases() []Case {
 			Expected: State{
 				Messages: []Message{
 					{Role: RoleUser, Text: "write it"},
-					{Role: RoleAssistant, ToolCalls: []ToolCall{{Name: "write_file"}}},
+					{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_1", Name: "write_file"}}},
 				},
 				PendingApprovals: []string{"apr_1"},
 				ActiveRun:        "run_1",
@@ -192,7 +224,7 @@ func Cases() []Case {
 					{Role: RoleUser, Text: "write it"},
 					{
 						Role:      RoleAssistant,
-						ToolCalls: []ToolCall{{Name: "write_file", Completed: true}},
+						ToolCalls: []ToolCall{{ID: "call_1", Name: "write_file", Completed: true}},
 					},
 				},
 				HeadSeq: 6,
@@ -257,6 +289,10 @@ func Cases() []Case {
 }
 
 // foldNotice is what a client puts where the folded turns were.
+// Written out rather than taken from domain.FoldNotice, and that is the
+// point: the reference is only worth having while it can disagree. Sharing
+// the constant would make the recorded cases agree with any wording the
+// implementation happened to pick, including a wrong one.
 const foldNotice = "[earlier turns were folded into a summary]"
 
 func body(value any) json.RawMessage {

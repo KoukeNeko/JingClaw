@@ -88,6 +88,11 @@ type Message struct {
 
 // ToolCall is one tool a turn asked for.
 type ToolCall struct {
+	// ID is what the result comes back against. Shown in no client, and here
+	// because without it a client has only the name to match on, which is not
+	// unique within a turn.
+	ID string `json:"id"`
+
 	Name string `json:"name"`
 
 	// Completed and IsError are what a client shows about how it ended.

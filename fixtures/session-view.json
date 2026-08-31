@@ -177,6 +177,7 @@
             "text": "Looking.",
             "tool_calls": [
               {
+                "id": "call_1",
                 "name": "read_file",
                 "completed": true,
                 "is_error": false
@@ -249,6 +250,7 @@
             "text": "One test failed.",
             "tool_calls": [
               {
+                "id": "call_1",
                 "name": "exec_command",
                 "completed": true,
                 "is_error": false,
@@ -395,6 +397,7 @@
             "text": "",
             "tool_calls": [
               {
+                "id": "call_1",
                 "name": "exec_command",
                 "completed": true,
                 "is_error": true
@@ -405,6 +408,90 @@
         "pending_approvals": null,
         "active_run": "",
         "head_seq": 4
+      }
+    },
+    {
+      "name": "two calls of one tool come back to the right places",
+      "why": "Tools run at the same time and need not return in the order they were asked for, so a client matching a result on the tool's name puts the failure on whichever call it reaches first and reports a result against a call that did not produce it.",
+      "events": [
+        {
+          "seq": 1,
+          "kind": "user.message",
+          "body": {
+            "message_id": "msg_1",
+            "text": "read both"
+          }
+        },
+        {
+          "seq": 2,
+          "kind": "tool.requested",
+          "body": {
+            "call_id": "call_1",
+            "name": "read_file"
+          }
+        },
+        {
+          "seq": 3,
+          "kind": "tool.requested",
+          "body": {
+            "call_id": "call_2",
+            "name": "read_file"
+          }
+        },
+        {
+          "seq": 4,
+          "kind": "tool.completed",
+          "body": {
+            "call_id": "call_1",
+            "is_error": true,
+            "name": "read_file"
+          }
+        },
+        {
+          "seq": 5,
+          "kind": "tool.completed",
+          "body": {
+            "call_id": "call_2",
+            "is_error": false,
+            "name": "read_file"
+          }
+        },
+        {
+          "seq": 6,
+          "kind": "assistant.completed",
+          "body": {
+            "message_id": "msg_2"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "text": "read both"
+          },
+          {
+            "role": "assistant",
+            "text": "",
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "name": "read_file",
+                "completed": true,
+                "is_error": true
+              },
+              {
+                "id": "call_2",
+                "name": "read_file",
+                "completed": true,
+                "is_error": false
+              }
+            ]
+          }
+        ],
+        "pending_approvals": null,
+        "active_run": "",
+        "head_seq": 6
       }
     },
     {
@@ -454,6 +541,7 @@
             "text": "",
             "tool_calls": [
               {
+                "id": "call_1",
                 "name": "write_file",
                 "completed": false,
                 "is_error": false
@@ -530,6 +618,7 @@
             "text": "",
             "tool_calls": [
               {
+                "id": "call_1",
                 "name": "write_file",
                 "completed": true,
                 "is_error": false

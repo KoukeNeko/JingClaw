@@ -50,7 +50,8 @@ func Reduce(state State, event Event) State {
 
 	case "tool.requested":
 		var payload struct {
-			Name string `json:"name"`
+			CallID string `json:"call_id"`
+			Name   string `json:"name"`
 		}
 		_ = json.Unmarshal(event.Body, &payload)
 		// Attached to the turn that asked, which is the assistant turn being
@@ -62,10 +63,12 @@ func Reduce(state State, event Event) State {
 			index = len(state.Messages) - 1
 		}
 		state.Messages[index].ToolCalls = append(
-			state.Messages[index].ToolCalls, ToolCall{Name: payload.Name})
+			state.Messages[index].ToolCalls,
+			ToolCall{ID: payload.CallID, Name: payload.Name})
 
 	case "tool.completed":
 		var payload struct {
+			CallID   string `json:"call_id"`
 			Name     string `json:"name"`
 			IsError  bool   `json:"is_error"`
 			Artifact *struct {
@@ -77,7 +80,7 @@ func Reduce(state State, event Event) State {
 		if payload.Artifact != nil {
 			artifact = payload.Artifact.ID
 		}
-		markCompleted(state.Messages, payload.Name, payload.IsError, artifact)
+		markCompleted(state.Messages, payload.CallID, payload.IsError, artifact)
 
 	case "approval.requested":
 		var payload struct {
@@ -160,13 +163,15 @@ func openAssistant(messages []Message) int {
 	return last
 }
 
-func markCompleted(messages []Message, name string, failed bool, artifact string) {
-	// The last call of that name that has not finished. Names repeat within a
-	// turn, and marking the first would report the wrong one as done.
+func markCompleted(messages []Message, call string, failed bool, artifact string) {
+	// By id. A turn can ask for the same tool twice and the two need not come
+	// back in the order they went out, so matching on the name marks whichever
+	// one the search happens to reach — reporting a result against a call that
+	// did not produce it, which is worse than showing nothing.
 	for i := len(messages) - 1; i >= 0; i-- {
 		calls := messages[i].ToolCalls
 		for j := len(calls) - 1; j >= 0; j-- {
-			if calls[j].Name == name && !calls[j].Completed {
+			if calls[j].ID == call && !calls[j].Completed {
 				calls[j].Completed = true
 				calls[j].IsError = failed
 				calls[j].Artifact = artifact
