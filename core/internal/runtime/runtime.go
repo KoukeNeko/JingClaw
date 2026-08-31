@@ -1156,6 +1156,12 @@ func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingC
 			break
 		}
 
+		// What the run has spent, said once, when it becomes true. The model
+		// cannot see this and has no other way to learn it.
+		if notice := r.spendNotice(ctx, run, call.Name); notice != "" {
+			result.Content += notice
+		}
+
 		if err := r.recordToolResult(ctx, run, call, result, r.opts.Now()); err != nil {
 			return false, err
 		}

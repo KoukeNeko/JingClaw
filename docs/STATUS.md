@@ -695,3 +695,54 @@ What is not established is that a model will find its way there by itself, and
 no amount of wording in the prompt has demonstrated otherwise. Worth retrying
 against a stronger model — `glm-5.3` and `glm-5.3-flash` both refused for want
 of a subscription, so the strongest thing tested here is a 31B.
+
+---
+
+## Why the delegated search was not being used
+
+The finding above — that nothing reaches for `investigate` on its own — has a
+cause, and it was found by reading what the model actually thought rather than
+by guessing at the prompt again.
+
+In 3,892 characters of reasoning over a 264-file workspace, the word
+"investigate" appears **once**, and as an ordinary English verb about what the
+model is doing itself: "Let's start by investigating internal/storage/storage.go."
+It then greps. The tool is never considered.
+
+Renaming it to `delegate_search` changed nothing: twelve calls, and the word
+"delegate" appears zero times in the reasoning. So the collision with a common
+verb was not the cause either.
+
+Four ways of saying "use this for that" in the prompt had failed by then. What
+they have in common is that all four were static text, present from the first
+turn, describing a situation that had not happened yet. None of them was news
+at the moment it mattered.
+
+**What a model cannot see is how much of its context it has spent.** It asks
+for a grep, reads a file, asks for another, and at no point is there anything
+to tell it this has become a long search — so the tool that exists to make
+long searches cheap is one it never has a reason to reach for.
+
+So one sentence is appended to the sixth search's result, once per run, saying
+what has been spent and what `investigate` would do with the rest. It is a
+fact the model has no other way to learn, delivered when it becomes true.
+
+Measured against the same model and workspace:
+
+| | delegated |
+| --- | --- |
+| long search, no notice | 0 of 2 |
+| long search, notice | **1 of 2** |
+| short search (4-6 calls), notice not reached | 0 of 3, correctly |
+
+That is not a solved problem. Two runs is not evidence, and the one that did
+not delegate had the same notice as the one that did. What can be said is that
+the mechanism fires only where it was meant to — three short lookups went
+uninterrupted — and that it is the first of five attempts to produce the
+behaviour at all.
+
+The off-by-one worth recording: the notice is written before the call it
+attaches to has been recorded, so counting only the log made the threshold
+mean one more than it said and the number in the sentence one less than the
+truth. Invisible in the behaviour, wrong in the words, and found only because
+one real run stopped at exactly six calls.
