@@ -37,6 +37,19 @@ var (
 	// ErrQuestionAnswered guards the same race approvals guard: two clients
 	// answering the same prompt must not resume the run twice.
 	ErrQuestionAnswered = errors.New("storage: question has already been answered")
+
+	ErrScheduleNotFound  = errors.New("storage: schedule not found")
+	ErrDuplicateSchedule = errors.New("storage: schedule already exists")
+
+	// ErrFiringAlreadyResolved is not a failure. It is the answer to the
+	// question a reconcile is asking: somebody already accounted for this
+	// occasion. Two daemons starting a second apart, or one restarting twice,
+	// must produce one run for one three o'clock.
+	ErrFiringAlreadyResolved = errors.New("storage: that firing is already resolved")
+
+	// ErrFiringNotResolved means a link was written for an occasion nobody
+	// had claimed, which is an ordering mistake rather than a missing row.
+	ErrFiringNotResolved = errors.New("storage: that firing was never resolved")
 )
 
 type SessionStore interface {
@@ -247,4 +260,52 @@ type Store interface {
 	ApprovalStore
 	EventStore
 	MemoryStore
+	ScheduleStore
+}
+
+// ScheduleStore keeps standing instructions and the occasions already
+// accounted for.
+//
+// The two together, because the second is what makes the first safe to act
+// on. A schedule alone says when something is due; only the firings say
+// whether this particular three o'clock has already been answered, and
+// without that a daemon that restarts answers it again.
+type ScheduleStore interface {
+	CreateSchedule(ctx context.Context, schedule domain.Schedule) error
+
+	// UpdateSchedule counts the change: the revision goes up, because a
+	// schedule that changed is a different instruction and the firings
+	// resolved under the old one belong to the old one.
+	UpdateSchedule(ctx context.Context, schedule domain.Schedule) error
+
+	// SetSchedulePaused does not count as a change. Pausing does not alter
+	// what the schedule means, and bumping the revision would orphan every
+	// firing already resolved under it.
+	SetSchedulePaused(ctx context.Context, id domain.ScheduleID, paused bool) error
+
+	Schedule(ctx context.Context, id domain.ScheduleID) (domain.Schedule, error)
+
+	// ListSchedules includes paused ones. The commonest reason to look is to
+	// find the one to turn back on.
+	ListSchedules(ctx context.Context) ([]domain.Schedule, error)
+
+	DeleteSchedule(ctx context.Context, id domain.ScheduleID) error
+
+	// ResolveFiring records that an occasion has been accounted for, and
+	// refuses a second attempt at the same one with ErrFiringAlreadyResolved.
+	// That refusal is how reconciling stays idempotent.
+	ResolveFiring(ctx context.Context, firing domain.Firing) error
+
+	// RecordFiringRun links an occasion to the run it became.
+	//
+	// Separate from resolving it, and after it, because the two answer
+	// different questions and only one of them has to happen first. The
+	// claim has to be made before anything starts, or two daemons both start
+	// a run for one three o'clock; the run's identity is not known until
+	// after. A link that fails to be written costs a nicety in a listing.
+	RecordFiringRun(ctx context.Context, firing domain.Firing) error
+
+	// LastFiring is the most recent occasion accounted for at this revision,
+	// or the zero time. It is the left-hand end of "what is owed".
+	LastFiring(ctx context.Context, id domain.ScheduleID, revision int) (time.Time, error)
 }

@@ -202,6 +202,9 @@ type Options struct {
 	// NewQuestionID names a question a person will be asked.
 	NewQuestionID IDGenerator
 
+	// NewScheduleID names a standing instruction.
+	NewScheduleID IDGenerator
+
 	Now    func() time.Time
 	Logger *slog.Logger
 }
@@ -255,6 +258,7 @@ func New(ctx context.Context, opts Options) *Runtime {
 		"NewApprovalID": opts.NewApprovalID,
 		"NewPlanItemID": opts.NewPlanItemID,
 		"NewQuestionID": opts.NewQuestionID,
+		"NewScheduleID": opts.NewScheduleID,
 	}
 	for name, value := range required {
 		if isNilOption(value) {

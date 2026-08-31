@@ -101,6 +101,18 @@ const (
 	// SessionServiceSetSessionModelProcedure is the fully-qualified name of the SessionService's
 	// SetSessionModel RPC.
 	SessionServiceSetSessionModelProcedure = "/jingclaw.control.v1.SessionService/SetSessionModel"
+	// SessionServiceCreateScheduleProcedure is the fully-qualified name of the SessionService's
+	// CreateSchedule RPC.
+	SessionServiceCreateScheduleProcedure = "/jingclaw.control.v1.SessionService/CreateSchedule"
+	// SessionServiceListSchedulesProcedure is the fully-qualified name of the SessionService's
+	// ListSchedules RPC.
+	SessionServiceListSchedulesProcedure = "/jingclaw.control.v1.SessionService/ListSchedules"
+	// SessionServiceDeleteScheduleProcedure is the fully-qualified name of the SessionService's
+	// DeleteSchedule RPC.
+	SessionServiceDeleteScheduleProcedure = "/jingclaw.control.v1.SessionService/DeleteSchedule"
+	// SessionServiceSetSchedulePausedProcedure is the fully-qualified name of the SessionService's
+	// SetSchedulePaused RPC.
+	SessionServiceSetSchedulePausedProcedure = "/jingclaw.control.v1.SessionService/SetSchedulePaused"
 )
 
 // GatewayIngressServiceClient is a client for the jingclaw.control.v1.GatewayIngressService
@@ -429,6 +441,16 @@ type SessionServiceClient interface {
 	// with a model in it, and changing that underneath would attribute a turn
 	// to a model that did not write it.
 	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
+	// Schedules: standing instructions that make runs of their own.
+	//
+	// Creating one is delegation, so it goes through the control plane like
+	// anything else somebody decides. Running one is not that person acting
+	// again later, which is why a scheduled run carries the schedule as its
+	// origin and not them.
+	CreateSchedule(context.Context, *connect.Request[v1.CreateScheduleRequest]) (*connect.Response[v1.CreateScheduleResponse], error)
+	ListSchedules(context.Context, *connect.Request[v1.ListSchedulesRequest]) (*connect.Response[v1.ListSchedulesResponse], error)
+	DeleteSchedule(context.Context, *connect.Request[v1.DeleteScheduleRequest]) (*connect.Response[v1.DeleteScheduleResponse], error)
+	SetSchedulePaused(context.Context, *connect.Request[v1.SetSchedulePausedRequest]) (*connect.Response[v1.SetSchedulePausedResponse], error)
 }
 
 // NewSessionServiceClient constructs a client for the jingclaw.control.v1.SessionService service.
@@ -532,6 +554,30 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("SetSessionModel")),
 			connect.WithClientOptions(opts...),
 		),
+		createSchedule: connect.NewClient[v1.CreateScheduleRequest, v1.CreateScheduleResponse](
+			httpClient,
+			baseURL+SessionServiceCreateScheduleProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("CreateSchedule")),
+			connect.WithClientOptions(opts...),
+		),
+		listSchedules: connect.NewClient[v1.ListSchedulesRequest, v1.ListSchedulesResponse](
+			httpClient,
+			baseURL+SessionServiceListSchedulesProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("ListSchedules")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteSchedule: connect.NewClient[v1.DeleteScheduleRequest, v1.DeleteScheduleResponse](
+			httpClient,
+			baseURL+SessionServiceDeleteScheduleProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("DeleteSchedule")),
+			connect.WithClientOptions(opts...),
+		),
+		setSchedulePaused: connect.NewClient[v1.SetSchedulePausedRequest, v1.SetSchedulePausedResponse](
+			httpClient,
+			baseURL+SessionServiceSetSchedulePausedProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("SetSchedulePaused")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -552,6 +598,10 @@ type sessionServiceClient struct {
 	answerQuestion     *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
 	listModels         *connect.Client[v1.ListModelsRequest, v1.ListModelsResponse]
 	setSessionModel    *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
+	createSchedule     *connect.Client[v1.CreateScheduleRequest, v1.CreateScheduleResponse]
+	listSchedules      *connect.Client[v1.ListSchedulesRequest, v1.ListSchedulesResponse]
+	deleteSchedule     *connect.Client[v1.DeleteScheduleRequest, v1.DeleteScheduleResponse]
+	setSchedulePaused  *connect.Client[v1.SetSchedulePausedRequest, v1.SetSchedulePausedResponse]
 }
 
 // CreateSession calls jingclaw.control.v1.SessionService.CreateSession.
@@ -629,6 +679,26 @@ func (c *sessionServiceClient) SetSessionModel(ctx context.Context, req *connect
 	return c.setSessionModel.CallUnary(ctx, req)
 }
 
+// CreateSchedule calls jingclaw.control.v1.SessionService.CreateSchedule.
+func (c *sessionServiceClient) CreateSchedule(ctx context.Context, req *connect.Request[v1.CreateScheduleRequest]) (*connect.Response[v1.CreateScheduleResponse], error) {
+	return c.createSchedule.CallUnary(ctx, req)
+}
+
+// ListSchedules calls jingclaw.control.v1.SessionService.ListSchedules.
+func (c *sessionServiceClient) ListSchedules(ctx context.Context, req *connect.Request[v1.ListSchedulesRequest]) (*connect.Response[v1.ListSchedulesResponse], error) {
+	return c.listSchedules.CallUnary(ctx, req)
+}
+
+// DeleteSchedule calls jingclaw.control.v1.SessionService.DeleteSchedule.
+func (c *sessionServiceClient) DeleteSchedule(ctx context.Context, req *connect.Request[v1.DeleteScheduleRequest]) (*connect.Response[v1.DeleteScheduleResponse], error) {
+	return c.deleteSchedule.CallUnary(ctx, req)
+}
+
+// SetSchedulePaused calls jingclaw.control.v1.SessionService.SetSchedulePaused.
+func (c *sessionServiceClient) SetSchedulePaused(ctx context.Context, req *connect.Request[v1.SetSchedulePausedRequest]) (*connect.Response[v1.SetSchedulePausedResponse], error) {
+	return c.setSchedulePaused.CallUnary(ctx, req)
+}
+
 // SessionServiceHandler is an implementation of the jingclaw.control.v1.SessionService service.
 type SessionServiceHandler interface {
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
@@ -673,6 +743,16 @@ type SessionServiceHandler interface {
 	// with a model in it, and changing that underneath would attribute a turn
 	// to a model that did not write it.
 	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
+	// Schedules: standing instructions that make runs of their own.
+	//
+	// Creating one is delegation, so it goes through the control plane like
+	// anything else somebody decides. Running one is not that person acting
+	// again later, which is why a scheduled run carries the schedule as its
+	// origin and not them.
+	CreateSchedule(context.Context, *connect.Request[v1.CreateScheduleRequest]) (*connect.Response[v1.CreateScheduleResponse], error)
+	ListSchedules(context.Context, *connect.Request[v1.ListSchedulesRequest]) (*connect.Response[v1.ListSchedulesResponse], error)
+	DeleteSchedule(context.Context, *connect.Request[v1.DeleteScheduleRequest]) (*connect.Response[v1.DeleteScheduleResponse], error)
+	SetSchedulePaused(context.Context, *connect.Request[v1.SetSchedulePausedRequest]) (*connect.Response[v1.SetSchedulePausedResponse], error)
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -772,6 +852,30 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("SetSessionModel")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceCreateScheduleHandler := connect.NewUnaryHandler(
+		SessionServiceCreateScheduleProcedure,
+		svc.CreateSchedule,
+		connect.WithSchema(sessionServiceMethods.ByName("CreateSchedule")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceListSchedulesHandler := connect.NewUnaryHandler(
+		SessionServiceListSchedulesProcedure,
+		svc.ListSchedules,
+		connect.WithSchema(sessionServiceMethods.ByName("ListSchedules")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceDeleteScheduleHandler := connect.NewUnaryHandler(
+		SessionServiceDeleteScheduleProcedure,
+		svc.DeleteSchedule,
+		connect.WithSchema(sessionServiceMethods.ByName("DeleteSchedule")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceSetSchedulePausedHandler := connect.NewUnaryHandler(
+		SessionServiceSetSchedulePausedProcedure,
+		svc.SetSchedulePaused,
+		connect.WithSchema(sessionServiceMethods.ByName("SetSchedulePaused")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -804,6 +908,14 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceListModelsHandler.ServeHTTP(w, r)
 		case SessionServiceSetSessionModelProcedure:
 			sessionServiceSetSessionModelHandler.ServeHTTP(w, r)
+		case SessionServiceCreateScheduleProcedure:
+			sessionServiceCreateScheduleHandler.ServeHTTP(w, r)
+		case SessionServiceListSchedulesProcedure:
+			sessionServiceListSchedulesHandler.ServeHTTP(w, r)
+		case SessionServiceDeleteScheduleProcedure:
+			sessionServiceDeleteScheduleHandler.ServeHTTP(w, r)
+		case SessionServiceSetSchedulePausedProcedure:
+			sessionServiceSetSchedulePausedHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -871,4 +983,20 @@ func (UnimplementedSessionServiceHandler) ListModels(context.Context, *connect.R
 
 func (UnimplementedSessionServiceHandler) SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.SetSessionModel is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) CreateSchedule(context.Context, *connect.Request[v1.CreateScheduleRequest]) (*connect.Response[v1.CreateScheduleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.CreateSchedule is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) ListSchedules(context.Context, *connect.Request[v1.ListSchedulesRequest]) (*connect.Response[v1.ListSchedulesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.ListSchedules is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) DeleteSchedule(context.Context, *connect.Request[v1.DeleteScheduleRequest]) (*connect.Response[v1.DeleteScheduleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.DeleteSchedule is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) SetSchedulePaused(context.Context, *connect.Request[v1.SetSchedulePausedRequest]) (*connect.Response[v1.SetSchedulePausedResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.SessionService.SetSchedulePaused is not implemented"))
 }

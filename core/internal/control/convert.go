@@ -532,3 +532,37 @@ func questionStatusToProto(status domain.QuestionStatus) controlv1.QuestionStatu
 		return controlv1.QuestionStatus_QUESTION_STATUS_UNSPECIFIED
 	}
 }
+
+// deliveryTargetsToProto is where a schedule's answers go.
+//
+// Carried on a schedule where they are deliberately not carried on a run
+// listing: a run's targets say where one reply went, and a schedule's say
+// where every future reply will go. The second is a standing permission to
+// post somewhere, and somebody looking at the list has to be able to see it.
+func deliveryTargetsToProto(targets []domain.DeliveryTarget) []*controlv1.DeliveryTarget {
+	if len(targets) == 0 {
+		return nil
+	}
+
+	converted := make([]*controlv1.DeliveryTarget, 0, len(targets))
+	for _, target := range targets {
+		converted = append(converted, &controlv1.DeliveryTarget{
+			Kind: target.Kind, Ref: target.Ref,
+		})
+	}
+	return converted
+}
+
+func deliveryTargetsFromProto(targets []*controlv1.DeliveryTarget) []domain.DeliveryTarget {
+	if len(targets) == 0 {
+		return nil
+	}
+
+	converted := make([]domain.DeliveryTarget, 0, len(targets))
+	for _, target := range targets {
+		converted = append(converted, domain.DeliveryTarget{
+			Kind: target.GetKind(), Ref: target.GetRef(),
+		})
+	}
+	return converted
+}

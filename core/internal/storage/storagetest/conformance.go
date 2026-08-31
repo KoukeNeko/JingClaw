@@ -61,6 +61,14 @@ func Run(t *testing.T, newStore Factory) {
 
 		"MemoryValidityIsSeparateFromBelief": testMemoryValidityIsSeparateFromBelief,
 		"SupersedingClosesTheOldValidity":    testSupersedingClosesTheOldValidity,
+
+		"ScheduleRoundTrip":                  testScheduleRoundTrip,
+		"ScheduleListIncludesPaused":         testScheduleListIncludesPaused,
+		"EditingASchedulesCountsAsAChange":   testEditingASchedulesCountsAsAChange,
+		"PausingIsNotAChange":                testPausingIsNotAChange,
+		"OneOccasionResolvesOnce":            testOneOccasionResolvesOnce,
+		"LastFiringIsPerRevision":            testLastFiringIsPerRevision,
+		"DeletingAScheduleForgetsItsFirings": testDeletingAScheduleForgetsItsFirings,
 	}
 
 	for name, fn := range tests {
@@ -1208,5 +1216,291 @@ func testPruningRaisesTheWatermark(t *testing.T, newStore Factory) {
 	}
 	if through, err := store.LogPrunedThrough(ctx); err != nil || through != 3 {
 		t.Errorf("the watermark moved to %d (err %v); it must stay at 3", through, err)
+	}
+}
+
+// aSchedule is one standing instruction, with a session to belong to.
+func aSchedule(t *testing.T, store storage.Store, id domain.ScheduleID) domain.Schedule {
+	t.Helper()
+
+	ctx := context.Background()
+	// The session is a fixture rather than the thing under test, so a test
+	// that asks for the same schedule twice — deleting and recreating one —
+	// gets the session it already made.
+	session := domain.Session{ID: domain.SessionID("ses_" + string(id)), Title: "scheduled"}
+	if err := store.CreateSession(ctx, session); err != nil &&
+		!errors.Is(err, storage.ErrDuplicateSession) {
+		t.Fatalf("create session: %v", err)
+	}
+
+	return domain.Schedule{
+		ID:         id,
+		Revision:   1,
+		Expression: "0 9 * * *",
+		Zone:       "Asia/Taipei",
+		Prompt:     "what changed yesterday",
+		SessionID:  session.ID,
+		CreatedBy:  domain.FromTheMachine("cli"),
+		Deliver:    []domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient, Ref: "cli"}},
+		CreatedAt:  time.Unix(1000, 0).UTC(),
+	}
+}
+
+func testScheduleRoundTrip(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	want := aSchedule(t, store, "sch_1")
+
+	if err := store.CreateSchedule(ctx, want); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.CreateSchedule(ctx, want); !errors.Is(err, storage.ErrDuplicateSchedule) {
+		t.Errorf("creating it twice: %v", err)
+	}
+
+	got, err := store.Schedule(ctx, want.ID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+
+	if got.Expression != want.Expression || got.Zone != want.Zone || got.Prompt != want.Prompt {
+		t.Errorf("what it does did not survive: %+v", got)
+	}
+	// Who set it up is attribution and has to survive, because it is the only
+	// record of who authorized an automation that acts on its own.
+	if got.CreatedBy.Kind != want.CreatedBy.Kind {
+		t.Errorf("who created it did not survive: %+v", got.CreatedBy)
+	}
+	// Where the answer goes is stored, never inferred later from anything.
+	if len(got.Deliver) != 1 || got.Deliver[0].Ref != "cli" {
+		t.Errorf("where it delivers did not survive: %+v", got.Deliver)
+	}
+	if !got.CreatedAt.Equal(want.CreatedAt) {
+		t.Errorf("created at %v, want %v", got.CreatedAt, want.CreatedAt)
+	}
+
+	if _, err := store.Schedule(ctx, "sch_missing"); !errors.Is(err, storage.ErrScheduleNotFound) {
+		t.Errorf("a schedule that is not there: %v", err)
+	}
+}
+
+func testScheduleListIncludesPaused(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	for _, id := range []domain.ScheduleID{"sch_1", "sch_2"} {
+		if err := store.CreateSchedule(ctx, aSchedule(t, store, id)); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	if err := store.SetSchedulePaused(ctx, "sch_2", true); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+
+	// Paused ones included: the commonest reason to look at this list is to
+	// find the one to turn back on.
+	listed, err := store.ListSchedules(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("want two schedules, got %d", len(listed))
+	}
+
+	var paused int
+	for _, one := range listed {
+		if one.Paused {
+			paused++
+		}
+	}
+	if paused != 1 {
+		t.Errorf("want one paused, got %d", paused)
+	}
+}
+
+// testEditingASchedulesCountsAsAChange is what stops an edit disturbing the
+// occasions already accounted for.
+func testEditingASchedulesCountsAsAChange(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	schedule := aSchedule(t, store, "sch_1")
+
+	if err := store.CreateSchedule(ctx, schedule); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	schedule.Expression = "0 18 * * *"
+	if err := store.UpdateSchedule(ctx, schedule); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	got, err := store.Schedule(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.Expression != "0 18 * * *" {
+		t.Errorf("the change did not take: %q", got.Expression)
+	}
+	// A schedule that changed is a different instruction, and the firings
+	// resolved under the old one belong to the old one.
+	if got.Revision != 2 {
+		t.Errorf("revision %d, want 2", got.Revision)
+	}
+
+	err = store.UpdateSchedule(ctx, domain.Schedule{ID: "sch_missing"})
+	if !errors.Is(err, storage.ErrScheduleNotFound) {
+		t.Errorf("updating one that is not there: %v", err)
+	}
+}
+
+// testPausingIsNotAChange is the other half.
+//
+// Pausing does not alter what the schedule means. Counting it would orphan
+// every occasion already resolved, and turning a schedule off and on again
+// would make it owe its whole history.
+func testPausingIsNotAChange(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	schedule := aSchedule(t, store, "sch_1")
+
+	if err := store.CreateSchedule(ctx, schedule); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.SetSchedulePaused(ctx, schedule.ID, true); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if err := store.SetSchedulePaused(ctx, schedule.ID, false); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+
+	got, err := store.Schedule(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.Revision != 1 {
+		t.Errorf("pausing counted as %d changes", got.Revision-1)
+	}
+	if got.Paused {
+		t.Error("it did not resume")
+	}
+}
+
+// testOneOccasionResolvesOnce is what makes reconciling idempotent.
+//
+// A daemon restarting twice in a minute, or two of them starting a second
+// apart, must produce one run for one three o'clock.
+func testOneOccasionResolvesOnce(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	schedule := aSchedule(t, store, "sch_1")
+
+	if err := store.CreateSchedule(ctx, schedule); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	due := time.Unix(2000, 0).UTC()
+	firing := domain.Firing{
+		ScheduleID: schedule.ID, Revision: 1,
+		For: due, Observed: time.Unix(2100, 0).UTC(), Missed: 3, RunID: "run_1",
+	}
+
+	if err := store.ResolveFiring(ctx, firing); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	// The second attempt is refused, and that refusal is the answer to the
+	// question rather than a failure to report.
+	second := firing
+	second.Observed = time.Unix(2200, 0).UTC()
+	second.RunID = "run_2"
+	if err := store.ResolveFiring(ctx, second); !errors.Is(err, storage.ErrFiringAlreadyResolved) {
+		t.Errorf("the same occasion resolved twice: %v", err)
+	}
+
+	last, err := store.LastFiring(ctx, schedule.ID, 1)
+	if err != nil {
+		t.Fatalf("last firing: %v", err)
+	}
+	if !last.Equal(due) {
+		t.Errorf("last firing %v, want %v", last, due)
+	}
+}
+
+// testLastFiringIsPerRevision keeps an edit from skipping the new
+// instruction's first occasion.
+func testLastFiringIsPerRevision(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	schedule := aSchedule(t, store, "sch_1")
+
+	if err := store.CreateSchedule(ctx, schedule); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Nothing has happened yet, which is the zero time rather than an error.
+	last, err := store.LastFiring(ctx, schedule.ID, 1)
+	if err != nil {
+		t.Fatalf("last firing: %v", err)
+	}
+	if !last.IsZero() {
+		t.Errorf("a schedule that never fired reports %v", last)
+	}
+
+	if err := store.ResolveFiring(ctx, domain.Firing{
+		ScheduleID: schedule.ID, Revision: 1,
+		For: time.Unix(2000, 0).UTC(), Observed: time.Unix(2000, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	// The next revision has its own account. Asking what the old instruction
+	// last did would let an edit skip the new one's first occasion.
+	last, err = store.LastFiring(ctx, schedule.ID, 2)
+	if err != nil {
+		t.Fatalf("last firing at the new revision: %v", err)
+	}
+	if !last.IsZero() {
+		t.Errorf("the new revision inherited %v from the old one", last)
+	}
+}
+
+func testDeletingAScheduleForgetsItsFirings(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	schedule := aSchedule(t, store, "sch_1")
+
+	if err := store.CreateSchedule(ctx, schedule); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.ResolveFiring(ctx, domain.Firing{
+		ScheduleID: schedule.ID, Revision: 1,
+		For: time.Unix(2000, 0).UTC(), Observed: time.Unix(2000, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	if err := store.DeleteSchedule(ctx, schedule.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := store.Schedule(ctx, schedule.ID); !errors.Is(err, storage.ErrScheduleNotFound) {
+		t.Errorf("it survived deletion: %v", err)
+	}
+	if err := store.DeleteSchedule(ctx, schedule.ID); !errors.Is(err, storage.ErrScheduleNotFound) {
+		t.Errorf("deleting it twice: %v", err)
+	}
+
+	// And its account goes with it. One created again under the same name
+	// would otherwise inherit occasions it never had.
+	recreated := aSchedule(t, store, "sch_1")
+	recreated.SessionID = schedule.SessionID
+	if err := store.CreateSchedule(ctx, recreated); err != nil {
+		t.Fatalf("create again: %v", err)
+	}
+	last, err := store.LastFiring(ctx, recreated.ID, 1)
+	if err != nil {
+		t.Fatalf("last firing: %v", err)
+	}
+	if !last.IsZero() {
+		t.Errorf("a schedule created again inherited a firing at %v", last)
 	}
 }

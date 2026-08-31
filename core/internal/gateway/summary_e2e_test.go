@@ -119,6 +119,7 @@ func newSummaryHarness(t *testing.T, turns [][]provider.Event) *harness {
 		NewApprovalID: next("apr"),
 		NewPlanItemID: next("todo"),
 		NewQuestionID: next("qst"),
+		NewScheduleID: next("sch"),
 		Now:           time.Now,
 		Logger:        slog.New(slog.DiscardHandler),
 	})

@@ -71,6 +71,7 @@ func newHarness(t *testing.T, chunkDelay time.Duration) harness {
 		NewApprovalID: next("apr"),
 		NewPlanItemID: next("todo"),
 		NewQuestionID: next("qst"),
+		NewScheduleID: next("sch"),
 		Now:           clock,
 		Logger:        slog.New(slog.DiscardHandler),
 	})

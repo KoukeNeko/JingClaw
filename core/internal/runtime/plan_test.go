@@ -77,6 +77,7 @@ func newScriptedRuntimeWith(
 		NewApprovalID: next("apr"),
 		NewPlanItemID: func() string { return fmt.Sprintf("todo_%d", steps.Add(1)) },
 		NewQuestionID: next("qst"),
+		NewScheduleID: next("sch"),
 		Now:           time.Now,
 		Logger:        slog.New(slog.DiscardHandler),
 	}), store

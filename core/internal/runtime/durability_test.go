@@ -53,6 +53,7 @@ func newRestartableRuntime(t *testing.T, dbPath string, chunkDelay time.Duration
 		NewApprovalID: next("apr"),
 		NewPlanItemID: next("todo"),
 		NewQuestionID: next("qst"),
+		NewScheduleID: next("sch"),
 		Now:           time.Now,
 		Logger:        slog.New(slog.DiscardHandler),
 	})

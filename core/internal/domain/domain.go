@@ -69,6 +69,16 @@ const (
 	// Reserved for M1b. No gateway plane exists yet, but Run carries an origin
 	// from the start so that adding one is not a schema migration.
 	OriginGateway RunOriginKind = "gateway"
+
+	// OriginSchedule is a run nobody asked for just now: a schedule came due.
+	//
+	// Its own kind rather than the creator's, and that is the whole design.
+	// Creating a schedule is delegation; running one is not impersonation. A
+	// run that carried the authority of whoever set it up would be that
+	// person still acting at three in the morning, and every later question
+	// about what may be done unattended would have to be argued against an
+	// architecture that had already answered it.
+	OriginSchedule RunOriginKind = "schedule"
 )
 
 // ExternalPrincipal is an identity owned by an external platform. Authorization
@@ -107,6 +117,14 @@ type RunOrigin struct {
 // not something this program knows.
 func FromTheMachine(client string) RunOrigin {
 	return RunOrigin{Kind: OriginLocalClient, ClientID: client}
+}
+
+// FromASchedule is a run that came due.
+//
+// Who set it up is on the schedule, not here. This says who is acting, and
+// the answer is the schedule itself.
+func FromASchedule(id ScheduleID) RunOrigin {
+	return RunOrigin{Kind: OriginSchedule, ClientID: string(id)}
 }
 
 // FromAPlatformAccount is a decision made by somebody the platform named.
@@ -1075,3 +1093,110 @@ type ApprovalResolved struct {
 
 func (ApprovalRequested) isEventPayload() {}
 func (ApprovalResolved) isEventPayload()  {}
+
+// ScheduleID names a schedule.
+type ScheduleID string
+
+// Schedule is a standing instruction to do something at a time.
+//
+// Not a run, and not a session: it is the thing that makes them. What it
+// holds is everything needed to decide, from the log alone, which firings are
+// owed — because a timer inside a process is not the truth. A laptop that
+// slept through three in the morning has to work out on waking what it
+// missed, and a process that only knows "the next tick is in sixty seconds"
+// cannot.
+type Schedule struct {
+	ID ScheduleID
+
+	// Revision counts changes to when or what this does.
+	//
+	// Part of a firing's identity, so that editing a schedule cannot make an
+	// already-resolved firing look unresolved and run a second time.
+	Revision int
+
+	// Expression is the five-field cron the firings come from, and Zone the
+	// place its hours are in.
+	//
+	// A zone by name rather than an offset: "every day at nine" means nine
+	// where somebody is, and an offset is wrong twice a year.
+	Expression string
+	Zone       string
+
+	// Prompt is what the agent is asked, each time.
+	Prompt string
+
+	// SessionID is the conversation the firings belong to.
+	//
+	// One session per schedule rather than one per firing, so a daily
+	// question can be answered with reference to yesterday's answer. What
+	// stops it growing forever is the same compaction every other session
+	// gets.
+	SessionID SessionID
+
+	// CreatedBy is who set this up. Attribution, and only that: it is not who
+	// acts when the schedule fires.
+	CreatedBy RunOrigin
+
+	// Deliver is where the answer goes, said outright.
+	//
+	// Not inferred from where the schedule was created. A schedule made in a
+	// channel may default to that channel, but "made here once" is not the
+	// same statement as "answer here every day for a year", and only the
+	// second one should be able to send messages somewhere.
+	//
+	// Empty delivers nowhere, which is not the same as producing nothing: the
+	// run and its answer are in the log either way.
+	Deliver []DeliveryTarget
+
+	// Missed says what to do about firings that came due while nothing was
+	// running.
+	Missed MissedPolicy
+
+	// Paused stops it firing without forgetting it.
+	Paused bool
+
+	CreatedAt time.Time
+}
+
+// MissedPolicy is what happens to firings nothing was there for.
+type MissedPolicy string
+
+const (
+	// MissedCoalesce runs once, however many were missed.
+	//
+	// The default, and what launchd and systemd both do: a machine that slept
+	// through four hourly firings wakes up owing one answer, not four agents
+	// arriving at once to do yesterday's work.
+	MissedCoalesce MissedPolicy = ""
+
+	// MissedSkip runs nothing that was missed, and waits for the next one.
+	//
+	// For a question whose answer is only about now. "Is the disk full" asked
+	// about eleven o'clock last night is not worth the tokens.
+	MissedSkip MissedPolicy = "skip"
+)
+
+// Firing is one occasion a schedule was due.
+//
+// Identified by the schedule, its revision and the time it was due — never by
+// when it actually ran. That triple is what makes reconciling idempotent: a
+// daemon restarting, or waking, works out what is owed from the log and
+// cannot create a second run for a firing already resolved.
+type Firing struct {
+	ScheduleID ScheduleID
+	Revision   int
+
+	// For is the time this firing was due, which is a fact about the
+	// schedule. Observed is when something noticed, which is a fact about the
+	// machine. On a laptop that slept they are hours apart, and confusing
+	// them is how a log stops being able to say what happened.
+	For      time.Time
+	Observed time.Time
+
+	// Missed counts firings coalesced into this one, so an answer that is
+	// late can say so.
+	Missed int
+
+	// RunID is the run this became, once there is one.
+	RunID RunID
+}

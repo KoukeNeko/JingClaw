@@ -43,6 +43,21 @@ type Store struct {
 	// memories share a timestamp — which they do constantly in tests.
 	memories    map[domain.MemoryID]domain.Memory
 	memoryOrder []domain.MemoryID
+
+	schedules     map[domain.ScheduleID]domain.Schedule
+	scheduleOrder []domain.ScheduleID
+
+	// firings is keyed the way the table is: by the occasion, never by when
+	// it ran. That is what makes resolving one twice a refusal rather than a
+	// second row.
+	firings map[firingKey]domain.Firing
+}
+
+// firingKey is one occasion: which schedule, at which revision, due when.
+type firingKey struct {
+	schedule domain.ScheduleID
+	revision int
+	due      int64
 }
 
 var _ storage.Store = (*Store)(nil)
@@ -57,6 +72,8 @@ func New() *Store {
 		pruned:    make(map[domain.SessionID]domain.Seq),
 		approvals: make(map[domain.ApprovalID]domain.Approval),
 		memories:  make(map[domain.MemoryID]domain.Memory),
+		schedules: make(map[domain.ScheduleID]domain.Schedule),
+		firings:   make(map[firingKey]domain.Firing),
 	}
 }
 
@@ -645,4 +662,195 @@ func (s *Store) LogPrunedThrough(ctx context.Context) (domain.Seq, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.logPruned, nil
+}
+
+func (s *Store) CreateSchedule(ctx context.Context, schedule domain.Schedule) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.schedules[schedule.ID]; exists {
+		return storage.ErrDuplicateSchedule
+	}
+	s.schedules[schedule.ID] = schedule
+	s.scheduleOrder = append(s.scheduleOrder, schedule.ID)
+	return nil
+}
+
+func (s *Store) UpdateSchedule(ctx context.Context, schedule domain.Schedule) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.schedules[schedule.ID]
+	if !ok {
+		return storage.ErrScheduleNotFound
+	}
+
+	// Counted here rather than taken from the caller, so that two callers
+	// cannot both write revision 4 over each other's meaning.
+	schedule.Revision = existing.Revision + 1
+	schedule.SessionID = existing.SessionID
+	schedule.CreatedBy = existing.CreatedBy
+	schedule.CreatedAt = existing.CreatedAt
+	s.schedules[schedule.ID] = schedule
+	return nil
+}
+
+func (s *Store) SetSchedulePaused(
+	ctx context.Context, id domain.ScheduleID, paused bool,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	schedule, ok := s.schedules[id]
+	if !ok {
+		return storage.ErrScheduleNotFound
+	}
+	// Not a change to what it means, so the revision stays where it is.
+	schedule.Paused = paused
+	s.schedules[id] = schedule
+	return nil
+}
+
+func (s *Store) Schedule(
+	ctx context.Context, id domain.ScheduleID,
+) (domain.Schedule, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Schedule{}, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	schedule, ok := s.schedules[id]
+	if !ok {
+		return domain.Schedule{}, storage.ErrScheduleNotFound
+	}
+	return schedule, nil
+}
+
+func (s *Store) ListSchedules(ctx context.Context) ([]domain.Schedule, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	schedules := make([]domain.Schedule, 0, len(s.scheduleOrder))
+	for _, id := range s.scheduleOrder {
+		if schedule, ok := s.schedules[id]; ok {
+			schedules = append(schedules, schedule)
+		}
+	}
+	return schedules, nil
+}
+
+func (s *Store) DeleteSchedule(ctx context.Context, id domain.ScheduleID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.schedules[id]; !ok {
+		return storage.ErrScheduleNotFound
+	}
+	delete(s.schedules, id)
+	for index, kept := range s.scheduleOrder {
+		if kept == id {
+			s.scheduleOrder = append(s.scheduleOrder[:index], s.scheduleOrder[index+1:]...)
+			break
+		}
+	}
+
+	// The firings go with it, as the foreign key does in the other store. A
+	// schedule created again under the same name would otherwise inherit an
+	// account of occasions it never had.
+	for key := range s.firings {
+		if key.schedule == id {
+			delete(s.firings, key)
+		}
+	}
+	return nil
+}
+
+func (s *Store) ResolveFiring(ctx context.Context, firing domain.Firing) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := firingKey{
+		schedule: firing.ScheduleID,
+		revision: firing.Revision,
+		due:      firing.For.UnixNano(),
+	}
+	if _, resolved := s.firings[key]; resolved {
+		return storage.ErrFiringAlreadyResolved
+	}
+	s.firings[key] = firing
+	return nil
+}
+
+func (s *Store) LastFiring(
+	ctx context.Context, id domain.ScheduleID, revision int,
+) (time.Time, error) {
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var latest int64
+	var found bool
+	for key := range s.firings {
+		if key.schedule != id || key.revision != revision {
+			continue
+		}
+		if !found || key.due > latest {
+			latest, found = key.due, true
+		}
+	}
+	if !found {
+		return time.Time{}, nil
+	}
+	return time.Unix(0, latest).UTC(), nil
+}
+
+func (s *Store) RecordFiringRun(ctx context.Context, firing domain.Firing) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := firingKey{
+		schedule: firing.ScheduleID,
+		revision: firing.Revision,
+		due:      firing.For.UnixNano(),
+	}
+	resolved, ok := s.firings[key]
+	if !ok {
+		return storage.ErrFiringNotResolved
+	}
+	resolved.RunID = firing.RunID
+	s.firings[key] = resolved
+	return nil
 }

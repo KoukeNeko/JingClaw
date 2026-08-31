@@ -42,6 +42,88 @@ message Run {
   string parent_run_id = 9;
 }
 
+// Schedule is a standing instruction, as a client sees it.
+message Schedule {
+  string id = 1;
+  int32 revision = 2;
+
+  string expression = 3;
+
+  // The zone its hours are in, by name. "Every day at nine" means nine where
+  // somebody is, and an offset would be wrong twice a year.
+  string zone = 4;
+
+  string prompt = 5;
+  string session_id = 6;
+
+  // Who set this up. Attribution only: it is never who acts when it fires.
+  RunOrigin created_by = 7;
+
+  repeated DeliveryTarget deliver = 8;
+
+  // Empty coalesces missed firings into one; "skip" runs nothing that is
+  // already late.
+  string missed_policy = 9;
+
+  bool paused = 10;
+  google.protobuf.Timestamp created_at = 11;
+
+  // When it will next come due, so a listing can say. Absent for a paused
+  // schedule, which has no next time until it is resumed.
+  google.protobuf.Timestamp next_at = 12;
+}
+
+message CreateScheduleRequest {
+  RequestMeta meta = 1;
+
+  string expression = 2;
+  string zone = 3;
+  string prompt = 4;
+
+  // Where the answer goes, said outright. A schedule created in a channel may
+  // default to that channel, but "made here once" and "post here every day
+  // for a year" are different statements and only the second one may send.
+  repeated DeliveryTarget deliver = 5;
+
+  string missed_policy = 6;
+
+  // Optional. Empty makes a session for this schedule to live in, which is
+  // the ordinary case: one session per schedule, so a daily question can be
+  // answered with reference to yesterday's answer.
+  string session_id = 7;
+}
+
+message CreateScheduleResponse {
+  Schedule schedule = 1;
+}
+
+message ListSchedulesRequest {
+  RequestMeta meta = 1;
+}
+
+message ListSchedulesResponse {
+  // Paused ones included: the commonest reason to look is to find the one to
+  // turn back on.
+  repeated Schedule schedules = 1;
+}
+
+message DeleteScheduleRequest {
+  RequestMeta meta = 1;
+  string schedule_id = 2;
+}
+
+message DeleteScheduleResponse {}
+
+message SetSchedulePausedRequest {
+  RequestMeta meta = 1;
+  string schedule_id = 2;
+  bool paused = 3;
+}
+
+message SetSchedulePausedResponse {
+  Schedule schedule = 1;
+}
+
 message CreateSessionRequest {
   RequestMeta meta = 1;
   string title = 2;
@@ -566,6 +648,17 @@ service SessionService {
   // with a model in it, and changing that underneath would attribute a turn
   // to a model that did not write it.
   rpc SetSessionModel(SetSessionModelRequest) returns (SetSessionModelResponse);
+
+  // Schedules: standing instructions that make runs of their own.
+  //
+  // Creating one is delegation, so it goes through the control plane like
+  // anything else somebody decides. Running one is not that person acting
+  // again later, which is why a scheduled run carries the schedule as its
+  // origin and not them.
+  rpc CreateSchedule(CreateScheduleRequest) returns (CreateScheduleResponse);
+  rpc ListSchedules(ListSchedulesRequest) returns (ListSchedulesResponse);
+  rpc DeleteSchedule(DeleteScheduleRequest) returns (DeleteScheduleResponse);
+  rpc SetSchedulePaused(SetSchedulePausedRequest) returns (SetSchedulePausedResponse);
 }
 
 message ListModelsRequest {

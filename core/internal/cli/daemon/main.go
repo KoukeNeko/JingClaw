@@ -438,6 +438,7 @@ func run(args []string) error {
 		NewApprovalID:      func() string { return id.WithPrefix("apr") },
 		NewPlanItemID:      planItemIDs(),
 		NewQuestionID:      func() string { return id.WithPrefix("qst") },
+		NewScheduleID:      func() string { return id.WithPrefix("sch") },
 		Now:                time.Now,
 		Logger:             logger,
 	})
@@ -457,6 +458,11 @@ func run(args []string) error {
 	if recovered > 0 {
 		logger.Warn("resolved runs orphaned by a previous shutdown", "count", recovered)
 	}
+
+	// Schedules are reconciled from here on: once immediately, because a
+	// machine that was asleep ran no timers and has to work out what came due
+	// while it was gone, and then every minute.
+	go watchSchedules(rootCtx, rt, logger)
 
 	controlToken, err := control.NewToken(control.ScopeControl)
 	if err != nil {

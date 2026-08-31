@@ -108,6 +108,7 @@ func newModelRuntime(t *testing.T) (*runtime.Runtime, *watchingProvider) {
 		NewApprovalID: next("apr"),
 		NewPlanItemID: planSteps(),
 		NewQuestionID: next("qst"),
+		NewScheduleID: next("sch"),
 		Now:           time.Now,
 		Logger:        slog.New(slog.DiscardHandler),
 	}), watching
