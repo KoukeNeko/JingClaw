@@ -284,7 +284,12 @@ func approvalStatusFromProto(status controlv1.ApprovalStatus) domain.ApprovalSta
 	}
 }
 
-func planStatusFromProto(status controlv1.PlanStatus) domain.PlanStatus {
+// PlanStatusFromProto reads a plan step's status off the wire.
+//
+// Exported so the panel reads one the same way the daemon wrote it. A second
+// copy of this switch is a place for the two to disagree about what an
+// abandoned step is, which is exactly the kind of drift nothing would catch.
+func PlanStatusFromProto(status controlv1.PlanStatus) domain.PlanStatus {
 	switch status {
 	case controlv1.PlanStatus_PLAN_STATUS_PENDING:
 		return domain.PlanPending
@@ -362,7 +367,7 @@ func planItemsFromProto(in []*controlv1.PlanItem) []domain.PlanItem {
 		out = append(out, domain.PlanItem{
 			ID:     item.GetId(),
 			Title:  item.GetTitle(),
-			Status: planStatusFromProto(item.GetStatus()),
+			Status: PlanStatusFromProto(item.GetStatus()),
 			Note:   item.GetNote(),
 		})
 	}

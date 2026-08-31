@@ -137,7 +137,7 @@ func TestEveryValueSurvivesTheWire(t *testing.T) {
 		for _, value := range []domain.PlanStatus{
 			domain.PlanPending, domain.PlanInProgress, domain.PlanCompleted, domain.PlanAbandoned,
 		} {
-			if back := planStatusFromProto(planStatusToProto(value)); back != value {
+			if back := PlanStatusFromProto(planStatusToProto(value)); back != value {
 				t.Errorf("%q came back as %q", value, back)
 			}
 		}
