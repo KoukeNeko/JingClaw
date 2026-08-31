@@ -1,0 +1,12 @@
+-- Whose words a memory came out of.
+--
+-- Trust already said whether the turn could be believed; it could not say
+-- whether the operator was the one speaking. A local turn that ran a command
+-- is trusted — the operator asked for it — and what the command printed is
+-- still not a person dictating a standing instruction.
+--
+-- Empty is the operator, so every memory already stored is treated as
+-- something a person said. That is what they were: the only way to write one
+-- until now was a turn a person typed, and the standing ones went through an
+-- approval a person answered.
+ALTER TABLE memories ADD COLUMN from_provenance TEXT NOT NULL DEFAULT '';

@@ -250,7 +250,11 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 		// which is what the field has always claimed to be. A gateway turn is
 		// the lowest there is; so is a local turn in which the model has
 		// already read somebody else's page.
-		Trust:         call.Context.TrustOrUntrusted(),
+		Trust: call.Context.TrustOrUntrusted(),
+
+		// And whose words it came out of, which Trust cannot say. A local
+		// turn that read a file is trusted and is not the operator dictating.
+		From:          call.Context.From,
 		Origin:        call.Context.Origin,
 		SourceSession: domain.SessionID(call.Context.SessionID),
 		SourceSeq:     call.Context.Seq,
@@ -627,6 +631,23 @@ func Instructions(
 	)
 	for _, instruction := range found {
 		if instruction.Trust == domain.TrustUntrusted {
+			continue
+		}
+
+		// And it has to be the operator's own words, not something the model
+		// read and wrote down. Trust cannot make this distinction: a turn
+		// somebody typed at this machine is trusted even after the model has
+		// run a command, and what that command printed is not a person
+		// dictating a standing instruction.
+		//
+		// This is the layer whose absence was recorded in internal/tool as a
+		// known hole. The path was: a local run shells out to something that
+		// reaches the network, the run stays trusted because a command is not
+		// declared foreign, and what comes back is written into a memory that
+		// is put in front of every later run. Two people-facing approvals sat
+		// on that path and neither of them could see where the text came
+		// from.
+		if !instruction.From.IsOperator() {
 			continue
 		}
 

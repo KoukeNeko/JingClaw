@@ -1130,6 +1130,10 @@ func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingC
 		if err != nil {
 			return false, err
 		}
+		from, err := r.provenanceSoFar(ctx, run, pending.Seq)
+		if err != nil {
+			return false, err
+		}
 
 		call := tool.Call{
 			ID:        string(pending.CallID),
@@ -1141,6 +1145,7 @@ func (r *Runtime) runTools(ctx context.Context, run domain.Run, calls []pendingC
 				Origin:    run.Origin,
 				Seq:       pending.Seq,
 				Trust:     trust,
+				From:      from,
 			},
 		}
 
@@ -1268,9 +1273,30 @@ func (r *Runtime) recordToolResult(
 			IsError:    result.IsError,
 			Truncated:  result.Truncated,
 			Foreign:    r.returnsForeignContent(call.Name),
+			From:       r.provenanceOf(call.Name),
 			Artifact:   artifactOf(result),
 			DurationMS: r.opts.Now().Sub(started).Milliseconds(),
 		})
+}
+
+// provenanceOf is who wrote what a tool returns.
+//
+// Asked of the registry at the moment of the call and written onto the event,
+// like Foreign beside it: a tool removed from the configuration must not make
+// an old event unclassifiable.
+//
+// A tool nobody can find is external. Not because it is, but because the
+// question here is what may be believed, and the answer for something that
+// cannot be identified is the least of the three.
+func (r *Runtime) provenanceOf(name string) domain.Provenance {
+	if r.opts.Tools == nil {
+		return domain.ProvenanceExternal
+	}
+	registered, ok := r.opts.Tools.Lookup(name)
+	if !ok {
+		return domain.ProvenanceExternal
+	}
+	return registered.Spec().Capabilities.Provenance
 }
 
 // returnsForeignContent asks whether a tool's results carry somebody else's

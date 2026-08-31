@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -71,6 +72,7 @@ func (t *GlobFiles) Spec() tool.Spec {
 }`),
 		Level: tool.LevelWorkspaceRead,
 		Capabilities: tool.Capabilities{
+			Provenance:   domain.ProvenanceLocalUnknown,
 			ReadFS:       true,
 			Idempotent:   true,
 			ParallelSafe: true,
@@ -224,6 +226,7 @@ func (t *Grep) Spec() tool.Spec {
 }`),
 		Level: tool.LevelWorkspaceRead,
 		Capabilities: tool.Capabilities{
+			Provenance:   domain.ProvenanceLocalUnknown,
 			ReadFS:       true,
 			Idempotent:   true,
 			ParallelSafe: true,

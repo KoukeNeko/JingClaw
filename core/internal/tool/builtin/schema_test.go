@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 )
 
@@ -98,5 +99,90 @@ func TestInvestigateNamesItsArgumentWhereTheModelWillRead(t *testing.T) {
 	// field name rather than being told it sent nothing.
 	if declared.AdditionalProperties == nil || *declared.AdditionalProperties {
 		t.Error("the schema accepts fields it does not understand")
+	}
+}
+
+// handsBackWhatItDidNotCompose is every tool whose result is text somebody or
+// something else produced.
+//
+// Listed rather than derived, because there is no capability that means it: a
+// tool that reads the artifact store touches no workspace and no network and
+// still hands back a page it did not write. What is derived is the other
+// direction — see the test below, which catches a tool added later.
+var handsBackWhatItDidNotCompose = []tool.Tool{
+	&ReadFile{}, &GlobFiles{}, &Grep{}, &GitStatus{}, &GitDiff{},
+	&ExecCommand{}, &ReadArtifact{}, &WebRead{}, &WebSearch{},
+	&Investigate{}, &StartProcess{}, &ProcessIO{}, &SkillLoad{},
+}
+
+// TestAnythingThatReadsSaysWhoseWordsComeBack is what stops a tool being
+// added without anyone thinking about it.
+//
+// Left at the zero value a tool claims to return the operator's own words,
+// which is how a command's output ends up eligible to become a standing
+// instruction — the hole this was built to close.
+func TestAnythingThatReadsSaysWhoseWordsComeBack(t *testing.T) {
+	for _, one := range handsBackWhatItDidNotCompose {
+		spec := one.Spec()
+		if spec.Capabilities.Provenance.IsOperator() {
+			t.Errorf("%s hands back text it did not compose and claims to return "+
+				"the operator's own words; say local_unknown for this machine or "+
+				"external for somebody else's", spec.Name)
+		}
+	}
+}
+
+// TestAToolThatReachesIsOnThatList is the half that catches a new one.
+//
+// Reaching the filesystem or the network is not what makes a result somebody
+// else's words, but it does mean somebody had to decide — so a tool that
+// reaches and is not on the list above is one nobody has thought about.
+func TestAToolThatReachesIsOnThatList(t *testing.T) {
+	listed := make(map[string]bool, len(handsBackWhatItDidNotCompose))
+	for _, one := range handsBackWhatItDidNotCompose {
+		listed[one.Spec().Name] = true
+	}
+
+	for _, one := range everyBuiltin() {
+		spec := one.Spec()
+		if !spec.Capabilities.ReadFS && !spec.Capabilities.Network {
+			continue
+		}
+		if !listed[spec.Name] {
+			t.Errorf("%s reaches outside itself and nobody has said whose words "+
+				"it hands back; add it to handsBackWhatItDidNotCompose", spec.Name)
+		}
+	}
+}
+
+// everyBuiltin is what this package offers, for the check above.
+func everyBuiltin() []tool.Tool {
+	return []tool.Tool{
+		&ReadFile{}, &GlobFiles{}, &Grep{}, &GitStatus{}, &GitDiff{},
+		&ExecCommand{}, &ReadArtifact{}, &WebRead{}, &WebSearch{},
+		&Investigate{}, &StartProcess{}, &ProcessIO{}, &StopProcess{},
+		&ListProcesses{}, &SkillLoad{}, &TodoUpdate{}, &AskUser{},
+	}
+}
+
+// TestSomebodyElsesWordsAreSaidToBeSomebodyElses keeps the two axes agreeing.
+//
+// A tool that returns a stranger's text has to say both: Foreign, which is
+// shown to whoever is deciding whether to allow a call, and external, which
+// is what a privileged sink consults. They are read by different people and
+// neither implies the other, so a tool declaring one and not the other is a
+// tool that is right in one place and wrong in the other.
+func TestSomebodyElsesWordsAreSaidToBeSomebodyElses(t *testing.T) {
+	for _, one := range []tool.Tool{&WebRead{}, &WebSearch{}} {
+		spec := one.Spec()
+
+		if !spec.Capabilities.ForeignContent {
+			t.Errorf("%s returns somebody else's words and does not say so where "+
+				"an approval would show it", spec.Name)
+		}
+		if spec.Capabilities.Provenance != domain.ProvenanceExternal {
+			t.Errorf("%s returns somebody else's words and records them as %q",
+				spec.Name, spec.Capabilities.Provenance)
+		}
 	}
 }

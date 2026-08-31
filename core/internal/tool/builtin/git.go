@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"os/exec"
 	"strings"
 	"time"
@@ -69,7 +70,7 @@ func (t *GitStatus) Spec() tool.Spec {
   "additionalProperties": false
 }`),
 		Level:        tool.LevelWorkspaceRead,
-		Capabilities: tool.Capabilities{ReadFS: true, Idempotent: true},
+		Capabilities: tool.Capabilities{ReadFS: true, Idempotent: true, Provenance: domain.ProvenanceLocalUnknown},
 	}
 }
 
@@ -125,7 +126,7 @@ func (t *GitDiff) Spec() tool.Spec {
   "additionalProperties": false
 }`),
 		Level:        tool.LevelWorkspaceRead,
-		Capabilities: tool.Capabilities{ReadFS: true, Idempotent: true},
+		Capabilities: tool.Capabilities{ReadFS: true, Idempotent: true, Provenance: domain.ProvenanceLocalUnknown},
 	}
 }
 

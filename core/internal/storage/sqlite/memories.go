@@ -11,7 +11,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
 
-const memoryColumns = `id, scope, scope_ref, activation, text, trust,
+const memoryColumns = `id, scope, scope_ref, activation, text, trust, from_provenance,
 	origin_kind, origin_client, origin_platform, origin_principal,
 	source_session, source_seq, approved_by,
 	created_at, invalidated_at, superseded_by,
@@ -20,7 +20,7 @@ const memoryColumns = `id, scope, scope_ref, activation, text, trust,
 // The search joins the table to its index, where "text" names a column in
 // both, so the same list has to be qualified there.
 const memoryColumnsQualified = `memories.id, memories.scope, memories.scope_ref,
-	memories.activation, memories.text, memories.trust,
+	memories.activation, memories.text, memories.trust, memories.from_provenance,
 	memories.origin_kind, memories.origin_client,
 	memories.origin_platform, memories.origin_principal,
 	memories.source_session, memories.source_seq, memories.approved_by,
@@ -39,13 +39,14 @@ func (s *Store) Remember(
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO memories (`+memoryColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			string(memory.ID),
 			string(memory.Scope),
 			memory.ScopeRef,
 			string(memory.Activation),
 			memory.Text,
 			string(memory.Trust),
+			string(memory.From),
 			string(memory.Origin.Kind),
 			memory.Origin.ClientID,
 			principalPlatform(memory.Origin),
@@ -281,13 +282,14 @@ func (s *Store) queryMemories(ctx context.Context, query string, args ...any) ([
 			createdAt    int64
 			invalidated  sql.NullInt64
 			supersededBy sql.NullString
+			from         string
 			sourceSeq    int64
 			validFrom    int64
 			validUntil   sql.NullInt64
 		)
 
 		if err := rows.Scan(
-			&memory.ID, &scope, &memory.ScopeRef, &activation, &memory.Text, &trust,
+			&memory.ID, &scope, &memory.ScopeRef, &activation, &memory.Text, &trust, &from,
 			&originKind, &memory.Origin.ClientID, &platform, &principal,
 			&memory.SourceSession, &sourceSeq, &memory.ApprovedBy,
 			&createdAt, &invalidated, &supersededBy,
@@ -299,6 +301,7 @@ func (s *Store) queryMemories(ctx context.Context, query string, args ...any) ([
 		memory.Scope = domain.MemoryScope(scope)
 		memory.Activation = domain.MemoryActivation(activation)
 		memory.Trust = domain.TrustLevel(trust)
+		memory.From = domain.Provenance(from)
 		memory.Origin.Kind = domain.RunOriginKind(originKind)
 		memory.SourceSeq = domain.Seq(sourceSeq)
 

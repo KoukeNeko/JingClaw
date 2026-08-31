@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"os"
 	"os/exec"
 	"runtime"
@@ -94,9 +95,10 @@ func (t *ExecCommand) Spec() tool.Spec {
 }`),
 		Level: tool.LevelExecute,
 		Capabilities: tool.Capabilities{
-			ReadFS:  true,
-			WriteFS: true,
-			Execute: true,
+			Provenance: domain.ProvenanceLocalUnknown,
+			ReadFS:     true,
+			WriteFS:    true,
+			Execute:    true,
 			// A command can do anything the user can, including reach the
 			// network. Claiming otherwise would let a policy under-estimate it.
 			Network:     true,

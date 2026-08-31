@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
@@ -91,6 +92,16 @@ func (t *ReadArtifact) Spec() tool.Spec {
 		// shown part of, so it grants no reach it did not have.
 		Level: tool.LevelInternal,
 		Capabilities: tool.Capabilities{
+			// Whatever some earlier tool stored, and the store does not
+			// record which. web_read puts pages here, so the honest floor is
+			// the least of the three — the same rule the runtime applies to a
+			// tool it cannot identify.
+			//
+			// Better would be for an artifact to carry the provenance of
+			// whatever produced it, so reading back a git diff were not
+			// treated as reading back a stranger's page. That is a change to
+			// the artifact store, and this is the safe answer until then.
+			Provenance:   domain.ProvenanceExternal,
 			Idempotent:   true,
 			ParallelSafe: true,
 		},

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"os"
 	"strings"
 	"time"
@@ -70,10 +71,11 @@ func (t *StartProcess) Spec() tool.Spec {
 }`),
 		Level: tool.LevelExecute,
 		Capabilities: tool.Capabilities{
-			ReadFS:  true,
-			WriteFS: true,
-			Execute: true,
-			Network: true,
+			Provenance: domain.ProvenanceLocalUnknown,
+			ReadFS:     true,
+			WriteFS:    true,
+			Execute:    true,
+			Network:    true,
 			// A program that outlives the run cannot be undone by the run
 			// ending, which is more than exec_command claims and is the honest
 			// floor for something that keeps a port bound after the turn.
@@ -200,6 +202,7 @@ func (t *ProcessIO) Spec() tool.Spec {
 }`),
 		Level: tool.LevelExecute,
 		Capabilities: tool.Capabilities{
+			Provenance: domain.ProvenanceLocalUnknown,
 			// Writing to a process is making a program act, which is
 			// execution however small the string is.
 			Execute: true,
@@ -342,7 +345,8 @@ func (t *StopProcess) Spec() tool.Spec {
 }`),
 		Level: tool.LevelExecute,
 		Capabilities: tool.Capabilities{
-			Execute: true,
+			Provenance: domain.ProvenanceLocalUnknown,
+			Execute:    true,
 			// Ending a program can lose what it had not written out.
 			Destructive: true,
 		},
@@ -409,7 +413,7 @@ func (t *ListProcesses) Spec() tool.Spec {
 		// Nothing is started, written to or stopped. It reports on what this
 		// session already did.
 		Level:        tool.LevelInternal,
-		Capabilities: tool.Capabilities{Idempotent: true, ParallelSafe: true},
+		Capabilities: tool.Capabilities{Idempotent: true, ParallelSafe: true, Provenance: domain.ProvenanceLocalUnknown},
 	}
 }
 

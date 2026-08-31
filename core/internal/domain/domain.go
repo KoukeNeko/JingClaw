@@ -350,6 +350,15 @@ type Memory struct {
 	// the trust of whoever approved it. It only ever travels downwards.
 	Trust TrustLevel
 
+	// From is whose words this came out of.
+	//
+	// The question Trust cannot answer. A local turn that ran a command is
+	// trusted — the operator asked for it — and what the command printed is
+	// still not the operator speaking. Only this can tell a standing
+	// instruction the operator dictated from one the model read somewhere and
+	// wrote down.
+	From Provenance
+
 	Origin        RunOrigin
 	SourceSession SessionID
 	SourceSeq     Seq
@@ -560,6 +569,16 @@ type ToolCallCompleted struct {
 	// make an old event unclassifiable, and "was this run reading somebody
 	// else's words" is a question about history that history should answer.
 	Foreign bool
+
+	// From says who wrote what came back: nothing for the operator's own
+	// words, local_unknown for this machine, external for somebody else's.
+	//
+	// Recorded for the same reason as Foreign and answering a wider question.
+	// Foreign is shown to a person deciding whether to allow a call, and has
+	// to stay rare to stay worth reading; this is what a privileged sink
+	// consults, where the honest answer about a command's output matters
+	// even though it is nothing to interrupt anybody about.
+	From Provenance
 
 	// Artifact names the whole of what Content is an excerpt of, when the tool
 	// stored one. A truncated result with nothing here is output that is gone.
@@ -1199,4 +1218,82 @@ type Firing struct {
 
 	// RunID is the run this became, once there is one.
 	RunID RunID
+}
+
+// Provenance says who wrote a piece of text, which is a different question
+// from whether it may be believed.
+//
+// The two were one field for a while, and the field was wrong. "Is this
+// foreign" cannot separate a compiler diagnostic from a web page: neither was
+// written by the operator, but only one of them is somebody else's words. So
+// a run that listed a directory looked exactly like a run that read a
+// stranger's page, and the only way to keep the warning meaningful was to not
+// raise it for commands at all — which is the hole this closes.
+//
+// The invariant, which is what all of this is for:
+//
+//	Text the model can see may lose authority, and may never gain it
+//	without an explicit trusted principal.
+//
+// A summary, a rewrite, a cat, a curl, another model, a skill — every one of
+// them can only hold or lower what it was given. The only things that raise
+// it are a person saying so and the runtime's own policy.
+type Provenance string
+
+const (
+	// ProvenanceOperator is the operator's own words: what they typed, and
+	// the files they wrote to be read as instructions.
+	//
+	// The zero value, because a tool that reads nothing produces nothing to
+	// doubt. A tool that does read has to say so.
+	ProvenanceOperator Provenance = ""
+
+	// ProvenanceLocalUnknown is text from this machine that nobody vouched
+	// for: a file in the workspace, the output of a command.
+	//
+	// Not suspicious, and not the operator either. The output of `ls` is
+	// perfectly honest and is still not somebody asking for something, which
+	// is the distinction that matters at a privileged sink.
+	ProvenanceLocalUnknown Provenance = "local_unknown"
+
+	// ProvenanceExternal is somebody else's words: a page, a tool server's
+	// answer, a message from a platform.
+	ProvenanceExternal Provenance = "external"
+)
+
+// worseThan orders provenance from most to least accountable, so that a run
+// can carry the worst of what it has read.
+var worseThan = map[Provenance]int{
+	ProvenanceOperator:     0,
+	ProvenanceLocalUnknown: 1,
+	ProvenanceExternal:     2,
+}
+
+// Worse is whichever of two provenances is less accountable.
+//
+// A run takes the worst of everything it has read, and never improves: that
+// is the invariant above, expressed as a function.
+func (p Provenance) Worse(other Provenance) Provenance {
+	if worseThan[other] > worseThan[p] {
+		return other
+	}
+	return p
+}
+
+// IsOperator reports whether this is the operator's own words.
+//
+// Asked rather than compared, because the zero value means operator and a
+// comparison against the constant reads as though it means "unset".
+func (p Provenance) IsOperator() bool { return p == ProvenanceOperator }
+
+// Describe is what to tell a person who is being asked to allow something.
+func (p Provenance) Describe() string {
+	switch p {
+	case ProvenanceExternal:
+		return "this run has read text from outside this machine"
+	case ProvenanceLocalUnknown:
+		return "this run has read files or command output from this machine"
+	default:
+		return ""
+	}
 }

@@ -124,34 +124,42 @@ type Capabilities struct {
 	// the network and returns the output of a program the operator chose to
 	// run; web_read returns a page written by whoever owns the address.
 	//
-	// It exists so that trust can be a property of what the model has read
-	// rather than only of where the turn came from. A model that reads a
-	// hostile page and then writes down what it says has laundered an
-	// instruction into durable memory, and nothing that looks only at the
-	// turn's origin can see it happen.
+	// This used to carry a known hole, recorded here because this comment is
+	// what the next person reads. The hole was that "a program the operator
+	// chose to run" is true of the program and not of its output: a local run
+	// could shell out to something that reaches the network and write what
+	// came back into a memory that later carried standing authority — which
+	// is the thing this field exists to prevent. Declaring it on exec_command
+	// would have closed it and cost too much, because every run that listed a
+	// directory would then have looked like one that read a stranger's page,
+	// and a warning that is always on is one nobody reads.
 	//
-	// Known hole, and the argument above is where it comes from. "A program
-	// the operator chose to run" is true of the program and not of its
-	// output: the operator chose to run a command that asks a web service a
-	// question, and what comes back was written by that service. So a run
-	// started from the console can shell out to a network-shaped command and
-	// write what it read into a memory that later carries standing authority,
-	// which is the thing this field exists to prevent. Runs from a gateway
-	// are already untrusted by origin, so the exposed path is the local one.
+	// Provenance below closes it, by asking the same question at a
+	// granularity that can tell those two apart.
 	//
-	// A missing layer rather than an open door: running a command and writing
-	// a standing memory are both approvals, so somebody sees the text. What
-	// they do not see is that it came from outside, which is exactly what
-	// this field would have told them.
-	//
-	// Declaring it on exec_command would close it and cost too much: every
-	// run that listed a directory would stop being able to remember
-	// anything. The fix is to separate what a result is (provenance) from
-	// whether it may instruct (authority) and give ordinary tool results no
-	// authority at all — see docs/research/14-authority-and-provenance.md.
-	// Recorded here rather than only there because this comment is what the
-	// next person will read.
+	// Kept alongside it rather than replaced by it, because they are read by
+	// different people for different reasons. This one is shown to somebody
+	// deciding whether to allow a call and has to stay rare to stay worth
+	// reading; Provenance is the whole truth, and is consulted where the
+	// whole truth is what matters.
 	ForeignContent bool
+
+	// Provenance says who wrote what this tool returns.
+	//
+	// The zero value is the operator, which is right for a tool that reads
+	// nothing: todo_update returns what it was handed. Anything that reads
+	// has to say so, and the honest answer for a command is local_unknown —
+	// its output is from this machine and is nobody's request.
+	//
+	// This is what closed the hole the comment above used to describe. The
+	// argument for leaving exec_command unmarked was that marking it would
+	// cost too much: every run that listed a directory would look like a run
+	// that had read a stranger's page, and a warning that is always on is one
+	// nobody reads. That argument was about a single boolean. With two
+	// values the cost disappears — listing a directory is local_unknown and
+	// reading a page is external, and only the second is worth interrupting
+	// somebody about.
+	Provenance domain.Provenance
 }
 
 // Spec is everything the runtime and the model need to know about a tool.
@@ -229,6 +237,18 @@ type CallContext struct {
 	// a caller that forgot to fill this in should get a memory it cannot
 	// promote rather than one it should not have trusted.
 	Trust domain.TrustLevel
+
+	// From is the worst provenance this run has read before this call.
+	//
+	// Beside Trust rather than replacing it, and the pair is the point: Trust
+	// says whether this turn may be believed, and this says whose words the
+	// run has been handling. A local turn that ran a command is still the
+	// operator asking, and what the command printed is still not the operator
+	// speaking — one field could not say both.
+	//
+	// What consults it is a privileged sink: somewhere text stops being an
+	// observation and becomes an instruction that shapes later runs.
+	From domain.Provenance
 
 	// Origin says whether the turn came from a control client on this machine
 	// or through a gateway from somebody else's platform.

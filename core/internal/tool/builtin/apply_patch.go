@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"os"
 	"path/filepath"
 	"sort"
@@ -90,6 +91,10 @@ func (t *ApplyPatch) Spec() tool.Spec {
 }`),
 		Level: tool.LevelWorkspaceWrite,
 		Capabilities: tool.Capabilities{
+			// The result is a diff, which is workspace text coming back. Not
+			// the operator's words, whatever the operator asked for.
+			Provenance: domain.ProvenanceLocalUnknown,
+
 			ReadFS:  true,
 			WriteFS: true,
 			// A patch can delete, and a deletion is not undone by running the

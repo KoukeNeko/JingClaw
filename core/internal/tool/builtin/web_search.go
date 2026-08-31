@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"strings"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
@@ -85,6 +86,7 @@ func (t *WebSearch) Spec() tool.Spec {
 			// mistake as the one about commands: a tool was judged by how
 			// much it returns rather than by whose words they are.
 			ForeignContent: true,
+			Provenance:     domain.ProvenanceExternal,
 
 			Network:      true,
 			Idempotent:   true,

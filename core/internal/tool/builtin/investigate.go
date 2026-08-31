@@ -61,7 +61,7 @@ func (t *Investigate) Spec() tool.Spec {
 		// a decision from anybody, which is the point of the tools it was
 		// given rather than a promise made here.
 		Level:        tool.LevelWorkspaceRead,
-		Capabilities: tool.Capabilities{ReadFS: true},
+		Capabilities: tool.Capabilities{ReadFS: true, Provenance: domain.ProvenanceLocalUnknown},
 	}
 }
 

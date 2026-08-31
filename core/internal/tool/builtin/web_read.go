@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"strings"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
@@ -61,7 +62,8 @@ func (t *WebRead) Spec() tool.Spec {
 }`),
 		Level: tool.LevelNetworkRead,
 		Capabilities: tool.Capabilities{
-			Network: true,
+			Provenance: domain.ProvenanceExternal,
+			Network:    true,
 
 			// The whole point of the tool: what comes back is written by
 			// whoever runs the site. Everything the model does afterwards in

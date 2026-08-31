@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"strings"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
@@ -74,6 +75,10 @@ func (t *EditFile) Spec() tool.Spec {
 }`),
 		Level: tool.LevelWorkspaceWrite,
 		Capabilities: tool.Capabilities{
+			// The result is a diff, which is workspace text coming back. Not
+			// the operator's words, whatever the operator asked for.
+			Provenance: domain.ProvenanceLocalUnknown,
+
 			ReadFS:      true,
 			WriteFS:     true,
 			Destructive: true,

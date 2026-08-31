@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"io"
 	"os"
 	"strings"
@@ -55,6 +56,7 @@ func (t *ReadFile) Spec() tool.Spec {
 }`),
 		Level: tool.LevelWorkspaceRead,
 		Capabilities: tool.Capabilities{
+			Provenance:   domain.ProvenanceLocalUnknown,
 			ReadFS:       true,
 			Idempotent:   true,
 			ParallelSafe: true,

@@ -69,8 +69,23 @@ func (t *SkillLoad) Spec() tool.Spec {
   "required": ["name"],
   "additionalProperties": false
 }`),
-		Level:        tool.LevelInternal,
-		Capabilities: tool.Capabilities{ReadFS: true, Idempotent: true, ParallelSafe: true},
+		Level: tool.LevelInternal,
+		Capabilities: tool.Capabilities{
+			// A skill is a file the operator installed and did not
+			// necessarily write — the way to get one is to install it from
+			// somewhere, and its author is whoever wrote it there.
+			//
+			// So: on this machine, chosen by the operator, and not the
+			// operator dictating. What that buys is that nothing read out of
+			// a skill can become a standing instruction, which is the same
+			// line the skill design draws everywhere else — a skill can make
+			// the model want something and can never make the runtime allow
+			// it.
+			Provenance:   domain.ProvenanceLocalUnknown,
+			ReadFS:       true,
+			Idempotent:   true,
+			ParallelSafe: true,
+		},
 	}
 }
 
