@@ -131,3 +131,99 @@ func TestTheConsoleProfileResolvesByName(t *testing.T) {
 		t.Error("a misspelled profile was accepted")
 	}
 }
+
+// TestNothingAsksAPersonWhoIsNotThere is the whole of the unattended profile.
+//
+// A schedule fires at three in the morning. Every decision the local profile
+// would refer to a person has to become a refusal here, because the person is
+// asleep and a run stopped waiting for them is stuck rather than waiting.
+func TestNothingAsksAPersonWhoIsNotThere(t *testing.T) {
+	local := permission.LocalProfile()
+	unattended := permission.UnattendedProfile()
+
+	// Every level, so one added later cannot quietly arrive as Ask.
+	var asked int
+	for level, decision := range local.Defaults {
+		unattendedDecision, known := unattended.Defaults[level]
+		if !known {
+			t.Errorf("the unattended profile has no rule for %s tools", level)
+			continue
+		}
+		if unattendedDecision == permission.Ask {
+			t.Errorf("%s tools ask somebody in the unattended profile", level)
+		}
+		if decision == permission.Ask && unattendedDecision != permission.Deny {
+			t.Errorf("%s tools are Ask locally and %s unattended; they must be Deny",
+				level, unattendedDecision)
+		}
+		if decision == permission.Ask {
+			asked++
+		}
+	}
+
+	// The precondition: without it this would pass against a local profile
+	// that asks about nothing.
+	if asked == 0 {
+		t.Fatal("the local profile asks about nothing, so this proves nothing")
+	}
+}
+
+// TestAnUnattendedRunIsRefusedTheThingsAPersonWouldDecide asserts it where it
+// is actually decided, rather than by reading the table.
+func TestAnUnattendedRunIsRefusedTheThingsAPersonWouldDecide(t *testing.T) {
+	engine := permission.New(permission.LocalProfile())
+	if err := engine.UseProfile("ses_scheduled", "unattended"); err != nil {
+		t.Fatalf("a session could not be opened unattended: %v", err)
+	}
+
+	for _, one := range []struct {
+		name  string
+		level tool.Level
+	}{
+		{"write_file", tool.LevelWorkspaceWrite},
+		{"remember", tool.LevelRemember},
+		{"exec_command", tool.LevelExecute},
+		{"ask_user", tool.LevelInternal},
+	} {
+		outcome := engine.Evaluate(context.Background(), permission.Request{
+			Spec:      tool.Spec{Name: one.name, Level: one.level},
+			Call:      tool.Call{Name: one.name},
+			SessionID: "ses_scheduled",
+		})
+		if outcome.Decision != permission.Deny {
+			t.Errorf("%s was %s in an unattended session (%s)",
+				one.name, outcome.Decision, outcome.Reason)
+		}
+	}
+
+	// And it can still do the thing it is for.
+	outcome := engine.Evaluate(context.Background(), permission.Request{
+		Spec:      tool.Spec{Name: "read_file", Level: tool.LevelWorkspaceRead},
+		Call:      tool.Call{Name: "read_file"},
+		SessionID: "ses_scheduled",
+	})
+	if outcome.Decision != permission.Allow {
+		t.Errorf("an unattended run cannot read: %s (%s)", outcome.Decision, outcome.Reason)
+	}
+
+	// A session that was never opened unattended is unaffected, which is what
+	// says the profile is doing this rather than the engine.
+	outcome = engine.Evaluate(context.Background(), permission.Request{
+		Spec:      tool.Spec{Name: "write_file", Level: tool.LevelWorkspaceWrite},
+		Call:      tool.Call{Name: "write_file"},
+		SessionID: "ses_ordinary",
+	})
+	if outcome.Decision != permission.Ask {
+		t.Errorf("an ordinary session was %s, want Ask", outcome.Decision)
+	}
+}
+
+// TestOneProfileCannotEditAnother is why these are functions.
+func TestOneProfileCannotEditAnother(t *testing.T) {
+	first := permission.UnattendedProfile()
+	first.Defaults[tool.LevelExecute] = permission.Allow
+
+	if permission.UnattendedProfile().Defaults[tool.LevelExecute] != permission.Deny {
+		t.Error("changing one copy of the profile changed them all")
+	}
+}

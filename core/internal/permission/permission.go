@@ -137,6 +137,40 @@ func GatewayProfile() Profile {
 	}
 }
 
+// UnattendedProfile is for a run nobody is watching: a schedule came due.
+//
+// Every Ask in the local profile is a Deny here, and that is the whole of it.
+// The rule states itself: there is nobody to ask, so anything that would ask
+// is refused.
+//
+// Refused rather than parked, which is the choice worth writing down. A run
+// stopped on an approval that nobody sees is not waiting, it is stuck — and
+// it is stuck at three in the morning, underneath a schedule that will come
+// due again before anybody looks. A refusal reaches the model instead, which
+// can say in its answer what it could not do; somebody reads that over
+// breakfast and does it themselves.
+//
+// It is also not a way to grant things. A person who wants a schedule to be
+// able to write should be given a tool that writes the one thing they meant,
+// not a profile that lets an unattended run write anything.
+func UnattendedProfile() Profile {
+	return Profile{
+		Name: "unattended",
+		Defaults: map[tool.Level]Decision{
+			tool.LevelInternal:       Allow,
+			tool.LevelWorkspaceRead:  Allow,
+			tool.LevelNetworkRead:    Allow,
+			tool.LevelWorkspaceWrite: Deny,
+			tool.LevelRemember:       Deny,
+			tool.LevelExecute:        Deny,
+			tool.LevelHighImpact:     Deny,
+		},
+		// Asking a person is the one thing that cannot work here, whatever
+		// level it is filed under.
+		DenyTools: map[string]bool{"ask_user": true},
+	}
+}
+
 // ConsoleProfile is for a private channel an operator controls, used as a
 // remote console rather than as a place the public can talk to the agent.
 //
@@ -185,6 +219,8 @@ func ProfileByName(name string) (Profile, bool) {
 		return GatewayProfile(), true
 	case "console":
 		return ConsoleProfile(), true
+	case "unattended":
+		return UnattendedProfile(), true
 	default:
 		return Profile{}, false
 	}
@@ -216,9 +252,11 @@ func New(profile Profile) *Engine {
 		granted:        make(map[domain.SessionID]map[string]bool),
 	}
 
-	// The channel profiles are always available, so a session opened from one
-	// cannot silently fall back to the local one.
-	for _, profile := range []Profile{GatewayProfile(), ConsoleProfile()} {
+	// The other profiles are always available, so a session opened under one
+	// cannot silently fall back to the local one — which for the unattended
+	// profile would mean a schedule running with a person's permissions at
+	// three in the morning.
+	for _, profile := range []Profile{GatewayProfile(), ConsoleProfile(), UnattendedProfile()} {
 		if _, ok := engine.profiles[profile.Name]; !ok {
 			engine.profiles[profile.Name] = profile
 		}
