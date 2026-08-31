@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
@@ -246,7 +247,36 @@ func (b *conversationBuilder) userContent(payload domain.UserMessageAdded) []pro
 		content = append(content, block)
 	}
 
-	return content
+	return somethingToSay(content)
+}
+
+// somethingToSay keeps a user turn from being empty.
+//
+// A message with no text and nothing readable attached contributes no
+// content at all, and a provider then sees a conversation whose last turn is
+// the model's — which every one of them refuses, because there is nothing to
+// answer. What reaches the operator is "something went wrong at the model",
+// about a request this built.
+//
+// It happened with a picture: somebody wrote the bot's name and attached an
+// image, so the text was empty once the mention was stripped, and the
+// attachment did not survive the trip. The attachment is a separate bug. This
+// is the layer that should not have produced an unanswerable request out of
+// it either way.
+func somethingToSay(content []provider.ContentBlock) []provider.ContentBlock {
+	for _, block := range content {
+		text, isText := block.(provider.TextBlock)
+		if !isText || strings.TrimSpace(text.Text) != "" {
+			return content
+		}
+	}
+
+	// Said rather than dropped. A turn that arrived and is not in the
+	// conversation is a turn the model is answering without knowing it
+	// happened, and "they sent something" is true and useful.
+	return []provider.ContentBlock{provider.TextBlock{
+		Text: "[they sent a message with no text, and nothing that could be read]",
+	}}
 }
 
 // imageBlock reads an image back out of the artifact store.
