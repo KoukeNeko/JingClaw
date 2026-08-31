@@ -131,9 +131,19 @@ type relay struct {
 // Deliver hands an inbound message to the agent.
 //
 // Refusals are expected traffic, not failures: a message from an unbound
-// channel or an unlisted account means the system is working. They are logged
-// at info and dropped, because replying "you are not allowed" to every
-// bystander would turn the bot into a nuisance.
+// channel or an unlisted account means the system is working.
+//
+// Somebody who was refused is told so, and that is a change from dropping it
+// silently. The reason for the silence was that replying to every bystander
+// would make the bot a nuisance, and it no longer applies: the adapter
+// delivers only messages that address the bot, so everything that reaches
+// here was said to it. Being ignored by something you spoke to directly is
+// indistinguishable from it being broken — which is how this was found, by
+// somebody having to read the log to learn that a refusal had happened at
+// all.
+//
+// Two refusals stay silent, and both are about not speaking where it was not
+// asked to. See sayRefused.
 func (r *relay) Deliver(ctx context.Context, message gateway.InboundMessage) error {
 	resp, err := r.client.DeliverInbound(ctx, connect.NewRequest(&controlv1.DeliverInboundRequest{
 		Message: inboundToProto(message),
@@ -146,6 +156,7 @@ func (r *relay) Deliver(ctx context.Context, message gateway.InboundMessage) err
 				"principal", message.Principal.ID,
 				"reason", connect.CodeOf(err).String(),
 			)
+			r.sayRefused(ctx, message, connect.CodeOf(err))
 			return nil
 		default:
 			return err
@@ -316,4 +327,47 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
 	clone.Header.Set("Authorization", "Bearer "+t.token)
 	return t.base.RoundTrip(clone)
+}
+
+// refusedInThisChannel is what somebody sees when the channel will not take
+// their message.
+//
+// It does not name who may: the list is the operator's to share, and a bot
+// reading it out to whoever asks is a different decision from the one they
+// made when they wrote it down. What it does say is that this is a setting
+// rather than a fault, and where to go about it.
+const refusedInThisChannel = "I can't take that here — this channel only " +
+	"accepts messages from certain accounts, and yours is not one of them. " +
+	"Whoever set the bot up can change that."
+
+// sayRefused tells somebody their message was not accepted, when saying so is
+// the right thing to do.
+//
+// Only for a refusal that is about them. A channel nobody bound gets silence:
+// the bot has no business announcing itself in every room it can see, and a
+// message there was addressed to something that has not been asked to be
+// present. That is the difference between "you may not" and "not here".
+//
+// A failure to say it is logged and dropped. The message was refused either
+// way, and turning the explanation's failure into the caller's error would
+// make a working refusal look like a broken gateway.
+func (r *relay) sayRefused(
+	ctx context.Context, message gateway.InboundMessage, code connect.Code,
+) {
+	if code != connect.CodePermissionDenied {
+		return
+	}
+
+	_, err := r.poster.Post(ctx, gateway.Dispatch{
+		AccountID: r.accountID,
+		Target:    message.Conversation,
+		Kind:      gateway.DispatchMessage,
+		Payload:   refusedInThisChannel,
+	})
+	if err != nil {
+		r.logger.Warn("could not say why a message was refused",
+			"channel_id", message.Conversation.ChannelID,
+			"error", err,
+		)
+	}
 }
