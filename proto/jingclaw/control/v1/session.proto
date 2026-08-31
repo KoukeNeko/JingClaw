@@ -371,6 +371,41 @@ message InboundMessage {
   MessageTrigger trigger = 14;
 
   google.protobuf.Timestamp occurred_at = 15;
+
+  // Files that came with it.
+  //
+  // The bytes travel here rather than a link, because a link to somebody
+  // else's service expires and is signed for a client this daemon is not, and
+  // the adapter is the only part of this system meant to talk to the platform
+  // at all.
+  //
+  // This was missing while both ends were ready for it: the adapter fetched
+  // the file and the ingress was waiting to store it, and in between there
+  // was nowhere to put it. Every picture anybody sent was downloaded and
+  // dropped on the way in, and a message that was only a picture then reached
+  // the model carrying nothing.
+  repeated InboundAttachment attachments = 16;
+}
+
+// InboundAttachment is one file that arrived with a message.
+message InboundAttachment {
+  // Id is the platform's own, kept so a later message about "that file" can
+  // be matched to this one.
+  string id = 1;
+
+  string name = 2;
+  string content_type = 3;
+
+  // Size is what the platform said, which is not always what arrived: an
+  // adapter that declined to fetch reports the size anyway, so the model can
+  // be told what it is not looking at.
+  int64 size = 4;
+
+  // Data is empty when the adapter declined to fetch — too large, or a kind
+  // of file this agent does not read. Everything else still arrives, because
+  // a file that was sent is a fact about the message whether or not it can be
+  // looked at.
+  bytes data = 5;
 }
 
 message PrincipalClaim {

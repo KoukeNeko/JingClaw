@@ -39,7 +39,32 @@ func inboundToProto(message gateway.InboundMessage) *controlv1.InboundMessage {
 		Text:                 message.Text,
 		Trigger:              triggerToProto(message.Trigger),
 		OccurredAt:           timestamppb.New(message.OccurredAt),
+		Attachments:          attachmentsToProto(message.Attachments),
 	}
+}
+
+// attachmentsToProto carries the files inward.
+//
+// Everything the adapter collected, including what it declined to fetch: a
+// file that was sent is a fact about the message whether or not anybody can
+// look at it, and dropping the ones without bytes would leave the model
+// answering "here, fix this" with no idea anything was attached.
+func attachmentsToProto(attachments []gateway.Attachment) []*controlv1.InboundAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+
+	converted := make([]*controlv1.InboundAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		converted = append(converted, &controlv1.InboundAttachment{
+			Id:          attachment.ID,
+			Name:        attachment.Name,
+			ContentType: attachment.ContentType,
+			Size:        attachment.Size,
+			Data:        attachment.Data,
+		})
+	}
+	return converted
 }
 
 func triggerToProto(trigger gateway.Trigger) controlv1.MessageTrigger {

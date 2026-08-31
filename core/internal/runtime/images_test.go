@@ -231,3 +231,89 @@ func newImageHarness(
 		Logger:        slog.New(slog.DiscardHandler),
 	})
 }
+
+// TestAPictureIsStillThereOnTheNextTurn is the question a picture raises the
+// moment there is a second turn.
+//
+// The bytes are not in the event — an image is large and the log is replayed
+// on every turn, so a conversation carrying copies of everything ever sent
+// would stop working long before the context window did. What is in the event
+// is a reference, and the picture is read back out of the artifact store each
+// time the conversation is rebuilt.
+//
+// Which is a design that works or does not work; there is no middle. If the
+// reading happened once, the model would answer the first question about a
+// picture and then be unable to see it, while the person went on asking about
+// something that was no longer in front of it.
+func TestAPictureIsStillThereOnTheNextTurn(t *testing.T) {
+	store := memory.New()
+	artifacts, err := artifact.Open(t.TempDir(), 0)
+	if err != nil {
+		t.Fatalf("open artifacts: %v", err)
+	}
+
+	picture := samplePNG(t)
+	ref, err := artifacts.PutBytes(context.Background(), picture, "image/png")
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	model := &compactingProvider{reply: "A green dot."}
+	rt := newImageHarness(t, store, artifacts, model)
+
+	session, err := rt.CreateSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	runID, _, err := rt.SendTurnTo(context.Background(), session.ID, domain.Turn{
+		Text:    "what is in this picture",
+		Origin:  domain.RunOrigin{Kind: domain.OriginLocalClient, ClientID: "cli"},
+		Targets: []domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient}},
+		Attachments: []domain.Attachment{{
+			ArtifactID: ref.ID,
+			Name:       "dot.png",
+			MediaType:  "image/png",
+			Size:       ref.Size,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	waitForRun(t, rt, runID)
+
+	// A second turn, carrying nothing of its own. What the model can see of
+	// the picture now is whatever the rebuild put back.
+	runID, _, err = rt.SendTurnTo(context.Background(), session.ID, domain.Turn{
+		Text:    "what colour was it",
+		Origin:  domain.RunOrigin{Kind: domain.OriginLocalClient, ClientID: "cli"},
+		Targets: []domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient}},
+	})
+	if err != nil {
+		t.Fatalf("send again: %v", err)
+	}
+	waitForRun(t, rt, runID)
+
+	sent := model.turnRequests()
+	if len(sent) < 2 {
+		t.Fatalf("the model was asked %d times, want two", len(sent))
+	}
+
+	var images []provider.ImageBlock
+	for _, message := range sent[len(sent)-1].Messages {
+		for _, block := range message.Content {
+			if found, ok := block.(provider.ImageBlock); ok {
+				images = append(images, found)
+			}
+		}
+	}
+
+	if len(images) != 1 {
+		t.Fatalf("%d pictures were in front of the model on the second turn, want one",
+			len(images))
+	}
+	if !bytes.Equal(images[0].Data, picture) {
+		t.Errorf("the picture came back as %d bytes, want the %d that were stored",
+			len(images[0].Data), len(picture))
+	}
+}

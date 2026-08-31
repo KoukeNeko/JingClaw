@@ -227,9 +227,10 @@ func inboundFromProto(message *controlv1.InboundMessage) gateway.InboundMessage 
 			ThreadID:      message.GetThreadId(),
 			RootMessageID: message.GetRootMessageId(),
 		},
-		Text:       message.GetText(),
-		Trigger:    triggerFromProto(message.GetTrigger()),
-		OccurredAt: message.GetOccurredAt().AsTime(),
+		Text:        message.GetText(),
+		Trigger:     triggerFromProto(message.GetTrigger()),
+		OccurredAt:  message.GetOccurredAt().AsTime(),
+		Attachments: inboundAttachmentsFromProto(message.GetAttachments()),
 	}
 }
 
@@ -415,4 +416,28 @@ func bindingFromProto(binding *controlv1.Binding) gateway.Binding {
 		AllowedPrincipals: binding.GetAllowedPrincipals(),
 		AllowedClaims:     claims,
 	}
+}
+
+// inboundAttachmentsFromProto is the files a message arrived with.
+//
+// Named apart from the one in fromproto.go, which converts what the daemon
+// already stored. These are on their way in and still carry their bytes.
+func inboundAttachmentsFromProto(
+	attachments []*controlv1.InboundAttachment,
+) []gateway.Attachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+
+	converted := make([]gateway.Attachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		converted = append(converted, gateway.Attachment{
+			ID:          attachment.GetId(),
+			Name:        attachment.GetName(),
+			ContentType: attachment.GetContentType(),
+			Size:        attachment.GetSize(),
+			Data:        attachment.GetData(),
+		})
+	}
+	return converted
 }
