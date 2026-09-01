@@ -337,10 +337,19 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 	case domain.ToolCallRequested:
 		p.record(run.ID).requested(payload)
 		if payload.Name == "web_read" {
-			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "network_started"})
+			// The address as well as the state. A platform that draws a
+			// reaction has the same emoji whichever page it went to, and
+			// where it is going is the thing a reader most wants to know.
+			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
+				State:  "network_started",
+				Detail: describeCall(payload.Name, payload.Arguments),
+			})
 		}
 		if payload.Name == "recall" {
-			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "memory_started"})
+			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
+				State:  "memory_started",
+				Detail: describeCall(payload.Name, payload.Arguments),
+			})
 		}
 
 		// What it is doing, while it is doing it. Throttled, because a run
@@ -461,7 +470,9 @@ func (p *Projector) observeState(
 
 		// Long tasks are the ones where silence is worst: a channel that hears
 		// nothing for a minute cannot tell working from broken.
-		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "provider_started"})
+		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
+			State: "provider_started", Detail: "thinking",
+		})
 
 	case domain.RunFailed, domain.RunCancelled:
 		// A run that ends badly must say so. Ending in silence looks exactly

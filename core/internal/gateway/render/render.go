@@ -293,7 +293,11 @@ func renderStatus(payload jcgateway.StatusPayload, style Style) string {
 	switch payload.State {
 	case "running":
 		return "👀"
-	case "working":
+	// Every state that means "still going" draws the same line. They are
+	// separate states because a platform that shows a reaction wants a
+	// different emoji for each; a platform that shows words wants the words,
+	// and the words are in Detail either way.
+	case "working", "network_started", "memory_started", "provider_started":
 		if !style.WorkingLine || payload.Detail == "" {
 			return ""
 		}

@@ -47,6 +47,11 @@ var discordStyle = render.Style{
 	// which turns an aligned table into a worse version of the rows it was
 	// made from.
 	TableColumns: 76,
+
+	// What it is doing now, in words as well as in a reaction. The reaction
+	// says which kind of thing; only the line says which page it went to or
+	// which file it opened, and that is the part somebody watching wants.
+	WorkingLine: true,
 }
 
 // Post delivers one dispatch and returns the ids Discord gave the messages.
@@ -169,7 +174,17 @@ func (a *Adapter) postReactionStatus(
 			"run_id", string(dispatch.RunID), "message_id", conversation.SourceMessageID,
 			"emoji", emoji, "error", err)
 	}
-	if !isFinalStatus(dispatch.Payload) || strings.TrimSpace(body) == "" {
+	if !isFinalStatus(dispatch.Payload) {
+		return a.showWhatItIsDoing(channelID, dispatch, body)
+	}
+
+	// The run is over, so the line saying what it was doing is about
+	// something that is no longer happening. Taken down rather than
+	// rewritten: the account of the run belongs under the answer, and a
+	// message posted while the run was still going sits above it.
+	a.takeDownWhatItWasDoing(channelID, dispatch)
+
+	if strings.TrimSpace(body) == "" {
 		return nil, nil
 	}
 
@@ -574,4 +589,75 @@ func targetChannel(target jcgateway.ConversationRef) string {
 		return target.ThreadID
 	}
 	return target.ChannelID
+}
+
+// showWhatItIsDoing keeps one line per run saying what it is doing now.
+//
+// Rewritten rather than added to, because the previous answer to "what is it
+// doing" is of no interest once it changes. The projector already throttles
+// these, so the rate is a line every second or so rather than one per call.
+//
+// A failure to say it is logged and dropped. This is commentary on work that
+// is happening anyway, and turning its failure into the caller's error would
+// make a working run look like a broken gateway.
+func (a *Adapter) showWhatItIsDoing(
+	channelID snowflake.ID, dispatch jcgateway.Dispatch, body string,
+) ([]string, error) {
+	shown, worth := worthShowing(dispatch, body)
+	if !worth {
+		return nil, nil
+	}
+
+	if existing, ok := a.liveStatus(dispatch.RunID); ok {
+		_, err := a.client.Rest.UpdateMessage(channelID, existing, discord.MessageUpdate{
+			Content:         &shown,
+			AllowedMentions: &discord.AllowedMentions{},
+		})
+		if err == nil {
+			return []string{existing.String()}, nil
+		}
+
+		a.config.Logger.Debug("could not rewrite the working line, posting a new one",
+			"run_id", string(dispatch.RunID), "error", err)
+		a.clearStatus(dispatch.RunID)
+	}
+
+	message, err := a.client.Rest.CreateMessage(channelID, messageWith(shown))
+	if err != nil {
+		a.config.Logger.Warn("could not say what the run is doing",
+			"run_id", string(dispatch.RunID), "error", err)
+		return nil, nil
+	}
+
+	a.setStatus(dispatch.RunID, message.ID)
+	return []string{message.ID.String()}, nil
+}
+
+// worthShowing decides whether a status is a line somebody would read.
+//
+// Nothing for a status with no words in it: a run that left "⋯" in the
+// channel would be something to scroll past rather than something to read.
+// Nothing either without a run to key it to, because the line has to be
+// rewritten by the next thing that run does, and a line nothing can find
+// again is a line that accumulates.
+func worthShowing(dispatch jcgateway.Dispatch, body string) (string, bool) {
+	shown := strings.TrimSpace(body)
+	if shown == "" || dispatch.RunID == "" {
+		return "", false
+	}
+	return shown, true
+}
+
+// takeDownWhatItWasDoing removes the line, if there is one to remove.
+func (a *Adapter) takeDownWhatItWasDoing(channelID snowflake.ID, dispatch jcgateway.Dispatch) {
+	existing, ok := a.liveStatus(dispatch.RunID)
+	if !ok {
+		return
+	}
+	a.clearStatus(dispatch.RunID)
+
+	if err := a.client.Rest.DeleteMessage(channelID, existing); err != nil {
+		a.config.Logger.Debug("could not take down the working line",
+			"run_id", string(dispatch.RunID), "message_id", existing.String(), "error", err)
+	}
 }

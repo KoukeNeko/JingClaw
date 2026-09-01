@@ -9,6 +9,10 @@ import (
 	"testing"
 
 	jcgateway "github.com/KoukeNeko/JingClaw/core/internal/gateway"
+	"github.com/disgoorg/snowflake/v2"
+
+	"github.com/KoukeNeko/JingClaw/core/internal/domain"
+
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway/render"
 )
 
@@ -488,5 +492,98 @@ func TestAnOrdinaryMessageCarriesNoFile(t *testing.T) {
 		Payload: string(empty),
 	}); carried {
 		t.Error("a file with no content was posted")
+	}
+}
+
+// Discord says what it is doing in words, not only in an emoji.
+//
+// The reaction says which kind of thing is happening; only the line says
+// which page it went to or which file it opened, and that is the part
+// somebody watching a run actually wants. Without this the channel shows a
+// globe for two minutes and nothing about where it went.
+func TestDiscordDrawsWhatItIsDoing(t *testing.T) {
+	for _, state := range []string{"working", "network_started", "memory_started", "provider_started"} {
+		rendered, err := render.Dispatch(jcgateway.Dispatch{
+			Kind:    jcgateway.DispatchStatus,
+			Payload: `{"state":"` + state + `","detail":"web_read https://example.com/a"}`,
+		}, discordStyle)
+		if err != nil {
+			t.Fatalf("%s: %v", state, err)
+		}
+		if !strings.Contains(rendered, "https://example.com/a") {
+			t.Errorf("%s draws %q, which does not say what it is doing", state, rendered)
+		}
+	}
+}
+
+// A state carrying nothing to say draws nothing.
+//
+// Otherwise every run leaves a line reading "⋯" in the channel, and a line
+// that says nothing is worse than no line: it is something to scroll past.
+func TestAStateWithNothingToSayDrawsNothing(t *testing.T) {
+	rendered, err := render.Dispatch(jcgateway.Dispatch{
+		Kind:    jcgateway.DispatchStatus,
+		Payload: `{"state":"working"}`,
+	}, discordStyle)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.TrimSpace(rendered) != "" {
+		t.Errorf("a status with no detail drew %q", rendered)
+	}
+}
+
+// One line per run, taken down when the run ends.
+//
+// The account of a run belongs under the answer; a message posted while the
+// run was still going sits above it. Rewriting the working line into the
+// summary would put it in the wrong place, so it goes away instead.
+func TestTheWorkingLineIsOnePerRunAndGoesAway(t *testing.T) {
+	adapter := &Adapter{statusMessages: map[domain.RunID]snowflake.ID{}}
+
+	if _, live := adapter.liveStatus("run_1"); live {
+		t.Error("a run that has said nothing already has a line")
+	}
+
+	adapter.setStatus("run_1", 11)
+	adapter.setStatus("run_2", 22)
+
+	first, live := adapter.liveStatus("run_1")
+	if !live || first != 11 {
+		t.Errorf("run_1's line came back as %v (live=%v)", first, live)
+	}
+
+	adapter.clearStatus("run_1")
+	if _, live := adapter.liveStatus("run_1"); live {
+		t.Error("a run whose line was taken down still has one")
+	}
+	if _, live := adapter.liveStatus("run_2"); !live {
+		t.Error("taking down one run's line took down another's")
+	}
+
+}
+
+// A status with nothing to say leaves nothing behind.
+func TestAStatusWithNothingToSayPostsNothing(t *testing.T) {
+	for _, nothing := range []struct {
+		why      string
+		dispatch jcgateway.Dispatch
+		body     string
+	}{
+		{"no words in it", jcgateway.Dispatch{RunID: "run_1"}, "   \n "},
+		{"nothing to key it to", jcgateway.Dispatch{}, "-# ⋯ read_file notes.txt"},
+	} {
+		if shown, worth := worthShowing(nothing.dispatch, nothing.body); worth {
+			t.Errorf("a status with %s would have posted %q", nothing.why, shown)
+		}
+	}
+
+	shown, worth := worthShowing(
+		jcgateway.Dispatch{RunID: "run_1"}, "-# ⋯ read_file notes.txt\n")
+	if !worth {
+		t.Fatal("a status with words and a run to key it to posts nothing")
+	}
+	if strings.HasSuffix(shown, "\n") {
+		t.Errorf("the line is posted with its trailing newline: %q", shown)
 	}
 }
