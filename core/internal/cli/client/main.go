@@ -1140,8 +1140,12 @@ func authenticatedIn(where string) (*http.Client, string, error) {
 		return nil, "", fmt.Errorf("%w (is jingclaw running?)", err)
 	}
 
+	// The base URL is a placeholder: every request is rewritten to wherever
+	// the discovery file points when it is made. Read once here so that
+	// starting with no daemon fails immediately and says so.
+	_ = found
 	return &http.Client{
-		Transport: &bearerTransport{token: found.Token, base: http.DefaultTransport},
+		Transport: &AtTheDaemon{Path: path, As: AsTheOperator},
 	}, found.BaseURL, nil
 }
 

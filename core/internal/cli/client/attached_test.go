@@ -1,4 +1,4 @@
-package gateway
+package client_test
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/cli/client"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 )
 
@@ -35,7 +36,7 @@ func TestItFollowsTheDaemonToItsNewAddress(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "daemon.json")
 	publish(t, path, first.URL, "token-one")
 
-	transport := &atTheDaemon{path: path, base: http.DefaultTransport}
+	transport := &client.AtTheDaemon{Path: path, As: client.AsTheGateway, Base: http.DefaultTransport}
 	client := &http.Client{Transport: transport}
 
 	ask(t, client, "http://wherever.invalid/ping")
@@ -61,7 +62,7 @@ func TestItFollowsTheDaemonToItsNewAddress(t *testing.T) {
 func TestARequestIsNotSentToAStaleAddress(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "daemon.json")
 
-	transport := &atTheDaemon{path: path, base: http.DefaultTransport}
+	transport := &client.AtTheDaemon{Path: path, As: client.AsTheGateway, Base: http.DefaultTransport}
 	client := &http.Client{Transport: transport}
 
 	request, err := http.NewRequest(http.MethodGet, "http://wherever.invalid/ping", nil)
@@ -95,7 +96,7 @@ func TestTheCredentialGoesNowhereWithoutOne(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "daemon.json")
 	publish(t, path, listening.URL, "")
 
-	transport := &atTheDaemon{path: path, base: http.DefaultTransport}
+	transport := &client.AtTheDaemon{Path: path, As: client.AsTheGateway, Base: http.DefaultTransport}
 	request, err := http.NewRequest(http.MethodGet, "http://wherever.invalid/ping", nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)

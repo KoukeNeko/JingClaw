@@ -705,12 +705,34 @@ func describeCall(name, arguments string) string {
 		return name
 	}
 
-	for _, key := range []string{"path", "pattern", "query", "program", "file_path", "url"} {
-		if value, ok := decoded[key].(string); ok && value != "" {
-			return name + " " + value
+	// The keys tools use for the thing they are working on. In order, because
+	// a tool with two of them is working on the first: exec_command has a
+	// program and arguments, and the program is what it is doing.
+	for _, key := range []string{
+		"path", "pattern", "query", "program", "file_path", "url",
+		"name", "question",
+	} {
+		value, ok := decoded[key].(string)
+		if !ok || value == "" {
+			continue
 		}
+		return name + " " + boundToALine(value)
 	}
 	return name
+}
+
+// lineLength is how much of an argument fits on a line somebody reads at a
+// glance. A question can be a paragraph, and this line is rewritten every
+// couple of seconds under an answer somebody is trying to read.
+const lineLength = 70
+
+// boundToALine keeps an argument from becoming the whole message.
+func boundToALine(value string) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= lineLength {
+		return string(runes)
+	}
+	return string(runes[:lineLength]) + "…"
 }
 
 func (p *Projector) enqueue(

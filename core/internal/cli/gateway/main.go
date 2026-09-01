@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -28,6 +27,7 @@ import (
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
+	"github.com/KoukeNeko/JingClaw/core/internal/cli/client"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
@@ -327,55 +327,12 @@ func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient,
 	}
 
 	httpClient := &http.Client{
-		Transport: &atTheDaemon{path: path, base: http.DefaultTransport},
+		Transport: &client.AtTheDaemon{Path: path, As: client.AsTheGateway},
 	}
 
 	// The base URL is a placeholder: every request is rewritten to wherever
 	// the discovery file points when it is made.
 	return controlv1connect.NewGatewayIngressServiceClient(httpClient, found.BaseURL), nil
-}
-
-// atTheDaemon sends every request wherever the discovery file currently points.
-//
-// Resolved per request rather than once at startup, because the daemon
-// publishes a fresh address and credential every time it starts. A gateway
-// holding the first one it saw survives a daemon restart as something worse
-// than a dead process: it stays connected to the platform, keeps marking
-// messages as seen, and delivers none of them — which from the room is
-// indistinguishable from an agent that has decided not to answer.
-//
-// The file is read on every request rather than cached and invalidated. It is
-// a few hundred bytes on local disk, the request rate is a handful per
-// message, and a cache here would need to know when it was wrong — which is
-// the thing that was missing in the first place.
-type atTheDaemon struct {
-	path string
-	base http.RoundTripper
-}
-
-func (t *atTheDaemon) RoundTrip(req *http.Request) (*http.Response, error) {
-	found, err := discovery.Read(t.path)
-	if err != nil {
-		return nil, fmt.Errorf("gateway: where the daemon is: %w", err)
-	}
-	if found.GatewayToken == "" {
-		return nil, errors.New("gateway: the daemon published no gateway credential")
-	}
-
-	where, err := url.Parse(found.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("gateway: the daemon published an address that will not parse: %w", err)
-	}
-
-	// Rewritten rather than checked. Refusing a request whose host does not
-	// match would mean the client had to be rebuilt on every restart, which is
-	// the arrangement this replaces.
-	clone := req.Clone(req.Context())
-	clone.URL.Scheme = where.Scheme
-	clone.URL.Host = where.Host
-	clone.Host = where.Host
-	clone.Header.Set("Authorization", "Bearer "+found.GatewayToken)
-	return t.base.RoundTrip(clone)
 }
 
 // refusedInThisChannel is what somebody sees when the channel will not take

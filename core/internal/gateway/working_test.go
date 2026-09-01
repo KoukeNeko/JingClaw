@@ -2,6 +2,7 @@ package gateway_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -85,4 +86,54 @@ func statusFor(t *testing.T, call domain.ToolCallRequested) string {
 		t.Fatalf("%s produced no status at all", call.Name)
 	}
 	return dispatches[len(dispatches)-1].Payload
+}
+
+// The line names the thing, whatever the tool calls its argument.
+//
+// A reader watching a run wants to know which skill, which question, which
+// file — and every tool spells that differently. A tool whose argument is not
+// recognised draws its own name and nothing else, which is the emoji problem
+// again in words.
+func TestTheLineNamesWhatEachToolIsWorkingOn(t *testing.T) {
+	for _, call := range []struct {
+		name      string
+		arguments string
+		wanted    string
+	}{
+		{"skill_load", `{"name":"deploy-runbook"}`, "deploy-runbook"},
+		{"investigate", `{"question":"which functions parse the config"}`, "which functions parse"},
+		{"read_file", `{"path":"notes.md"}`, "notes.md"},
+		{"web_read", `{"url":"https://example.com/a"}`, "https://example.com/a"},
+		{"exec_command", `{"program":"go","args":["test"]}`, "go"},
+	} {
+		said := statusFor(t, domain.ToolCallRequested{
+			CallID: "call_1", Name: call.name, Arguments: call.arguments,
+		})
+		if !strings.Contains(said, call.wanted) {
+			t.Errorf("%s does not say what it is working on: %s", call.name, said)
+		}
+	}
+}
+
+// And a long one does not become the whole message.
+//
+// A line that is rewritten every couple of seconds must stay a line. A
+// question of two hundred characters would push the answer off the screen
+// while saying nothing the first eighty did not.
+func TestTheLineStaysALine(t *testing.T) {
+	said := statusFor(t, domain.ToolCallRequested{
+		CallID: "call_1", Name: "investigate",
+		Arguments: `{"question":"` + strings.Repeat("why ", 60) + `"}`,
+	})
+
+	var payload struct {
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(said), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len([]rune(payload.Detail)) > 100 {
+		t.Errorf("the line is %d characters long: %q",
+			len([]rune(payload.Detail)), payload.Detail)
+	}
 }

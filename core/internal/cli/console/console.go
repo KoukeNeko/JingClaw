@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -195,6 +196,12 @@ type controlv1connectSessionService interface {
 func (s *session) follow(ctx context.Context) {
 	cursor := uint64(0)
 
+	// Paced, and said once. Without this a daemon that went away is a
+	// terminal filling with one sentence as fast as the machine can print
+	// it, which hides whatever somebody was reading and says nothing the
+	// first line did not.
+	var retries console.Retries
+
 	for ctx.Err() == nil {
 		stream, err := s.daemon.SubscribeAllEvents(ctx, connect.NewRequest(
 			&controlv1.SubscribeAllEventsRequest{AfterCursor: cursor, ClientId: clientName},
@@ -207,7 +214,9 @@ func (s *session) follow(ctx context.Context) {
 			return
 		}
 
+		read := false
 		for stream.Receive() {
+			read = true
 			switch frame := stream.Msg().GetValue().(type) {
 			case *controlv1.SubscribeAllEventsResponse_Event:
 				cursor = frame.Event.GetGlobalSeq()
@@ -228,13 +237,31 @@ func (s *session) follow(ctx context.Context) {
 		// from the same cursor, so whatever stopped it stops it again — and
 		// without this the console sits there looking connected, redrawing a
 		// prompt, while every event after that one is never shown.
-		if err := stream.Err(); err != nil && ctx.Err() == nil {
-			s.screen.Log("the event stream stopped: " + err.Error())
+		if read {
+			// Something got through, so the next outage is a new fact and is
+			// said, and waited on from the start rather than at whatever
+			// interval the last one had backed off to.
+			retries.Worked()
 		}
 
 		_ = stream.Close()
 		if ctx.Err() != nil {
 			return
+		}
+
+		wait := time.Duration(0)
+		if err := stream.Err(); err != nil && ctx.Err() == nil {
+			var say string
+			say, wait = retries.Failed("the event stream stopped: " + err.Error())
+			if say != "" {
+				s.screen.Log(say)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
 		}
 	}
 }
