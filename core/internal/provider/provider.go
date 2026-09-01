@@ -158,6 +158,13 @@ type ContentBlock interface {
 
 type TextBlock struct {
 	Text string
+
+	// Annotation marks text this machine wrote into somebody else's turn: a
+	// timestamp, or a note that what follows arrived from outside. The model
+	// reads it like any other text, and every adapter renders it the same
+	// way — what the flag is for is the other direction, so anything asking
+	// what the person actually said does not get an answer this side wrote.
+	Annotation bool
 }
 
 // ToolUseBlock records a tool the model asked for. It goes back into the
@@ -318,7 +325,10 @@ func (r Request) LastUserText() string {
 			continue
 		}
 		for _, block := range r.Messages[i].Content {
-			if text, ok := block.(TextBlock); ok {
+			// Annotations skipped. They are this machine's words sitting in a
+			// user turn, and returning one here would answer "what did they
+			// say" with a timestamp.
+			if text, ok := block.(TextBlock); ok && !text.Annotation {
 				return text.Text
 			}
 		}

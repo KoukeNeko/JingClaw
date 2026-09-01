@@ -480,10 +480,16 @@ answer with nothing marking it stale. It gives the instant with its offset,
 the weekday, the same instant in UTC, and the zone by name where the machine
 has one to give. By name and not by abbreviation: "CST" is China Standard
 Time at +08:00 and Central Standard Time at -06:00, and a reader given only
-that converts to whichever it guesses. What is still not done is the other
-half — the log knows when every turn happened, and the conversation rebuilt
-from it drops that, so "how long ago did we talk about this" remains
-unanswerable.
+that converts to whichever it guesses. Every turn a person took now carries the time
+they took it, taken from the event rather than from the clock: the
+conversation is rebuilt from the log on every request, so a time read during
+that rebuild would date an old turn to now and would change the prefix a
+provider is paid to remember on a request where nothing about the history
+changed.
+
+It sits in its own block rather than in their words, and that block is marked
+as this machine's. Otherwise anything asking what somebody said gets a
+timestamp back, which is how the fake provider came to echo one.
 
 **A gateway that follows the daemon.** The daemon publishes a fresh address
 every time it starts. The gateway read that once, kept it, and went on

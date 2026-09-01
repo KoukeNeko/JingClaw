@@ -296,3 +296,23 @@ func TestLastUserTextFindsMostRecent(t *testing.T) {
 		t.Errorf("got %q for an empty request, want empty", got)
 	}
 }
+
+// What the person said is not what this machine wrote beside it.
+//
+// A turn carries annotations — the time it was taken, a note that an image
+// came from outside — and they are text blocks like any other. Anything
+// asking what somebody said and getting one of those back is answering with
+// its own words.
+func TestWhatWasSaidIsNotWhatWasWrittenBesideIt(t *testing.T) {
+	request := provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleUser,
+		Content: []provider.ContentBlock{
+			provider.TextBlock{Text: "[2026-09-01T18:42:07+08:00]", Annotation: true},
+			provider.TextBlock{Text: "what is in this file"},
+		},
+	}}}
+
+	if got := request.LastUserText(); got != "what is in this file" {
+		t.Errorf("what they said came back as %q", got)
+	}
+}
