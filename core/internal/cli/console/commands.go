@@ -2,6 +2,7 @@ package console
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -48,6 +49,12 @@ func (s *session) run(ctx context.Context, line string) bool {
 	case "approve", "deny":
 		s.decide(ctx, command)
 
+	case "show":
+		s.showOneApproval(ctx, command.Arg(0))
+
+	case "open":
+		s.openStoredOutput(ctx, command.Arg(0))
+
 	case "questions":
 		s.showQuestions(ctx)
 
@@ -72,6 +79,14 @@ func (s *session) run(ctx context.Context, line string) bool {
 			return true
 		}
 		s.say("this console did not start it; use jingclaw stop.")
+
+	default:
+		// A verb the table has and this switch does not. Said rather than
+		// ignored, because the parser accepted it: a command that is listed
+		// in help, completes, and then does nothing is worse than one that
+		// does not exist, and the person typing it has no way to tell which
+		// they are looking at.
+		s.say("`" + command.Verb + "` is listed and not wired up; this is a bug.")
 	}
 
 	return false
@@ -129,6 +144,168 @@ func (s *session) showApprovals(ctx context.Context) {
 			s.say("      this run read text from outside this machine")
 		}
 	}
+}
+
+// showOneApproval prints the whole of one waiting call.
+//
+// The listing clips, because a list of full commands is a list nobody reads.
+// This is where the clipping stops: deciding whether to run something means
+// deciding about that thing, and a decision made against the first seventy
+// characters of it is a decision about a prefix.
+func (s *session) showOneApproval(ctx context.Context, id string) {
+	if id == "" {
+		s.say("which one? " + console.Usage("show"))
+		return
+	}
+
+	waiting, err := s.everyApproval(ctx)
+	if err != nil {
+		s.say("could not read what is waiting: " + err.Error())
+		return
+	}
+
+	for _, approval := range waiting {
+		if approval.GetId() != id {
+			continue
+		}
+		s.sayApprovalInFull(approval)
+		return
+	}
+	s.say("nothing is waiting under that id; " + console.Usage("approvals"))
+}
+
+// sayApprovalInFull is one call, unclipped.
+func (s *session) sayApprovalInFull(approval *controlv1.Approval) {
+	s.say(approval.GetId() + "  " + approval.GetToolName())
+	if summary := approval.GetSummary(); summary != "" {
+		s.say("  " + summary)
+	}
+
+	// The arguments as well as the rendering. The rendering is what a person
+	// reads; the arguments are what will actually run, and a decision made
+	// against a rendering that disagreed with them would be a decision about
+	// something else.
+	if preview := approval.GetPreview(); preview != "" {
+		s.sayEachLine(preview)
+	}
+	s.say("  arguments:")
+	s.sayEachLine(approval.GetArguments())
+
+	for _, effect := range approval.GetEffects() {
+		s.say("  · " + effect)
+	}
+	if approval.GetReadForeign() {
+		// The one thing the person deciding cannot see for themselves: the
+		// request looks the same whether the agent arrived at it or a page it
+		// read suggested it, and only the log knows.
+		s.say("  this run read text from outside this machine before asking")
+	}
+}
+
+// sayEachLine prints something multi-line as lines of the log.
+//
+// One call per line rather than one call with newlines in it, because the
+// screen owns the bottom line and redraws it around whatever it prints.
+func (s *session) sayEachLine(text string) {
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		s.say("  " + line)
+	}
+}
+
+// openStoredOutput writes stored output out and hands it to the machine.
+//
+// Not drawn in the log. A terminal is a poor image viewer and a worse PDF
+// reader, and what somebody wants when a build fails is the log in the thing
+// they read logs in.
+func (s *session) openStoredOutput(ctx context.Context, id string) {
+	stored := s.lastStored()
+	if id != "" && !strings.HasPrefix(stored.id, id) {
+		s.say("this console has only seen " + shortOrNothing(stored.id) +
+			" go past; open it with `open`, or read it with `agent artifact`.")
+		return
+	}
+	if stored.id == "" {
+		s.say("no stored output has gone past yet.")
+		return
+	}
+
+	extension, openable := console.ExtensionFor(stored.mediaType)
+	if !openable {
+		// Refused rather than opened as something else. An artifact is
+		// whatever a tool produced, which includes whatever a page the run
+		// read suggested it produce, and handing that to the machine's
+		// default program for it is running somebody else's file.
+		s.say(fmt.Sprintf("%s is a %s, which this console will not hand to the machine.",
+			stored.id, orUnknown(stored.mediaType)))
+		return
+	}
+
+	data, err := s.readArtifact(ctx, stored.id)
+	if err != nil {
+		s.say("could not read it: " + err.Error())
+		return
+	}
+
+	path, err := console.WriteForOpening(s.into, stored.id, extension, data)
+	if err != nil {
+		s.say(err.Error())
+		return
+	}
+	if err := s.opener.Open(ctx, path); err != nil {
+		s.say("could not open it: " + err.Error())
+		return
+	}
+	s.say("opened " + path)
+}
+
+// readArtifact reads stored output back whole.
+//
+// Whole because what it is for is handing to another program, and half a
+// build log is a file that opens and says the wrong thing.
+func (s *session) readArtifact(ctx context.Context, id string) ([]byte, error) {
+	if s.artifacts == nil {
+		return nil, errors.New("this console cannot reach stored output")
+	}
+
+	stream, err := s.artifacts.ReadArtifact(ctx, connect.NewRequest(
+		&controlv1.ReadArtifactRequest{Id: id, Limit: maxArtifactBytes}))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = stream.Close() }()
+
+	var read []byte
+	for stream.Receive() {
+		read = append(read, stream.Msg().GetChunk()...)
+		if len(read) > maxArtifactBytes {
+			// Said rather than truncated. A log cut off at an arbitrary point
+			// opens and says the wrong thing, and nothing on the screen would
+			// show that the end is missing.
+			return nil, fmt.Errorf("it is larger than this console will write out (%d bytes)",
+				maxArtifactBytes)
+		}
+	}
+	return read, stream.Err()
+}
+
+// maxArtifactBytes bounds what the console will write out to be opened.
+//
+// Generous, because the thing this exists for is a build log nobody wants
+// truncated, and bounded because "whatever a tool produced" is not a size.
+const maxArtifactBytes = 64 << 20
+
+func orUnknown(mediaType string) string {
+	if mediaType == "" {
+		return "kind of file this console was not told"
+	}
+	return mediaType
+}
+
+func shortOrNothing(id string) string {
+	if id == "" {
+		return "nothing"
+	}
+	return id
 }
 
 // everyApproval gathers what is waiting across every session.

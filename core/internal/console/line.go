@@ -27,9 +27,10 @@ import (
 //
 //	15:04:05  #session  KIND state  metadata · preview
 const (
-	timeFormat    = "15:04:05"
-	sessionDigits = 8
-	fieldGap      = "  "
+	timeFormat     = "15:04:05"
+	sessionDigits  = 8
+	artifactDigits = 12
+	fieldGap       = "  "
 )
 
 // previewWidth is how much of a payload one line shows before the rest is left
@@ -85,6 +86,22 @@ func shortSession(id domain.SessionID) string {
 		text = text[:sessionDigits]
 	}
 	return "#" + text
+}
+
+// shortArtifact is an artifact id at the length a log line can carry.
+//
+// Short enough to sit on a line beside everything else, long enough that two
+// of them in one session are not the same string. `open` takes a prefix, so
+// what is printed is what can be typed.
+func shortArtifact(id string) string {
+	text := string(id)
+	if cut := strings.IndexByte(text, '-'); cut >= 0 && cut+1 < len(text) {
+		text = text[cut+1:]
+	}
+	if len(text) > artifactDigits {
+		text = text[:artifactDigits]
+	}
+	return text
 }
 
 // Clip shortens text to what a line of the log shows of a payload.
@@ -155,6 +172,13 @@ func Describe(event domain.Event) (Line, bool) {
 		}
 		line.Meta = payload.Name
 		line.Preview = firstOf(payload.Summary, payload.Content)
+
+		// Named, because otherwise the only way to reach a build log is to
+		// know it exists. The id is what `open` takes, so it has to be on the
+		// line somebody is reading when they decide they want it.
+		if payload.Artifact != nil {
+			line.Meta += " · output " + shortArtifact(payload.Artifact.ID)
+		}
 
 	case domain.ApprovalRequested:
 		line.Kind = "APPROVAL"

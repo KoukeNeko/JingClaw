@@ -1,4 +1,4 @@
-package tui
+package console
 
 import (
 	"context"
@@ -15,6 +15,10 @@ import (
 // An interface so the checks can watch what would be opened without anything
 // actually being launched, and because "the machine" is a different program
 // on every platform.
+//
+// Here rather than drawn in the log, because a terminal is a poor image
+// viewer and a worse PDF reader. What somebody wants when a build fails is
+// the log in the thing they read logs in.
 type Opener interface {
 	Open(ctx context.Context, path string) error
 }
@@ -38,14 +42,14 @@ var openableTypes = map[string]string{
 	"image/webp":       ".webp",
 }
 
-// extensionFor says how a stored output may be named, and whether it may be
+// ExtensionFor says how a stored output may be named, and whether it may be
 // opened at all.
 //
 // The extension comes from the media type and never from anything the agent
 // chose. What an extension does is pick the program that runs, so taking one
 // from a tool's own output would let a run decide which program starts on the
 // operator's machine — a larger thing than showing them a log.
-func extensionFor(mediaType string) (string, bool) {
+func ExtensionFor(mediaType string) (string, bool) {
 	// Parameters dropped: "text/plain; charset=utf-8" is text/plain, and a
 	// lookup that missed it would refuse a log for saying its encoding.
 	base := strings.TrimSpace(strings.ToLower(mediaType))
@@ -57,22 +61,22 @@ func extensionFor(mediaType string) (string, bool) {
 	return extension, allowed
 }
 
-// theMachine opens a file the way the platform does.
-type theMachine struct{}
+// TheMachine is the platform's own "open this".
+type TheMachine struct{}
 
 // Open hands the path over, without waiting for whatever opens it.
 //
 // Not waited on because the program that opens a PDF stays open, and a panel
 // blocked until somebody closes their reader would look hung.
-func (theMachine) Open(ctx context.Context, path string) error {
+func (TheMachine) Open(ctx context.Context, path string) error {
 	opener, args := openerFor(path)
 	if opener == "" {
-		return fmt.Errorf("tui: no way to open a file on %s", runtime.GOOS)
+		return fmt.Errorf("console: no way to open a file on %s", runtime.GOOS)
 	}
 
 	command := exec.CommandContext(ctx, opener, args...)
 	if err := command.Start(); err != nil {
-		return fmt.Errorf("tui: opening %s: %w", filepath.Base(path), err)
+		return fmt.Errorf("console: opening %s: %w", filepath.Base(path), err)
 	}
 
 	// Released rather than waited on. Waiting would hold the panel until the
@@ -93,19 +97,19 @@ func openerFor(path string) (string, []string) {
 	}
 }
 
-// writeForOpening puts the bytes where something else can read them.
+// WriteForOpening puts the bytes where something else can read them.
 //
 // Never executable, whatever it is. A file mode is not a judgement about the
 // contents, and 0o600 on a file about to be handed to a default program is
 // the difference between opening a document and running one.
-func writeForOpening(dir, id, extension string, data []byte) (string, error) {
+func WriteForOpening(dir, id, extension string, data []byte) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("tui: making somewhere to put it: %w", err)
+		return "", fmt.Errorf("console: making somewhere to put it: %w", err)
 	}
 
 	path := filepath.Join(dir, safeName(id)+extension)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", fmt.Errorf("tui: writing it out: %w", err)
+		return "", fmt.Errorf("console: writing it out: %w", err)
 	}
 
 	// Said again, because the mode above applies only when the file is
@@ -114,7 +118,7 @@ func writeForOpening(dir, id, extension string, data []byte) (string, error) {
 	// whatever mode it already had — and the promise this function makes is
 	// about the file that is handed over, not about the first one.
 	if err := os.Chmod(path, 0o600); err != nil {
-		return "", fmt.Errorf("tui: setting how it may be used: %w", err)
+		return "", fmt.Errorf("console: setting how it may be used: %w", err)
 	}
 	return path, nil
 }

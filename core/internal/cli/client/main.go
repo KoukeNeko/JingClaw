@@ -944,12 +944,12 @@ func dialMemory() (controlv1connect.MemoryServiceClient, error) {
 	return controlv1connect.NewMemoryServiceClient(httpClient, baseURL), nil
 }
 
-// DialForPanel is the two clients the terminal panel needs.
+// DialForConsole is the two clients the console needs.
 //
 // Both from one connection rather than two calls, because they must reach the
-// same daemon: a panel reading a session from one and its stored output from
-// another would open a file that belongs to a different log.
-func DialForPanel(where string) (
+// same daemon: a console reading a session from one and its stored output
+// from another would open a file that belongs to a different log.
+func DialForConsole(where string) (
 	controlv1connect.SessionServiceClient,
 	controlv1connect.ArtifactServiceClient,
 	error,

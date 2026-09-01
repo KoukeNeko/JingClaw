@@ -44,6 +44,8 @@ var known = []struct {
 	{Verb: "approvals", Aliases: []string{"pending"}, What: "what is waiting for a decision"},
 	{Verb: "approve", Aliases: []string{"allow", "yes"}, Takes: "<id>", What: "allow a waiting call"},
 	{Verb: "deny", Aliases: []string{"refuse", "no"}, Takes: "<id>", What: "refuse a waiting call"},
+	{Verb: "show", Takes: "<id>", What: "the whole of a waiting call, not the clipped line"},
+	{Verb: "open", Takes: "[id]", What: "open stored output in whatever reads that kind"},
 	{Verb: "questions", Aliases: []string{"asked"}, What: "what the agent has stopped to ask"},
 	{Verb: "answer", Takes: "<id> <text>", What: "answer a question it is waiting on"},
 	{Verb: "sessions", Aliases: []string{"ls"}, What: "the conversations there are"},
@@ -89,6 +91,24 @@ func Parse(line string) (Command, bool, error) {
 		return Command{}, false, ErrUnknown{Typed: fields[0]}
 	}
 	return Command{Verb: verb, Args: fields[1:]}, true, nil
+}
+
+// Usage is one verb and what it takes, for saying so when it was typed
+// without them.
+//
+// Read from the same table as help and the parser, so a command cannot be
+// told to take an argument it does not, or documented in two shapes.
+func Usage(verb string) string {
+	for _, command := range known {
+		if command.Verb != verb {
+			continue
+		}
+		if command.Takes == "" {
+			return "try `" + command.Verb + "`"
+		}
+		return "try `" + command.Verb + " " + command.Takes + "`"
+	}
+	return "try `help`"
 }
 
 // Help is the list of commands, for somebody who typed help.

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -51,7 +52,7 @@ const (
 // runtimeDir is where the daemon publishes itself. The console is a client
 // like any other and finds it the same way.
 func Run(ctx context.Context, runtimeDir string, leaving Leaving) error {
-	daemon, err := client.Dial(runtimeDir)
+	daemon, artifacts, err := client.DialForConsole(runtimeDir)
 	if err != nil {
 		return err
 	}
@@ -79,9 +80,16 @@ func Run(ctx context.Context, runtimeDir string, leaving Leaving) error {
 	defer screen.Close()
 
 	session := &session{
-		daemon:  daemon,
-		screen:  screen,
-		leaving: leaving,
+		daemon:    daemon,
+		artifacts: artifacts,
+		screen:    screen,
+		leaving:   leaving,
+		opener:    console.TheMachine{},
+
+		// Its own directory under the system temporary one, so what the
+		// console wrote out is together when somebody goes looking, and is
+		// not read by the next thing to look in there.
+		into: filepath.Join(os.TempDir(), "jingclaw-output"),
 	}
 
 	ctx, stop := context.WithCancel(ctx)
@@ -119,13 +127,37 @@ func rawMode() (func(), error) {
 
 // session is one run of the console.
 type session struct {
-	daemon  controlv1connectSessionService
-	screen  *console.Screen
-	leaving Leaving
+	daemon    controlv1connectSessionService
+	artifacts artifactReader
+	screen    *console.Screen
+	leaving   Leaving
+
+	// opener and into are how stored output reaches something that can read
+	// it, and where it is written on the way. Held so a check can watch what
+	// would be opened without a reader being launched.
+	opener console.Opener
+	into   string
 
 	mu      sync.Mutex
 	focused domain.SessionID
 	history []string
+
+	// stored is the last output a call left behind, so `open` with no
+	// argument means the one just mentioned in the log rather than nothing.
+	stored storedOutput
+}
+
+// storedOutput is an artifact the console has seen go past.
+type storedOutput struct {
+	id        string
+	mediaType string
+}
+
+// artifactReader is the part of the artifact service the console uses.
+type artifactReader interface {
+	ReadArtifact(
+		context.Context, *connect.Request[controlv1.ReadArtifactRequest],
+	) (*connect.ServerStreamForClient[controlv1.ReadArtifactResponse], error)
 }
 
 // controlv1connectSessionService is what the console needs of the daemon.
@@ -192,6 +224,14 @@ func (s *session) follow(ctx context.Context) {
 			}
 		}
 
+		// Said before reconnecting. A stream that ends mid-way is retried
+		// from the same cursor, so whatever stopped it stops it again — and
+		// without this the console sits there looking connected, redrawing a
+		// prompt, while every event after that one is never shown.
+		if err := stream.Err(); err != nil && ctx.Err() == nil {
+			s.screen.Log("the event stream stopped: " + err.Error())
+		}
+
 		_ = stream.Close()
 		if ctx.Err() != nil {
 			return
@@ -218,11 +258,36 @@ func (s *session) show(event *controlv1.Event) {
 		return
 	}
 
+	// Noted before it is drawn, so `open` with no argument means the output
+	// the line being read just mentioned.
+	s.noteStoredOutput(read)
+
 	line, ok := console.Describe(read)
 	if !ok {
 		return
 	}
 	s.screen.Log(line.String())
+}
+
+// noteStoredOutput keeps the last stored output that went past.
+func (s *session) noteStoredOutput(event domain.Event) {
+	completed, isCompleted := event.Payload.(domain.ToolCallCompleted)
+	if !isCompleted || completed.Artifact == nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stored = storedOutput{
+		id: completed.Artifact.ID, mediaType: completed.Artifact.MediaType,
+	}
+}
+
+// lastStored is the output `open` means when it is given no argument.
+func (s *session) lastStored() storedOutput {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stored
 }
 
 // read takes keystrokes until the console is told to leave.
