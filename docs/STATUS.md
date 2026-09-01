@@ -1,6 +1,6 @@
 # Where JingClaw is
 
-Updated 2026-08-31.
+Updated 2026-09-01.
 
 ## Done
 
@@ -472,6 +472,26 @@ never a summary of it. Clipping counts what the terminal draws, not bytes or
 runes. No terminal, no state, no dependency — the rest of the console can be
 argued about without this changing.
 
+**A gateway that follows the daemon.** The daemon publishes a fresh address
+every time it starts. The gateway read that once, kept it, and went on
+dialling a port nobody answers — while still connected to the platform, still
+marking every message as seen, and delivering none of them. Nine hours of
+that in a live deployment, and from the room it was indistinguishable from an
+agent that had decided not to reply. Every request now resolves the daemon
+from the discovery file as it is made, and a room whose message went nowhere
+is told so: once per outage, per room, and again after the next one.
+
+**A terminal panel, built and then removed.** `docs/PROPOSED_PLAN-tui.md` says
+at the top that it is superseded — the console replaced it. Read by its
+headings, that banner was invisible, and what got built was the shape the plan
+had already rejected: a session list, a full-screen session view, several
+screens. Two halves of it were worth keeping and are now console verbs.
+`show <id>` prints a waiting call in full, because deciding whether to run
+something means deciding about that thing rather than about its first seventy
+characters. `open` hands stored output to whatever reads that kind, with the
+extension taken from the media type and never from anything the agent chose,
+a short allowlist, and a file that is never executable.
+
 ## Not done
 
 **Built but nothing uses it**
@@ -492,20 +512,24 @@ argued about without this changing.
   than on the run, which is a larger change than the one that made run-level
   trust work.
 
+- ~~**MCP OAuth.**~~ Written, and checked against a stub that runs the whole
+  authorization-code flow. The transport authorizes twice and the two are
+  routed by `state`, which is how a single-use exchange came to be attempted
+  twice; failures are remembered so the second attempt is refused rather than
+  retried.
+
 - ~~**A stale client resolves the old way.**~~ Fixed by there being one
   binary: a client cannot be built from a different revision than the daemon
   it talks to when they are the same file. The supervisor also starts its
   parts from `os.Executable()` rather than the name on PATH, so an installed
   copy and a freshly built one cannot be mixed.
 
-- **Nothing is sandboxed.** There is no seatbelt, bubblewrap, landlock or
-  seccomp anywhere: an approved `exec_command` runs with the daemon's own
-  privileges. That is a deliberate shape rather than an oversight — the
-  boundary here is approval, not containment — but the two stop different
-  things. Approval stops what should not be done; a sandbox stops what is
-  being done from reaching further than it said. An approved `npm test` can
-  still read `~/.ssh`. Claude Code and Codex have OS-native sandboxes;
-  OpenHands and OpenClaw use containers.
+- ~~**Nothing is sandboxed.**~~ There is now seatbelt on macOS and Landlock on
+  Linux, in `internal/sandbox`. Approval stops what should not be done; the
+  sandbox stops what is being done from reaching further than it said, which
+  is a different thing — an approved `npm test` no longer reads `~/.ssh`.
+  Landlock's network rules need ABI 4, and a policy asking for something the
+  kernel cannot promise is refused up front rather than quietly downgraded.
 
 - **A tool's declared effects are not this call's effects.** The lines under
   "This will" come from the tool's static capabilities, not from the arguments
@@ -550,14 +574,24 @@ argued about without this changing.
 
 **Not started**
 
-- Subagents. Four decisions to make before any code: whose run, whose
-  approval, what context, whose budget.
-- Subagents: no code at all, and four decisions to make first — whose run,
-  whose approval, what context, whose budget
-- Anthropic and OpenAI's own APIs; the abstraction is there, the adapters are not
+- **Subagents, in general.** `investigate` exists and is the bounded case: one
+  question, a fixed budget, a worker that acts as itself rather than as
+  whoever asked. The general shape still needs the four decisions made —
+  whose run, whose approval, what context, whose budget — and none of them
+  are answered by the bounded one.
+- **How many pictures fit in one request.** There is a bound on how large one
+  attachment may be and none on how many go in. Anthropic refuses a request
+  with more than a hundred images, and refuses the whole request rather than
+  the extra ones.
+- **A schedule that overran has one policy.** Everything in
+  `internal/schedule/due.go` coalesces: a firing missed while the last one was
+  still going becomes one firing, not none and not all of them. Skip and
+  catch-up are named in the plan and not written.
+- OpenAI's own API. The Anthropic adapter landed; `openai_compat` covers a
+  server that speaks the shape, and OpenAI itself is not separately written
 - Ollama structured output (`format`), and its model-pull progress
-- No client shows a running process; the three tools are model-facing only
-- MCP OAuth, for a server that wants it
+- No client shows a running process; `list_processes` and its two neighbours
+  are model-facing only
 
 ## Defects that only end-to-end testing found
 
@@ -574,6 +608,12 @@ rather than in logic a unit test was looking at.
    dropped on SQLite
 8. A mistyped field name on an approval was read as a deny and reported as
    success; found within minutes of writing a second client
+9. The gateway kept the daemon's first address and dialled it forever after a
+   restart — connected, acknowledging, delivering nothing, for nine hours
+10. A tool result was matched to a call by the tool's name, so two calls of one
+   tool coming back out of order put the failure on the one that succeeded;
+   the runtime's own view had always used the call id and only the reference
+   every client is checked against was wrong
 
 Two were found by reading rather than running: the daemon deleting a
 replacement's discovery file, and compaction summarising its own summary.
