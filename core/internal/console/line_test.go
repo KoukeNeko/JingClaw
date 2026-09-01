@@ -38,7 +38,9 @@ func TestTheFieldsComeInAFixedOrder(t *testing.T) {
 	}
 
 	written := line.String()
-	for _, wanted := range []string{"16:23:04", "#abcdef01", "TOOL", "→", "exec_command"} {
+	// The time in the reader's own zone, not the UTC the event arrived in.
+	drawnAt := at("2026-08-30T16:23:04Z").Local().Format("15:04:05")
+	for _, wanted := range []string{drawnAt, "#abcdef01", "TOOL", "→", "exec_command"} {
 		if !strings.Contains(written, wanted) {
 			t.Errorf("the line does not contain %q: %s", wanted, written)
 		}
@@ -174,5 +176,42 @@ func TestAPlanSaysHowFarItHasGot(t *testing.T) {
 	}
 	if !strings.Contains(written, "write the file") {
 		t.Errorf("the line does not say what it is doing: %s", written)
+	}
+}
+
+// An event is described in the reader's own time.
+//
+// An event carries the moment it happened, and it arrives in UTC because that
+// is what the wire format returns. Drawn as-is, a console read at four in the
+// morning says eight in the evening, and the one thing somebody scanning a
+// log does — decide whether a line is from just now or from this morning —
+// is the thing it gets wrong.
+func TestALineIsDrawnInTheReadersOwnTime(t *testing.T) {
+	when := time.Date(2026, 9, 1, 20, 35, 5, 0, time.UTC)
+
+	// An event as it arrives: the wire format hands back UTC, whatever zone
+	// the machine that wrote it was in.
+	line, ok := Describe(domain.Event{
+		OccurredAt: when,
+		Kind:       domain.EventRunStateChanged,
+		Payload:    domain.RunStateChanged{Status: domain.RunRunning},
+	})
+	if !ok {
+		t.Fatal("a run starting is not described at all")
+	}
+
+	wanted := when.Local().Format("15:04:05")
+	if !strings.Contains(line.String(), wanted) {
+		t.Errorf("described as %q; where the reader is it is %s", line.String(), wanted)
+	}
+
+	// And the two are actually different here, or the check above passes
+	// without having shown anything. On a machine set to UTC there is
+	// nothing to tell apart and nothing to prove.
+	if _, offset := when.Local().Zone(); offset == 0 {
+		t.Skip("this machine is on UTC, so nothing distinguishes the two")
+	}
+	if strings.Contains(line.String(), "20:35:05") {
+		t.Errorf("the line is drawn in UTC rather than where the reader is: %q", line.String())
 	}
 }

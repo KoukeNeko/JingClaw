@@ -88,3 +88,37 @@ func TestAStreamThatWorkedStartsOver(t *testing.T) {
 		t.Errorf("the first retry after a working stream waits %v", wait)
 	}
 }
+
+// A console attaching shows what just happened, not everything that ever did.
+//
+// The log is every event since the deployment was first started. Drawing it
+// from the beginning scrolls days past somebody who opened a console to see
+// what is happening now, and the thing they wanted is the part that went by
+// while the terminal was still catching up.
+func TestAttachingDrawsTheTailAndNotTheWholeLog(t *testing.T) {
+	// A log with more in it than anybody wants to read.
+	const head = 5000
+
+	from := console.AttachFrom(head)
+	if from == 0 {
+		t.Fatal("a console attaching to a long log starts at the beginning of it")
+	}
+	if from >= head {
+		t.Errorf("it starts at %d with the head at %d, so nothing is drawn", from, head)
+	}
+	if drawn := head - from; drawn > 200 {
+		t.Errorf("it draws the last %d events, which is a wall rather than a tail", drawn)
+	}
+
+	// A log shorter than the tail is drawn whole. There is nothing to skip,
+	// and starting partway through a short log hides the beginning of the
+	// only conversation there is.
+	if from := console.AttachFrom(10); from != 0 {
+		t.Errorf("a log of 10 events is drawn from %d rather than from the start", from)
+	}
+
+	// A deployment with no events yet has nothing to skip either.
+	if from := console.AttachFrom(0); from != 0 {
+		t.Errorf("an empty log is drawn from %d", from)
+	}
+}

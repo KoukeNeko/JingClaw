@@ -194,7 +194,11 @@ type controlv1connectSessionService interface {
 
 // follow prints the log until the context ends.
 func (s *session) follow(ctx context.Context) {
+	// Where the log ends is not known until the daemon says so, and it says
+	// so first. Until then this asks from the beginning; what it draws is
+	// decided below, once the hello has arrived.
 	cursor := uint64(0)
+	attached := false
 
 	// Paced, and said once. Without this a daemon that went away is a
 	// terminal filling with one sentence as fast as the machine can print
@@ -218,7 +222,24 @@ func (s *session) follow(ctx context.Context) {
 		for stream.Receive() {
 			read = true
 			switch frame := stream.Msg().GetValue().(type) {
+			case *controlv1.SubscribeAllEventsResponse_Hello:
+				// Only on the way in. A reconnection resumes from where this
+				// console got to, or it would skip whatever happened while it
+				// was away — which is the gap it reconnects to close.
+				if !attached {
+					attached = true
+					cursor = console.AttachFrom(frame.Hello.GetHeadCursor())
+				}
+
 			case *controlv1.SubscribeAllEventsResponse_Event:
+				if frame.Event.GetGlobalSeq() <= cursor {
+					// Older than where this console started. Asked for
+					// because the cursor is not known until the hello, and
+					// skipped rather than drawn: a console opened to see what
+					// is happening now must not spend the first screenful on
+					// last week.
+					continue
+				}
 				cursor = frame.Event.GetGlobalSeq()
 				s.show(frame.Event)
 

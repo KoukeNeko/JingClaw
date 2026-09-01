@@ -141,7 +141,13 @@ func collapse(text string) string {
 // Deltas are not shown. A console that printed every token would be a console
 // nobody could read, and the completed message says the same thing once.
 func Describe(event domain.Event) (Line, bool) {
-	line := Line{At: event.OccurredAt, Session: event.SessionID}
+	// In the reader's own time. An event carries the moment it happened and
+	// arrives in UTC, because that is what the wire format hands back
+	// whatever zone the machine that wrote it was in. Drawn as-is, a console
+	// read at four in the morning says eight the previous evening — and the
+	// one thing somebody scanning a log does is decide whether a line is from
+	// just now or from this morning.
+	line := Line{At: event.OccurredAt.Local(), Session: event.SessionID}
 
 	switch payload := event.Payload.(type) {
 	case domain.UserMessageAdded:
