@@ -16,8 +16,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -126,6 +128,11 @@ type relay struct {
 	poster    adapter
 	accountID string
 	logger    *slog.Logger
+
+	// toldAbout is the rooms already told the agent cannot be reached,
+	// cleared for a room the moment something gets through to it again.
+	mu        sync.Mutex
+	toldAbout map[string]bool
 }
 
 // Deliver hands an inbound message to the agent.
@@ -159,9 +166,12 @@ func (r *relay) Deliver(ctx context.Context, message gateway.InboundMessage) err
 			r.sayRefused(ctx, message, connect.CodeOf(err))
 			return nil
 		default:
+			r.sayTheAgentIsUnreachable(ctx, message)
 			return err
 		}
 	}
+
+	r.reachedTheAgent(message.Conversation.ChannelID)
 
 	if resp.Msg.GetDuplicate() {
 		// The platform redelivered after a reconnect. The reply to the
@@ -298,6 +308,10 @@ func (r *relay) post(ctx context.Context, dispatch *controlv1.Dispatch) error {
 }
 
 // dialAgent connects to the daemon with the gateway-scoped credential.
+//
+// Read once here so that starting with no daemon fails immediately and says
+// so, rather than after the platform connection is up. Where the requests
+// actually go is decided per request, below.
 func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient, error) {
 	path, err := discovery.PathIn(runtimeDir)
 	if err != nil {
@@ -313,19 +327,54 @@ func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient,
 	}
 
 	httpClient := &http.Client{
-		Transport: &bearerTransport{token: found.GatewayToken, base: http.DefaultTransport},
+		Transport: &atTheDaemon{path: path, base: http.DefaultTransport},
 	}
+
+	// The base URL is a placeholder: every request is rewritten to wherever
+	// the discovery file points when it is made.
 	return controlv1connect.NewGatewayIngressServiceClient(httpClient, found.BaseURL), nil
 }
 
-type bearerTransport struct {
-	token string
-	base  http.RoundTripper
+// atTheDaemon sends every request wherever the discovery file currently points.
+//
+// Resolved per request rather than once at startup, because the daemon
+// publishes a fresh address and credential every time it starts. A gateway
+// holding the first one it saw survives a daemon restart as something worse
+// than a dead process: it stays connected to the platform, keeps marking
+// messages as seen, and delivers none of them — which from the room is
+// indistinguishable from an agent that has decided not to answer.
+//
+// The file is read on every request rather than cached and invalidated. It is
+// a few hundred bytes on local disk, the request rate is a handful per
+// message, and a cache here would need to know when it was wrong — which is
+// the thing that was missing in the first place.
+type atTheDaemon struct {
+	path string
+	base http.RoundTripper
 }
 
-func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *atTheDaemon) RoundTrip(req *http.Request) (*http.Response, error) {
+	found, err := discovery.Read(t.path)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: where the daemon is: %w", err)
+	}
+	if found.GatewayToken == "" {
+		return nil, errors.New("gateway: the daemon published no gateway credential")
+	}
+
+	where, err := url.Parse(found.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: the daemon published an address that will not parse: %w", err)
+	}
+
+	// Rewritten rather than checked. Refusing a request whose host does not
+	// match would mean the client had to be rebuilt on every restart, which is
+	// the arrangement this replaces.
 	clone := req.Clone(req.Context())
-	clone.Header.Set("Authorization", "Bearer "+t.token)
+	clone.URL.Scheme = where.Scheme
+	clone.URL.Host = where.Host
+	clone.Host = where.Host
+	clone.Header.Set("Authorization", "Bearer "+found.GatewayToken)
 	return t.base.RoundTrip(clone)
 }
 
@@ -339,6 +388,64 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 const refusedInThisChannel = "I can't take that here — this channel only " +
 	"accepts messages from certain accounts, and yours is not one of them. " +
 	"Whoever set the bot up can change that."
+
+// cannotReachTheAgent is what somebody sees when their message reached the
+// gateway and got no further.
+//
+// It says the message is gone rather than delayed, because it is: nothing
+// queues it and nothing retries it. Telling somebody it will be picked up
+// later would be a comfortable thing to say and untrue, and they would find
+// out by waiting.
+const cannotReachTheAgent = "I'm connected here but I can't reach the agent " +
+	"right now, so this message did not get to it. It is not queued — send it " +
+	"again once whoever runs the bot has it back up."
+
+// sayTheAgentIsUnreachable tells a room that its message went nowhere, once
+// per outage.
+//
+// Once, because a daemon that is down stays down, and answering every message
+// with the same line turns one outage into a room nobody can read. Per room,
+// because somebody in a channel that has not been told has no way to know.
+//
+// The reaction the adapter adds on the way in is what makes this necessary:
+// it marks the message as taken before anything is delivered, so a gateway
+// that cannot reach the daemon produces exactly what a working one produces.
+func (r *relay) sayTheAgentIsUnreachable(ctx context.Context, message gateway.InboundMessage) {
+	channel := message.Conversation.ChannelID
+
+	r.mu.Lock()
+	if r.toldAbout == nil {
+		r.toldAbout = map[string]bool{}
+	}
+	already := r.toldAbout[channel]
+	r.toldAbout[channel] = true
+	r.mu.Unlock()
+
+	if already {
+		return
+	}
+
+	if _, err := r.poster.Post(ctx, gateway.Dispatch{
+		AccountID: r.accountID,
+		Target:    message.Conversation,
+		Kind:      gateway.DispatchMessage,
+		Payload:   cannotReachTheAgent,
+	}); err != nil {
+		// Logged and dropped, like a refusal. The message was undeliverable
+		// either way, and the caller's error is about that rather than about
+		// this.
+		r.logger.Warn("could not say that the agent is unreachable",
+			"channel_id", channel, "error", err)
+	}
+}
+
+// reachedTheAgent forgets that a room was told, so the next outage is said
+// again rather than passing in the silence this exists to end.
+func (r *relay) reachedTheAgent(channel string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.toldAbout, channel)
+}
 
 // sayRefused tells somebody their message was not accepted, when saying so is
 // the right thing to do.

@@ -35,10 +35,17 @@ type refusing struct {
 	sent int
 }
 
+// DeliverInbound refuses with whatever code it was given, and accepts when it
+// was given none — so one fake can play a daemon that comes back.
 func (r *refusing) DeliverInbound(
 	context.Context, *connect.Request[controlv1.DeliverInboundRequest],
 ) (*connect.Response[controlv1.DeliverInboundResponse], error) {
 	r.sent++
+	if r.code == 0 {
+		return connect.NewResponse(&controlv1.DeliverInboundResponse{
+			SessionId: "ses_1", RunId: "run_1",
+		}), nil
+	}
 	return nil, connect.NewError(r.code, errors.New("refused"))
 }
 

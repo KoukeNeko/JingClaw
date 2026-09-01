@@ -49,70 +49,8 @@ mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 # The stub records every call it is given, so the assertions are about what
 # would have gone over the wire rather than about what the adapter believes it
 # sent.
-cat > "$WORK/stub.py" <<'PY'
-import json, sys, threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-port, calls_path, chat_id, user_id = int(sys.argv[1]), sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-
-lock = threading.Lock()
-delivered = False
-next_id = 5000
-
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
-    def do_POST(self):
-        global delivered, next_id
-
-        method = self.path.rsplit("/", 1)[-1]
-        length = int(self.headers.get("content-length") or 0)
-        raw = self.rfile.read(length) if length else b""
-        try:
-            body = json.loads(raw) if raw else {}
-        except ValueError:
-            body = {"_raw": raw.decode("utf-8", "replace")}
-
-        with lock:
-            with open(calls_path, "a") as log:
-                log.write(json.dumps({"method": method, "body": body}) + "\n")
-
-            if method == "getMe":
-                result = {"id": 1, "username": "jingclaw_bot"}
-            elif method == "getUpdates":
-                if delivered:
-                    result = []
-                else:
-                    delivered = True
-                    result = [{
-                        "update_id": 1,
-                        "message": {
-                            "message_id": 11,
-                            "from": {"id": user_id, "is_bot": False, "username": "someone",
-                                     "first_name": "Someone"},
-                            "chat": {"id": chat_id, "type": "private"},
-                            "date": 0,
-                            "text": "say something back",
-                        },
-                    }]
-            else:
-                next_id += 1
-                result = {"message_id": next_id, "chat": {"id": chat_id, "type": "private"}}
-
-        payload = json.dumps({"ok": True, "result": result}).encode()
-        self.send_response(200)
-        self.send_header("content-type", "application/json")
-        self.send_header("content-length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-
-ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
-PY
-
-python3 "$WORK/stub.py" 7793 "$WORK/calls.jsonl" "$CHAT_ID" "$USER_ID" 2>/dev/null &
+python3 ../scripts/support/telegram-stub.py 7793 "$WORK/calls.jsonl" "$CHAT_ID" "$USER_ID" 2>/dev/null &
 STUB=$!
 
 WAITED=0
