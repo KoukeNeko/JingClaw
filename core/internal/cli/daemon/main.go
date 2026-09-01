@@ -376,6 +376,7 @@ func run(args []string) error {
 	tools.MustRegister(
 		&builtin.TodoUpdate{Planner: later},
 		&builtin.AskUser{},
+		&builtin.Now{},
 		&builtin.SkillLoad{Skills: installedSkills{}, Activations: later},
 		&builtin.Investigate{Delegator: later},
 	)
