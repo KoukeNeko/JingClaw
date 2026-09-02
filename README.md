@@ -78,12 +78,14 @@ CLI, console ────────┘
 
 ## Project status
 
-**Preview.** It does what is described above, every day, on macOS and Linux.
+**Preview.** It does what is described above, every day, on macOS and Linux,
+and its tests pass on Windows too.
 
 What that does not promise yet: configuration and storage formats may change
 between versions; the daemon listens on loopback only, so there is no remote
-access; Windows builds but does not pass its own tests, and
-[`docs/STATUS.md`](docs/STATUS.md) says exactly which ones and why.
+access. Windows is newer than the rest and two things there are still
+untested rather than working — the race detector and a real terminal — which
+[`docs/STATUS.md`](docs/STATUS.md) sets out rather than rounding up.
 
 `docs/STATUS.md` is the honest account — what works, what is missing, and the
 defects found along the way. [`docs/roadmap.md`](docs/roadmap.md) has the
@@ -105,4 +107,4 @@ milestones.
 
 Go 1.26+ to build. A provider — Gemini, Ollama, Anthropic, or anything that
 speaks the OpenAI shape — and a Discord bot token if you want the chat half.
-macOS and Linux; see the status above for Windows.
+macOS, Linux and Windows — with the caveats in the status above.
