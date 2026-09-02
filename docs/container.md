@@ -80,19 +80,41 @@ a file with.
 
 Three things to set, and the first is the one that catches people.
 
-**`JINGCLAW_HOME` has to match the mount path.** The image puts the
-deployment at `/var/lib/jingclaw`. Mount the volume there and there is nothing
-else to say. Where the platform picks its own path — `/data` is a common
-default — set the variable to the same path:
+**Mount the volume at `/var/lib/jingclaw`.** Not at `/data`, and not at
+anywhere else the platform offers by default, unless you can also set the
+directory's owner.
+
+The reason is how a volume gets its ownership. Mounted over a directory the
+image already has, it inherits that directory's owner — and the image creates
+`/var/lib/jingclaw` owned by the user it runs as. Mounted anywhere else, the
+path does not exist in the image, so the container runtime creates it owned by
+**root**, and the image does not run as root:
+
+```
+$ docker run --rm -u 10001 -v somevolume:/data … touch /data/x
+touch: /data/x: Permission denied
+```
+
+Pointing `JINGCLAW_HOME` at a subdirectory does not get around it: the
+directory the runtime creates is mode 755, so a user who is not its owner
+cannot create anything inside it either.
+
+Where the platform will only mount at a path of its own and offers no way to
+own it, the remaining option is to run as root — `--user 0` on Docker, or
+whatever the platform calls it. That gives up what the non-root user was for,
+which is that this agent runs commands somebody approved rather than commands
+somebody wrote. Prefer the mount path.
+
+If you do move it, the two have to agree:
 
 | | |
 |---|---|
-| mount path | `/data` |
-| `JINGCLAW_HOME` | `/data` |
+| mount path | `/var/lib/jingclaw` |
+| `JINGCLAW_HOME` | unset — the image already says it |
 
-Get these out of step and everything still appears to work: the daemon writes
-its database into the container's own filesystem, and the volume sits empty
-until the container is replaced and the sessions are gone.
+Out of step, everything appears to work: the daemon writes its database into
+the container's own filesystem, the volume sits empty, and the sessions are
+gone when the container is replaced.
 
 **`JINGCLAW_CONFIG` carries the whole configuration file.** Individual
 settings do not survive the trip through an environment: the variables reach
@@ -133,9 +155,9 @@ cannot start and cannot be corrected by fixing the variable.
 The startup line says which happened:
 
 ```
-Config:  /data/config.toml (created from JINGCLAW_CONFIG)
-Config:  /data/config.toml (created, all defaults)
-Config:  /data/config.toml
+Config:  /var/lib/jingclaw/config.toml (created from JINGCLAW_CONFIG)
+Config:  /var/lib/jingclaw/config.toml (created, all defaults)
+Config:  /var/lib/jingclaw/config.toml
 ```
 
 **Credentials stay variables.** `DISCORD_BOT_TOKEN`, `GEMINI_API_KEY` and the

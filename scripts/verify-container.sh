@@ -93,6 +93,30 @@ while ! docker exec "$NAME" test -f /var/lib/jingclaw/run/daemon.json 2>/dev/nul
 done
 printf 'ok   it starts against a volume of its own and publishes itself\n'
 
+# A volume mounted where the documentation says is writable by the user the
+# image runs as, and one mounted anywhere else is not.
+#
+# Both halves matter. A named volume takes its ownership from the directory it
+# is mounted over, and the image owns that one; mounted somewhere the image has
+# no directory, the runtime creates it owned by root and the image is not root.
+# The documentation recommended the second arrangement until this was measured,
+# and what that produces is a first run that can write nothing and says only
+# "permission denied".
+docker run --rm -v "$VOLUME:/var/lib/jingclaw" --entrypoint sh "$IMAGE" -c \
+	'touch /var/lib/jingclaw/.writable && rm /var/lib/jingclaw/.writable' >/dev/null 2>&1 ||
+	fail "a volume mounted where the documentation says is not writable by the image's own user"
+
+ELSEWHERE="$VOLUME-elsewhere"
+docker volume create "$ELSEWHERE" >/dev/null
+WROTE=no
+docker run --rm -v "$ELSEWHERE:/data" --entrypoint sh "$IMAGE" -c \
+	'touch /data/x' >/dev/null 2>&1 && WROTE=yes
+docker volume rm "$ELSEWHERE" >/dev/null 2>&1
+[ "$WROTE" = "no" ] ||
+	fail "a volume mounted at /data is writable, so the documentation's reason for
+insisting on /var/lib/jingclaw is no longer true and should be rewritten"
+printf 'ok   the documented mount path is the writable one, and another is not\n'
+
 # Not root. The agent runs commands somebody approved, which is a different
 # thing from commands somebody wrote.
 WHO=$(docker exec "$NAME" id -u)
