@@ -143,7 +143,7 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			ToolName:   "exec_command",
 			Status:     domain.ApprovalAllowed,
 			Scope:      domain.RememberSession,
-			DecidedBy:  domain.FromAPlatformAccount("discord", "675724351156518953", "Alice"),
+			DecidedBy:  domain.FromAPlatformAccount("discord", "900000000000000042", "Alice"),
 		},
 	}
 }

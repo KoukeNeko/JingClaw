@@ -128,7 +128,7 @@ func TestItDoesNotReadOutWhoMay(t *testing.T) {
 	}
 
 	said := platform.dispatches[0].Payload
-	for _, leak := range []string{"675724351156518953", "users =", "allowlist", "binding"} {
+	for _, leak := range []string{"900000000000000042", "users =", "allowlist", "binding"} {
 		if strings.Contains(said, leak) {
 			t.Errorf("it mentions %q: %s", leak, said)
 		}

@@ -12,7 +12,7 @@ import (
 // copied from a real deployment's database.
 const asItWasWritten = `{"approval_id":"apr_01M174AGK7EPC6JDM0S5APHSEM",` +
 	`"call_id":"call_yeiyczst","tool_name":"exec_command","status":"allowed",` +
-	`"scope":"once","decided_by":"discord:675724351156518953"}`
+	`"scope":"once","decided_by":"discord:900000000000000042"}`
 
 func TestAnApprovalWrittenBeforeTheSplitStillReads(t *testing.T) {
 	var payload approvalResolvedJSON
@@ -27,8 +27,8 @@ func TestAnApprovalWrittenBeforeTheSplitStillReads(t *testing.T) {
 	if decided.Principal.Platform != "discord" {
 		t.Errorf("platform is %q, want discord", decided.Principal.Platform)
 	}
-	if decided.Principal.PrincipalID != "675724351156518953" {
-		t.Errorf("principal is %q, want 675724351156518953", decided.Principal.PrincipalID)
+	if decided.Principal.PrincipalID != "900000000000000042" {
+		t.Errorf("principal is %q, want 900000000000000042", decided.Principal.PrincipalID)
 	}
 	if decided.Kind != domain.OriginGateway {
 		t.Errorf("kind is %q, want %q", decided.Kind, domain.OriginGateway)
@@ -60,7 +60,7 @@ func TestAnOriginSurvivesBeingWrittenAndRead(t *testing.T) {
 	for name, origin := range map[string]domain.RunOrigin{
 		"the machine":       domain.FromTheMachine("jingclaw-cli"),
 		"a platform accont": domain.FromAPlatformAccount("discord", "77", "Alice"),
-		"a channel":         domain.FromAChannel("discord", "1477276931836743912"),
+		"a channel":         domain.FromAChannel("discord", "900000000000000041"),
 	} {
 		written, err := json.Marshal(approvalResolvedJSON{
 			DecidedBy: decidedByJSON{encodeOrigin(origin)},

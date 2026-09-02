@@ -29,12 +29,12 @@ func TestNothingLocalEverBecomesAPerson(t *testing.T) {
 // A platform names whoever pressed the button, and that is the one case where
 // there is a person to record.
 func TestAPlatformAccountIsAPerson(t *testing.T) {
-	origin := domain.FromAPlatformAccount("discord", "675724351156518953", "Alice")
+	origin := domain.FromAPlatformAccount("discord", "900000000000000042", "Alice")
 
 	if origin.Principal == nil {
 		t.Fatal("a platform account recorded no person")
 	}
-	if origin.Principal.PrincipalID != "675724351156518953" {
+	if origin.Principal.PrincipalID != "900000000000000042" {
 		t.Errorf("principal is %q", origin.Principal.PrincipalID)
 	}
 	if origin.Kind != domain.OriginGateway {
@@ -45,12 +45,12 @@ func TestAPlatformAccountIsAPerson(t *testing.T) {
 // A console binding is a room that is the credential. The room is what was
 // authorised, so the room is what is recorded — and it is still not a person.
 func TestAChannelIsARoomAndNotAPerson(t *testing.T) {
-	origin := domain.FromAChannel("discord", "1477276931836743912")
+	origin := domain.FromAChannel("discord", "900000000000000041")
 
 	if origin.Principal != nil {
 		t.Errorf("a room became a person: %+v", origin.Principal)
 	}
-	if origin.ClientID != "discord:1477276931836743912" {
+	if origin.ClientID != "discord:900000000000000041" {
 		t.Errorf("the room is %q", origin.ClientID)
 	}
 }
@@ -74,13 +74,13 @@ func TestEveryOriginSaysSomething(t *testing.T) {
 // The name is what a person reading a log recognises; the id is what
 // authorisation is checked against. Shown, the name wins.
 func TestANameIsPreferredToAnIdentifier(t *testing.T) {
-	named := domain.FromAPlatformAccount("discord", "675724351156518953", "Alice")
+	named := domain.FromAPlatformAccount("discord", "900000000000000042", "Alice")
 	if described := named.Describe(); described != "Alice" {
 		t.Errorf("described as %q, want Alice", described)
 	}
 
-	unnamed := domain.FromAPlatformAccount("discord", "675724351156518953", "")
-	if described := unnamed.Describe(); described != "discord:675724351156518953" {
+	unnamed := domain.FromAPlatformAccount("discord", "900000000000000042", "")
+	if described := unnamed.Describe(); described != "discord:900000000000000042" {
 		t.Errorf("described as %q", described)
 	}
 }
