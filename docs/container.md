@@ -71,6 +71,88 @@ the process list of anything that can read `/proc`. A file in the volume is
 readable by whoever can read the volume, which is a smaller set. Compose and
 Kubernetes both mount secrets as files for this reason.
 
+## A platform whose only inputs are a volume and some variables
+
+Managed container platforms — Cloud Run, Fly, Zentring Run and the rest —
+usually offer exactly two ways in: a persistent volume mounted somewhere of
+their choosing, and a list of environment variables. There is no shell to copy
+a file with.
+
+Three things to set, and the first is the one that catches people.
+
+**`JINGCLAW_HOME` has to match the mount path.** The image puts the
+deployment at `/var/lib/jingclaw`. Mount the volume there and there is nothing
+else to say. Where the platform picks its own path — `/data` is a common
+default — set the variable to the same path:
+
+| | |
+|---|---|
+| mount path | `/data` |
+| `JINGCLAW_HOME` | `/data` |
+
+Get these out of step and everything still appears to work: the daemon writes
+its database into the container's own filesystem, and the volume sits empty
+until the container is replaced and the sessions are gone.
+
+**`JINGCLAW_CONFIG` carries the whole configuration file.** Individual
+settings do not survive the trip through an environment: the variables reach
+`provider.backend` and stop, because a name like `api_key_env` makes any
+deeper underscore ambiguous, and a list of tables like the channel bindings
+has no spelling as a variable at all. So the file goes in whole:
+
+```
+JINGCLAW_CONFIG=[provider]
+backend = "gemini"
+
+[provider.gemini]
+model = "gemini-2.5-flash"
+
+[gateway]
+platform = "discord"
+
+[gateway.discord]
+account_id = "main"
+
+[[gateway.discord.channels]]
+channel_ids = ["1477…"]
+tenant_id = "…"
+workspace_id = "default"
+```
+
+It is written to `$JINGCLAW_HOME/config.toml` on first start, with the same
+permissions a file written by hand would get, and **only if there is not one
+already**. The variable arrives again on every restart; overwriting would
+discard whatever was edited in the volume, on the restart after somebody
+edited it. To change the configuration, change the variable and delete the
+file, or edit the file and leave the variable alone.
+
+TOML that will not parse is refused and nothing is written. The file is
+created once and never replaced, so a broken one would be a deployment that
+cannot start and cannot be corrected by fixing the variable.
+
+The startup line says which happened:
+
+```
+Config:  /data/config.toml (created from JINGCLAW_CONFIG)
+Config:  /data/config.toml (created, all defaults)
+Config:  /data/config.toml
+```
+
+**Credentials stay variables.** `DISCORD_BOT_TOKEN`, `GEMINI_API_KEY` and the
+rest are read from the environment by name, so they need not go in the file at
+all — which is the better arrangement here, because the file is in the volume
+and the volume is a backup away from somewhere else.
+
+### Two settings on the platform, not in the file
+
+**Do not let it scale to zero.** JingClaw holds a socket open to the chat
+platform and a run in progress is a run in memory as well as in the log.
+Scaling to zero disconnects it and cuts a run mid-way. Minimum instances: 1.
+
+**One replica.** The daemon owns a SQLite database on a volume, and two of
+them on one volume is the failure this project is built to avoid rather than
+the load-balancing it looks like.
+
 ## A directory on the host instead of a volume
 
 The image runs as uid **10001**, so a bind-mounted directory has to be

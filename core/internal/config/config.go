@@ -38,6 +38,17 @@ const (
 	// envPrefix keeps JingClaw's variables from colliding with anything else
 	// in a shell.
 	envPrefix = "JINGCLAW_"
+
+	// FileEnvVar carries a whole configuration file, for a deployment whose
+	// only way in is an environment variable.
+	//
+	// Some container platforms offer exactly two inputs: a volume and a list
+	// of variables. Individual settings do not survive that trip — the
+	// environment reaches provider.backend and stops, because a name like
+	// api_key_env makes any deeper underscore ambiguous — and a list of
+	// tables like the channel bindings has no spelling as a variable at all.
+	// So the file comes through whole, and is written where the file goes.
+	FileEnvVar = "JINGCLAW_CONFIG"
 )
 
 // Config is the whole of the daemon's settings.
@@ -1558,10 +1569,24 @@ func EnsureFile() (path string, created bool, err error) {
 		return "", false, fmt.Errorf("config: create config directory: %w", err)
 	}
 
+	// What goes in it, decided before the file exists. A file written from an
+	// unusable variable could never be corrected: it is created once and
+	// never overwritten, so the deployment would be stuck with it and the
+	// failure would name a parse error rather than the variable to fix.
+	starting := Example
+	if given, ok := os.LookupEnv(FileEnvVar); ok && strings.TrimSpace(given) != "" {
+		if _, err := toml.Parser().Unmarshal([]byte(given)); err != nil {
+			return "", false, fmt.Errorf(
+				"config: %s does not parse as TOML: %w", FileEnvVar, err)
+		}
+		starting = given
+	}
+
 	// O_EXCL rather than a Stat and then a write: two daemons starting
 	// together must not both find the file missing and race to create it, and
 	// an existing file must never be overwritten by a process that is only
-	// trying to be helpful.
+	// trying to be helpful. That covers the variable too: what somebody
+	// edited in the volume outlives a restart that brings the variable again.
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		return path, false, nil
@@ -1570,7 +1595,7 @@ func EnsureFile() (path string, created bool, err error) {
 		return "", false, fmt.Errorf("config: create %s: %w", path, err)
 	}
 
-	if _, err := file.WriteString(Example); err != nil {
+	if _, err := file.WriteString(starting); err != nil {
 		_ = file.Close()
 		return "", false, fmt.Errorf("config: write %s: %w", path, err)
 	}

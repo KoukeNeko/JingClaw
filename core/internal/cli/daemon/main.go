@@ -1062,6 +1062,14 @@ func describeConfigFile(path string, created bool) string {
 		return "(none)"
 	}
 	if created {
+		// Which of the two ways it was created, because they lead somewhere
+		// different. Defaults mean nothing was configured; a file from the
+		// environment means it was, and calling that defaults sends somebody
+		// looking for why their settings were ignored on the one run where
+		// they were first applied.
+		if given, ok := os.LookupEnv(config.FileEnvVar); ok && strings.TrimSpace(given) != "" {
+			return path + " (created from " + config.FileEnvVar + ")"
+		}
 		return path + " (created, all defaults)"
 	}
 	return path

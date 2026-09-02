@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
@@ -130,5 +131,102 @@ func TestEnsureFileLeavesAnExistingOneAlone(t *testing.T) {
 	}
 	if string(kept) != edited {
 		t.Errorf("the file was overwritten:\n%s", kept)
+	}
+}
+
+// A deployment whose only way in is an environment variable can still be
+// configured.
+//
+// Some container platforms offer exactly two inputs: a mounted volume and a
+// list of environment variables. Individual settings do not survive that trip
+// — the environment reaches `provider.backend` and stops, because a name like
+// `api_key_env` makes any deeper underscore ambiguous — and a list of tables
+// like the channel bindings cannot be written as a variable at all. So the
+// whole file comes through as one, and is written where the file goes.
+func TestTheWholeFileCanArriveInTheEnvironment(t *testing.T) {
+	given := "[provider]\nbackend = \"ollama\"\n"
+	t.Setenv(config.FileEnvVar, given)
+	home := t.TempDir()
+	t.Setenv("JINGCLAW_HOME", home)
+
+	path, created, err := config.EnsureFile()
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if !created {
+		t.Fatal("it reported nothing to create")
+	}
+
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(written) != given {
+		t.Errorf("the file holds %q, not what the environment gave", string(written))
+	}
+
+	// And it is as protected as one somebody wrote by hand, because it is the
+	// same file and may hold the same credentials.
+	ownerOnly, detail, err := fsperm.EnsureOwnerOnly(path)
+	if err != nil {
+		t.Fatalf("permissions: %v", err)
+	}
+	if !ownerOnly {
+		t.Errorf("a config file from the environment is readable by others: %s", detail)
+	}
+}
+
+// What is already in the volume wins.
+//
+// The variable is set on the service, so it arrives again on every restart. A
+// write that overwrote would discard whatever somebody edited in the volume,
+// and would do it on the restart after they edited it — which is the moment
+// they would least expect to lose it.
+func TestTheEnvironmentDoesNotOverwriteWhatIsAlreadyThere(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("JINGCLAW_HOME", home)
+
+	theirs := "[provider]\nbackend = \"gemini\"\n"
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(theirs), 0o600); err != nil {
+		t.Fatalf("staging: %v", err)
+	}
+
+	t.Setenv(config.FileEnvVar, "[provider]\nbackend = \"ollama\"\n")
+
+	path, created, err := config.EnsureFile()
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if created {
+		t.Error("it created a file over one that was already there")
+	}
+
+	written, _ := os.ReadFile(path)
+	if string(written) != theirs {
+		t.Errorf("the file was replaced by the environment's copy: %q", string(written))
+	}
+}
+
+// TOML that will not parse is refused, and nothing is written.
+//
+// The file is created with O_EXCL and never overwritten, so a broken one
+// written now is a deployment that cannot start and cannot be fixed by
+// correcting the variable. Refusing here means the failure names the variable
+// while somebody is still looking at it.
+func TestUnparseableTOMLIsRefusedRatherThanWritten(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("JINGCLAW_HOME", home)
+	t.Setenv(config.FileEnvVar, "[provider\nbackend =")
+
+	_, _, err := config.EnsureFile()
+	if err == nil {
+		t.Fatal("it accepted TOML that does not parse")
+	}
+	if !strings.Contains(err.Error(), config.FileEnvVar) {
+		t.Errorf("the failure does not name the variable to fix: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(home, "config.toml")); !os.IsNotExist(err) {
+		t.Error("a file was written despite the content being unusable")
 	}
 }
