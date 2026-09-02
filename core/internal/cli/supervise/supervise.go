@@ -41,7 +41,15 @@ const stopGrace = 15 * time.Second
 // terminal — they are left alone. Without that rule the second run of this
 // command is two daemons on one database, each of them certain it is the one.
 func Run(ctx context.Context) error {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	// The hangup as well as the interrupt and the terminate. A terminal that
+	// goes away — a window closed, an ssh session dropped — sends this, and
+	// Go's own answer to it is to die without running anything deferred: the
+	// parts would be left orphaned, holding the port and the database, with a
+	// status that says "running" to whoever looks next.
+	//
+	// An ssh session with no terminal at all sends no signal, and there the
+	// console's own read returns EOF and leaves the same way.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, hangup)
 	defer stop()
 
 	if running, err := alreadyRunning(); err != nil {
@@ -419,7 +427,11 @@ func terminate(command *exec.Cmd) {
 	if command == nil || command.Process == nil {
 		return
 	}
-	_ = command.Process.Signal(syscall.SIGTERM)
+	// The group rather than the process. A part runs whatever somebody
+	// approved and those run their own children; signalling only the process
+	// this program started leaves the rest holding what they held, and the
+	// next start fails for a reason that looks nothing like the cause.
+	askTheGroupToStop(command)
 
 	done := make(chan struct{})
 	go func() { _, _ = command.Process.Wait(); close(done) }()
@@ -427,7 +439,7 @@ func terminate(command *exec.Cmd) {
 	select {
 	case <-done:
 	case <-time.After(stopGrace):
-		_ = command.Process.Kill()
+		killTheGroup(command)
 	}
 }
 
