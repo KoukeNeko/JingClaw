@@ -1,6 +1,6 @@
 # Where JingClaw is
 
-Updated 2026-09-01.
+Updated 2026-09-02.
 
 ## Done
 
@@ -519,6 +519,36 @@ a short allowlist, and a file that is never executable.
 
 **Known holes**
 
+- **On Windows, the credentials are readable by anybody on the machine.**
+  The code asks for 0600 and gets 666, because Windows has no POSIX
+  permissions and `os.Chmod` there only toggles the read-only bit. That
+  covers `run/daemon.json`, which holds the live daemon token and the
+  gateway token; the MCP session store; and every secret file. Nothing in
+  `internal/discovery`, `internal/secret` or `internal/home` knows it is on
+  Windows, so nothing tries and nothing says it could not.
+
+  Not a test artifact. The checks that assert 0600 had simply never run
+  there: the Windows job failed on formatting before it reached the build,
+  and formatting failed because the checkout was CRLF, and behind both of
+  those the package did not compile at all. Three things hiding one another
+  and, between them, the fact that a platform in the matrix had never been
+  built.
+
+  What it would take is Windows ACLs — `SetNamedSecurityInfo` with a DACL
+  granting the owner and nobody else. Until then a deployment on Windows is
+  one where any process running as any user can read the token that
+  approves tool calls.
+
+- **On Windows, stopping a process leaves its descendants running.** The
+  Unix path signals the process group; Windows has no such thing, and
+  `group_windows.go` has said since it was written that containing a tree
+  there needs a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
+
+  The consequence is now measured rather than predicted: `internal/process`
+  does not fail on Windows, it hangs, and the job is killed at the
+  ten-minute timeout. A killed process's children inherit the output pipe
+  and keep it open, so `cmd.Wait` waits for a copy that will never see EOF.
+
 - **Trust does not survive the run it was earned in.** A tool that returns
   somebody else's words lowers the trust of everything written after it in
   that run. It does not follow the words out of the run: the agent reads a
@@ -572,6 +602,20 @@ a short allowlist, and a file that is never executable.
   is no tool call to attribute it to. OpenClaw documents the same limit —
   "the current runtime does not propagate content origin within an owner
   turn" — and has not closed it either.
+
+**Windows, in general**
+
+Its tests ran for the first time on 2026-09-02 and 28 of them failed. Twelve
+still do: the two holes above, two about path semantics — `/etc/passwd` is
+not outside a workspace there — and one about artifact content. The rest
+were checks that assumed the machine they were written on, and are fixed:
+event ids built from a clock with millisecond resolution, a temporary-
+directory warning that knew only Unix names, and font substitutions asserted
+on a machine whose typeface has the glyph.
+
+Linux and macOS are green, and the container image is built and published
+from Linux. Windows builds and vets; it does not pass its tests, and saying
+so here is more use than a matrix entry that claims otherwise.
 
 **Never exercised against the real thing**
 
@@ -633,6 +677,12 @@ rather than in logic a unit test was looking at.
    tool coming back out of order put the failure on the one that succeeded;
    the runtime's own view had always used the call id and only the reference
    every client is checked against was wrong
+11. The console orphaned everything it started when the terminal closed: it
+   listened for interrupt and terminate and not for the hangup, and Go's
+   answer to a hangup is to die without running anything deferred
+12. Windows had never been built, let alone tested, and three separate
+   failures were hiding one another — CRLF broke formatting, formatting ran
+   before the build, and the build would not have compiled
 
 Two were found by reading rather than running: the daemon deleting a
 replacement's discovery file, and compaction summarising its own summary.
