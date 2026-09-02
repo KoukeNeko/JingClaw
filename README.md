@@ -15,6 +15,10 @@
 </p>
 
 <p align="center">
+  <strong>English</strong> · <a href="README.zh-TW.md">繁體中文</a>
+</p>
+
+<p align="center">
   <a href="#getting-started">Getting started</a>
   · <a href="docs/using-it.md">Using it</a>
   · <a href="docs/configuration.md">Configuration</a>
