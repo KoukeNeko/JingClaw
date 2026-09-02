@@ -1,0 +1,30 @@
+# What the build does not need, and what it must not carry.
+#
+# The context is sent to the daemon before anything is built, so this is the
+# last point at which a deployment's own files can be kept out of an image
+# that is going to be pushed somewhere public.
+
+# A deployment. None of this belongs in an image, and a log or a database
+# from the machine that built it is the clearest example of why.
+*.log
+*.db
+*.db-*
+.jingclaw/
+
+# Built here, built again inside. A binary from the host is the wrong
+# architecture as often as not.
+core/bin/
+build/
+
+# History, and the largest thing in the directory.
+.git/
+.github/
+
+# Not read by the build, and one of them is personal.
+.claude/
+.DS_Store
+docs/research/
+fixtures/
+macos/
+scripts/
+JINGCLAW.md

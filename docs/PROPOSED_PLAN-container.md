@@ -1,5 +1,7 @@
 # A container image, built by CI, published to GHCR
 
+Built. The image is 229MB, which D1 is the reason for.
+
 ## 1. What this is for
 
 Running JingClaw somewhere that is not the machine it was built on, without
@@ -107,7 +109,22 @@ Docker, the way `verify-sandbox-linux.sh` does:
 
 CI runs it on the `end-to-end` runner, which already has Docker.
 
-## 6. Known costs
+## 6. What came out different
+
+- **A first run needs a credential, and the container exits without one.**
+  The supervisor starts the daemon and the gateway and stops everything when
+  either goes, so an image started with nothing set up comes up, says which
+  credential it wants and where to put it, and stops. The message is the
+  setup instructions, and that is the best available answer — but somebody
+  who wants the control plane and no chat platform has no way to say so.
+  There is no "no gateway" setting. Worth having; not this.
+
+- The check runs the daemon rather than the supervisor for everything after
+  that, because the gateway wants a credential a platform will accept and
+  this check has no platform. What is under test is the image and the volume,
+  which the daemon exercises exactly as well.
+
+## 7. Known costs
 
 - The image is ~200MB rather than ~30MB. D1 says why.
 - A bind mount needs the right uid. D2 says why.
