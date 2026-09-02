@@ -19,6 +19,15 @@ func aJob() job {
 // launchd reads this file, and a file it cannot parse is a service that
 // silently never starts.
 func TestThePlistIsWellFormed(t *testing.T) {
+	// plutil is macOS's own, and this file is only ever read by launchd,
+	// which is also macOS's own. Elsewhere there is nothing to check it with
+	// and nothing that would read it — said as a skip rather than passed
+	// quietly, so a run that could not check this does not look like one that
+	// did.
+	if _, err := exec.LookPath("plutil"); err != nil {
+		t.Skip("no plutil here, and it is what launchd's own parser is")
+	}
+
 	written := aJob().plist()
 
 	command := exec.Command("plutil", "-lint", "-")
@@ -54,6 +63,10 @@ func TestThePlistCarriesWhatTheServiceNeeds(t *testing.T) {
 // A home directory is allowed to have an ampersand in it, and a plist that
 // stops parsing at one is a service that never runs for that person alone.
 func TestAPathWithMarkupInItDoesNotBreakThePlist(t *testing.T) {
+	if _, err := exec.LookPath("plutil"); err != nil {
+		t.Skip("no plutil here, and it is what launchd's own parser is")
+	}
+
 	awkward := aJob()
 	awkward.Home = "/Users/tom & jerry/.jingclaw"
 

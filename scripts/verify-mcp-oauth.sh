@@ -125,7 +125,10 @@ printf 'ok   and the whole exchange completes: registration, pkce, and the token
 SESSION="$WORK/mcp-auth/books.json"
 [ -f "$SESSION" ] || fail "nothing was stored"
 
-MODE=$(stat -f '%Lp' "$SESSION" 2>/dev/null || stat -c '%a' "$SESSION")
+# GNU first. Its -f means "file system status" and succeeds, so asking the BSD
+# way first never falls through on Linux — it reads a filesystem and calls the
+# answer a file mode. BSD has no -c, so this order fails where it should.
+MODE=$(stat -c '%a' "$SESSION" 2>/dev/null || stat -f '%Lp' "$SESSION")
 [ "$MODE" = "600" ] || fail "the session is mode $MODE"
 printf 'ok   the session is on disk, readable by nobody else\n'
 

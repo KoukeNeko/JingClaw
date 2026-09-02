@@ -30,6 +30,15 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
+# A plist is launchd's, and launchd is macOS's. Elsewhere there is nothing to
+# write one for, and the command says so rather than writing one nothing
+# reads. Skipped with a reason: a check that quietly passed on a machine that
+# could not run it is worse than one that says it did not.
+if [ "$(uname -s)" != "Darwin" ]; then
+	printf 'skipped: launchd is macOS, and a plist is what launchd reads\n'
+	exit 0
+fi
+
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
 DEPLOYMENT="$WORK/.jingclaw"

@@ -1,0 +1,13 @@
+# Line endings, settled here rather than by whoever checks the tree out.
+#
+# Windows checks out CRLF by default, which makes gofmt report every file in
+# the repository as needing formatting — so the first time CI ran on a full
+# tree, the Windows job failed on all of it and said nothing about why. The
+# shell scripts have the same problem in the other direction: a CRLF one is a
+# script whose interpreter line ends in a character it cannot use.
+* text=auto eol=lf
+
+# Byte-for-byte, because they are compared as bytes.
+*.png binary
+*.ttf binary
+*.otf binary
