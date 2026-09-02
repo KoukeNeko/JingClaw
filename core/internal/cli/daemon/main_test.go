@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,5 +39,55 @@ func TestALaterRunDoesNotClaimToHaveWrittenTheFile(t *testing.T) {
 
 	if said := describeConfigFile("/data/config.toml", false, false); said != "/data/config.toml" {
 		t.Errorf("a run that created nothing says %q", said)
+	}
+}
+
+// A deployment has the files it is meant to be edited, without --init.
+//
+// They were created only by --init, so a daemon started any other way — a
+// container, a service, anyone who ran "jingclaw" and never read about the
+// flag — ran with neither, and the reason they are created rather than
+// documented ("a file that exists is a file somebody edits; one they have to
+// know to create is one that stays absent") applied to nobody but the person
+// who already knew.
+func TestStartingCreatesTheFilesMeantToBeEdited(t *testing.T) {
+	root := t.TempDir()
+
+	if err := writeInstructionFiles(root); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	for _, name := range config.InstructionFiles() {
+		content, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !strings.Contains(string(content), instructionPurpose[name]) {
+			t.Errorf("%s does not say what it is for: %q", name, string(content))
+		}
+	}
+}
+
+// And never over what is in them.
+//
+// The daemon runs this on every start, so overwriting would discard an
+// edited persona on the restart after somebody edited it — and a persona
+// seeded from the environment would be replaced by an empty heading before
+// it was ever read.
+func TestAnInstructionFileThatExistsIsLeftAlone(t *testing.T) {
+	root := t.TempDir()
+
+	theirs := "# Who you are\n\nAnswer briefly.\n"
+	if err := os.WriteFile(filepath.Join(root, config.PersonaFile), []byte(theirs), 0o600); err != nil {
+		t.Fatalf("staging: %v", err)
+	}
+
+	if err := writeInstructionFiles(root); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	back, _ := os.ReadFile(filepath.Join(root, config.PersonaFile))
+	if string(back) != theirs {
+		t.Errorf("it replaced a persona that was already there: %q", string(back))
 	}
 }

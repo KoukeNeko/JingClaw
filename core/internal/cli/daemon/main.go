@@ -139,6 +139,18 @@ func run(args []string) error {
 		if _, createdConfig, err = config.EnsureFile(); err != nil {
 			return err
 		}
+
+		// And the two files the settings point at. Created rather than
+		// documented, for the same reason the settings are: a file that
+		// exists is a file somebody edits, and one they have to know to
+		// create is one that stays absent. --init did this and nothing else
+		// did, so every deployment that was not started by hand ran without
+		// them. After what the environment supplied, which is never replaced.
+		if dir, found := home.Resolve(); found {
+			if err := writeInstructionFiles(dir.Root); err != nil {
+				return err
+			}
+		}
 	}
 
 	cfg, configFile, err := config.Load(*configPath)
@@ -738,7 +750,8 @@ var instructionPurpose = map[string]string{
 // project's files as though they were part of it.
 //
 // Created rather than documented. A file that exists is a file somebody edits;
-// one they have to know to create is one that stays absent.
+// one they have to know to create is one that stays absent. Which is why the
+// daemon does this on every start and not only under --init.
 //
 // Each is a heading and its purpose, and nothing else. Filling them with
 // suggested content would mean every deployment starts with instructions

@@ -86,4 +86,25 @@ grep -q 'does not decode' "$WORK/refusal" ||
 
 [ -e "$WORK/refused" ] && fail "a refused value still left a deployment behind"
 
+# A deployment that brings nothing still gets the files it is meant to edit.
+# They were created only by --init, so every container and every service ran
+# with neither, and the reason for creating them rather than documenting them
+# reached only the people who already knew about the flag.
+unset JINGCLAW_CONFIG JINGCLAW_PERSONA JINGCLAW_AGENTS
+export JINGCLAW_HOME="$WORK/plain"
+start_briefly
+
+for name in config.toml PERSONA.md AGENTS.md; do
+	[ -f "$WORK/plain/$name" ] ||
+		fail "a plain start left no $name for anybody to edit"
+done
+
+# What a redeployment looks like: the container is replaced, the volume is
+# not. The files are already there and the new one must read them rather than
+# put empty headings back over them.
+printf '# Edited between deployments\n' > "$WORK/plain/PERSONA.md"
+start_briefly
+[ "$(cat "$WORK/plain/PERSONA.md")" = "# Edited between deployments" ] ||
+	fail "a second start replaced the persona that was in the volume"
+
 printf 'PASS: the files a deployment brings arrive, once, intact\n'

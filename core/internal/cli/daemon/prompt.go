@@ -89,8 +89,8 @@ func skillCatalogue(logger *slog.Logger) string {
 // in there, the agent's own instructions are a file it can edit while doing a
 // job, and they sit among a project's files as though they were part of it.
 //
-// A missing one is not an error. The pair is created by --init and either may
-// be emptied or removed by somebody who does not want it.
+// A missing one is not an error. The pair is created on the first start and
+// either may be emptied or removed by somebody who does not want it.
 func readStandingInstructions() ([]prompt.StandingInstructions, error) {
 	dir, found := home.Resolve()
 	if !found {
