@@ -26,6 +26,10 @@ func main() {
 	// all: it may be one started to confine a command and then become it.
 	confineIfAsked()
 
+	// And this process may be the smaller thing left behind to notice that
+	// the program is gone, which is not the program either.
+	supervise.WatchIfAsked()
+
 	if err := root().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

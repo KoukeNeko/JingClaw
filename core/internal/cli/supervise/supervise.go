@@ -99,6 +99,21 @@ func Run(ctx context.Context) error {
 	defer terminate(chat)
 
 	chatGone := whenItExits(chat)
+
+	// Held for as long as this console is. Whatever happens to it — a clean
+	// exit, a hangup, or being killed outright — the other end of this goes
+	// with it, and the watchdog stops the parts. It is insurance against the
+	// one way of leaving that runs nothing here, so a failure to arrange it
+	// is said and not fatal.
+	lifeline, err := watchOver(self, agent, chat)
+	if err != nil {
+		fmt.Fprintln(os.Stderr,
+			"nothing will clean up if this console is killed outright:", err)
+	}
+	if lifeline != nil {
+		defer func() { _ = lifeline.Close() }()
+	}
+
 	if watching {
 		return watch(ctx, agentGone, chatGone)
 	}
