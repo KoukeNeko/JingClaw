@@ -148,9 +148,10 @@ discard whatever was edited in the volume, on the restart after somebody
 edited it. To change the configuration, change the variable and delete the
 file, or edit the file and leave the variable alone.
 
-TOML that will not parse is refused and nothing is written. The file is
-created once and never replaced, so a broken one would be a deployment that
-cannot start and cannot be corrected by fixing the variable.
+TOML that will not parse is refused and nothing is written — not the
+configuration and not the other two files either. They are created once and
+never replaced, so a run that wrote one and then refused the next would leave
+a deployment holding a file that fixing the variable can no longer change.
 
 The startup line says which happened:
 
@@ -159,6 +160,38 @@ Config:  /var/lib/jingclaw/config.toml (created from JINGCLAW_CONFIG)
 Config:  /var/lib/jingclaw/config.toml (created, all defaults)
 Config:  /var/lib/jingclaw/config.toml
 ```
+
+**`JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` carry the other two files.** The
+configuration is not the only thing a deployment has to bring. `PERSONA.md`
+says who the agent is and `AGENTS.md` says how the project works, and both are
+read from the same directory, so on a platform whose only inputs are a volume
+and some variables they are as unreachable as the configuration was.
+
+```
+JINGCLAW_PERSONA=# Who you are
+
+Answer briefly. Say when you are unsure.
+```
+
+They follow the same rule as `JINGCLAW_CONFIG`: written on first start, never
+written over one that is already there, `0600`. Nothing validates their
+contents, because a persona has no shape to be wrong.
+
+**A whole document through a single-line form: `base64:`.** Some platforms
+give you one input box per variable and drop the newlines, and a persona
+without its line breaks is a different persona. Prefix the value with
+`base64:` and the rest is decoded before it is written:
+
+```bash
+printf '%s' "$(cat PERSONA.md)" | base64 | tr -d '\n'   # paste with base64: in front
+```
+
+The prefix is required rather than guessed. Short markdown is often valid
+base64 by accident, so a value that merely looks encoded is written as it
+reads. A value that announces `base64:` and then does not decode is refused
+and the daemon does not start — the alternative is a persona file full of
+line noise that nobody notices for a week. All three variables take the
+prefix, and `JINGCLAW_CONFIG` is checked as TOML after decoding.
 
 **Credentials stay variables.** `DISCORD_BOT_TOKEN`, `GEMINI_API_KEY` and the
 rest are read from the environment by name, so they need not go in the file at

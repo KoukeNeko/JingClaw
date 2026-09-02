@@ -40,6 +40,14 @@ flags, so `JINGCLAW_AGENT_NAME` overrides `agent.name`, and `--model` overrides
 both. Only a flag actually typed counts; an unset one does not quietly replace
 a configured value with a default.
 
+Three variables carry a whole file rather than one setting, for deployments
+whose only inputs are a volume and an environment: `JINGCLAW_CONFIG`,
+`JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` write `config.toml`, `PERSONA.md`
+and `AGENTS.md` on first start, never over a file that is already there. A
+value prefixed `base64:` is decoded first, so a multi-line document survives
+a platform's single-line form. [`container.md`](container.md) has the whole
+arrangement.
+
 What the agent says it is comes from here too:
 
 ```toml
