@@ -346,10 +346,7 @@ func start(ctx context.Context, self, part string, output io.Writer) (*exec.Cmd,
 	command.Stdout = output
 	command.Stderr = output
 
-	// Its own process group, so a Ctrl-C in this terminal reaches this
-	// program and lets it stop the parts in order, rather than arriving at
-	// all three at once and racing the shutdown it was about to run.
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	ownProcessGroup(command)
 
 	if err := command.Start(); err != nil {
 		return nil, fmt.Errorf("supervise: start the %s: %w", part, err)
