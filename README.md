@@ -1,838 +1,108 @@
-# JingClaw
+<h1 align="center">JingClaw</h1>
 
-A local-first, durable agent runtime you can attach to from anywhere.
+<p align="center">
+  <strong>An AI agent that keeps working when you close the window.</strong><br>
+  It runs on your machine, answers in Discord, and remembers every session
+  across restarts, crashes, and whichever client you attach from next.
+</p>
 
-One executable. Run `jingclaw` and it starts the daemon and the chat gateway
-together, the way a game server starts.
+<p align="center">
+  <a href="https://github.com/KoukeNeko/JingClaw/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/KoukeNeko/JingClaw/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI"></a>
+  <a href="https://github.com/KoukeNeko/JingClaw/pkgs/container/jingclaw"><img alt="Container image" src="https://img.shields.io/badge/GHCR-amd64_%C2%B7_arm64-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
+  <img alt="Go 1.26" src="https://img.shields.io/badge/GO-1.26+-00ADD8?style=for-the-badge&logo=go&logoColor=white">
+  <img alt="Preview" src="https://img.shields.io/badge/STATUS-PREVIEW-E8A33D?style=for-the-badge">
+  <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/LICENSE-MIT-4CAF50?style=for-the-badge&logo=github"></a>
+</p>
 
-The daemon owns every piece of state — sessions, runs, the event log. Everything
-else is a projection of it, so closing a client never stops work that is already
-running, and reattaching from somewhere else picks up exactly where you left
-off.
+<p align="center">
+  <a href="#getting-started">Getting started</a>
+  · <a href="docs/using-it.md">Using it</a>
+  · <a href="docs/configuration.md">Configuration</a>
+  · <a href="docs/container.md">Docker</a>
+  · <a href="docs/architecture.md">Architecture</a>
+  · <a href="docs/roadmap.md">Roadmap</a>
+</p>
 
-```
-    Discord ──→ gateway ─┐            jingclaw <subcommand> ─┐
-                         │                                   │
-                         └─────────────┬─────────────────────┘
-                                       ↓
-                               Connect-RPC / loopback
-                                       ↓
-                                    daemon
-                                       ↓
-                                    SQLite
-```
+---
 
-Two processes, not one. The gateway holds somebody else's bot token and keeps a
-socket open to the internet; the process that owns the shell, the workspace and
-the event log must not go down with it.
-
-## Status: M1b — the gateway plane
-
-Given a repository with a failing test, JingClaw finds the cause, fixes it, and
-runs the tests to confirm — stopping for a human before each change. State
-persists to SQLite and survives a restart, including runs orphaned by a crash
-and runs parked on an approval.
-
-Conversation happens in a chat channel. The terminal is where you watch it and
-answer it, not where you talk to it.
-
-| Milestone | Scope |
-|---|---|
-| M0 | walking skeleton — done |
-| M1a | durable runtime, providers, tools, permissions — done |
-| **M1b** | gateway plane ✓, Discord adapter ✓, one executable ✓ |
-| M2 | the console: one scrolling log, one command line |
-| M3 | skills, subagents, replay, sandboxing, remote fleet |
-
-The macOS, Windows and web clients are not being built. A terminal is a client
-that works everywhere, and three of them at parity was three times the work for
-the same thing.
-
-### Where it keeps things
-
-```
-~/.jingclaw/
-  config.toml    the settings
-  AGENTS.md      standing instructions
-  PERSONA.md     who it is
-  workspace/     what the agent may read and change
-  data/          the database and stored output
-  run/           how clients find the daemon
-  log/           what a service writes when nobody is watching
-```
-
-Created on first run. Credentials go in beside them, mode 600.
-
-One place, always the same place. Where you happen to be standing when you type
-the name does not take part: a daemon whose database depended on the working
-directory is one that quietly becomes two, and then the settings you edited are
-not the settings that ran.
-
-`JINGCLAW_HOME` names a directory outright, for running against a deployment
-without being inside it. Set it to `none` to say there is no directory at all,
-which is how a test or a check states that it means the machine to look like
-one that has never had one.
-
-`jingclaw daemon --print-paths` reports where everything resolved, so a script
-that needs the discovery file can ask rather than reimplement the rules and then
-drift from them.
-
-The workspace is *inside* the directory rather than beside it, and is not a
-setting. Where the agent may read and write is one answer in one place: a
-second way to say it would be a second place for the two to disagree, and
-which one ran would depend on which file was edited last.
-
-So a deployment cannot reach the project it was set up in. To work on your own
-code, put it in the workspace.
-
-### What it can do
-
-| Tool | Gate |
-|---|---|
-| `read_file`, `glob_files`, `grep` | runs unattended |
-| `web_read` | unattended locally, asks from a chat channel |
-| `write_file`, `edit_file` | asks first |
-| `exec_command` | asks first |
-
-An edit must target text that appears exactly once, in a file the agent has
-read and that has not changed since. `exec_command` takes a program and an
-argument list — there is no shell — and a cancelled command takes its whole
-process group with it.
-
-### Models
-
-| `[model] provider` | What it talks to |
-|---|---|
-| `gemini` | Google's API |
-| `ollama` | a local Ollama daemon, or Ollama Cloud |
-| `openai_compat` | vLLM, LM Studio, llama.cpp, OpenRouter, Groq, Together |
-| `fake` | nothing; a deterministic stand-in for offline work |
-
-Ollama is reached through its own API rather than its OpenAI-compatible one,
-because the things a runtime has to know are only in the former: how much
-context the server actually gave a model, whether it is loaded at all, and its
-thinking as a field rather than mixed into the answer.
-
-That first one decides whether long sessions work. A model trained for 128k is
-routinely loaded with 4k, because that is what fit in the memory on hand, and
-planning against the larger figure means every request is refused while
-compaction waits for a threshold it will never reach. So a context window
-carries its provenance, and the order of belief is: the operator, then a server
-reporting what it has loaded, then a catalogue, then the model's own maximum —
-and nothing at all if none of them said.
-
-Ollama also serves an OpenAI-compatible endpoint at `/v1`, which is the
-quickest way to try `openai_compat` against a real implementation. Note what
-it costs: that listing says nothing about context length, so the window comes
-back unknown and compaction stays off unless `[context] window` is set. The
-native adapter reads the real figure. That difference is the argument for it.
-
-`openai_compat` needs a `profile`, because the claim is about a request shape
-rather than about behaviour. Servers making it disagree on whether usage is
-reported, which of two fields carries reasoning, and what a status code means:
-one answers `403` for a prompt longer than the context, which read the ordinary
-way is a permissions failure nobody can fix. The profile is named in
-configuration rather than guessed from the address, since a proxy makes the
-address say nothing, and an unknown name is refused rather than silently
-becoming the one that knows none of this.
-
-### A channel as a console
-
-"Discord" is not one trust level. A channel with fourteen people in it and one
-only you can see are different rooms, and the platform's own permissions are
-what separate them. Declare a private channel as a console in the config file:
-
-```toml
-[[gateway.channels]]
-channel_id = "111111111111111111"
-tenant_id  = "222222222222222222"
-workspace_id = "default"
-profile = "console"
-users = ["333333333333333333"]
-```
-
-Channels are applied when the daemon starts, so a deployment is described in
-the file rather than in commands somebody has to remember running. Declaring
-one that already exists updates it. Removing one does *not* unbind it — a
-daemon started once with an incomplete file would otherwise take away the thing
-that decides who can reach the agent — and the startup log names any bound
-channel the file does not, so nothing drifts unseen.
-
-The same thing from the command line, when that is easier:
-
-```bash
-agent bindings add --channel <id> --guild <id> --workspace ws \
-  --user <your-user-id> --profile console
-```
-
-A console channel reads and searches the workspace, fetches pages, and reads
-what the agent remembers. Changes to files and to memory still stop and ask —
-and you can answer there: `pending` lists what is waiting, `approve <id>` and
-`deny <id>` decide it, and `artifact <id>` hands over something a run stored.
-Those few words are the whole command set, matched on the entire message, so an
-ordinary sentence still reaches the agent.
-
-A console is also a log. Every finished tool call appears there with what it
-did, how long it took and whether it worked — as subtext, so twenty of them do
-not bury the reply. An ordinary channel gets none of that: it is a conversation,
-not a terminal.
-
-The same asymmetry applies to failures. A run that dies gets a plain sentence in
-a room other people read, because a provider's own words carry the account's
-quota and limits. A console gets the real reason, since hiding it from the one
-person who can fix it protects nobody.
-
-Every run ends with what it cost: which provider and model answered, the tools
-it used and how long each took, the sources it drew on, and the tokens.
-
-Artifacts are pulled, never pushed. A run that produces a large result says it
-exists and stops there; the bytes cross into a channel when a person names the
-one they want. Attaching everything a run produced would put whole build logs
-and fetched pages into a room on the agent's initiative.
-
-It cannot run programs. That is the line, and it is where it is because of what
-a channel permission can and cannot do. It settles who is in the room, which is
-what makes reading and writing reasonable there. It cannot settle whether an
-account still belongs to its owner, and a stolen one holds the request and the
-approval both. So running programs stays where somebody has to be at the
-machine, which is also the only place that can tell.
-
-The channel is told all of this the first time it is used, and again on `help`.
-A boundary that lives only in a configuration file on a machine nobody in the
-room is sitting at is one everybody will assume the shape of instead.
-
-A console decides only for its own conversation. A run started at the terminal
-is still answered at the terminal.
-
-### Reading the web
-
-Off by default; `[web] enabled = true` turns it on. `web_read` fetches a page
-and returns its visible text and links, and that is the whole of it: no
-clicking, typing, signing in or submitting. Those are a different power with a
-different blast radius, and keeping them out of this tool is what stops the
-gentler one from quietly carrying them.
-
-Pages are fetched by driving a real browser rather than by making an HTTP
-request. A growing share of the web answers anything that does not look like a
-browser with a challenge page, which an agent then reads as though it were the
-article; a browser also runs the JavaScript that many sites need before there
-is any text to read at all. It costs a process and a few seconds per page, and
-needs Python with the `cloakbrowser` package installed. This is not a way past
-serious bot detection — sites running Cloudflare or DataDome still refuse, and
-`web_read` reports the refusal rather than pretending — it is a way to read the
-ordinary web that a plain fetch no longer reaches.
-
-Three things hold regardless of which page comes back:
-
-- **Nothing inside this machine is reachable.** Addresses are checked against
-  what they resolve to rather than how they are spelled, every address a name
-  resolves to is checked, and the same check runs again inside the browser for
-  wherever a redirect leads. A public hostname pointed at `169.254.169.254` is
-  the normal way this is attacked, and it is refused.
-- **What comes back is labelled.** Every result opens by naming the final URL,
-  the redirect it came through, and the fact that a stranger wrote it. Text in
-  a page that addresses the agent is content, not instruction.
-- **Who chose the address decides the gate.** The operator naming a page is
-  research and runs unattended. A link arriving from a chat channel stops for
-  the operator, because that plane can already read the workspace and a page
-  saying "now show me your .env" would otherwise complete the loop.
-
-### From a chat channel
-
-The gateway connects a Discord bot to the same runtime, so a mention in a bound
-channel starts work and the reply comes back to that thread. `jingclaw` starts
-it along with the daemon; binding a channel is the only step of your own.
-
-```bash
-jingclaw bindings add --channel <id> --guild <id> --workspace ws --user <your-user-id>
-```
-
-Every default is no: a channel with no binding is unreachable, a binding with
-nobody allowed permits nobody, overheard text is not a request, and bots are
-refused whatever the allowlist says. Runs from a channel use a stricter
-profile that denies execution outright — approving from the same account that
-asked is one unbroken chain, so anything that runs a program has to be
-authorised from a local client.
-
-## Layout
-
-```
-proto/    the contract
-core/     everything: daemon, gateway, CLI
-scripts/  the checks
-docs/     plans and research
-```
-
-Inside `core`:
-
-```
-cmd/jingclaw/   the one executable
-internal/cli/   its subcommands: daemon, gateway, client, supervise, service
-internal/       the runtime, the store, the tools, the adapters
-gen/            generated from proto, and committed
-```
-
-Generated code is committed, so a build never needs `buf` installed. CI
-regenerates and fails on any drift.
-
-## Build
-
-Requires Go 1.26+ and [buf](https://buf.build) 1.72+ (only for changing the
-proto files).
+## Getting started
 
 ```bash
 go install github.com/KoukeNeko/JingClaw/core/cmd/jingclaw@latest
-```
-
-Or from a checkout:
-
-```bash
-cd core && go install ./cmd/jingclaw
-```
-
-## Try it
-
-```bash
 jingclaw
 ```
 
-That is the whole thing: it creates `~/.jingclaw` if there is none, starts the
-daemon and the gateway, and stays until you interrupt it. Run it again from
-another terminal and it says so rather than starting a second one.
+That is the whole thing. It creates `~/.jingclaw` if there is none, starts the
+daemon and the chat gateway together, and gives you a console to watch them
+from. Run it again from another terminal and it says so rather than starting a
+second one.
+
+The first run has no model and no chat account yet, so it tells you what it
+wants and where to put it. Set those in `~/.jingclaw/config.toml`, start it
+again, and talk to it in Discord.
 
 ```bash
 jingclaw status      # running, and where
 jingclaw stop        # stop the one that is running
 ```
 
-To be one of the parts by hand — which is what the supervisor does, and what
-the checks do:
+Prefer a container? `docs/container.md` — the image is on GHCR for amd64 and
+arm64, and carries no settings, no database and no credentials of its own.
 
-```bash
-jingclaw daemon --provider=gemini --model=gemma-4-31b-it
-jingclaw gateway
-```
+## What it does
 
-`~/.jingclaw/workspace` is the only directory tools can reach. Paths are
-resolved and symlink-checked against it before any I/O, so neither traversal
-nor a symlink pointing elsewhere gets out.
+**Work survives the client.** Sessions, runs and every event go to SQLite as
+they happen. Close the terminal, restart the daemon, come back tomorrow from a
+different machine: a run that was waiting for an approval is still waiting, and
+answering it hours later works.
 
-Reads run unattended; anything that modifies the workspace stops for a
-decision:
+**A person decides what matters.** Reads run unattended. Anything that changes
+the workspace, runs a command, or reaches the network stops and asks — in the
+channel, with the command it is about to run written out. The pause is durable
+too.
 
-```bash
-jingclaw approvals <session-id>
-jingclaw approve <approval-id>     # --session to allow that tool for the session
-jingclaw deny <approval-id>
-```
+**The conversation lives in chat.** Discord is where you talk to it; the
+terminal is where you watch it and answer it. It says what it is doing while it
+does it — which file it opened, which page it read — and the answer arrives as
+it is written.
 
-The pause is durable. A run waiting for an answer survives a daemon restart and
-can be answered hours later, by a client that never saw the original prompt.
-
-The key comes from `GEMINI_API_KEY`, or a mode-600 file at
-`gemini.key` under the config directory. `--list-models` prints what the
-provider actually serves; a `--model` it does not serve fails at startup
-rather than on the first message.
-
-It binds an ephemeral port on loopback and writes a `0600` discovery file
-holding the address and a bearer token; the CLI finds it from there. State
-lives in `jingclaw.db` under the user config directory, or wherever
-`--data-dir` points.
-
-Then create a session and follow it:
-
-```bash
-jingclaw session create
-jingclaw attach <session-id>
-```
-
-And in a third, send a turn:
-
-```bash
-jingclaw send <session-id> "測試訊息"
-```
+**One binary, two processes.** The gateway holds a bot token and keeps a socket
+open to the internet. The process that owns your shell, your workspace and the
+event log does not go down with it.
 
 ```
-000001 user.message           測試訊息
-000002 run.running
-000003 assistant.delta        收到：
-000004 assistant.delta        測試訊息
-000005 assistant.completed
-000006 run.completed
+Discord ──→ gateway ─┐
+                     ├──→ daemon ──→ SQLite
+CLI, console ────────┘
 ```
 
-Detach with `Ctrl+C` — the run keeps going — then resume from where you
-stopped:
-
-```bash
-jingclaw attach <session-id> --after 3
-```
-
-Only events 4, 5 and 6 arrive. Restarting the daemon changes nothing: the
-session, its runs and the sequence all continue where they were.
-
-## Configuration
-
-Every setting the daemon, the CLI and the gateway have is written in one file.
-Flags exist so a single run can differ from it, not so that a deployment has to
-be described on a command line.
-
-The daemon writes the file the first time it starts, so there is nothing to
-find out and nowhere to put it:
-
-```
-$ jingclaw daemon
-JingClaw daemon
-Listening: http://127.0.0.1:54832
-Config:    /Users/you/.config/JingClaw/config.toml (created, all defaults)
-```
-
-Every setting is in it and every line is commented, so its arrival changes
-nothing until a line is deliberately uncommented. An existing file is never
-touched. [`core/config.example.toml`](core/config.example.toml) is the same
-content, checked in so it can be read without running anything, and
-`--print-config` writes it to stdout.
-
-The location is the platform config directory — `~/Library/Application Support/JingClaw/` on macOS,
-`%AppData%\JingClaw\` on Windows, `~/.config/JingClaw/` on Linux and on macOS
-when a file is already there. `--config` names another one.
-
-Precedence runs defaults → file → `JINGCLAW_`-prefixed environment →
-flags, so `JINGCLAW_AGENT_NAME` overrides `agent.name`, and `--model` overrides
-both. Only a flag actually typed counts; an unset one does not quietly replace
-a configured value with a default.
-
-What the agent says it is comes from here too:
-
-```toml
-[agent]
-name = "江委員"
-persona = """
-You are careful and concise. You work on this team's Go services.
-"""
-```
-
-The prompt is assembled in layers, each with a stated source, and
-`--print-prompt` shows the whole thing with where every part came from. One
-layer is deliberately not configurable: the contract that tells the model how
-tools behave and what a refusal means. Letting an operator edit that would let
-them describe a system that does not exist.
-
-Settings are checked at startup rather than at the moment they matter, and all
-of them at once — restarting a daemon to discover the next mistake is work the
-program can do in one pass:
-
-```
-Configuration problem in /Users/you/.config/JingClaw/config.toml
-
-  server.addr = "0.0.0.0:9977"
-      is not a loopback address
-      This API can run programs and is not safe to expose. Use 127.0.0.1, ::1 or localhost.
-
-  model.provider = "openai"
-      is not a provider that exists
-      Use "gemini", or "fake" for the offline provider.
-```
-
-That last refusal is not a preference. This API reads files and runs programs;
-binding it somewhere reachable needs a more deliberate mechanism than a config
-line, and there is not one.
-
-## Watching it work
-
-Conversation happens in the chat channel. The terminal is where you watch what
-it is doing and answer it when it stops to ask.
-
-```bash
-jingclaw attach <session-id>          # follow one session's events
-jingclaw approvals <session-id>       # what is waiting for a decision
-jingclaw questions                    # what it has stopped to ask
-```
-
-The daemon owns the run, so detaching does not stop it. Reattach with
-`--after <seq>` and you resume exactly where you left off, because the sequence
-is dense within a session and a client that asks for something older than what
-is kept is told to resync rather than handed a conversation missing its middle.
-
-A console — one scrolling log across every session with a command line at the
-bottom, the shape a game server has — is the next thing being built. There was
-a web console; it was removed. A page served over loopback, its own credential
-kind, its own pairing code and its own client at parity was a second product
-next to a terminal that already worked everywhere the first one did.
-
-## Images
-
-Send the bot a screenshot on Discord — **attached to the message that mentions
-it**, not sent separately — and it looks at it. Without the Message Content
-intent the bot only sees messages addressed to it, so a picture posted on its
-own is a picture it was never shown.
-
-From a terminal it is the same picture, a flag away:
-
-```bash
-jingclaw send <session-id> "what is wrong with this layout" --attach shot.png
-```
- The path is the same
-shape as everything else here: the adapter fetches the bytes, the ingress puts
-them in the artifact store, the **event carries a reference** — not the picture
-— and the bytes are read back when a request is assembled. An image is large
-and the log is replayed on every turn, so a conversation that carried copies of
-everything ever sent to it would stop working long before the context window
-did.
-
-The adapter fetches rather than passing a link inward. Discord's link is signed
-for a client this daemon is not and it expires, so a conversation replayed next
-month would find nothing behind it — and the gateway is the only part of this
-system meant to talk to the platform at all.
-
-**The declared type is not believed.** It comes from the platform, which got it
-from whoever uploaded the file. The bytes have to agree with the label, the
-label has to be on a short list — PNG, JPEG, WebP — and the header has to
-declare a picture small enough to decode. That last one matters on its own: a
-bounded number of bytes is not a bounded amount of work, and a few dozen bytes
-of PNG header can promise 900 million pixels.
-
-SVG is a document that can carry script and is not accepted. An attachment that
-cannot be shown is still named in the message, because "here, fix this" makes
-no sense at all if the attachment is invisible.
-
-A picture from a gateway turn is labelled as coming from outside this machine.
-That is not a security control — text inside an image is a known way to instruct
-a model, and no label prevents it. What holds is the same thing that always
-holds here: a run's permissions come from where it came from, and nothing the
-model reads can raise them.
-
-## Memory
-
-Off by default. What is written here is read by every later session, by an
-agent that no longer knows where it came from, so turning it on is a decision
-somebody makes rather than one they inherit:
-
-```toml
-[memory]
-enabled = true
-```
-
-Then `remember` writes something down and `recall` looks it up. Three rules
-shape the rest, and each comes from something that has actually gone wrong in a
-shipped system rather than from taste.
-
-**What stops for a person is authority, not persistence.** A memory has an
-`activation`: `retrieval` is looked up when it is wanted, `standing` goes in
-front of the model on every future run. Writing the first changes nothing until
-somebody asks for it, so it does not interrupt. Writing the second shapes every
-future run without anybody asking, so it does. That split matters because an
-approval that fires on every write is one people learn to click through — and a
-one-click approve-everything flow is not an approval.
-
-What the approval shows is the proposed text *and* which session, which message
-and which principal produced it: a conditional injection that fires when you say
-"yes" to something innocuous is only visible if the screen says where the
-proposal came from.
-
-**Reading is scoped by who is asking.** What a Discord account told the agent
-is not recalled for the operator, and the operator's notes are not read into a
-channel. The scope comes from the turn, never from an argument the model could
-choose. What the *project* knows is shared, because that is what a project is —
-but a turn from outside this machine can only write about the person it came
-from. Project knowledge is read by local runs that can execute programs, so
-promoting anything into it is the operator's to do.
-
-**What came from outside stays marked.** A gateway-origin memory is untrusted
-permanently — a fact derived from untrusted text is untrusted however many
-summaries it has been through — and is never put in front of the model as a
-standing direction. It can be looked up deliberately, labelled as coming from
-outside this machine.
-
-You can see all of it, which is the control that matters:
-
-```bash
-jingclaw memory list             # everything, with where each came from
-jingclaw memory list --history   # including what has been superseded
-jingclaw memory forget mem_01K…  # gone, not merely superseded
-```
-
-A correction invalidates rather than overwrites, so "what is believed now" and
-"what was believed then" are both answerable. Two corrections to the same
-memory cannot both win: the second is refused, because a supersession graph
-that forks has no answer to which branch is believed.
-
-Forgetting removes the memory, index and all — the agent will not recall it or
-carry it again. It does **not** erase the conversation the memory came from:
-that is still in the event log, because an append-only log cannot forget, and
-that is the price of it being able to say what happened. The provenance on each
-memory is what tells you where else to look.
-
-Retrieval is SQLite FTS5, and it fails silently — it does not crash, the agent
-just looks as though it forgot. `TestRecallOnParaphrase` measures exactly that
-against a corpus of realistic paraphrases and prints what it missed. It stands
-at **6 of 11**, and the misses are all the same shape: the same thing said in
-other words. That number is the evidence for adding embeddings when the time
-comes, and there is no point adding them before there is a number.
-
-The reasoning, the evidence behind it, and what is deliberately not built are
-in `docs/research/05-memory.md`.
-
-## Large output
-
-A build log that fails at line 40,000 is the most useful thing in a session and
-the least printable. Truncating it throws away the part somebody wanted;
-keeping it whole ends the session. So the model gets an excerpt and an
-identifier:
-
-```
-/bin/cat big.txt
-exit status 0 after 12ms
-
-line-0-padding-padding-padding
-...
-[... 132890 bytes omitted ...]
-...
-line-3999-padding-padding-padding
-[the whole output is 134890 bytes; read it with read_artifact on sha256-2d932a66...]
-```
-
-The model reads the rest with `read_artifact`, which reports the window and how
-much remains, so a caller paging through does not have to hold its own belief
-about how much there is. A person gets the same bytes:
-
-```bash
-jingclaw artifact get sha256-2d932a66... > build.log
-```
-
-Content is addressed by its digest, so running a failing suite four times in an
-afternoon stores one log rather than four. The reference lives in the
-`tool.completed` event rather than in a table of its own — the event already
-records which session, which run and which tool produced it, and a second place
-holding the same fact is a second place for it to be wrong. A failure carries
-the reference as readily as a success: a command that timed out is exactly the
-one whose output somebody wants.
-
-Identifiers reach the store from a model, so they are input rather than facts.
-Only an exact lowercase sha256 digest resolves to a path.
-
-## Tool servers
-
-Tools that speak the Model Context Protocol run as child processes of the
-daemon and appear to the model as ordinary tools:
-
-```toml
-[[mcp.servers]]
-name = "sqlite"
-command = "uvx"
-args = ["mcp-server-sqlite", "--db-path", "notes.db"]
-level = "workspace_read"
-pass_env = ["SOME_TOKEN"]
-```
-
-```
-Tools:     12 (6 from 1 of 1 mcp servers)
-```
-
-Three things about that boundary are deliberate, because an MCP server is
-somebody else's program running on your machine.
-
-**A server does not get to say how dangerous it is.** The policy engine reads
-`Level` and `Capabilities`; if a server could set them, one that declared its
-tool read-only would walk straight past the approval a truthful one would have
-to stop for. The level comes from `level` in your configuration and defaults to
-`execute`, the honest floor for a call that makes another program act.
-Capabilities are assumed rather than asked: network, execute and destructive,
-none of idempotent or parallel-safe.
-
-**Names are prefixed, never passed through.** Tools arrive as
-`mcp_<server>_<tool>`, so installing a server cannot make `read_file` mean
-something other than the one that respects the workspace boundary. A name too
-long for a model to call is refused rather than truncated, because truncating
-invents collisions between tools that differ only in the part that was cut off.
-
-**Nothing is inherited that was not named.** The daemon's environment holds
-your provider credentials. A server gets `PATH` and the like, whatever `env`
-sets literally, and whatever `pass_env` names — nothing else.
-
-A server that will not start is logged and skipped rather than taken as a
-reason to refuse to run, and the banner says how many of how many answered: a
-tool that is quietly absent looks exactly like one the model chose not to use.
-
-## Long sessions
-
-The conversation sent to the model is rebuilt from the event log every turn.
-That is what lets a session survive a restart with its history intact, and it
-is also unbounded: left alone, a session that goes on long enough exceeds the
-model's context window and every turn after that fails.
-
-So when the next request would be too large, the older part of the session is
-summarised and the summary is written to the log as an event:
-
-```
-000214 conversation.compacted folded 38 messages, ~92000 tokens to ~24000
-```
-
-Nothing is deleted. The folded events are still in the log and a client may
-still show them; they are simply no longer part of what the model sees. Because
-the summary is an event, a daemon that restarts picks the session up from it
-rather than replaying the history it replaced, and every attached client learns
-that it happened the same way it learns everything else.
-
-Two things make this safe rather than merely smaller. Compaction runs only at
-the top of the tool loop with nothing outstanding — the one point where every
-call the model made has a recorded result — and the cut never leaves the
-conversation starting with a tool result whose call has been folded away. Both
-are properties the tests assert directly.
-
-The window comes from the provider. It can be set in `[context]` for a local
-model served by something that does not report one; with neither, compaction
-stays off, because summarising against a guessed window would either throw work
-away early or fail to save the session that needed saving.
-
-## Verifying
-
-```bash
-cd core && go test -race ./...
-./scripts/verify-all.sh
-```
-
-The scripts are separate from the tests on purpose. Every serious defect this
-project has had was in an assembly seam rather than in logic a unit test was
-looking at: the daemon that never wired the projector, so runs completed and
-Discord got nothing; the storage codec that did not know an event, so
-compaction worked in memory and vanished on SQLite; the bot that connected,
-logged cleanly, and ignored every message; the client subcommands leaving their
-read-the-configuration step on the shared root command, so the daemon ran it
-too and refused to start anywhere without a default location. None were visible
-to a unit test. All were visible within seconds of running the thing.
-
-So each script starts a real daemon, drives it the way a person would, and
-checks what came out. `verify-artifacts.sh` needs a provider credential —
-only a model calls tools — and skips itself when there is none.
-
-## What is one conversation
-
-A Discord **thread** is a session. Outside a thread, the **channel** is: two
-people mentioning the bot in `#agent` are continuing one conversation, and
-opening a thread is how somebody says they want a separate one.
-
-This is worth stating because getting it wrong is invisible from the code and
-obvious from the channel. Keying on the arriving message's id — which is what
-this did until it was noticed — gives every mention a session of its own, and
-what that looks like is an agent with no memory: ask it something, say "go
-ahead", and it has never heard of you.
-
-## What it is doing, on Discord
-
-A run that reads four files and waits on a test suite used to say nothing at
-all between "working on it" and the answer, and silence because it is busy
-looks exactly like silence because something broke. It now says what it is
-doing:
-
-```
-江委員  _Working on it — `read_file notes.txt`_
-```
-
-That line is **rewritten in place** rather than added to. A run touching ten
-files leaves one line behind it, not ten, and when the run ends the same line
-becomes `_Done in 12s._` instead of still claiming to be busy.
-
-It belongs to its run. Keyed by channel — which it was, briefly — a new run
-edited the line the previous one left behind, and since that line had ended up
-at the bottom of the previous answer, asking a fresh question rewrote the tail
-of the last one.
-
-The lines are throttled to `gateway.working_interval` (two seconds), which is
-about as fast as anybody reads and comfortably inside what Discord accepts as
-edits to one message. Which message is live is held in the adapter's memory
-rather than in the outbox, because it is a presentation detail: losing it
-across a restart costs one extra line in a channel, not a wrong one.
-
-## Answers as they are written
-
-A model writing for twenty seconds used to be twenty seconds of nothing
-followed by a wall of text. The answer now grows in one message: the projector
-sends what has been said so far on a cadence, each version naming the answer it
-belongs to, and the adapter rewrites the message rather than posting the same
-paragraph again.
-
-The first delta only starts the clock, so an answer finished inside one
-`gateway.stream_interval` (1.5 seconds) never streams — it arrives whole, which
-is what it should do rather than appearing and being rewritten a moment later.
-
-While it is being written an answer occupies exactly one message, cut at
-Discord's limit with an ellipsis. Deciding between several messages and a file
-belongs to the final version, when the whole thing is known.
-
-## Long answers on Discord
-
-A reply that needs eight messages is a channel somebody has to scroll past for
-the rest of the day. Past `gateway.max_messages` (three by default) the answer
-goes as a `.txt` attachment instead, with its opening in the message so a
-reader can tell whether it is worth opening:
-
-```
-Here is what I found. The suite fails in three places, all in the
-vowel counting…
-
-the whole answer is attached (18.4 KB)
-```
-
-Only the agent's own answers. An approval is the thing somebody has to act on
-and a status line is short by construction; hiding either behind a download
-would be worse than a long channel.
-
-No link is ever generated for it. A `http://127.0.0.1:PORT/…` address means
-nothing to anybody reading Discord, and the artifact store is not something
-this daemon publishes.
-
-## Design rules
-
-These are load-bearing. Breaking one is a design change, not a refactor.
-
-1. **The event log is the history.** Message lists in a UI are projections of
-   it, never the source.
-2. **Sessions and runs are separate.** A session is a conversation; a run is
-   one execution within it.
-3. **Clients are projections.** They may not decide tool permissions, judge
-   whether a run has finished, or keep their own model catalog.
-4. **The runtime never sees the wire format.** Translation lives only in
-   `internal/control`.
-5. **Not every caller is trusted.** `Run.origin` and `TrustLevel` exist from
-   M0 so the gateway plane can arrive without a schema migration.
-6. **Loopback is not authentication.** Any web page can reach `127.0.0.1`, and
-   this API will grow a shell.
-7. **A dead process must not strand a run.** Startup resolves runs left live by
-   a crash and records the outcome as an event, so a reconnecting client learns
-   it the same way it learns everything else.
-8. **Provider deltas are coalesced before they are persisted.** A model that
-   streams a few characters at a time must not turn every keystroke into a
-   database write — but interrupting a reply still flushes what was already
-   generated, because losing it would be worse than never batching.
-9. **A model's cooperation is not a security control.** The system prompt says
-   what the agent may reach, but the workspace boundary is enforced in code and
-   tested by forcing the calls a well-behaved model would decline to make.
-10. **A failed tool is an observation, not an error.** Structured codes and a
-   suggested next step go back to the model; "exit status 1" leaves it retrying
-   the same call until the budget runs out.
-11. **Permission and correctness are separate.** Approval answers "may you touch
-   this"; the write rules answer "do you know what you are touching". A human
-   saying yes does not let the agent overwrite a file it never read.
-12. **A paused run is not an orphan.** Waiting on a human is a legitimate state,
-   so startup leaves it alone instead of failing it.
-13. **Credentials never reach a log.** They load from an environment variable or
-   a mode-600 file into a type whose `String`, `Format` and `MarshalJSON` all
-   redact.
-
-`internal/architecture` asserts rules 3–4 mechanically: the CLI cannot import
-the runtime, and the runtime cannot import generated protobuf.
-
-## Development
-
-```bash
-cd core
-go test ./...
-go test -race ./...
-```
-
-After editing anything in `proto/`:
-
-```bash
-buf format -w && buf lint && buf generate
-```
+## Project status
+
+**Preview.** It does what is described above, every day, on macOS and Linux.
+
+What that does not promise yet: configuration and storage formats may change
+between versions; the daemon listens on loopback only, so there is no remote
+access; Windows builds but does not pass its own tests, and
+[`docs/STATUS.md`](docs/STATUS.md) says exactly which ones and why.
+
+`docs/STATUS.md` is the honest account — what works, what is missing, and the
+defects found along the way. [`docs/roadmap.md`](docs/roadmap.md) has the
+milestones.
+
+## Documentation
+
+| | |
+|---|---|
+| [Using it](docs/using-it.md) | approvals, memory, images, tool servers, long sessions |
+| [Configuration](docs/configuration.md) | every setting, and why it is what it is |
+| [In a chat channel](docs/discord.md) | what a conversation looks like from Discord |
+| [Docker](docs/container.md) | the image, the volume, and where credentials go |
+| [Architecture](docs/architecture.md) | the shape of it, and the rules it was built by |
+| [Development](docs/development.md) | building it, and the checks a change has to pass |
+| [Status](docs/STATUS.md) | what is done, what is not, and what went wrong |
+
+## Requirements
+
+Go 1.26+ to build. A provider — Gemini, Ollama, Anthropic, or anything that
+speaks the OpenAI shape — and a Discord bot token if you want the chat half.
+macOS and Linux; see the status above for Windows.
