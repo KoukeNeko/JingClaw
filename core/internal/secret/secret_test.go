@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm/permtest"
 	"github.com/KoukeNeko/JingClaw/core/internal/secret"
 )
 
@@ -57,7 +59,7 @@ func TestRevealReturnsTheValue(t *testing.T) {
 }
 
 func TestLoadPrefersEnvironment(t *testing.T) {
-	path := writeKeyFile(t, "from-file", 0o600)
+	path := writeKeyFile(t, "from-file")
 	t.Setenv("JINGCLAW_TEST_KEY", "from-env")
 
 	value, err := secret.Load(secret.LoadOptions{
@@ -73,7 +75,7 @@ func TestLoadPrefersEnvironment(t *testing.T) {
 }
 
 func TestLoadFallsBackToFile(t *testing.T) {
-	path := writeKeyFile(t, "  from-file\n", 0o600)
+	path := writeKeyFile(t, "  from-file\n")
 
 	value, err := secret.Load(secret.LoadOptions{
 		EnvVars: []string{"JINGCLAW_TEST_UNSET_KEY"},
@@ -91,7 +93,10 @@ func TestLoadFallsBackToFile(t *testing.T) {
 // A key other local accounts can read should be treated as compromised, so
 // loading it is refused rather than silently accepted.
 func TestLoadRefusesWorldReadableFile(t *testing.T) {
-	path := writeKeyFile(t, "exposed", 0o644)
+	path := writeKeyFile(t, "exposed")
+	if err := permtest.Expose(path); err != nil {
+		t.Fatalf("expose: %v", err)
+	}
 
 	_, err := secret.Load(secret.LoadOptions{Files: []string{path}})
 	if err == nil {
@@ -120,7 +125,7 @@ func TestLoadMissingFileIsNotAnError(t *testing.T) {
 }
 
 func TestEmptyEnvVarFallsThrough(t *testing.T) {
-	path := writeKeyFile(t, "from-file", 0o600)
+	path := writeKeyFile(t, "from-file")
 	t.Setenv("JINGCLAW_TEST_KEY", "   ")
 
 	value, err := secret.Load(secret.LoadOptions{
@@ -135,16 +140,17 @@ func TestEmptyEnvVarFallsThrough(t *testing.T) {
 	}
 }
 
-func writeKeyFile(t *testing.T, contents string, mode os.FileMode) string {
+func writeKeyFile(t *testing.T, contents string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "test.key")
-	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("write key file: %v", err)
 	}
-	// WriteFile is subject to umask, so set the mode explicitly.
-	if err := os.Chmod(path, mode); err != nil {
-		t.Fatalf("chmod key file: %v", err)
+	// WriteFile's mode is subject to umask on Unix and only advisory on
+	// Windows, so lock the file down the same way the daemon does.
+	if err := fsperm.Restrict(path); err != nil {
+		t.Fatalf("restrict key file: %v", err)
 	}
 	return path
 }

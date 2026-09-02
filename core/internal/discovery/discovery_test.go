@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 )
 
 func writeFile(t *testing.T, path string, pid int) {
@@ -27,12 +28,12 @@ func TestTheDiscoveryFileIsOwnerOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run", "daemon.json")
 	writeFile(t, path, 42)
 
-	info, err := os.Stat(path)
+	ownerOnly, exposure, err := fsperm.EnsureOwnerOnly(path)
 	if err != nil {
-		t.Fatalf("stat: %v", err)
+		t.Fatalf("check: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("mode is %o, want 600", perm)
+	if !ownerOnly {
+		t.Errorf("the discovery file %s", exposure)
 	}
 }
 

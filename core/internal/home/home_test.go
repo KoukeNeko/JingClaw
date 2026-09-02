@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
@@ -113,12 +114,12 @@ func TestItIsNotReadableByAnybodyElse(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	info, err := os.Stat(dir.Root)
+	ownerOnly, exposure, err := fsperm.EnsureOwnerOnly(dir.Root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode := info.Mode().Perm(); mode&0o077 != 0 {
-		t.Errorf("mode is %o, which lets somebody else in", mode)
+	if !ownerOnly {
+		t.Errorf("the directory %s, which lets somebody else in", exposure)
 	}
 }
 

@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm/permtest"
 )
 
 func opened(t *testing.T) (*Store, string) {
@@ -86,23 +89,23 @@ func TestWhatIsStoredIsNotReadableByAnybodyElse(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	file, err := os.Stat(filepath.Join(dir, "books.json"))
+	ownerOnly, exposure, err := fsperm.EnsureOwnerOnly(filepath.Join(dir, "books.json"))
 	if err != nil {
-		t.Fatalf("stat: %v", err)
+		t.Fatalf("check session: %v", err)
 	}
-	if mode := file.Mode().Perm(); mode&0o077 != 0 {
-		t.Errorf("the session is mode %#o", mode)
+	if !ownerOnly {
+		t.Errorf("the session %s", exposure)
 	}
 
 	// The directory too. Its listing says which services this deployment
 	// holds credentials for, which is worth something to somebody who cannot
 	// read the files themselves.
-	held, err := os.Stat(dir)
+	ownerOnly, exposure, err = fsperm.EnsureOwnerOnly(dir)
 	if err != nil {
-		t.Fatalf("stat dir: %v", err)
+		t.Fatalf("check dir: %v", err)
 	}
-	if mode := held.Mode().Perm(); mode&0o077 != 0 {
-		t.Errorf("the directory is mode %#o", mode)
+	if !ownerOnly {
+		t.Errorf("the directory %s", exposure)
 	}
 }
 
@@ -113,8 +116,8 @@ func TestASessionOthersCanReadIsRefusedRatherThanUsed(t *testing.T) {
 	if err := store.Save("books", config, token); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if err := os.Chmod(filepath.Join(dir, "books.json"), 0o644); err != nil {
-		t.Fatalf("chmod: %v", err)
+	if err := permtest.Expose(filepath.Join(dir, "books.json")); err != nil {
+		t.Fatalf("expose: %v", err)
 	}
 
 	// Refused, not skipped. Reading it anyway would use a credential that

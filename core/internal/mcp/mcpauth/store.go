@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
@@ -64,6 +65,12 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("mcpauth: could not make %s: %w", dir, err)
 	}
+	// MkdirAll's mode is only advisory on Windows, so lock the directory down
+	// explicitly: its listing names which services this deployment holds
+	// credentials for.
+	if err := fsperm.Restrict(dir); err != nil {
+		return nil, fmt.Errorf("mcpauth: %w", err)
+	}
 	return &Store{dir: dir}, nil
 }
 
@@ -80,8 +87,7 @@ func (s *Store) Load(server string) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	info, err := os.Stat(path)
-	if err != nil {
+	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrNoSession
 		}
@@ -92,10 +98,14 @@ func (s *Store) Load(server string) (*Session, error) {
 	// compromised. Refused rather than skipped, the same way this deployment
 	// already treats a credential file: falling through quietly would hide
 	// the exposure, and what is behind it is somebody's account.
-	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+	ownerOnly, exposure, err := fsperm.EnsureOwnerOnly(path)
+	if err != nil {
+		return nil, fmt.Errorf("mcpauth: check %s: %w", path, err)
+	}
+	if !ownerOnly {
 		return nil, fmt.Errorf(
-			"mcpauth: %s is mode %#o; it must not be readable by group or others (chmod 600)",
-			path, mode)
+			"mcpauth: %s %s; it must be readable only by its owner (chmod 600)",
+			path, exposure)
 	}
 
 	raw, err := os.ReadFile(path)
@@ -145,9 +155,9 @@ func (s *Store) Save(server string, config *oauth2.Config, token *oauth2.Token) 
 	}
 	defer os.Remove(temp.Name())
 
-	// Before the bytes, not after: a file that exists at 0600 from the moment
+	// Before the bytes, not after: a file that is owner-only from the moment
 	// it has content is one nobody can read in between.
-	if err := temp.Chmod(0o600); err != nil {
+	if err := fsperm.Restrict(temp.Name()); err != nil {
 		temp.Close()
 		return fmt.Errorf("mcpauth: %w", err)
 	}

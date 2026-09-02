@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
@@ -73,10 +74,17 @@ func Write(path string, d File) error {
 		return fmt.Errorf("discovery: encode discovery: %w", err)
 	}
 
-	// Write then rename, so a client never reads a half-written file.
+	// Write then rename, so a client never reads a half-written file. The
+	// rename carries the temp file's permissions with it, so lock those down
+	// before it: the file holds the control token, and MkdirAll's mode is only
+	// advisory on Windows.
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
 		return fmt.Errorf("discovery: write discovery: %w", err)
+	}
+	if err := fsperm.Restrict(tmp); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("discovery: restrict discovery: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)

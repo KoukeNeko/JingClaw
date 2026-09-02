@@ -27,6 +27,7 @@ import (
 	"github.com/knadh/koanf/providers/structs"
 	"github.com/knadh/koanf/v2"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/openaicompat"
@@ -1575,6 +1576,14 @@ func EnsureFile() (path string, created bool, err error) {
 	}
 	if err := file.Close(); err != nil {
 		return "", false, fmt.Errorf("config: write %s: %w", path, err)
+	}
+
+	// The O_CREATE mode above is only advisory on Windows; lock the file down
+	// explicitly. It holds no secrets today, but it is the file an operator
+	// pastes instructions into, and widening later is harder than starting
+	// narrow.
+	if err := fsperm.Restrict(path); err != nil {
+		return "", false, fmt.Errorf("config: %w", err)
 	}
 
 	return path, true, nil

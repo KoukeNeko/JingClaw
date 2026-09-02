@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 )
 
 // DirName is what the directory is called, under the user's home.
@@ -70,11 +72,16 @@ func Create(root string) (Dir, error) {
 	}
 
 	dir := Dir{Root: root}
-	// 0700 throughout: the database holds every conversation and the
+	// Owner-only throughout: the database holds every conversation and the
 	// directory holds credentials, and neither is anybody else's business.
+	// MkdirAll's mode is only advisory on Windows, so each directory is locked
+	// down explicitly after it is made.
 	for _, path := range []string{dir.Root, dir.Workspace(), dir.Data(), dir.Run()} {
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			return Dir{}, fmt.Errorf("home: create %s: %w", path, err)
+		}
+		if err := fsperm.Restrict(path); err != nil {
+			return Dir{}, fmt.Errorf("home: %w", err)
 		}
 	}
 

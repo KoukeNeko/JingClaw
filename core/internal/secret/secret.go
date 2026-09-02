@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 	"strings"
 )
@@ -73,8 +74,7 @@ func Load(opts LoadOptions) (Value, error) {
 			continue
 		}
 
-		info, err := os.Stat(path)
-		if err != nil {
+		if _, err := os.Stat(path); err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
@@ -85,10 +85,14 @@ func Load(opts LoadOptions) (Value, error) {
 		// treat as compromised, so this refuses rather than quietly using it.
 		// Refusing beats skipping: silently falling through to the next
 		// candidate would hide the exposure.
-		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		ownerOnly, exposure, err := fsperm.EnsureOwnerOnly(path)
+		if err != nil {
+			return Value{}, fmt.Errorf("secret: check %s: %w", path, err)
+		}
+		if !ownerOnly {
 			return Value{}, fmt.Errorf(
-				"secret: %s is mode %#o; it must not be readable by group or others (chmod 600)",
-				path, mode)
+				"secret: %s %s; it must be readable only by its owner (chmod 600)",
+				path, exposure)
 		}
 
 		raw, err := os.ReadFile(path)

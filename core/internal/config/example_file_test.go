@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 )
 
 // exampleFile is the copy checked into the repository, where somebody browsing
@@ -64,12 +65,12 @@ func TestEnsureFileCreatesTheExample(t *testing.T) {
 	// It holds no secrets today, but it is the file an operator will paste
 	// instructions into, and widening permissions later is harder than
 	// starting narrow.
-	info, err := os.Stat(path)
+	ownerOnly, exposure, err := fsperm.EnsureOwnerOnly(path)
 	if err != nil {
-		t.Fatalf("stat: %v", err)
+		t.Fatalf("check: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("mode is %o, want 600", perm)
+	if !ownerOnly {
+		t.Errorf("the created file %s", exposure)
 	}
 
 	// Loading what was just created must change nothing.
