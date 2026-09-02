@@ -204,10 +204,22 @@ func sayIfTheBuildDidNotReachIt() {
 		return
 	}
 
+	now := time.Now()
 	fmt.Printf("Note: this build is newer than what is running "+
 		"(built %s, running since %s).\n",
-		built.Format(time.Kitchen), started.Format(time.Kitchen))
+		clockOf(built, now), clockOf(started, now))
 	fmt.Println("      Run `stop` and start again to run the code you just built.")
+}
+
+// clockOf is a time to read at a glance, dated when it is not from today.
+//
+// A clock alone cannot say whether the thing running started this morning or
+// on Friday, and this note exists to answer exactly that.
+func clockOf(when, now time.Time) string {
+	if when.YearDay() == now.YearDay() && when.Year() == now.Year() {
+		return when.Format(time.Kitchen)
+	}
+	return when.Format("Jan 2 " + time.Kitchen)
 }
 
 // buildIsNewerThanWhatIsRunning is the comparison, kept apart so it can be
@@ -444,6 +456,40 @@ func stopRunning() error {
 		return fmt.Errorf("supervise: stop pid %d: %w", file.PID, err)
 	}
 
-	fmt.Printf("asked pid %d to stop\n", file.PID)
+	// Waited for. A signal is a request and returns before the process has
+	// acted on it, and the wrapper script runs this and then starts again in
+	// the same line — so returning early means the second half looks at a
+	// process that is still dying, attaches to it, and reports that the build
+	// just made has not reached the deployment. Which is advice to run exactly
+	// what was just run.
+	if !gone(file.PID, alive, stopWithin, time.Sleep) {
+		fmt.Printf("asked pid %d to stop; it is still running after %s\n",
+			file.PID, stopWithin)
+		return nil
+	}
+
+	fmt.Printf("stopped pid %d\n", file.PID)
 	return nil
+}
+
+// stopWithin is how long a stop waits before saying it did not happen.
+//
+// Long enough for a deployment to close its listeners and its database, and
+// short enough that a terminal is not held by a command waiting for something
+// that is not going to happen.
+const stopWithin = 10 * time.Second
+
+// gone waits for a process to have actually gone, and says whether it did.
+//
+// The clock is a parameter so this can be checked without one.
+func gone(pid int, running func(int) bool, within time.Duration, sleep func(time.Duration)) bool {
+	const breath = 50 * time.Millisecond
+
+	for waited := time.Duration(0); waited <= within; waited += breath {
+		if !running(pid) {
+			return true
+		}
+		sleep(breath)
+	}
+	return !running(pid)
 }

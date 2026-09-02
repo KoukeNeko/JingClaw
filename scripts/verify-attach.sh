@@ -143,4 +143,19 @@ grep -q "newer than what is running" "$WORK/screen" ||
 	fail "it attached to a deployment older than this build and said nothing: $(head -c 600 "$WORK/screen")"
 printf 'ok   and says so when the build never reached what is running\n'
 
+# And that the advice it gives works. `stop` sends a signal, which returns
+# before the process has acted on it, so a script that stops and starts in one
+# line looked at something still dying, attached to it, and printed the note
+# above — advice to run exactly what had just been run.
+JINGCLAW_HOME="$WORK" "$WORK/jingclaw" stop >"$WORK/stopped" 2>&1 ||
+	fail "stop failed: $(cat "$WORK/stopped")"
+
+kill -0 "$DAEMON" 2>/dev/null &&
+	fail "stop returned while pid $DAEMON was still running: $(cat "$WORK/stopped")"
+grep -q "stopped pid" "$WORK/stopped" ||
+	fail "stop did not say it had stopped anything: $(cat "$WORK/stopped")"
+printf 'ok   and stopping has stopped it by the time it returns\n'
+
+DAEMON=""
+
 printf '\nall checks passed\n'

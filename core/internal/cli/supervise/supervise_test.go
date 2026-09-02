@@ -97,3 +97,72 @@ func TestNothingIsClaimedWhenTheTimesAreUnknown(t *testing.T) {
 		t.Error("an unknown start time was compared against anyway")
 	}
 }
+
+// Stopping waits for it to have stopped.
+//
+// A signal is a request, and it returns before the process has acted on it.
+// The wrapper script runs `stop` and then starts again in the same line, so
+// returning early means the second half looks at a process that is still
+// dying, attaches to it, and reports that the build it just made has not
+// reached the deployment — advice to run exactly what was just run.
+func TestStoppingWaitsForItToHaveStopped(t *testing.T) {
+	breaths := 0
+	stillThere := func(int) bool {
+		breaths++
+		return breaths < 4
+	}
+
+	if !gone(99, stillThere, time.Second, func(time.Duration) {}) {
+		t.Error("it gave up while the process was on its way out")
+	}
+	if breaths < 4 {
+		t.Errorf("it asked %d times, so it did not wait at all", breaths)
+	}
+}
+
+// And gives up rather than hanging, when it does not go.
+//
+// A stop that never returns is worse than one that reports the truth: the
+// terminal is held by a command that is waiting for something that is not
+// going to happen, and there is nothing on screen to say so.
+func TestStoppingGivesUpOnSomethingThatWillNotGo(t *testing.T) {
+	waited := time.Duration(0)
+	stubborn := func(int) bool { return true }
+
+	if gone(99, stubborn, 200*time.Millisecond, func(d time.Duration) { waited += d }) {
+		t.Error("a process that never went was reported as stopped")
+	}
+	if waited > time.Second {
+		t.Errorf("it waited %v on something it was told to give up on after 200ms", waited)
+	}
+}
+
+// One already gone is gone, without waiting at all.
+func TestSomethingAlreadyStoppedIsNotWaitedFor(t *testing.T) {
+	waited := time.Duration(0)
+
+	if !gone(99, func(int) bool { return false }, time.Second,
+		func(d time.Duration) { waited += d }) {
+		t.Error("a process that was already gone was reported as still running")
+	}
+	if waited != 0 {
+		t.Errorf("it waited %v for something that had already gone", waited)
+	}
+}
+
+// Two times an hour apart on different days are not both "4:59AM".
+//
+// The note exists to be read at a glance, and a clock time with no day on it
+// cannot say whether the thing running started this morning or on Friday.
+func TestATimeSaysWhichDayWhenItIsNotToday(t *testing.T) {
+	now := time.Date(2026, 9, 2, 14, 43, 0, 0, time.Local)
+	earlier := time.Date(2026, 9, 2, 4, 59, 0, 0, time.Local)
+	yesterday := time.Date(2026, 9, 1, 4, 59, 0, 0, time.Local)
+
+	if said := clockOf(earlier, now); strings.Contains(said, "Sep") {
+		t.Errorf("a time from today is dated: %q", said)
+	}
+	if said := clockOf(yesterday, now); !strings.Contains(said, "Sep") {
+		t.Errorf("a time from another day is not dated: %q", said)
+	}
+}
