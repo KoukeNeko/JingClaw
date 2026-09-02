@@ -165,7 +165,10 @@ Config:  /var/lib/jingclaw/config.toml
 configuration is not the only thing a deployment has to bring. `PERSONA.md`
 says who the agent is and `AGENTS.md` says how the project works, and both are
 read from the same directory, so on a platform whose only inputs are a volume
-and some variables they are as unreachable as the configuration was.
+and some variables they are as unreachable as the configuration was. `jingclaw
+--init` writes them as empty headings on a machine somebody is sitting at; a
+daemon starting on its own does not, so without these variables a container
+runs with neither.
 
 ```
 JINGCLAW_PERSONA=# Who you are
@@ -176,6 +179,12 @@ Answer briefly. Say when you are unsure.
 They follow the same rule as `JINGCLAW_CONFIG`: written on first start, never
 written over one that is already there, `0600`. Nothing validates their
 contents, because a persona has no shape to be wrong.
+
+| Variable | Becomes | Checked as |
+|---|---|---|
+| `JINGCLAW_CONFIG` | `config.toml` | TOML |
+| `JINGCLAW_PERSONA` | `PERSONA.md` | — |
+| `JINGCLAW_AGENTS` | `AGENTS.md` | — |
 
 **A whole document through a single-line form: `base64:`.** Some platforms
 give you one input box per variable and drop the newlines, and a persona
@@ -192,6 +201,50 @@ reads. A value that announces `base64:` and then does not decode is refused
 and the daemon does not start — the alternative is a persona file full of
 line noise that nobody notices for a week. All three variables take the
 prefix, and `JINGCLAW_CONFIG` is checked as TOML after decoding.
+
+### The whole thing, assembled
+
+Nothing above needs a shell in the container. This is a complete deployment —
+settings, persona, standing instructions and a credential — started from one
+command:
+
+```bash
+docker volume create jingclaw
+
+docker run -d --name jingclaw \
+  -v jingclaw:/var/lib/jingclaw \
+  -e DISCORD_BOT_TOKEN="$DISCORD_BOT_TOKEN" \
+  -e GEMINI_API_KEY="$GEMINI_API_KEY" \
+  -e JINGCLAW_CONFIG="$(cat config.toml)" \
+  -e JINGCLAW_PERSONA="$(cat PERSONA.md)" \
+  -e JINGCLAW_AGENTS="$(cat AGENTS.md)" \
+  ghcr.io/koukeneko/jingclaw
+```
+
+On a platform with a web form instead of a shell, the same values are typed
+into three boxes — and a form that will not take a newline gets the encoded
+form of each file:
+
+```bash
+for file in config.toml PERSONA.md AGENTS.md; do
+  printf '%s -> base64:%s\n\n' "$file" "$(base64 < "$file" | tr -d '\n')"
+done
+```
+
+Then check what the first run made of it:
+
+```bash
+docker logs jingclaw | head -12
+```
+
+```
+Config:  /var/lib/jingclaw/config.toml (created from JINGCLAW_CONFIG)
+```
+
+`(created, all defaults)` on that line means the variable did not arrive, and
+the deployment is running on an empty example. `(created from …)` appears
+once, on the run that wrote the file; every later start shows the path alone,
+because by then the file is whatever is in the volume.
 
 **Credentials stay variables.** `DISCORD_BOT_TOKEN`, `GEMINI_API_KEY` and the
 rest are read from the environment by name, so they need not go in the file at

@@ -1662,9 +1662,10 @@ const Example = `# JingClaw configuration. Every setting is shown at its default
 # ── Agent and provider ─────────────────────────────────────────
 
 [agent]
-# Who this agent is and how it works are AGENTS.md and PERSONA.md, beside
-# this file and created with it. They are not settings: a second place to say
-# the same thing is one somebody edits while the first is what runs.
+# Who this agent is and how it works are AGENTS.md and PERSONA.md, beside this
+# file. "jingclaw daemon --init" creates them empty; a container gets them from
+# JINGCLAW_PERSONA and JINGCLAW_AGENTS. They are not settings: a second place
+# to say the same thing is one somebody edits while the first is what runs.
 
 # Tool calls one turn may make before the run is stopped.
 # max_iterations = 12

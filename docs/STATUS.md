@@ -511,6 +511,27 @@ characters. `open` hands stored output to whatever reads that kind, with the
 extension taken from the media type and never from anything the agent chose,
 a short allowlist, and a file that is never executable.
 
+**A deployment that can bring its own files.** `JINGCLAW_CONFIG`,
+`JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` write `config.toml`, `PERSONA.md` and
+`AGENTS.md` on first start. Some container platforms offer exactly two inputs,
+a mounted volume and a list of variables, and all three of these are files in
+a directory that nothing can put a file into before the first start.
+Individual settings do not survive that trip — the environment reaches
+`provider.backend` and stops, because a name like `api_key_env` makes any
+deeper underscore ambiguous, and a list of tables like the channel bindings
+has no spelling as a variable at all — so the file goes in whole. A value
+prefixed `base64:` is decoded first, because a platform's single-line form
+drops the newlines and a persona without its line breaks is a different
+persona; the prefix is required rather than guessed, since short markdown is
+often valid base64 by accident.
+
+Never over a file that exists. The variables are set on the service and arrive
+again on every restart, so overwriting would discard what somebody edited in
+the volume, on the restart after they edited it. Everything is decoded and
+checked before anything is written: these files are created once and never
+replaced, so a run that wrote the first and refused the second would leave a
+deployment holding a file that correcting the variable can no longer change.
+
 ## Not done
 
 **Built but nothing uses it**
@@ -685,6 +706,13 @@ rather than in logic a unit test was looking at.
 12. Windows had never been built, let alone tested, and three separate
    failures were hiding one another — CRLF broke formatting, formatting ran
    before the build, and the build would not have compiled
+13. Two writers for `config.toml` — the example and the environment seeding —
+   so whichever ran first decided whether the startup line called a supplied
+   configuration "all defaults", and it was the line an operator would read
+   while looking for why their settings were ignored
+14. Seeding wrote each file as it decoded the next, so an unusable persona
+   left the configuration behind: created once, never replaced, and no longer
+   correctable by fixing the variable the error named
 
 Two were found by reading rather than running: the daemon deleting a
 replacement's discovery file, and compaction summarising its own summary.
