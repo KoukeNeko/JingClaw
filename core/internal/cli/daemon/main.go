@@ -851,7 +851,14 @@ func isTemporary(path string) (string, bool) {
 		resolved = filepath.Join(evaluated, filepath.Base(resolved))
 	}
 
-	roots := []string{"/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/dev/shm"}
+	// What this system itself calls temporary, first. On Windows that is the
+	// only one of these that means anything — the literals below are Unix
+	// paths, and a database under %TEMP% would have gone unmentioned.
+	roots := []string{os.TempDir()}
+	if evaluated, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
+		roots = append(roots, evaluated)
+	}
+	roots = append(roots, "/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/dev/shm")
 	if fromEnv := os.Getenv("TMPDIR"); fromEnv != "" {
 		if cleaned, err := filepath.EvalSymlinks(fromEnv); err == nil {
 			roots = append(roots, cleaned)
