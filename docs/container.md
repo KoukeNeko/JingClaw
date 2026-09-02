@@ -86,6 +86,39 @@ commands somebody approved, which is a different thing from commands somebody
 wrote, and root in a container is one careless flag away from root on the
 host.
 
+## Stopping it
+
+`docker stop` signals PID 1 and nothing else, waits, and then kills. Two
+things follow from that, and both are handled here rather than left to be
+discovered.
+
+**PID 1 is tini, not the supervisor.** With the supervisor as PID 1 a
+grandchild orphaned by its parent exiting is re-parented to it and stays a
+zombie: Go waits on the children `os/exec` started and on nothing else. This
+agent runs shells, build tools and whatever somebody approved, all of which
+fork, so those accumulate until the process table is full and the container
+can start nothing at all — silently, because everything looks fine until it
+does not. Measured, not assumed: one orphan is one zombie, and the check
+beside this file is what keeps it that way.
+
+`docker run --init` does the same job from outside. It is not needed here and
+does no harm if passed: it puts docker-init in front of tini.
+
+**Give it longer than ten seconds.** Docker's default stop timeout is 10s and
+the supervisor allows each part 15s to close its database and let go of its
+runs. A part that takes its time is killed by Docker before the supervisor has
+finished waiting for it.
+
+```
+docker run --stop-timeout 30 …
+```
+
+```yaml
+services:
+  jingclaw:
+    stop_grace_period: 30s
+```
+
 ## The sandbox
 
 Off by default, in the image as everywhere else, and left off here.

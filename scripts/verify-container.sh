@@ -127,6 +127,29 @@ docker exec "$NAME" cat /var/lib/jingclaw/discord.token | grep -q "$SECRET" ||
 	fail "the secret in the volume is not readable by the process that needs it"
 printf 'ok   a secret in the volume is readable there and nowhere else\n'
 
+# Nothing is left behind by a command that forked and walked away.
+#
+# The agent runs shells, build tools and whatever somebody approved, and those
+# fork. A grandchild orphaned by its parent exiting is re-parented to PID 1,
+# and if PID 1 is not an init it never reaps it: Go waits on the children
+# os/exec started and on nothing else. They accumulate as zombies until the
+# process table is full and the container can start nothing at all — silently,
+# because everything looks fine until it does not.
+docker exec "$NAME" sh -c '
+	sh -c "(sleep 1; exit 0) & exit 0"
+	sleep 3' >/dev/null 2>&1
+
+ZOMBIES=$(docker exec "$NAME" sh -c '
+	for p in $(ls /proc | grep -E "^[0-9]+$"); do
+		[ -r /proc/$p/stat ] || continue
+		set -- $(cat /proc/$p/stat 2>/dev/null)
+		[ "$3" = "Z" ] && echo "$1"
+	done' 2>/dev/null | wc -l | tr -d " ")
+
+[ "$ZOMBIES" = "0" ] ||
+	fail "$ZOMBIES zombie(s) left after one orphan; PID 1 is $(docker exec "$NAME" cat /proc/1/comm) and is not reaping"
+printf 'ok   an orphaned grandchild is reaped rather than left as a zombie\n'
+
 # The volume is the deployment, so replacing the container keeps it.
 SESSION=$(docker exec "$NAME" jingclaw session create --title "before" 2>/dev/null |
 	grep -oE 'ses_[A-Za-z0-9]+' | head -1)

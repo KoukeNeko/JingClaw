@@ -38,10 +38,22 @@ FROM debian:bookworm-slim
 # git is the one command the code invokes by name. ca-certificates is what
 # every provider call needs — without it they fail at TLS, which reads like a
 # wrong key rather than a missing package.
+#
+# tini is what makes PID 1 an init. Measured rather than assumed: with the
+# supervisor as PID 1, a grandchild orphaned by its parent exiting is
+# re-parented to it and stays a zombie, because Go reaps the children os/exec
+# started and nothing else. This agent runs shells, build tools and whatever
+# somebody approved, all of which fork, so those accumulate until the process
+# table is full and nothing can start.
+#
+# In the image rather than left to `docker run --init`, because the failure
+# is silent and the flag is easy to forget. Passing --init as well is
+# harmless: it puts docker-init in front of this one.
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		ca-certificates \
 		git \
+		tini \
 	&& rm -rf /var/lib/apt/lists/*
 
 # A user of its own. The agent runs commands somebody approved, which is a
@@ -71,4 +83,9 @@ WORKDIR /var/lib/jingclaw
 # parts find each other through a discovery file whose whole purpose is to be
 # local, and sharing it between containers would make a local thing a network
 # one.
-ENTRYPOINT ["jingclaw"]
+# tini forwards the signal to its immediate child and reaps whatever the
+# kernel hands it. What it does not do is signal the whole tree — so the
+# supervisor still terminates its own parts, which it does, and must: docker
+# stop signals PID 1 alone, and the moment PID 1 exits the kernel SIGKILLs
+# everything else in the namespace.
+ENTRYPOINT ["/usr/bin/tini", "--", "jingclaw"]
