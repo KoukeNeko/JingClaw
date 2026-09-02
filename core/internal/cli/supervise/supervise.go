@@ -364,17 +364,40 @@ func alive(pid int) bool {
 	return process.Signal(syscall.Signal(0)) == nil
 }
 
-func start(ctx context.Context, self, part string, output io.Writer) (*exec.Cmd, error) {
+// supervised is a started part and the group that contains its tree, so that
+// stopping the part takes with it whatever the part started.
+type supervised struct {
+	command *exec.Cmd
+	group   *procGroup
+}
+
+func start(ctx context.Context, self, part string, output io.Writer) (*supervised, error) {
 	command := exec.CommandContext(ctx, self, part)
 	command.Stdout = output
 	command.Stderr = output
 
-	ownProcessGroup(command)
+	group, err := newProcGroup()
+	if err != nil {
+		return nil, fmt.Errorf("supervise: contain the %s: %w", part, err)
+	}
+	group.configure(command)
 
 	if err := command.Start(); err != nil {
+		group.close()
 		return nil, fmt.Errorf("supervise: start the %s: %w", part, err)
 	}
-	return command, nil
+
+	// The part may have been started suspended so it could be placed in its
+	// group before running; started assigns it and lets it go. A failure here
+	// leaves a part that must not be left behind, so it is killed and reaped
+	// before the error is returned.
+	if err := group.started(command); err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		group.close()
+		return nil, fmt.Errorf("supervise: contain the %s: %w", part, err)
+	}
+	return &supervised{command: command, group: group}, nil
 }
 
 // waitForReady blocks until the daemon has published itself.
@@ -438,24 +461,29 @@ func failedToStart(said *lastWords) error {
 // Asked rather than killed: the daemon has a database to close and runs to
 // let go of, and the difference between a clean stop and a killed one is a
 // session that comes back and one that comes back with a hole in it.
-func terminate(command *exec.Cmd) {
-	if command == nil || command.Process == nil {
+func terminate(one *supervised) {
+	if one == nil || one.command.Process == nil {
 		return
 	}
 	// The group rather than the process. A part runs whatever somebody
 	// approved and those run their own children; signalling only the process
 	// this program started leaves the rest holding what they held, and the
 	// next start fails for a reason that looks nothing like the cause.
-	askTheGroupToStop(command)
+	one.group.askToStop(one.command)
 
 	done := make(chan struct{})
-	go func() { _, _ = command.Process.Wait(); close(done) }()
+	go func() { _, _ = one.command.Process.Wait(); close(done) }()
 
 	select {
 	case <-done:
 	case <-time.After(stopGrace):
-		killTheGroup(command)
+		one.group.kill(one.command)
 	}
+
+	// Release the group. On Windows this is also the safety net: a job object
+	// set to end its processes when its handle closes takes any descendant a
+	// stop did not.
+	one.group.close()
 }
 
 // whenItExits is closed when a part has gone.
@@ -463,10 +491,10 @@ func terminate(command *exec.Cmd) {
 // Closed rather than sent to, because more than one place waits on it and a
 // value can only be taken once. Wait may only be called once per command, so
 // this is the one place that calls it.
-func whenItExits(command *exec.Cmd) <-chan struct{} {
+func whenItExits(one *supervised) <-chan struct{} {
 	gone := make(chan struct{})
 	go func() {
-		_ = command.Wait()
+		_ = one.command.Wait()
 		close(gone)
 	}()
 	return gone

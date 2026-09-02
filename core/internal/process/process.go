@@ -117,6 +117,11 @@ type handle struct {
 
 	command *exec.Cmd
 
+	// group contains the process and its descendants, so that stopping it
+	// stops the tree rather than orphaning whatever it started. Its shape is
+	// per-platform: a process group on Unix, a job object on Windows.
+	group *procGroup
+
 	// input writes to the program. For a terminal it is the same file as
 	// output; for pipes it is stdin.
 	input io.WriteCloser

@@ -58,7 +58,12 @@ func (m *Manager) Start(options StartOptions) (State, error) {
 	command := exec.Command(options.Program, options.Args...)
 	command.Dir = options.Dir
 	command.Env = options.Env
-	configureProcessGroup(command)
+
+	group, err := newProcGroup()
+	if err != nil {
+		return State{}, err
+	}
+	group.configure(command)
 
 	one := &handle{
 		id:         m.newID(),
@@ -66,6 +71,7 @@ func (m *Manager) Start(options StartOptions) (State, error) {
 		program:    options.Program,
 		args:       append([]string{}, options.Args...),
 		command:    command,
+		group:      group,
 		buffer:     newRingBuffer(m.bufferBytes()),
 		isTerminal: options.Terminal,
 		startedAt:  m.now(),
@@ -73,6 +79,7 @@ func (m *Manager) Start(options StartOptions) (State, error) {
 	}
 
 	if err := m.launch(one, options); err != nil {
+		group.close()
 		return State{}, err
 	}
 
@@ -96,6 +103,12 @@ func (m *Manager) launch(one *handle, options StartOptions) error {
 		if terminal != nil {
 			one.terminal = terminal
 			one.input = terminal
+			if err := one.group.started(one.command); err != nil {
+				_ = terminal.Close()
+				_ = one.command.Process.Kill()
+				_ = one.command.Wait()
+				return err
+			}
 			go func() { _, _ = io.Copy(one.buffer, terminal) }()
 			return nil
 		}
@@ -119,6 +132,15 @@ func (m *Manager) launch(one *handle, options StartOptions) error {
 
 	if err := one.command.Start(); err != nil {
 		return fmt.Errorf("process: start %s: %w", options.Program, err)
+	}
+	// The process may have been started suspended so it could be placed in its
+	// group before running; started assigns it and lets it go. A failure here
+	// leaves a process that must not be left behind, so it is killed and
+	// reaped before the error is returned.
+	if err := one.group.started(one.command); err != nil {
+		_ = one.command.Process.Kill()
+		_ = one.command.Wait()
+		return err
 	}
 	return nil
 }
@@ -147,6 +169,10 @@ func (m *Manager) reap(one *handle) {
 	if one.terminal != nil {
 		_ = one.terminal.Close()
 	}
+	// Release the group. On Windows this is also the safety net: a job object
+	// set to end its processes when its handle closes takes any descendant the
+	// program left behind with it.
+	one.group.close()
 	close(one.done)
 }
 
@@ -248,7 +274,7 @@ func (m *Manager) Stop(id ID) (State, error) {
 		return one.state(m.now()), nil
 	}
 
-	if err := terminateGroup(one.command); err != nil {
+	if err := one.group.terminate(one.command); err != nil {
 		return State{}, fmt.Errorf("process: stop %s: %w", id, err)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -337,7 +338,10 @@ func TestHowAProgramEndedIsKept(t *testing.T) {
 func TestStoppingTakesTheChildrenWithIt(t *testing.T) {
 	manager := newTestManager(t)
 
-	marker := t.TempDir() + "/still-running"
+	// Forward slashes so the path survives being embedded in a shell command:
+	// a Windows temp path carries backslashes, which the shell reads as escapes
+	// and swallows. os.Stat reads it back either way.
+	marker := filepath.ToSlash(t.TempDir()) + "/still-running"
 	state, err := manager.Start(StartOptions{
 		SessionID: "ses_1",
 		Program:   "sh",

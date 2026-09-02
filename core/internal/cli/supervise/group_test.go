@@ -23,13 +23,22 @@ func TestStoppingAPartTakesItsChildrenWithIt(t *testing.T) {
 	// A process that starts another and then waits, so there is a grandchild
 	// to be left behind.
 	marker := t.TempDir() + "/grandchild"
-	part := exec.Command("sh", "-c",
+	command := exec.Command("sh", "-c",
 		"sh -c 'echo $$ > "+marker+"; while true; do sleep 1; done' & wait")
-	ownProcessGroup(part)
 
-	if err := part.Start(); err != nil {
+	group, err := newProcGroup()
+	if err != nil {
+		t.Fatalf("group: %v", err)
+	}
+	group.configure(command)
+
+	if err := command.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	if err := group.started(command); err != nil {
+		t.Fatalf("contain: %v", err)
+	}
+	part := &supervised{command: command, group: group}
 
 	grandchild := 0
 	for range 100 {
@@ -42,7 +51,7 @@ func TestStoppingAPartTakesItsChildrenWithIt(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if grandchild == 0 {
-		_ = part.Process.Kill()
+		_ = part.command.Process.Kill()
 		t.Fatal("the grandchild never said which pid it was")
 	}
 

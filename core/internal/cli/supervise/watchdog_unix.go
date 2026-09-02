@@ -97,11 +97,11 @@ func anyAlive(groups []int) bool {
 // watchdog would not start: it is insurance against a way of leaving that is
 // rare, and refusing to run at all because the insurance is unavailable would
 // be the wrong trade.
-func watchOver(self string, parts ...*exec.Cmd) (io.Closer, error) {
+func watchOver(self string, parts ...*supervised) (io.Closer, error) {
 	groups := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if part != nil && part.Process != nil {
-			groups = append(groups, fmt.Sprint(part.Process.Pid))
+		if part != nil && part.command.Process != nil {
+			groups = append(groups, fmt.Sprint(part.command.Process.Pid))
 		}
 	}
 	if len(groups) == 0 {
