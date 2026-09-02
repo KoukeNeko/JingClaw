@@ -65,6 +65,18 @@ func kindFor(status int, message string) provider.ErrorKind {
 			return provider.KindContextOverflow
 		}
 		return provider.KindInvalidRequest
+
+	case http.StatusRequestEntityTooLarge:
+		// The request was refused for its size, which for a conversation is
+		// the conversation being too long. Classified here rather than as a
+		// request the server could not parse, because the two are told apart
+		// by what fixes them: this one is fixed by sending less, and that is
+		// something the runtime already knows how to do.
+		//
+		// Ollama answers this with Go's own "http: request body too large",
+		// which mentions neither a context nor a window, so the check under
+		// 400 does not see it.
+		return provider.KindContextOverflow
 	}
 
 	if status >= 500 {
