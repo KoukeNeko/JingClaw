@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -123,9 +124,18 @@ func run(args []string) error {
 	// deployment there would look like. A command whose whole purpose is to
 	// report can be run on a machine to find out where things are; creating
 	// the first of them while answering is not reporting.
-	var createdConfig bool
+	var createdConfig, seededConfig bool
 	if *configPath == "" && !*printPaths {
-		var err error
+		// The files a deployment carries, from variables, where a variable is
+		// the only way in. Before the example is written, so that a platform
+		// that supplied a configuration gets that one rather than a default
+		// it can then never replace.
+		seeded, err := config.SeedFromEnvironment()
+		if err != nil {
+			return err
+		}
+		seededConfig = slices.Contains(seeded, home.ConfigName)
+
 		if _, createdConfig, err = config.EnsureFile(); err != nil {
 			return err
 		}
@@ -582,7 +592,7 @@ func run(args []string) error {
 	)
 	// Human-facing line on stdout; the structured log goes to stderr.
 	fmt.Printf("JingClaw daemon\nListening: %s\nConfig:    %s\nProvider:  %s\nModel:     %s\nWorkspace: %s\nTools:     %s\nDatabase:  %s\nDiscovery: %s\n",
-		baseURL, describeConfigFile(configFile, createdConfig), modelProvider.Name(), selected.ID,
+		baseURL, describeConfigFile(configFile, createdConfig, seededConfig), modelProvider.Name(), selected.ID,
 		ws.Root(), describeTools(tools, servers, cfg), dbPath, discoveryPath)
 
 	serveErr := make(chan error, 1)
@@ -1057,19 +1067,20 @@ func contextWindow(cfg config.Config, model provider.ModelInfo) (int64, provider
 
 // describeConfigFile says where the settings came from, and whether this run
 // is the one that put the file there.
-func describeConfigFile(path string, created bool) string {
+func describeConfigFile(path string, created, seeded bool) string {
 	if path == "" {
 		return "(none)"
 	}
-	if created {
-		// Which of the two ways it was created, because they lead somewhere
-		// different. Defaults mean nothing was configured; a file from the
-		// environment means it was, and calling that defaults sends somebody
-		// looking for why their settings were ignored on the one run where
-		// they were first applied.
-		if given, ok := os.LookupEnv(config.FileEnvVar); ok && strings.TrimSpace(given) != "" {
-			return path + " (created from " + config.FileEnvVar + ")"
-		}
+	// Which of the two ways it was created, because they lead somewhere
+	// different. Defaults mean nothing was configured; a file from the
+	// environment means it was, and calling that defaults sends somebody
+	// looking for why their settings were ignored on the one run where they
+	// were first applied. Both come from what this run actually did rather
+	// than from the variable, which stays set on every later run too.
+	switch {
+	case seeded:
+		return path + " (created from " + config.FileEnvVar + ")"
+	case created:
 		return path + " (created, all defaults)"
 	}
 	return path

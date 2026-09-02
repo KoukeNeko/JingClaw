@@ -14,9 +14,7 @@ import (
 // sends them looking for why their configuration was ignored, on the one run
 // where it was applied for the first time.
 func TestAConfigFromTheEnvironmentIsNotCalledDefaults(t *testing.T) {
-	t.Setenv(config.FileEnvVar, "[provider]\nbackend = \"ollama\"\n")
-
-	said := describeConfigFile("/data/config.toml", true)
+	said := describeConfigFile("/data/config.toml", false, true)
 	if strings.Contains(said, "defaults") {
 		t.Errorf("a file written from %s is described as %q", config.FileEnvVar, said)
 	}
@@ -24,9 +22,20 @@ func TestAConfigFromTheEnvironmentIsNotCalledDefaults(t *testing.T) {
 		t.Errorf("it does not say where the settings came from: %q", said)
 	}
 
-	// And without the variable, the sentence it had is still right.
-	t.Setenv(config.FileEnvVar, "")
-	if said := describeConfigFile("/data/config.toml", true); !strings.Contains(said, "defaults") {
+	// And a file nobody supplied still reads the way it did.
+	if said := describeConfigFile("/data/config.toml", true, false); !strings.Contains(said, "defaults") {
 		t.Errorf("a file nobody supplied is described as %q", said)
+	}
+}
+
+// The variable stays set on every later run, and only the first run created
+// anything. A line that reported the variable rather than what this run did
+// would claim, on every restart, to have just written a file it did not
+// touch — while the file being read might be one somebody edited since.
+func TestALaterRunDoesNotClaimToHaveWrittenTheFile(t *testing.T) {
+	t.Setenv(config.FileEnvVar, "[provider]\nbackend = \"ollama\"\n")
+
+	if said := describeConfigFile("/data/config.toml", false, false); said != "/data/config.toml" {
+		t.Errorf("a run that created nothing says %q", said)
 	}
 }

@@ -8,6 +8,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -49,6 +50,25 @@ const (
 	// tables like the channel bindings has no spelling as a variable at all.
 	// So the file comes through whole, and is written where the file goes.
 	FileEnvVar = "JINGCLAW_CONFIG"
+
+	// PersonaEnvVar and InstructionsEnvVar carry the two files that say who
+	// the agent is and how a project wants to be worked on.
+	//
+	// A configuration is not the whole deployment. These are read from the
+	// same directory and are just as unreachable there, and the persona is
+	// the one somebody most wants to set: it is what makes a deployment
+	// theirs rather than a default.
+	PersonaEnvVar      = "JINGCLAW_PERSONA"
+	InstructionsEnvVar = "JINGCLAW_AGENTS"
+
+	// encodedPrefix marks a value that had to be encoded to survive the trip.
+	//
+	// Some platforms take variables through a form whose field is one line,
+	// and a persona is many. The value says whether it was encoded rather
+	// than being guessed at: a short markdown file is valid base64 often
+	// enough that guessing would eventually write somebody's persona as
+	// gibberish and give them no way to tell.
+	encodedPrefix = "base64:"
 )
 
 // Config is the whole of the daemon's settings.
@@ -1569,24 +1589,12 @@ func EnsureFile() (path string, created bool, err error) {
 		return "", false, fmt.Errorf("config: create config directory: %w", err)
 	}
 
-	// What goes in it, decided before the file exists. A file written from an
-	// unusable variable could never be corrected: it is created once and
-	// never overwritten, so the deployment would be stuck with it and the
-	// failure would name a parse error rather than the variable to fix.
-	starting := Example
-	if given, ok := os.LookupEnv(FileEnvVar); ok && strings.TrimSpace(given) != "" {
-		if _, err := toml.Parser().Unmarshal([]byte(given)); err != nil {
-			return "", false, fmt.Errorf(
-				"config: %s does not parse as TOML: %w", FileEnvVar, err)
-		}
-		starting = given
-	}
-
 	// O_EXCL rather than a Stat and then a write: two daemons starting
 	// together must not both find the file missing and race to create it, and
 	// an existing file must never be overwritten by a process that is only
-	// trying to be helpful. That covers the variable too: what somebody
-	// edited in the volume outlives a restart that brings the variable again.
+	// trying to be helpful. A deployment that supplied its own configuration
+	// has already had it written by SeedFromEnvironment, so what arrives here
+	// is the example or nothing.
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		return path, false, nil
@@ -1595,7 +1603,7 @@ func EnsureFile() (path string, created bool, err error) {
 		return "", false, fmt.Errorf("config: create %s: %w", path, err)
 	}
 
-	if _, err := file.WriteString(starting); err != nil {
+	if _, err := file.WriteString(Example); err != nil {
 		_ = file.Close()
 		return "", false, fmt.Errorf("config: write %s: %w", path, err)
 	}
@@ -1929,4 +1937,121 @@ token_file = "telegram.token"
 // somebody tidying up, and the test that stops them has to be able to ask.
 func CheckChannelForTest(channel Channel, where string) []Problem {
 	return channel.problems(where, map[string]string{})
+}
+
+// SeedFromEnvironment writes the deployment's files from variables, where a
+// variable is the only way in, and says which ones it wrote.
+//
+// Never over a file that exists. The variables are set on the service, so
+// they arrive again on every restart; overwriting would discard whatever was
+// edited in the volume, on the restart after somebody edited it.
+func SeedFromEnvironment() (written []string, err error) {
+	dir, found := home.Resolve()
+	if !found {
+		return nil, nil
+	}
+
+	// Everything is decoded and checked before anything is written. These
+	// files are created once and never replaced, so a run that wrote the
+	// first and then refused the second would leave a deployment holding a
+	// file it cannot correct by fixing the variable it names.
+	type seeded struct {
+		name    string
+		content []byte
+	}
+	var ready []seeded
+
+	for _, seed := range []struct {
+		variable string
+		name     string
+		check    func([]byte) error
+	}{
+		{FileEnvVar, home.ConfigName, parsesAsTOML},
+		{PersonaEnvVar, PersonaFile, nil},
+		{InstructionsEnvVar, InstructionsFile, nil},
+	} {
+		given, ok := os.LookupEnv(seed.variable)
+		if !ok || strings.TrimSpace(given) == "" {
+			continue
+		}
+
+		content, err := decodeSeed(given)
+		if err != nil {
+			return nil, fmt.Errorf("config: %s: %w", seed.variable, err)
+		}
+		if seed.check != nil {
+			if err := seed.check(content); err != nil {
+				return nil, fmt.Errorf("config: %s: %w", seed.variable, err)
+			}
+		}
+		ready = append(ready, seeded{seed.name, content})
+	}
+
+	for _, file := range ready {
+		wrote, err := writeIfAbsent(filepath.Join(dir.Root, file.name), file.content)
+		if err != nil {
+			return written, fmt.Errorf("config: %s: %w", file.name, err)
+		}
+		if wrote {
+			written = append(written, file.name)
+		}
+	}
+	return written, nil
+}
+
+// decodeSeed is the value as the file should hold it.
+func decodeSeed(given string) ([]byte, error) {
+	if !strings.HasPrefix(given, encodedPrefix) {
+		return []byte(given), nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(
+		strings.TrimSpace(strings.TrimPrefix(given, encodedPrefix)))
+	if err != nil {
+		return nil, fmt.Errorf("says %s and does not decode: %w", encodedPrefix, err)
+	}
+	return decoded, nil
+}
+
+// parsesAsTOML refuses a configuration that could never be read.
+//
+// Checked before anything is written, because the file is created once and
+// never replaced: a broken one is a deployment that cannot start and cannot
+// be fixed by correcting the variable.
+func parsesAsTOML(content []byte) error {
+	if _, err := toml.Parser().Unmarshal(content); err != nil {
+		return fmt.Errorf("does not parse as TOML: %w", err)
+	}
+	return nil
+}
+
+// writeIfAbsent creates a file, or leaves the one that is there.
+// writeIfAbsent writes the file and says whether this call is the one that did.
+func writeIfAbsent(path string, content []byte) (wrote bool, err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return false, fmt.Errorf("create the directory: %w", err)
+	}
+
+	// O_EXCL rather than a Stat and then a write, so two starting together
+	// cannot both find it missing and race.
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("create %s: %w", path, err)
+	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		return false, fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return false, fmt.Errorf("write %s: %w", path, err)
+	}
+
+	// The mode above is advisory on Windows. These may hold credentials and
+	// they are the files an operator's instructions live in either way.
+	if err := fsperm.Restrict(path); err != nil {
+		return false, err
+	}
+	return true, nil
 }

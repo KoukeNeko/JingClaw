@@ -1,9 +1,11 @@
 package config_test
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -149,12 +151,21 @@ func TestTheWholeFileCanArriveInTheEnvironment(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("JINGCLAW_HOME", home)
 
+	seeded, err := config.SeedFromEnvironment()
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if !slices.Contains(seeded, "config.toml") {
+		t.Fatalf("it reported writing %v, not the config file", seeded)
+	}
+
+	// And the example does not then land on top of it.
 	path, created, err := config.EnsureFile()
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if !created {
-		t.Fatal("it reported nothing to create")
+	if created {
+		t.Error("the example was written over the deployment's own file")
 	}
 
 	written, err := os.ReadFile(path)
@@ -193,15 +204,15 @@ func TestTheEnvironmentDoesNotOverwriteWhatIsAlreadyThere(t *testing.T) {
 
 	t.Setenv(config.FileEnvVar, "[provider]\nbackend = \"ollama\"\n")
 
-	path, created, err := config.EnsureFile()
+	seeded, err := config.SeedFromEnvironment()
 	if err != nil {
-		t.Fatalf("ensure: %v", err)
+		t.Fatalf("seed: %v", err)
 	}
-	if created {
-		t.Error("it created a file over one that was already there")
+	if len(seeded) != 0 {
+		t.Errorf("it wrote %v over what was already there", seeded)
 	}
 
-	written, _ := os.ReadFile(path)
+	written, _ := os.ReadFile(filepath.Join(home, "config.toml"))
 	if string(written) != theirs {
 		t.Errorf("the file was replaced by the environment's copy: %q", string(written))
 	}
@@ -218,7 +229,7 @@ func TestUnparseableTOMLIsRefusedRatherThanWritten(t *testing.T) {
 	t.Setenv("JINGCLAW_HOME", home)
 	t.Setenv(config.FileEnvVar, "[provider\nbackend =")
 
-	_, _, err := config.EnsureFile()
+	_, err := config.SeedFromEnvironment()
 	if err == nil {
 		t.Fatal("it accepted TOML that does not parse")
 	}
@@ -228,5 +239,126 @@ func TestUnparseableTOMLIsRefusedRatherThanWritten(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(home, "config.toml")); !os.IsNotExist(err) {
 		t.Error("a file was written despite the content being unusable")
+	}
+}
+
+// The files that say who the agent is arrive the same way.
+//
+// A configuration is not the whole deployment. PERSONA.md and AGENTS.md are
+// read from the same directory and are just as unreachable on a platform
+// whose only inputs are a volume and a list of variables — and a persona is
+// the one somebody most wants to set, because it is what makes the deployment
+// theirs rather than a default.
+func TestTheInstructionFilesCanArriveInTheEnvironment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("JINGCLAW_HOME", home)
+	t.Setenv(config.PersonaEnvVar, "# Who you are\n\nBrief, and never chatty.\n")
+	t.Setenv(config.InstructionsEnvVar, "# How this project works\n")
+
+	if _, err := config.SeedFromEnvironment(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	for name, wanted := range map[string]string{
+		config.PersonaFile:      "never chatty",
+		config.InstructionsFile: "How this project works",
+	} {
+		written, err := os.ReadFile(filepath.Join(home, name))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if !strings.Contains(string(written), wanted) {
+			t.Errorf("%s holds %q", name, string(written))
+		}
+	}
+}
+
+// A value that will not survive a single-line field can be encoded.
+//
+// Some platforms take environment variables through a web form whose field is
+// one line. A persona is many. Rather than guessing whether a value has been
+// encoded — a short markdown file is valid base64 often enough to be a
+// problem — the value says so itself.
+func TestAnEncodedValueIsDecoded(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("JINGCLAW_HOME", home)
+
+	persona := "# Who you are\n\nOne line, then another.\n"
+	t.Setenv(config.PersonaEnvVar, "base64:"+base64.StdEncoding.EncodeToString([]byte(persona)))
+
+	if _, err := config.SeedFromEnvironment(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	written, err := os.ReadFile(filepath.Join(home, config.PersonaFile))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(written) != persona {
+		t.Errorf("decoded to %q", string(written))
+	}
+}
+
+// And one that says it is encoded and is not says so.
+func TestAnEncodedValueThatIsNotIsRefused(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("JINGCLAW_HOME", home)
+	t.Setenv(config.PersonaEnvVar, "base64:this is not base64 at all!!")
+
+	_, err := config.SeedFromEnvironment()
+	if err == nil {
+		t.Fatal("it accepted something that claimed to be encoded and was not")
+	}
+	if !strings.Contains(err.Error(), config.PersonaEnvVar) {
+		t.Errorf("the failure does not name the variable: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, config.PersonaFile)); !os.IsNotExist(err) {
+		t.Error("a file was written from a value that could not be decoded")
+	}
+}
+
+// What is already in the volume wins, here too.
+func TestSeedingDoesNotOverwriteAnInstructionFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("JINGCLAW_HOME", home)
+
+	theirs := "# Mine, edited in the volume\n"
+	if err := os.WriteFile(filepath.Join(home, config.PersonaFile), []byte(theirs), 0o600); err != nil {
+		t.Fatalf("staging: %v", err)
+	}
+	t.Setenv(config.PersonaEnvVar, "# From the variable\n")
+
+	if _, err := config.SeedFromEnvironment(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	written, _ := os.ReadFile(filepath.Join(home, config.PersonaFile))
+	if string(written) != theirs {
+		t.Errorf("the file was replaced by the environment's copy: %q", string(written))
+	}
+}
+
+// One unusable variable leaves nothing behind, not even the usable ones.
+//
+// These files are created once and never replaced. A run that wrote the
+// configuration and then refused the persona would leave a deployment holding
+// a file it can no longer change by fixing the variable that names it, and
+// the operator would be looking at the persona error while the config was
+// quietly settled.
+func TestARefusedValueWritesNoneOfTheOthers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("JINGCLAW_HOME", home)
+	t.Setenv(config.FileEnvVar, "[provider]\nbackend = \"ollama\"\n")
+	t.Setenv(config.PersonaEnvVar, "base64:not base64 at all !!!")
+
+	if _, err := config.SeedFromEnvironment(); err == nil {
+		t.Fatal("it accepted a value that announces an encoding and has none")
+	}
+
+	for _, name := range []string{"config.toml", config.PersonaFile} {
+		if _, err := os.Stat(filepath.Join(home, name)); !os.IsNotExist(err) {
+			t.Errorf("%s was written despite the run being refused", name)
+		}
 	}
 }
