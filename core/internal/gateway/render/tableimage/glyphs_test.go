@@ -43,6 +43,8 @@ func TestNothingIsDrawnThatTheTypefaceCannotDraw(t *testing.T) {
 func TestTheMarksATableUsesSurviveAsSomethingReadable(t *testing.T) {
 	fonts := loaded(t)
 
+	skipIfThisFontCanDrawIt(t, fonts.Body, '✅', '❌', '✔', '✖')
+
 	for _, one := range []struct {
 		said string
 		want string
@@ -76,6 +78,8 @@ func TestWordsAreNeverLost(t *testing.T) {
 // everything not in the small map: it reads as absence, not as damage.
 func TestAnEmojiWithNoSubstituteLeavesASpaceRatherThanABox(t *testing.T) {
 	fonts := loaded(t)
+
+	skipIfThisFontCanDrawIt(t, fonts.Body, '🎉')
 
 	got := drawable(fonts.Body, "🎉 done")
 	if strings.HasPrefix(got, "🎉") {
@@ -167,6 +171,8 @@ func sameTable(a, b Table) bool {
 func TestDrawItselfSubstitutes(t *testing.T) {
 	fonts := loaded(t)
 
+	skipIfThisFontCanDrawIt(t, fonts.Body, '✅', '❌')
+
 	withEmoji, err := Draw(Table{
 		Header: []string{"狀態", "說明"},
 		Rows:   [][]string{{"✅ 有販售", "在架上"}, {"❌ 未上架", "沒有"}},
@@ -199,6 +205,8 @@ func TestDrawItselfSubstitutes(t *testing.T) {
 func TestAModifierLeavesNoGapWhereItHadNoWidth(t *testing.T) {
 	fonts := loaded(t)
 
+	skipIfThisFontCanDrawIt(t, fonts.Body, '✅', '👍')
+
 	for _, one := range []struct {
 		said string
 		want string
@@ -210,6 +218,23 @@ func TestAModifierLeavesNoGapWhereItHadNoWidth(t *testing.T) {
 	} {
 		if got := drawable(fonts.Body, one.said); got != one.want {
 			t.Errorf("drawable(%q) = %q, want %q", one.said, got, one.want)
+		}
+	}
+}
+
+// skipIfThisFontCanDrawIt says when a substitution check has nothing to check.
+//
+// These checks are about what happens where a typeface has no glyph for a
+// mark. On a machine whose body font does have one, drawing it is the right
+// answer and the substitute is not wanted — so there is nothing here to be
+// right or wrong about, and saying so is better than asserting the fallback
+// on a machine that never reaches it.
+func skipIfThisFontCanDrawIt(t *testing.T, face font.Face, marks ...rune) {
+	t.Helper()
+
+	for _, r := range marks {
+		if _, ok := face.GlyphAdvance(r); ok {
+			t.Skipf("this machine's body font draws %q, so nothing stands in for it", r)
 		}
 	}
 }
