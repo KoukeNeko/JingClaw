@@ -37,6 +37,8 @@ cleanup() {
 	docker rm -f "$NAME" >/dev/null 2>&1
 	docker rm -f "$NAME-again" >/dev/null 2>&1
 	docker rm -f "$NAME-first" >/dev/null 2>&1
+	docker rm -f "$NAME-seeded" >/dev/null 2>&1
+	docker volume rm "$VOLUME-seeded" >/dev/null 2>&1
 	docker volume rm "$VOLUME" >/dev/null 2>&1
 	docker image rm -f "$IMAGE" >/dev/null 2>&1
 }
@@ -193,5 +195,42 @@ done
 docker exec "$NAME-again" jingclaw session list 2>/dev/null | grep -q "$SESSION" ||
 	fail "the session from before the container was replaced is gone"
 printf 'ok   the database outlives the container\n'
+
+# The files a deployment brings when a variable is the only way in. Checked
+# here rather than only in a unit test, because this is the one arrangement
+# where it matters: no shell, no way to put a file in the volume first, and a
+# platform that supplies a configuration and gets a default instead has no
+# symptom other than an agent behaving like nobody configured it.
+SEEDED="$VOLUME-seeded"
+docker volume create "$SEEDED" >/dev/null
+docker run -v "$SEEDED:/var/lib/jingclaw" \
+	-e JINGCLAW_CONFIG='[provider]
+backend = "fake"
+fake_model = "fake-echo"
+' \
+	-e JINGCLAW_PERSONA="base64:$(printf '# Who you are\n\nAnswer briefly.\n' | base64 | tr -d '\n')" \
+	--name "$NAME-seeded" -d "$IMAGE" daemon >/dev/null
+
+WAITED=0
+while ! docker run --rm -v "$SEEDED:/var/lib/jingclaw" --entrypoint sh "$IMAGE" \
+	-c 'test -f /var/lib/jingclaw/PERSONA.md' 2>/dev/null; do
+	WAITED=$((WAITED + 1))
+	[ "$WAITED" -gt 300 ] &&
+		fail "nothing was written from the environment: $(docker logs "$NAME-seeded" 2>&1 | tail -20)"
+	sleep 0.2
+done
+docker rm -f "$NAME-seeded" >/dev/null
+
+SEEN=$(docker run --rm -v "$SEEDED:/var/lib/jingclaw" --entrypoint sh "$IMAGE" -c \
+	'cat /var/lib/jingclaw/PERSONA.md; echo ---; cat /var/lib/jingclaw/config.toml')
+docker volume rm "$SEEDED" >/dev/null 2>&1
+
+# The blank line is the point: a document that arrives base64-encoded arrives
+# whole, and one whose newlines were dropped is a different document.
+printf '%s' "$SEEN" | grep -q '^Answer briefly\.$' ||
+	fail "the persona did not survive the trip through the environment: $SEEN"
+printf '%s' "$SEEN" | grep -q 'fake-echo' ||
+	fail "the deployment is running the example rather than the supplied configuration"
+printf 'ok   a deployment can bring its own settings and persona in variables\n'
 
 printf '\nall checks passed\n'

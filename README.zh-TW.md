@@ -53,7 +53,8 @@ jingclaw stop        # 停掉正在跑的那個
 想用容器？看 [`docs/container.md`](docs/container.md)——image 放在 GHCR，
 amd64 和 arm64 都有，而且裡面沒有設定、沒有資料庫、也沒有任何憑證。如果平台
 只給你一個掛載的 volume 和一串環境變數，`JINGCLAW_CONFIG`、`JINGCLAW_PERSONA`
-和 `JINGCLAW_AGENTS` 各帶一整份檔案進去。
+和 `JINGCLAW_AGENTS` 各帶一整份檔案進去。[`compose.yaml`](compose.yaml)
+則是連 Ollama 一起跑起來的整套。
 
 ## 它做什麼
 

@@ -71,6 +71,68 @@ the process list of anything that can read `/proc`. A file in the volume is
 readable by whoever can read the volume, which is a smaller set. Compose and
 Kubernetes both mount secrets as files for this reason.
 
+## Reaching a model
+
+A container's `localhost` is the container. `base_url =
+"http://localhost:11434"`, which is right on a laptop and is the default,
+finds nothing in here. Two arrangements work, and which one you want depends
+on where the GPU is.
+
+### Ollama on the host
+
+The one to prefer on a Mac, and the one to prefer anywhere the host already
+has models pulled and signed in:
+
+```
+docker run -d -v jingclaw:/var/lib/jingclaw \
+  -e JINGCLAW_CONFIG="$(cat config.toml)" \
+  ghcr.io/koukeneko/jingclaw
+```
+
+```toml
+[provider.ollama]
+model = "gemma4"
+base_url = "http://host.docker.internal:11434"
+```
+
+On Docker Desktop that name resolves and reaches the host, including an
+Ollama listening only on `127.0.0.1` — the desktop VM proxies it, so nothing
+on the host has to be opened up.
+
+On Linux it needs both halves: `--add-host=host.docker.internal:host-gateway`
+so the name resolves, and `OLLAMA_HOST=0.0.0.0` on the Ollama service so it
+listens on something the container can reach. A loopback-only Ollama is
+unreachable there however the name resolves.
+
+The reason to prefer this on a Mac is the GPU. Docker cannot reach it, so a
+model running in a container on a Mac runs on the CPU; the host's Ollama uses
+Metal.
+
+### Ollama as a second container
+
+[`compose.yaml`](../compose.yaml) in the repository root is the whole stack —
+JingClaw, Ollama, a volume each, no published model port:
+
+```bash
+cp .env.example .env          # the bot token goes in it
+docker compose up -d
+docker compose exec ollama ollama pull gemma4
+```
+
+The pull is a separate step because models are gigabytes and the image
+carries none. Until it has been done, the daemon says so by name and stops:
+
+```
+error: provider ollama does not serve model "gemma4"; run --list-models to see the options
+```
+
+A `:cloud` model needs `ollama signin`, which wants a browser, so those are
+easier on the host than in a container.
+
+An NVIDIA host can hand the GPU to the Ollama service; `compose.yaml` has the
+block to uncomment. A machine without one fails to start with it present,
+which is why it is not on by default.
+
 ## A platform whose only inputs are a volume and some variables
 
 Managed container platforms — Cloud Run, Fly, Zentring Run and the rest —

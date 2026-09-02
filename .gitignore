@@ -32,3 +32,6 @@ macos/.swiftpm/
 # The built and signed application. A compiled binary in git is a large blob
 # nobody diffs and everybody clones; scripts/build-macos.sh makes it.
 /build/
+
+# Holds a bot token. compose reads it automatically.
+.env

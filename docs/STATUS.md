@@ -532,6 +532,17 @@ checked before anything is written: these files are created once and never
 replaced, so a run that wrote the first and refused the second would leave a
 deployment holding a file that correcting the variable can no longer change.
 
+**A model the container can reach.** A container's `localhost` is the
+container, so the Ollama default that is right on a laptop finds nothing in
+one. `compose.yaml` runs JingClaw and Ollama as two services with a volume
+each and no published model port; the alternative, and the better one on a
+Mac, is the host's own Ollama at `host.docker.internal:11434` — Docker Desktop
+proxies that to a server listening only on loopback, so nothing on the host
+has to be opened up, and the host's Ollama can use a GPU that Docker cannot
+reach. On Linux the same arrangement needs `--add-host=host.docker.internal:host-gateway`
+and `OLLAMA_HOST=0.0.0.0`, because there the name resolves to a real address
+and a loopback-only server is not on it.
+
 ## Not done
 
 **Built but nothing uses it**

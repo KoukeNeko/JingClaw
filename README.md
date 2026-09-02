@@ -54,7 +54,8 @@ Prefer a container? [`docs/container.md`](docs/container.md) — the image is on
 GHCR for amd64 and arm64, and carries no settings, no database and no
 credentials of its own. On a platform whose only inputs are a volume and some
 variables, `JINGCLAW_CONFIG`, `JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` each
-carry a whole file in.
+carry a whole file in. [`compose.yaml`](compose.yaml) runs it with an Ollama
+beside it.
 
 ## What it does
 

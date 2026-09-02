@@ -1,0 +1,88 @@
+# JingClaw and a model, as one deployment.
+#
+#   cp .env.example .env      # put the bot token in it
+#   docker compose up -d
+#   docker compose exec ollama ollama pull "${OLLAMA_MODEL:-gemma4}"
+#
+# The pull is a separate step on purpose: models are gigabytes, and which one
+# a deployment should run is not a decision this file can make for it.
+
+services:
+  jingclaw:
+    image: ghcr.io/koukeneko/jingclaw:latest
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+    # Long enough for a run in progress to be written down. The daemon is PID
+    # 1 behind tini and stops on the signal; what takes the time is the
+    # ordered teardown behind it.
+    stop_grace_period: 30s
+
+    volumes:
+      # The one path to mount. A volume mounted anywhere else is created
+      # owned by root, and this image does not run as root.
+      - jingclaw:/var/lib/jingclaw
+
+    environment:
+      # Required, and named here so a missing one fails at "compose up" with
+      # a sentence rather than at runtime with a login error.
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?put it in .env, see .env.example}
+
+      # The whole settings file, written into the volume on the first start
+      # and never over one that is already there. Editing it here after that
+      # changes nothing: edit the file in the volume, or remove the volume.
+      JINGCLAW_CONFIG: |
+        [provider]
+        backend = "ollama"
+
+        [provider.ollama]
+        model = "${OLLAMA_MODEL:-gemma4}"
+        # The service below, on the network compose puts them both on.
+        base_url = "http://ollama:11434"
+
+        [gateway]
+        platform = "discord"
+
+        [gateway.discord]
+        account_id = "main"
+
+        # Rooms people can type in. Fill in the ids from Discord; without
+        # this the agent connects and answers nobody.
+        # [[gateway.discord.channels]]
+        # channel_ids = ["000000000000000000"]
+        # tenant_id = "000000000000000000"
+        # workspace_id = "default"
+
+      JINGCLAW_PERSONA: |
+        # Who you are
+
+        Answer briefly. Say when you are unsure.
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+
+    volumes:
+      # Where pulled models live. Without this every restart pulls again.
+      - ollama:/root/.ollama
+
+    # No published port. Only jingclaw needs to reach it, and compose already
+    # puts them on a network where it can. Publishing 11434 would put an
+    # unauthenticated model server on the host's interfaces.
+
+    # An NVIDIA host can hand the GPU over. Left out rather than commented in,
+    # because a machine without one fails to start with it present — and on a
+    # Mac it makes no difference either way: Docker cannot reach the Mac GPU,
+    # so a model in a container here runs on the CPU. Point at the host's own
+    # Ollama instead; docs/container.md says how.
+    #
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
+
+volumes:
+  jingclaw:
+  ollama:
