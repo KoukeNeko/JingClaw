@@ -35,6 +35,18 @@ type Provider struct {
 	// ChunkDelay is applied before every chunk after the first.
 	ChunkDelay time.Duration
 
+	// Generating, when set, is closed once a stream has handed over its first
+	// chunk.
+	//
+	// For a check that has to act while a run is generating, which is a
+	// moment nothing else marks: text deltas are coalesced before they are
+	// written, so the first of them reaches the log only when the stream
+	// ends — and a check that waited for one would be waiting for the run to
+	// be over. Waiting for the run to say it is running is earlier than the
+	// first chunk rather than later, which is a race that fails on whichever
+	// machine happens to win it.
+	Generating chan struct{}
+
 	// Script is what to do turn by turn instead of echoing.
 	//
 	// It exists because tool calls are a path only a model takes, and until
@@ -107,7 +119,8 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request) (provider
 		chunks = append(chunks, text)
 	}
 
-	return &stream{chunks: chunks, reasoning: p.Reasoning, delay: p.ChunkDelay}, nil
+	return &stream{chunks: chunks, reasoning: p.Reasoning, delay: p.ChunkDelay,
+		generating: p.Generating}, nil
 }
 
 // scripted answers according to the script, by counting how far through it
@@ -126,7 +139,8 @@ func (p *Provider) scripted(req provider.Request) provider.Stream {
 	if taken >= len(p.Script) {
 		// Past the end of the script, so it answers and stops. A script that
 		// ran out mid-conversation would otherwise loop.
-		return &stream{chunks: []string{p.Script[len(p.Script)-1].Text}, delay: p.ChunkDelay}
+		return &stream{chunks: []string{p.Script[len(p.Script)-1].Text}, delay: p.ChunkDelay,
+			generating: p.Generating}
 	}
 
 	turn := p.Script[taken]
@@ -136,15 +150,18 @@ func (p *Provider) scripted(req provider.Request) provider.Stream {
 	}
 
 	return &stream{
-		chunks:    chunks,
-		reasoning: p.Reasoning,
-		delay:     p.ChunkDelay,
-		call:      turn,
-		callIndex: taken,
+		generating: p.Generating,
+		chunks:     chunks,
+		reasoning:  p.Reasoning,
+		delay:      p.ChunkDelay,
+		call:       turn,
+		callIndex:  taken,
 	}
 }
 
 type stream struct {
+	generating chan struct{}
+
 	chunks    []string
 	reasoning string
 	delay     time.Duration
@@ -186,6 +203,14 @@ func (s *stream) Recv(ctx context.Context) (provider.Event, error) {
 
 		text := s.chunks[s.next]
 		s.next++
+
+		// Said once, after the first chunk has been produced rather than
+		// before: what a waiter is waiting for is that something exists to
+		// lose.
+		if s.generating != nil {
+			close(s.generating)
+			s.generating = nil
+		}
 		return provider.TextDelta{Text: text}, nil
 	}
 

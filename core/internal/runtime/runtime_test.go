@@ -183,7 +183,17 @@ func TestListAfterReturnsOnlyLaterEvents(t *testing.T) {
 // mid-generation. Losing the terminal event would leave clients showing a run
 // that never ends.
 func TestInterruptMidStreamCancelsAndRecordsTerminalState(t *testing.T) {
-	rt, store, _ := newHarness(t, fake.New(2*time.Second))
+	// Closed once the provider has produced something, which is the moment
+	// this check needs and the one nothing else marks. A run says it is
+	// running from the point the provider is called, which is before its
+	// first chunk; the first text event is written when the deltas are
+	// flushed, which is after the run has ended. Waiting for either is a race
+	// that fails on whichever machine happens to win it.
+	generating := make(chan struct{})
+	model := fake.New(2 * time.Second)
+	model.Generating = generating
+
+	rt, store, _ := newHarness(t, model)
 	ctx := context.Background()
 
 	session, err := rt.CreateSession(ctx, "test")
@@ -196,12 +206,11 @@ func TestInterruptMidStreamCancelsAndRecordsTerminalState(t *testing.T) {
 		t.Fatalf("send turn: %v", err)
 	}
 
-	// Wait until the run is actually generating, so the interrupt arrives
-	// mid-stream rather than before the provider was even called.
-	waitFor(t, func() bool {
-		run, err := rt.Run(ctx, runID)
-		return err == nil && run.Status == domain.RunRunning
-	})
+	select {
+	case <-generating:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the provider never produced anything to interrupt")
+	}
 
 	if _, err := rt.InterruptRun(ctx, runID, "user pressed stop"); err != nil {
 		t.Fatalf("interrupt: %v", err)
