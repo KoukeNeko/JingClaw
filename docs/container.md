@@ -206,7 +206,10 @@ prefix, and `JINGCLAW_CONFIG` is checked as TOML after decoding.
 
 Nothing above needs a shell in the container. This is a complete deployment —
 settings, persona, standing instructions and a credential — started from one
-command:
+command.
+
+**From a shell, the files go in as they are.** `-e VAR="$(cat file)"` carries
+the newlines through unchanged, so there is nothing to encode:
 
 ```bash
 docker volume create jingclaw
@@ -221,15 +224,21 @@ docker run -d --name jingclaw \
   ghcr.io/koukeneko/jingclaw
 ```
 
-On a platform with a web form instead of a shell, the same values are typed
-into three boxes — and a form that will not take a newline gets the encoded
-form of each file:
+**A web form is where `base64:` starts to matter.** A managed platform gives
+you three input boxes instead of a command line, and many of them keep only
+the first line of what you paste. The same three values, encoded so that one
+line is all they need:
 
 ```bash
 for file in config.toml PERSONA.md AGENTS.md; do
   printf '%s -> base64:%s\n\n' "$file" "$(base64 < "$file" | tr -d '\n')"
 done
 ```
+
+Paste each line's value, `base64:` prefix included, into the box for that
+file's variable. A box that does take newlines needs none of this — the
+prefix is what says a value is encoded, so an unencoded one is simply used as
+it reads.
 
 Then check what the first run made of it:
 
