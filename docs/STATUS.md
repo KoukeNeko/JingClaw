@@ -519,35 +519,30 @@ a short allowlist, and a file that is never executable.
 
 **Known holes**
 
-- **On Windows, the credentials are readable by anybody on the machine.**
-  The code asks for 0600 and gets 666, because Windows has no POSIX
-  permissions and `os.Chmod` there only toggles the read-only bit. That
-  covers `run/daemon.json`, which holds the live daemon token and the
-  gateway token; the MCP session store; and every secret file. Nothing in
-  `internal/discovery`, `internal/secret` or `internal/home` knows it is on
-  Windows, so nothing tries and nothing says it could not.
+- ~~**On Windows, the credentials are readable by anybody on the
+  machine.**~~ Closed. Windows has no POSIX mode, so `os.Chmod` there only
+  toggled the read-only bit and `Stat` reported 0666 for every readable
+  file — which did not weaken the check, it emptied it, and the daemon
+  refused its own token besides. `internal/fsperm` now expresses owner-only
+  as a chmod on Unix and as a protected DACL on Windows, granting the owner
+  and nobody else. `internal/discovery`, `internal/secret`, `internal/home`,
+  `internal/config` and the MCP session store write through it, and the load
+  path reads the DACL back rather than a mode it cannot. The cases that
+  assert an exposed file is refused now expose their fixtures with a real
+  Everyone-readable ACL, because a mode a DACL cannot express proves nothing
+  there.
 
-  Not a test artifact. The checks that assert 0600 had simply never run
-  there: the Windows job failed on formatting before it reached the build,
-  and formatting failed because the checkout was CRLF, and behind both of
-  those the package did not compile at all. Three things hiding one another
-  and, between them, the fact that a platform in the matrix had never been
-  built.
-
-  What it would take is Windows ACLs — `SetNamedSecurityInfo` with a DACL
-  granting the owner and nobody else. Until then a deployment on Windows is
-  one where any process running as any user can read the token that
-  approves tool calls.
-
-- **On Windows, stopping a process leaves its descendants running.** The
-  Unix path signals the process group; Windows has no such thing, and
-  `group_windows.go` has said since it was written that containing a tree
-  there needs a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
-
-  The consequence is now measured rather than predicted: `internal/process`
-  does not fail on Windows, it hangs, and the job is killed at the
-  ten-minute timeout. A killed process's children inherit the output pipe
-  and keep it open, so `cmd.Wait` waits for a copy that will never see EOF.
+- ~~**On Windows, stopping a process leaves its descendants running.**~~
+  Closed. Each process is assigned to a job object created with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` — started suspended and resumed once
+  it is in the job, so no child escapes into the window before the
+  assignment — and stopping terminates the job, which takes the whole tree.
+  That ends the hang it caused as well: a killed process's children no
+  longer inherit a live output pipe, so `cmd.Wait` sees EOF instead of
+  waiting on a copy that never does. `internal/winjob` is shared, so the
+  daemon's own parts under `internal/cli/supervise` contain their trees the
+  same way — untested on Windows, since the containment test there is
+  Unix-only, but riding on the mechanism `internal/process` does verify.
 
 - **Trust does not survive the run it was earned in.** A tool that returns
   somebody else's words lowers the trust of everything written after it in
@@ -605,17 +600,24 @@ a short allowlist, and a file that is never executable.
 
 **Windows, in general**
 
-Its tests ran for the first time on 2026-09-02 and 28 of them failed. Twelve
-still do: the two holes above, two about path semantics — `/etc/passwd` is
-not outside a workspace there — and one about artifact content. The rest
-were checks that assumed the machine they were written on, and are fixed:
-event ids built from a clock with millisecond resolution, a temporary-
-directory warning that knew only Unix names, and font substitutions asserted
-on a machine whose typeface has the glyph.
+Its tests ran for the first time on 2026-09-02 and 28 of them failed. None
+do now. Sixteen were checks that assumed the machine they were written on —
+event ids from a millisecond clock, a temporary-directory warning that knew
+only Unix names, font substitutions asserted on a machine whose typeface has
+the glyph. The rest were the real defects above: the credentials, the
+process trees, two about path semantics — `/etc/passwd` is not an absolute
+path there, so the case is written with the workspace's own volume now, and
+a reserved device name reaches outside any directory, so `read_file("CON")`
+is refused where it used to open the console device — and one where the
+test's own Windows counting command started at one and dropped the line it
+then went looking for.
 
-Linux and macOS are green, and the container image is built and published
-from Linux. Windows builds and vets; it does not pass its tests, and saying
-so here is more use than a matrix entry that claims otherwise.
+Linux and macOS are green, the container image is built and published from
+Linux, and the Windows tests now pass too. Two things a run here does not
+cover, and saying so is more use than a matrix entry that does not: the race
+detector needs a C toolchain this machine has not got, and ConPTY is still
+an honest pipe rather than a terminal. Whether that adds up to "supported"
+is a heading this does not claim on its own.
 
 **Never exercised against the real thing**
 

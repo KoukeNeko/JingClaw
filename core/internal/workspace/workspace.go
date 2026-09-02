@@ -92,6 +92,14 @@ func (w *Workspace) Resolve(relative string) (string, error) {
 		return "", fmt.Errorf("%w: %s", ErrOutsideWorkspace, relative)
 	}
 
+	// A component may reach outside without any traversal: on Windows a
+	// reserved device name opens the device from any directory, and a colon
+	// names a drive-relative path or an alternate data stream. Lexical
+	// containment does not catch these, so they are refused before the join.
+	if escapesByName(cleaned) {
+		return "", fmt.Errorf("%w: %s", ErrOutsideWorkspace, relative)
+	}
+
 	candidate := filepath.Join(w.root, cleaned)
 
 	resolved, err := resolveExisting(candidate)

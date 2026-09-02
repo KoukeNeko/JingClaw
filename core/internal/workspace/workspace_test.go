@@ -70,12 +70,40 @@ func TestResolveRejectsTraversal(t *testing.T) {
 func TestResolveRejectsAbsolutePaths(t *testing.T) {
 	ws, root := newWorkspace(t)
 
+	// An absolute path outside the root, spelled the way the running platform
+	// spells one: "/etc/passwd" is not absolute on Windows (it has no drive),
+	// and hard-coding a drive would assume one the machine may not have. The
+	// root's own volume is absolute on either platform — empty on Unix, so this
+	// is "/outside.txt", and the actual drive of the temp dir on Windows.
+	absoluteOutside := filepath.VolumeName(root) + string(filepath.Separator) + "outside.txt"
+
 	for _, path := range []string{
-		"/etc/passwd",
+		absoluteOutside,
 		filepath.Join(root, "src", "main.go"),
 	} {
 		_, err := ws.Resolve(path)
 		if !errors.Is(err, workspace.ErrOutsideWorkspace) {
+			t.Errorf("Resolve(%q) = %v, want ErrOutsideWorkspace", path, err)
+		}
+	}
+}
+
+// On Windows a component can reach outside without any traversal: a reserved
+// device name opens the device from any directory, and a colon names a
+// drive-relative path or an alternate data stream rather than a file the join
+// placed inside the root.
+func TestResolveRejectsWindowsDeviceAndStreamNames(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("device names and colons are only special on Windows")
+	}
+
+	ws, _ := newWorkspace(t)
+
+	for _, path := range []string{
+		"CON", "NUL", "COM1", "nul.txt", "sub/CON",
+		`C:relative`, "notes.txt:hidden",
+	} {
+		if _, err := ws.Resolve(path); !errors.Is(err, workspace.ErrOutsideWorkspace) {
 			t.Errorf("Resolve(%q) = %v, want ErrOutsideWorkspace", path, err)
 		}
 	}

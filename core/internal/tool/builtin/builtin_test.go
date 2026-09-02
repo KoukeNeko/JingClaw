@@ -154,9 +154,16 @@ func TestReadFileRejectsBinary(t *testing.T) {
 // The workspace boundary is the security property of this whole layer, so it
 // is asserted at the tool surface too, not only in the workspace package.
 func TestToolsRefuseToEscapeTheWorkspace(t *testing.T) {
-	_, registry, _ := newFixture(t)
+	_, registry, root := newFixture(t)
 
-	for _, path := range []string{"../outside.txt", "/etc/passwd", "src/../../outside.txt"} {
+	// An absolute path outside the root, spelled for the running platform:
+	// "/etc/passwd" is not absolute on Windows, and hard-coding a drive would
+	// assume one the machine may not have. The root's own volume is absolute on
+	// either platform — "/outside.txt" on Unix, the temp dir's actual drive on
+	// Windows.
+	absoluteOutside := filepath.VolumeName(root) + string(filepath.Separator) + "outside.txt"
+
+	for _, path := range []string{"../outside.txt", absoluteOutside, "src/../../outside.txt"} {
 		result := call(t, registry, "read_file", map[string]any{"path": path})
 		if !result.IsError {
 			t.Errorf("read_file(%q) succeeded; it must not reach outside the workspace", path)

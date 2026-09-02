@@ -43,8 +43,10 @@ func newArchivingFixture(t *testing.T, maxOutput int) *tool.Registry {
 func countingCommand(lines int) (string, []string) {
 	script := "i=0; while [ $i -lt " + itoa(lines) + " ]; do echo \"line-$i-padding-padding-padding\"; i=$((i+1)); done"
 	if runtime.GOOS == "windows" {
+		// for /L counts inclusively, so [0, lines-1] matches the shell loop's
+		// half-open [0, lines): the same line-0 through line-(lines-1).
 		return "cmd.exe", []string{"/d", "/s", "/c",
-			"for /L %i in (1,1," + itoa(lines) + ") do @echo line-%i-padding-padding-padding"}
+			"for /L %i in (0,1," + itoa(lines-1) + ") do @echo line-%i-padding-padding-padding"}
 	}
 	return "/bin/sh", []string{"-c", script}
 }
