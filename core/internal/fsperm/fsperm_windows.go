@@ -19,8 +19,14 @@ const accessAllowedACEType = 0
 // control, and marks the list protected so that no entry inherited from a
 // parent directory can grant anyone else access. It is the Windows equivalent
 // of chmod 0600 (or 0700 for a directory — a DACL draws no distinction).
+//
+// The single entry is for the file's own owner, read back rather than assumed
+// to be the account this process runs as. Windows makes a file created by a
+// member of the Administrators group owned by the group, not the user, so
+// granting the process's own SID would grant a principal the owner check does
+// not recognise — which is precisely how EnsureOwnerOnly reads it back.
 func Restrict(path string) error {
-	owner, err := currentUserSID()
+	owner, err := ownerOf(path)
 	if err != nil {
 		return err
 	}
@@ -37,7 +43,7 @@ func Restrict(path string) error {
 		Inheritance:       windows.NO_INHERITANCE,
 		Trustee: windows.TRUSTEE{
 			TrusteeForm:  windows.TRUSTEE_IS_SID,
-			TrusteeType:  windows.TRUSTEE_IS_USER,
+			TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
 			TrusteeValue: windows.TrusteeValueFromSID(owner),
 		},
 	}}, nil)
@@ -109,18 +115,28 @@ func EnsureOwnerOnly(path string) (ownerOnly bool, detail string, err error) {
 	return true, "", nil
 }
 
-// currentUserSID is the SID of the account this process runs as, copied out of
-// the process token so it outlives the token's buffer.
-func currentUserSID() (*windows.SID, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+// ownerOf reads a file's owner SID, copied out of the descriptor's buffer so
+// it outlives it. It is what an entry is granted to, and what EnsureOwnerOnly
+// reads back as the owner, so the two agree on any machine — including one
+// where the owner is the Administrators group rather than a user.
+func ownerOf(path string) (*windows.SID, error) {
+	sd, err := windows.GetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("fsperm: current user: %w", err)
+		return nil, fmt.Errorf("fsperm: read owner of %s: %w", path, err)
 	}
-	owner, err := user.User.Sid.Copy()
+	owner, _, err := sd.Owner()
 	if err != nil {
-		return nil, fmt.Errorf("fsperm: copy current user SID: %w", err)
+		return nil, fmt.Errorf("fsperm: owner of %s: %w", path, err)
 	}
-	return owner, nil
+	copied, err := owner.Copy()
+	if err != nil {
+		return nil, fmt.Errorf("fsperm: copy owner of %s: %w", path, err)
+	}
+	return copied, nil
 }
 
 // trustedSIDs are the principals whose access does not count as an exposure:
