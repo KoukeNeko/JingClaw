@@ -67,24 +67,32 @@ func Run(ctx context.Context) error {
 	output, closeOutput, watching := where()
 	defer closeOutput()
 
-	agent, err := start(ctx, self, "daemon", output)
+	// Kept as well as written, so a part that fails to start can be quoted
+	// rather than only reported.
+	saidByAgent := &lastWords{limit: lastWordsKept}
+
+	agent, err := start(ctx, self, "daemon", io.MultiWriter(output, saidByAgent))
 	if err != nil {
 		return err
 	}
 	defer terminate(agent)
 
-	if err := waitForReady(ctx); err != nil {
+	agentGone := whenItExits(agent)
+	if err := waitForReady(ctx, agentGone, saidByAgent, alreadyRunning); err != nil {
 		return err
 	}
 
-	chat, err := start(ctx, self, "gateway", output)
+	saidByChat := &lastWords{limit: lastWordsKept}
+
+	chat, err := start(ctx, self, "gateway", io.MultiWriter(output, saidByChat))
 	if err != nil {
 		return err
 	}
 	defer terminate(chat)
 
+	chatGone := whenItExits(chat)
 	if watching {
-		return watch(ctx, agent, chat)
+		return watch(ctx, agentGone, chatGone)
 	}
 
 	fmt.Println("JingClaw is running. Press Ctrl-C to stop it.")
@@ -92,10 +100,10 @@ func Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return nil
-	case err := <-exits(agent):
-		return stopped("daemon", err)
-	case err := <-exits(chat):
-		return stopped("gateway", err)
+	case <-agentGone:
+		return stopped("daemon", saidByAgent)
+	case <-chatGone:
+		return stopped("gateway", saidByChat)
 	}
 }
 
@@ -128,7 +136,7 @@ func where() (io.Writer, func(), bool) {
 }
 
 // watch runs the console until it is closed or a part stops.
-func watch(ctx context.Context, agent, chat *exec.Cmd) error {
+func watch(ctx context.Context, agent, chat <-chan struct{}) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
@@ -136,9 +144,9 @@ func watch(ctx context.Context, agent, chat *exec.Cmd) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-		case <-exits(agent):
+		case <-agent:
 			stop()
-		case <-exits(chat):
+		case <-chat:
 			stop()
 		}
 	}()
@@ -280,12 +288,21 @@ func canAttach(isTerminal bool) bool { return isTerminal }
 // daemon, and the daemon exiting is then the whole point rather than a
 // failure. Reporting that as one made every clean shutdown end with an error
 // line and a non-zero status.
-func stopped(part string, err error) error {
-	if err == nil {
+// stopped reports a part that ended, with what it said on the way out.
+//
+// Under a console the parts write to a log file, so a message saying only
+// that something stopped sends whoever read it looking for a file nobody told
+// them about.
+func stopped(part string, said *lastWords) error {
+	last := ""
+	if said != nil {
+		last = said.String()
+	}
+	if last == "" {
 		fmt.Printf("The %s stopped; stopping the rest.\n", part)
 		return nil
 	}
-	return fmt.Errorf("the %s stopped: %w", part, err)
+	return fmt.Errorf("the %s stopped:\n%s", part, last)
 }
 
 // alreadyRunning reports whether a daemon has published itself and is alive.
@@ -345,7 +362,12 @@ func start(ctx context.Context, self, part string, output io.Writer) (*exec.Cmd,
 // The gateway is started after, because a gateway that comes up first spends
 // its early life failing to reach something that is not there yet and says so
 // in a way that reads like a fault.
-func waitForReady(ctx context.Context) error {
+func waitForReady(
+	ctx context.Context,
+	gone <-chan struct{},
+	said *lastWords,
+	published func() (bool, error),
+) error {
 	deadline := time.NewTimer(readyTimeout)
 	defer deadline.Stop()
 
@@ -353,17 +375,42 @@ func waitForReady(ctx context.Context) error {
 	defer tick.Stop()
 
 	for {
-		if running, _ := alreadyRunning(); running {
+		if running, _ := published(); running {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
+		case <-gone:
+			// It has exited, so waiting out the timeout would be a minute of
+			// blank terminal before saying what is already known. What it
+			// said on the way out is the answer.
+			return failedToStart(said)
+
 		case <-deadline.C:
-			return errors.New("supervise: the daemon did not start")
+			// Still running and still not published. Whatever it has said so
+			// far is the best account there is.
+			return failedToStart(said)
+
 		case <-tick.C:
 		}
 	}
+}
+
+// failedToStart is the message, carrying what the part said if it said any.
+//
+// Under a console the parts write to a log file, so an error saying only that
+// something did not start sends whoever read it looking for a file nobody
+// told them about.
+func failedToStart(said *lastWords) error {
+	if said == nil {
+		return errors.New("supervise: the daemon did not start")
+	}
+	if last := said.String(); last != "" {
+		return fmt.Errorf("supervise: the daemon did not start:\n%s", last)
+	}
+	return errors.New("supervise: the daemon did not start, and said nothing about why")
 }
 
 // terminate asks a part to stop and waits, briefly.
@@ -387,11 +434,24 @@ func terminate(command *exec.Cmd) {
 	}
 }
 
-func exits(command *exec.Cmd) <-chan error {
-	out := make(chan error, 1)
-	go func() { out <- command.Wait() }()
-	return out
+// whenItExits is closed when a part has gone.
+//
+// Closed rather than sent to, because more than one place waits on it and a
+// value can only be taken once. Wait may only be called once per command, so
+// this is the one place that calls it.
+func whenItExits(command *exec.Cmd) <-chan struct{} {
+	gone := make(chan struct{})
+	go func() {
+		_ = command.Wait()
+		close(gone)
+	}()
+	return gone
 }
+
+// lastWordsKept is how much of a failing part's output is quoted back. Enough
+// for the error it ended on, and not so much that a stack trace becomes the
+// message.
+const lastWordsKept = 2000
 
 // Commands are the subcommands for managing what Run starts.
 func Commands() []*cobra.Command {
