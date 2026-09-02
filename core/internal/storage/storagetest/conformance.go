@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -97,11 +98,25 @@ func mustCreateSession(t *testing.T, store storage.Store, id string) domain.Sess
 	return session
 }
 
+// eventIDs numbers the events this suite appends.
+//
+// A counter rather than the clock. time.Now has nanosecond units and not
+// nanosecond resolution: on Windows it advances in steps of about a
+// millisecond, so a loop appending five events in a row read the same instant
+// five times and built the same id five times. What that produced was a
+// unique-constraint failure in the store — a real one, about ids this helper
+// made up, in a suite checking that the store keeps its promises.
+var eventIDs atomic.Uint64
+
+func nextEventID(session domain.SessionID) domain.EventID {
+	return domain.EventID(fmt.Sprintf("evt_%s_%d", session, eventIDs.Add(1)))
+}
+
 func appendEvent(t *testing.T, store storage.Store, session domain.SessionID, kind domain.EventKind, payload domain.EventPayload) domain.Seq {
 	t.Helper()
 
 	seq, err := store.Append(context.Background(), domain.Event{
-		ID:         domain.EventID(fmt.Sprintf("evt_%s_%d", session, time.Now().UnixNano())),
+		ID:         nextEventID(session),
 		SessionID:  session,
 		RunID:      "run_1",
 		OccurredAt: fixedTime(),
@@ -1502,5 +1517,22 @@ func testDeletingAScheduleForgetsItsFirings(t *testing.T, newStore Factory) {
 	}
 	if !last.IsZero() {
 		t.Errorf("a schedule created again inherited a firing at %v", last)
+	}
+}
+
+// The ids this suite makes up are its own to keep unique.
+//
+// Exported so the packages that run the suite check it: a duplicate here
+// fails as a unique-constraint violation in the store, which reads as the
+// store breaking a promise rather than as the suite handing it the same id
+// twice.
+func TestIDsAreUniqueWithoutTheClock(t *testing.T) {
+	seen := map[domain.EventID]bool{}
+	for range 1000 {
+		id := nextEventID("ses_1")
+		if seen[id] {
+			t.Fatalf("%q was handed out twice", id)
+		}
+		seen[id] = true
 	}
 }
