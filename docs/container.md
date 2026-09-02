@@ -227,10 +227,11 @@ Config:  /var/lib/jingclaw/config.toml
 configuration is not the only thing a deployment has to bring. `PERSONA.md`
 says who the agent is and `AGENTS.md` says how the project works, and both are
 read from the same directory, so on a platform whose only inputs are a volume
-and some variables they are as unreachable as the configuration was. `jingclaw
---init` writes them as empty headings on a machine somebody is sitting at; a
-daemon starting on its own does not, so without these variables a container
-runs with neither.
+and some variables they are as unreachable as the configuration was. Every
+start writes them as empty headings when they are absent, so a container
+without these variables comes up with two files to edit rather than none — but
+editing a file inside a container means finding a way in, and the variables
+are the way in that does not need one.
 
 ```
 JINGCLAW_PERSONA=# Who you are
@@ -321,6 +322,54 @@ because by then the file is whatever is in the volume.
 rest are read from the environment by name, so they need not go in the file at
 all — which is the better arrangement here, because the file is in the volume
 and the volume is a backup away from somewhere else.
+
+### It is a worker, not a web service
+
+The thing to check before choosing a platform. JingClaw's HTTP API is how its
+own clients reach it — the console, the CLI, the gateway — and it can run
+programs, so `server.addr` is refused unless it is on the loopback interface.
+There is no port to publish, no `EXPOSE` in the image, and nothing for a
+platform's health check to open.
+
+That rules out anything request-driven. A platform that routes traffic to your
+container, waits for it to bind `$PORT`, or stops it between requests will
+report an unhealthy deployment however well it is running. What works is the
+kind of service a platform calls a *worker*, a *background service* or a
+*private service*: always on, no ingress, with a disk.
+
+Which leaves four requirements, and a platform either offers all of them or is
+the wrong shape for this:
+
+| | |
+|---|---|
+| a persistent volume | the event log is the program's memory |
+| mounted at `/var/lib/jingclaw` | or owned by uid 10001 wherever it lands |
+| one instance, never zero | one writer for the database, and a run in progress is in memory too |
+| no HTTP health check | there is nothing listening for it |
+
+**And the model has to be somewhere the container can reach.** A PaaS cannot
+see the Ollama on your laptop, and `compose.yaml`'s second service is not
+available where you do not control the compose file. Two ways out:
+
+A hosted provider — Gemini, Anthropic, or anything speaking the OpenAI shape —
+which is one `[provider]` section and a key in a variable.
+
+Or Ollama's own hosted service, which speaks the same API as the local daemon
+with a credential attached:
+
+```toml
+[provider]
+backend = "ollama"
+
+[provider.ollama]
+model = "gemma4:31b-cloud"
+base_url = "https://ollama.com"
+api_key_env = ["OLLAMA_API_KEY"]
+```
+
+The model name is the deployment's, not the machine's, so the same
+configuration works on a laptop pointed at a local daemon and on a platform
+pointed at the hosted one.
 
 ### Two settings on the platform, not in the file
 

@@ -543,6 +543,16 @@ reach. On Linux the same arrangement needs `--add-host=host.docker.internal:host
 and `OLLAMA_HOST=0.0.0.0`, because there the name resolves to a real address
 and a loopback-only server is not on it.
 
+**The files meant to be edited, on any start.** `PERSONA.md` and `AGENTS.md`
+were created by `--init` and by nothing else, so every deployment that was not
+started by hand — a container, a service, anyone who ran `jingclaw` and never
+read about the flag — ran with neither. The reason for creating them rather
+than documenting them ("a file that exists is a file somebody edits; one they
+have to know to create is one that stays absent") reached only the people who
+already knew. The daemon now writes them on every start, after whatever the
+environment supplied and never over a file that exists, so a redeployment
+finds them already in the volume.
+
 ## Not done
 
 **Built but nothing uses it**
