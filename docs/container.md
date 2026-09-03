@@ -133,6 +133,45 @@ An NVIDIA host can hand the GPU to the Ollama service; `compose.yaml` has the
 block to uncomment. A machine without one fails to start with it present,
 which is why it is not on by default.
 
+## What the image cannot do: read the web
+
+`web.enabled = true` with the default backend drives a real browser, and the
+image carries neither python3 nor the `cloakbrowser` package. The daemon says
+so and stops rather than coming up with the tool missing:
+
+```
+error: web.backend is "browser": web: python3 is not on PATH
+Reading pages drives a real browser, which needs python3 with the cloakbrowser package. Set web.enabled = false to run without it.
+```
+
+Stopping is deliberate. A deployment that quietly dropped page reading looks
+from the room like a model that will not use the tool, and that is a long
+afternoon.
+
+Two ways forward. **Leave it off** — `web.enabled = false`, the default — and
+the agent works on the workspace and the conversation, which is most of what
+it is for. Or **derive an image** that has the interpreter, the package and a
+browser for it to drive:
+
+```dockerfile
+FROM ghcr.io/koukeneko/jingclaw
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
+	&& rm -rf /var/lib/apt/lists/*
+# Then the cloakbrowser package and the browser it drives, per its own
+# instructions — it is a separate project with its own licence, which is why
+# it is not in the image above.
+USER jingclaw
+```
+
+That recipe is a starting point rather than a tested one: what `cloakbrowser`
+needs from a base image is its business, and browsers in containers want fonts
+and shared libraries that are worth reading its documentation for.
+
+Either way, `web_read` is not a way past serious bot detection. Cloudflare and
+DataDome-class protection refuse a browser in a container as readily as
+anywhere else, and the tool reports the refusal rather than inventing a page.
+
 ## A platform whose only inputs are a volume and some variables
 
 Managed container platforms — Cloud Run, Fly, Zentring Run and the rest —
