@@ -1,8 +1,10 @@
 package web_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -18,13 +20,9 @@ import (
 // and failed on the first fetch — which from the room looks like a model
 // refusing to use the tool.
 func TestAnInterpreterWithoutThePackageIsRefused(t *testing.T) {
-	dir := t.TempDir()
-	pretend := filepath.Join(dir, "python3")
 	// Exits 1 for any argument, which is what an interpreter without the
 	// package does when asked to import it.
-	if err := os.WriteFile(pretend, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatalf("staging: %v", err)
-	}
+	pretend := stubInterpreter(t, 1)
 
 	err := web.CanDriveABrowser(pretend)
 	if err == nil {
@@ -37,13 +35,29 @@ func TestAnInterpreterWithoutThePackageIsRefused(t *testing.T) {
 
 // And one that can is accepted.
 func TestAnInterpreterThatCanImportIsAccepted(t *testing.T) {
-	dir := t.TempDir()
-	pretend := filepath.Join(dir, "python3")
-	if err := os.WriteFile(pretend, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("staging: %v", err)
-	}
+	pretend := stubInterpreter(t, 0)
 
 	if err := web.CanDriveABrowser(pretend); err != nil {
 		t.Errorf("an interpreter that imports it was refused: %v", err)
 	}
+}
+
+// stubInterpreter writes something that can be run and exits how it is told.
+//
+// Per platform, because a shebang is a Unix thing: Windows runs neither a
+// #! line nor an extensionless file, and a check written for one machine that
+// cannot run on the other is how a platform stops being tested.
+func stubInterpreter(t *testing.T, exitCode int) string {
+	t.Helper()
+
+	name, body := "python3", fmt.Sprintf("#!/bin/sh\nexit %d\n", exitCode)
+	if runtime.GOOS == "windows" {
+		name, body = "python3.cmd", fmt.Sprintf("@exit /b %d\r\n", exitCode)
+	}
+
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("staging: %v", err)
+	}
+	return path
 }

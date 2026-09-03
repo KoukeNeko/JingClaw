@@ -37,6 +37,16 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
+# This check reads a real page from a stand-in site, so the daemon below is
+# configured to read pages — and one told to do that refuses to start unless
+# it can import the package it drives a browser with. A build machine has
+# neither, and saying so beats a failure that looks like the guard being
+# checked has broken.
+if ! python3 -c 'import cloakbrowser' >/dev/null 2>&1; then
+	printf 'skipped: no browser on this machine, and this check reads a page\n'
+	exit 0
+fi
+
 mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 # A page that tries to plant a permanent instruction. Served locally so the

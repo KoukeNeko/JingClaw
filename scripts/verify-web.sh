@@ -97,6 +97,20 @@ runtime_dir = "$WORK/run"
 data_dir = "$WORK/data"
 EOF
 
+# Everything below drives a daemon configured to read pages, and one told to
+# do that refuses to start unless it can actually import the package — an
+# interpreter without it produced a daemon that came up and failed on every
+# fetch. So the guard runs here rather than around the fetches alone.
+#
+# Skipping is honest in a way that passing would not be: the address guards
+# above stand on their own, and claiming a fetch was verified when nothing was
+# fetched is how a capability ships broken.
+if ! python3 -c 'import cloakbrowser' >/dev/null 2>&1; then
+	printf '\nskipped the fetching checks: no browser on this machine\n'
+	printf 'all checks passed\n'
+	exit 0
+fi
+
 "$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
@@ -114,16 +128,6 @@ printf 'ok   web_read is registered when the configuration turns it on\n'
 
 # 3. The real fetcher, against a real page. This is the half that a stub
 #    cannot check: whether a browser is actually installed and driveable.
-#
-#    It needs a browser, which a build machine does not have. Skipping is
-#    honest here in a way that passing would not be: the guard tests above
-#    stand on their own, and claiming a fetch was verified when nothing was
-#    fetched is how a capability ships broken.
-if ! python3 -c 'import cloakbrowser' >/dev/null 2>&1; then
-	printf '\nskipped the fetching checks: no browser on this machine\n'
-	printf 'all checks passed\n'
-	exit 0
-fi
 
 cat > "$WORK/probe_test.go" <<'GOEOF'
 package web_test

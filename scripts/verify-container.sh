@@ -260,9 +260,16 @@ while ! docker exec "$NAME-web" test -f /var/lib/jingclaw/run/daemon.json 2>/dev
 		fail "it will not start with web reading on: $(docker logs "$NAME-web" 2>&1 | tail -20)"
 	sleep 0.2
 done
+# And the tool is actually offered. Starting proves the image has what the
+# daemon checks for; this proves the capability reached the model's tool list,
+# which is the assertion verify-web.sh makes and now skips wherever the
+# package is absent.
+docker logs "$NAME-web" 2>&1 | grep -q 'web reading is on' ||
+	fail "the daemon started with web enabled and never registered the tool: $(docker logs "$NAME-web" 2>&1 | tail -20)"
+
 docker rm -f "$NAME-web" >/dev/null
 docker volume rm "$WEBBED" >/dev/null 2>&1
-printf 'ok   it starts with web reading turned on\n'
+printf 'ok   it starts with web reading on, and offers the tool\n'
 
 # The wrapper is importable and the browser it drives is not in the image.
 #
