@@ -202,6 +202,45 @@ func firstLines(text string, limit int) string {
 	return strings.Join(lines, "\n")
 }
 
+// CanDriveABrowser says whether this interpreter can actually fetch a page.
+//
+// PythonPath finds the interpreter and stops there, which was half the check:
+// an image with python3 and no cloakbrowser passed it, started, validated
+// every setting, and then failed on every fetch — and from a chat room a tool
+// that always fails looks like a model that will not use it.
+//
+// One subprocess at startup, which is where this project checks things: an
+// operator restarting a daemon to discover the next mistake is work the
+// program can do in one pass.
+func CanDriveABrowser(python string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), importCheckTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, python, "-c", "import cloakbrowser").CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("web: %s did not answer in %s when asked to import cloakbrowser",
+			python, importCheckTimeout)
+	}
+	return fmt.Errorf("web: %s cannot import cloakbrowser: %w%s",
+		python, err, detail(out))
+}
+
+// detail appends what the interpreter said, when it said anything.
+func detail(out []byte) string {
+	said := firstLines(string(out), 3)
+	if said == "" {
+		return ""
+	}
+	return "\n" + said
+}
+
+// importCheckTimeout bounds the one subprocess. An interpreter that has not
+// answered by then is not one to start a deployment on.
+const importCheckTimeout = 30 * time.Second
+
 // PythonPath resolves the interpreter, so a misconfiguration is reported when
 // the daemon starts rather than when the model first asks for a page.
 func PythonPath(configured string) (string, error) {

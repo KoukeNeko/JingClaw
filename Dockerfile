@@ -68,8 +68,52 @@ RUN useradd --system --uid 10001 --create-home --home-dir /home/jingclaw \
 	&& mkdir -p /var/lib/jingclaw \
 	&& chown jingclaw:jingclaw /var/lib/jingclaw
 
+# What reading a page needs, and the largest thing in this image by far.
+#
+# web.enabled is off by default and this changes nothing about that. What it
+# changes is what happens when somebody turns it on: the daemon refuses to
+# start without an interpreter, which in a container is a wall rather than a
+# missing package — an image carries what it carries, and the operator reading
+# "python3 is not on PATH" has nowhere to install it.
+#
+# A virtual environment because bookworm's Python is externally managed and
+# refuses a system-wide pip install. python3 on PATH is this one, so nothing
+# has to be configured to find it; /usr/bin/python3 stays where apt expects.
+#
+# A wrapper and not a symlink. Python finds its environment by resolving its
+# own executable, and a symlink to the venv's python3 resolves through it to
+# /usr/bin/python3.11 — sys.prefix becomes /usr and the venv's packages are
+# invisible. Measured: the daemon started, because it only looks for an
+# interpreter, and importing cloakbrowser failed.
+#
+# playwright install-deps rather than a hand-written package list: cloakbrowser
+# drives a Chromium, the shared libraries one needs are its own business, and a
+# list written here would be right until the day it was not.
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends python3 python3-venv \
+	&& python3 -m venv /opt/cloakbrowser \
+	&& /opt/cloakbrowser/bin/pip install --no-cache-dir cloakbrowser \
+	&& /opt/cloakbrowser/bin/playwright install-deps chromium \
+	&& printf '#!/bin/sh\nexec /opt/cloakbrowser/bin/python3 "$@"\n' \
+		> /usr/local/bin/python3 \
+	&& chmod 755 /usr/local/bin/python3 \
+	&& /usr/local/bin/python3 -c 'import cloakbrowser' \
+	&& rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /out/jingclaw /usr/local/bin/jingclaw
 COPY docs/config.example.toml /usr/share/jingclaw/config.example.toml
+
+# The browser cloakbrowser drives is NOT in this image, and must not be.
+#
+# It is a compiled Chromium under its own licence — free to use, and not to
+# redistribute, which is what putting it in a published image would be. The
+# wrapper above is MIT and ships here; the binary it fetches is fetched by the
+# deployment that runs it, under that deployment's own terms.
+#
+# Into the volume rather than the container's writable layer, so the ~200MB
+# download happens on the first page read and not again every time the
+# container is replaced.
+ENV CLOAKBROWSER_CACHE_DIR=/var/lib/jingclaw/browser
 
 # Where the deployment lives, and the one path to mount.
 ENV JINGCLAW_HOME=/var/lib/jingclaw

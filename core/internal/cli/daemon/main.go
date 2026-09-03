@@ -961,6 +961,9 @@ func webFetcher(cfg config.Config) (web.Fetcher, error) {
 	switch cfg.Web.Backend {
 	case "browser":
 		python, err := web.PythonPath(cfg.Web.Python)
+		if err == nil {
+			err = web.CanDriveABrowser(python)
+		}
 		if err != nil {
 			// The cause, and then the remedy. Whoever reads this is often
 			// somewhere with nothing to install into — an image carries what

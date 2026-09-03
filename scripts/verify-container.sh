@@ -38,7 +38,9 @@ cleanup() {
 	docker rm -f "$NAME-again" >/dev/null 2>&1
 	docker rm -f "$NAME-first" >/dev/null 2>&1
 	docker rm -f "$NAME-seeded" >/dev/null 2>&1
+	docker rm -f "$NAME-web" >/dev/null 2>&1
 	docker volume rm "$VOLUME-seeded" >/dev/null 2>&1
+	docker volume rm "$VOLUME-web" >/dev/null 2>&1
 	docker volume rm "$VOLUME" >/dev/null 2>&1
 	docker image rm -f "$IMAGE" >/dev/null 2>&1
 }
@@ -232,5 +234,48 @@ printf '%s' "$SEEN" | grep -q '^Answer briefly\.$' ||
 printf '%s' "$SEEN" | grep -q 'fake-echo' ||
 	fail "the deployment is running the example rather than the supplied configuration"
 printf 'ok   a deployment can bring its own settings and persona in variables\n'
+
+# Turning web reading on does not stop the daemon coming up.
+#
+# The check is a start, not a fetch. What broke a deployment was the refusal
+# at startup — no python3 in the image, so a daemon with web.enabled = true
+# never ran at all — and a page fetch here would test somebody else's network
+# rather than this image.
+WEBBED="$VOLUME-web"
+docker volume create "$WEBBED" >/dev/null
+docker run --name "$NAME-web" -d -v "$WEBBED:/var/lib/jingclaw" \
+	-e JINGCLAW_CONFIG='[provider]
+backend = "fake"
+fake_model = "fake-echo"
+
+[web]
+enabled = true
+' \
+	"$IMAGE" daemon >/dev/null
+
+WAITED=0
+while ! docker exec "$NAME-web" test -f /var/lib/jingclaw/run/daemon.json 2>/dev/null; do
+	WAITED=$((WAITED + 1))
+	[ "$WAITED" -gt 300 ] &&
+		fail "it will not start with web reading on: $(docker logs "$NAME-web" 2>&1 | tail -20)"
+	sleep 0.2
+done
+docker rm -f "$NAME-web" >/dev/null
+docker volume rm "$WEBBED" >/dev/null 2>&1
+printf 'ok   it starts with web reading turned on\n'
+
+# The wrapper is importable and the browser it drives is not in the image.
+#
+# Both halves. Without the wrapper, web reading cannot work at all. With the
+# binary baked in, this image would be redistributing a compiled Chromium that
+# its licence says may not be redistributed — a check rather than a comment,
+# because that is the kind of thing a later "just make it faster" undoes.
+docker run --rm --entrypoint python3 "$IMAGE" -c 'import cloakbrowser' >/dev/null 2>&1 ||
+	fail "cloakbrowser is not importable, so web reading cannot work in this image"
+
+docker run --rm --entrypoint sh "$IMAGE" -c \
+	'find / -xdev -name "*chrom*" -type f -size +50M 2>/dev/null | head -1' | grep -q . &&
+	fail "a browser binary is in the image, which its licence does not allow redistributing"
+printf 'ok   the wrapper is in the image and the browser it fetches is not\n'
 
 printf '\nall checks passed\n'
