@@ -293,6 +293,13 @@ there the address is chosen by somebody else.
 that answer anything else with a challenge page. Needs Python and the
 cloakbrowser package. "none" disables fetching.
 
+Both halves are checked when the daemon starts, not when the model first asks
+for a page: the interpreter has to be there, and it has to be able to import
+the package. An interpreter without the package used to pass, and what that
+produced was a daemon that came up, validated everything, and failed on every
+fetch — which from a chat room is indistinguishable from a model that will not
+use the tool.
+
 ## `[web.search]`
 
 **`backend`**

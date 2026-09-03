@@ -553,6 +553,19 @@ already knew. The daemon now writes them on every start, after whatever the
 environment supplied and never over a file that exists, so a redeployment
 finds them already in the volume.
 
+**Web reading in the container, up to the line the licence draws.** The image
+carries python3 and the `cloakbrowser` wrapper, so `web.enabled = true` starts
+instead of refusing — a container that says "python3 is not on PATH" is a wall
+rather than a missing package, because an image carries what it carries. The
+Chromium the wrapper drives is *not* in the image and must not be: it is
+licensed free to use and not to redistribute, and a published image containing
+it is redistribution. It is fetched on the first page read into
+`CLOAKBROWSER_CACHE_DIR`, pointed at the volume so the ~200MB arrives once
+rather than every time the container is replaced. The container check asserts
+both halves — the wrapper importable, and no browser-sized binary in the image
+— because "just bake it in and make the first read faster" is exactly the kind
+of change that gets made later by somebody who never read the licence.
+
 ## Not done
 
 **Built but nothing uses it**

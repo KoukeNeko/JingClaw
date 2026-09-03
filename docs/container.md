@@ -133,43 +133,52 @@ An NVIDIA host can hand the GPU to the Ollama service; `compose.yaml` has the
 block to uncomment. A machine without one fails to start with it present,
 which is why it is not on by default.
 
-## What the image cannot do: read the web
+## Reading the web
 
-`web.enabled = true` with the default backend drives a real browser, and the
-image carries neither python3 nor the `cloakbrowser` package. The daemon says
-so and stops rather than coming up with the tool missing:
+`web.enabled = true` works in this image. It carries python3 and the
+`cloakbrowser` wrapper, which is what the daemon checks for at startup — a
+container without them refuses to start, and "python3 is not on PATH" is a
+wall rather than a missing package when there is nowhere to install anything.
+
+Reading is still off by default. What the image changes is what happens when
+somebody turns it on.
+
+**The browser itself is not in the image, and cannot be.** `cloakbrowser` is
+an MIT wrapper around a compiled Chromium that is licensed separately: free to
+use, and **not to redistribute**. Putting it in a published image is
+redistribution, so it is fetched by the deployment that runs it instead —
+about 200MB, on the first page read.
+
+It lands in the volume rather than the container's writable layer:
 
 ```
-error: web.backend is "browser": web: python3 is not on PATH
-Reading pages drives a real browser, which needs python3 with the cloakbrowser package. Set web.enabled = false to run without it.
+CLOAKBROWSER_CACHE_DIR=/var/lib/jingclaw/browser
 ```
 
-Stopping is deliberate. A deployment that quietly dropped page reading looks
-from the room like a model that will not use the tool, and that is a long
-afternoon.
+which the image sets. Left in the layer it would be fetched again every time
+the container was replaced. In the volume it is fetched once and outlives the
+deployment that fetched it.
 
-Two ways forward. **Leave it off** — `web.enabled = false`, the default — and
-the agent works on the workspace and the conversation, which is most of what
-it is for. Or **derive an image** that has the interpreter, the package and a
-browser for it to drive:
+Two things follow from the download being real:
 
-```dockerfile
-FROM ghcr.io/koukeneko/jingclaw
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
-	&& rm -rf /var/lib/apt/lists/*
-# Then the cloakbrowser package and the browser it drives, per its own
-# instructions — it is a separate project with its own licence, which is why
-# it is not in the image above.
-USER jingclaw
-```
+**The first page read is slow.** A couple of hundred megabytes arrive before
+the first answer does. Everything after it is the ordinary few seconds a
+browser costs.
 
-That recipe is a starting point rather than a tested one: what `cloakbrowser`
-needs from a base image is its business, and browsers in containers want fonts
-and shared libraries that are worth reading its documentation for.
+**A deployment with no outbound access cannot do it.** Somewhere that reaches
+your model and nothing else will start, validate, and then fail at the first
+page. Give it a browser instead of a network: `CLOAKBROWSER_BINARY_PATH`
+points at one you mounted, and `CLOAKBROWSER_CACHE_DIR` at a volume you
+pre-populated somewhere with a network.
 
-Either way, `web_read` is not a way past serious bot detection. Cloudflare and
-DataDome-class protection refuse a browser in a container as readily as
+**On the licence.** The free binary covers personal and commercial use; newer
+builds need a CloakBrowser Pro subscription, which a deployment supplies with
+`CLOAKBROWSER_LICENSE_KEY` like any other credential. Serving third parties
+wants an OEM licence. The terms are theirs, not this project's — read them
+before shipping this to somebody else's users.
+
+And `web_read` is not a way past serious bot detection either way. Cloudflare
+and DataDome-class protection refuse a browser in a container as readily as
 anywhere else, and the tool reports the refusal rather than inventing a page.
 
 ## A platform whose only inputs are a volume and some variables
