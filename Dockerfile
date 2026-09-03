@@ -28,7 +28,14 @@ COPY proto ./proto
 RUN cd core && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
 	-o /out/jingclaw ./cmd/jingclaw
 
-FROM debian:bookworm-slim
+# A Python base rather than debian-slim plus an apt python. python:3-slim IS
+# debian-slim with a CPython built into /usr/local, so the base does not
+# change and neither does the size — what it changes is that pip installs
+# system-wide with no externally-managed lock, so there is no virtual
+# environment and no wrapper to make python3 on PATH resolve to it. The
+# earlier venv did both, and a symlink into it resolved through to the system
+# python and lost its own packages. Off that path entirely by not having one.
+FROM python:3.13-slim-bookworm
 
 # Not scratch, and not distroless. The binary would run in either, and the
 # agent would be able to do nothing: exec_command is most of what it is for,
@@ -72,32 +79,21 @@ RUN useradd --system --uid 10001 --create-home --home-dir /home/jingclaw \
 #
 # web.enabled is off by default and this changes nothing about that. What it
 # changes is what happens when somebody turns it on: the daemon refuses to
-# start without an interpreter, which in a container is a wall rather than a
-# missing package — an image carries what it carries, and the operator reading
-# "python3 is not on PATH" has nowhere to install it.
+# start without an interpreter that can import the package, which in a
+# container is a wall rather than a missing package — an image carries what it
+# carries, and the operator reading "cannot import cloakbrowser" has nowhere
+# to install it.
 #
-# A virtual environment because bookworm's Python is externally managed and
-# refuses a system-wide pip install. python3 on PATH is this one, so nothing
-# has to be configured to find it; /usr/bin/python3 stays where apt expects.
-#
-# A wrapper and not a symlink. Python finds its environment by resolving its
-# own executable, and a symlink to the venv's python3 resolves through it to
-# /usr/bin/python3.11 — sys.prefix becomes /usr and the venv's packages are
-# invisible. Measured: the daemon started, because it only looks for an
-# interpreter, and importing cloakbrowser failed.
+# System-wide, because this base's python is under /usr/local and carries no
+# externally-managed marker, so pip installs into the python that is already
+# python3 on PATH. Nothing to activate and nothing to point at.
 #
 # playwright install-deps rather than a hand-written package list: cloakbrowser
 # drives a Chromium, the shared libraries one needs are its own business, and a
 # list written here would be right until the day it was not.
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends python3 python3-venv \
-	&& python3 -m venv /opt/cloakbrowser \
-	&& /opt/cloakbrowser/bin/pip install --no-cache-dir cloakbrowser \
-	&& /opt/cloakbrowser/bin/playwright install-deps chromium \
-	&& printf '#!/bin/sh\nexec /opt/cloakbrowser/bin/python3 "$@"\n' \
-		> /usr/local/bin/python3 \
-	&& chmod 755 /usr/local/bin/python3 \
-	&& /usr/local/bin/python3 -c 'import cloakbrowser' \
+RUN pip install --no-cache-dir cloakbrowser \
+	&& playwright install-deps chromium \
+	&& python3 -c 'import cloakbrowser' \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /out/jingclaw /usr/local/bin/jingclaw

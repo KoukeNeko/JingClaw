@@ -554,9 +554,12 @@ environment supplied and never over a file that exists, so a redeployment
 finds them already in the volume.
 
 **Web reading in the container, up to the line the licence draws.** The image
-carries python3 and the `cloakbrowser` wrapper, so `web.enabled = true` starts
-instead of refusing — a container that says "python3 is not on PATH" is a wall
-rather than a missing package, because an image carries what it carries. The
+is built on `python:3-slim` and installs the `cloakbrowser` package into that
+python, so `web.enabled = true` starts instead of refusing — a container that
+cannot import it is a wall rather than a missing package, because an image
+carries what it carries. (An earlier version bolted a venv onto debian-slim
+and a symlink into it resolved back to the system python, losing the package;
+the python base has no venv and no symlink, so neither does the bug.) The
 Chromium the wrapper drives is *not* in the image and must not be: it is
 licensed free to use and not to redistribute, and a published image containing
 it is redistribution. It is fetched on the first page read into

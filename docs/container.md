@@ -135,10 +135,11 @@ which is why it is not on by default.
 
 ## Reading the web
 
-`web.enabled = true` works in this image. It carries python3 and the
-`cloakbrowser` wrapper, which is what the daemon checks for at startup — a
-container without them refuses to start, and "python3 is not on PATH" is a
-wall rather than a missing package when there is nowhere to install anything.
+`web.enabled = true` works in this image. Its base is `python:3-slim`, so
+python3 is already on PATH, and the `cloakbrowser` package is installed into
+it — which is what the daemon checks for at startup. A container that cannot
+import it refuses to start, and that is a wall rather than a missing package
+when there is nowhere to install anything.
 
 Reading is still off by default. What the image changes is what happens when
 somebody turns it on.
