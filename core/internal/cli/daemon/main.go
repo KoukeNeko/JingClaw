@@ -962,7 +962,14 @@ func webFetcher(cfg config.Config) (web.Fetcher, error) {
 	case "browser":
 		python, err := web.PythonPath(cfg.Web.Python)
 		if err != nil {
-			return nil, fmt.Errorf("web.backend is \"browser\": %w", err)
+			// The cause, and then the remedy. Whoever reads this is often
+			// somewhere with nothing to install into — an image carries what
+			// it carries — so the line has to name the setting that runs
+			// without a browser rather than only the thing that is missing.
+			return nil, fmt.Errorf(
+				"web.backend is \"browser\": %w\n"+
+					"Reading pages drives a real browser, which needs python3 with the "+
+					"cloakbrowser package. Set web.enabled = false to run without it.", err)
 		}
 		return &web.BrowserFetcher{
 			Python:   python,
