@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
@@ -235,4 +237,84 @@ var readOnlyForWorkers = map[string]bool{
 	"git_diff":      true,
 	"read_artifact": true,
 	"skill_load":    true,
+}
+
+// toolLoadName is the tool whose successful calls load a deferred one. The
+// same literal builtin.ToolLoad uses; not imported from there, because this
+// package is what builtin's interfaces are wired to.
+const toolLoadName = "tool_load"
+
+// loadedDeclarations are the deferred tools this session has loaded, read
+// from the log rather than held in memory: a tool_load that completed without
+// error names one, and a run resumed in another process reaches the same set.
+//
+// The request carries the name and the completion says whether it succeeded,
+// so both are needed. A load that was refused — a name that is not deferred —
+// must not declare whatever the model typed.
+func (r *Runtime) loadedDeclarations(ctx context.Context, run domain.Run) []provider.ToolDeclaration {
+	if r.opts.Tools == nil {
+		return nil
+	}
+	events, err := r.opts.Store.ListAfter(ctx, run.SessionID, 0, 0)
+	if err != nil {
+		r.opts.Logger.Warn("could not read what this session has loaded",
+			"session_id", string(run.SessionID), "error", err)
+		return nil
+	}
+
+	asked := make(map[domain.ToolCallID]string)
+	loaded := make(map[string]bool)
+	for _, event := range events {
+		switch payload := event.Payload.(type) {
+		case domain.ToolCallRequested:
+			if payload.Name != toolLoadName {
+				continue
+			}
+			var args struct {
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal([]byte(payload.Arguments), &args); err == nil {
+				asked[payload.CallID] = strings.TrimSpace(args.Name)
+			}
+		case domain.ToolCallCompleted:
+			if name, ok := asked[payload.CallID]; ok && !payload.IsError && name != "" {
+				loaded[name] = true
+			}
+		}
+	}
+
+	// In name order, so the declarations are stable between requests.
+	names := make([]string, 0, len(loaded))
+	for name := range loaded {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var declared []provider.ToolDeclaration
+	for _, name := range names {
+		found, ok := r.opts.Tools.Lookup(name)
+		if !ok {
+			continue
+		}
+		if spec := found.Spec(); spec.Deferred {
+			declared = append(declared, declarationOf(spec))
+		}
+	}
+	return declared
+}
+
+// withLoaded is what one request declares: the run's fixed base plus the
+// deferred tools this session has loaded so far. Per request rather than per
+// run, because a tool_load in one turn is what makes the tool available in
+// the next — and a worker gets none of it, for the same reason it gets only
+// the read-only base.
+func (r *Runtime) withLoaded(ctx context.Context, run domain.Run, base []provider.ToolDeclaration) []provider.ToolDeclaration {
+	if run.Kind == domain.RunWorker {
+		return base
+	}
+	loaded := r.loadedDeclarations(ctx, run)
+	if len(loaded) == 0 {
+		return base
+	}
+	return append(append(make([]provider.ToolDeclaration, 0, len(base)+len(loaded)), base...), loaded...)
 }

@@ -40,6 +40,12 @@ type Environment struct {
 	OS            string
 	Arch          string
 
+	// DeferredServers are the tool servers whose tools are kept out of the
+	// list above until asked for: one line each, so a server with forty
+	// tools costs the prompt a line rather than forty schemas. The model
+	// reaches one through tool_search and tool_load.
+	DeferredServers []DeferredServer
+
 	// ToolNames are the tools actually registered, so the description cannot
 	// drift from what is really available.
 	ToolNames []string
@@ -136,7 +142,33 @@ func environment(env Environment) string {
 		fmt.Fprintf(&out, "\nTools available: %s", strings.Join(env.ToolNames, ", "))
 	}
 
+	if len(env.DeferredServers) > 0 {
+		lines := make([]string, 0, len(env.DeferredServers))
+		for _, server := range env.DeferredServers {
+			lines = append(lines, server.describe())
+		}
+		fmt.Fprintf(&out, "\nTool servers whose tools are not listed above, to save room; "+
+			"find one with tool_search and call tool_load before using it: %s",
+			strings.Join(lines, "; "))
+	}
+
 	return out.String()
+}
+
+// DeferredServer is one line of the catalogue: enough to know a server is
+// worth searching, and no more.
+type DeferredServer struct {
+	Name  string
+	Tools int
+	Level string
+}
+
+func (d DeferredServer) describe() string {
+	noun := "tools"
+	if d.Tools == 1 {
+		noun = "tool"
+	}
+	return fmt.Sprintf("%s (%d %s, %s)", d.Name, d.Tools, noun, d.Level)
 }
 
 // formatting is how to write an answer that will be read in a chat window.

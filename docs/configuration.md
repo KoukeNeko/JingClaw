@@ -383,6 +383,23 @@ reachable from chat.
 A server's tools are found when the daemon starts, so adding one is a restart
 away. The model sees them as `mcp_<name>_<tool>`.
 
+**`defer`**
+
+Keeps this server's tools out of the prompt until the model asks for one.
+Every declared tool costs every request its name, description and schema,
+and one server can carry forty; with several, the model reads a hundred
+schemas a turn and chooses among them worse. Deferred, the prompt names the
+server in one line — what it is called, how many tools, what they are gated
+at — and the model reaches a tool through `tool_search`, which returns names
+and descriptions, and `tool_load`, which returns the schema and makes the
+tool callable for the rest of the session.
+
+Off by default: it is about cost, and a deployment with one small server has
+none to save. What is loaded is read from the session's log, not held in
+memory, so a daemon restarted mid-session declares the same tools.
+Deferring changes nothing about permission: a loaded tool is gated at the
+server's level as if it had been listed from the start.
+
 ## `[process]`
 
 **`buffer_bytes`**

@@ -82,6 +82,10 @@ func (m *Manager) Register(registry *tool.Registry) error {
 // Connected is how many servers are answering, for a banner that says so.
 func (m *Manager) Connected() int { return len(m.servers) }
 
+// Servers are the ones that connected, for the prompt to name the deferred
+// ones in a line each.
+func (m *Manager) Servers() []*Server { return m.servers }
+
 // NeedLogin names the servers waiting on somebody to sign in.
 //
 // Kept apart from the ones that failed, because the two ask different things

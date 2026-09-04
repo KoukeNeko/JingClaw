@@ -633,6 +633,11 @@ type MCPServer struct {
 	// is watching it, so a server whose session has run out is reported as
 	// needing one rather than blocking a run on a page no one will open.
 	OAuth bool `koanf:"oauth"`
+
+	// Defer keeps this server's tools out of the prompt until a run asks for
+	// one by name. Off by default: it is about cost, and a deployment with
+	// one small server has none to save.
+	Defer bool `koanf:"defer"`
 }
 
 // Process bounds what long-running programs may keep.
@@ -1848,6 +1853,9 @@ enabled = false
 # rather than blocking a run on a page no one will see. "jingclaw mcp list"
 # says which servers need one.
 # oauth = false
+# Keep this server's tools out of the prompt until the model asks for one
+# by name (tool_search, tool_load). For servers with many tools.
+# defer = false
 
 # ── Interfaces ──────────────────────────────────────────────
 

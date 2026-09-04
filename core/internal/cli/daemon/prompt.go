@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
 	"log/slog"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"sort"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
@@ -21,6 +23,7 @@ func buildPrompt(
 	cfg config.Config,
 	ws *workspace.Workspace,
 	tools *tool.Registry,
+	servers *mcp.Manager,
 	logger *slog.Logger,
 ) ([]prompt.Layer, error) {
 	instructions, err := readStandingInstructions()
@@ -36,10 +39,11 @@ func buildPrompt(
 
 	return prompt.Build(
 		prompt.Environment{
-			WorkspaceRoot: ws.Root(),
-			OS:            goruntime.GOOS,
-			Arch:          goruntime.GOARCH,
-			ToolNames:     names,
+			WorkspaceRoot:   ws.Root(),
+			OS:              goruntime.GOOS,
+			Arch:            goruntime.GOARCH,
+			ToolNames:       names,
+			DeferredServers: deferredServers(servers),
 		},
 		instructions,
 		skillCatalogue(logger),
@@ -115,4 +119,26 @@ func readStandingInstructions() ([]prompt.StandingInstructions, error) {
 	}
 
 	return carried, nil
+}
+
+// deferredServers is the catalogue line for each server whose tools are kept
+// out of the prompt: name, how many, what they are gated at. Sorted, so the
+// prefix a provider caches is the same every start.
+func deferredServers(servers *mcp.Manager) []prompt.DeferredServer {
+	if servers == nil {
+		return nil
+	}
+	var out []prompt.DeferredServer
+	for _, server := range servers.Servers() {
+		if !server.Deferred() || len(server.Tools()) == 0 {
+			continue
+		}
+		out = append(out, prompt.DeferredServer{
+			Name:  server.Name(),
+			Tools: len(server.Tools()),
+			Level: server.Level().String(),
+		})
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
+	return out
 }

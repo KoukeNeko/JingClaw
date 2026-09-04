@@ -402,10 +402,12 @@ func run(args []string) error {
 		&builtin.SkillLoad{Skills: installedSkills{}, Activations: later},
 		&builtin.SkillStage{Installer: deploymentSkills{}},
 		&builtin.SkillActivate{Installer: deploymentSkills{}},
+		&builtin.ToolSearch{Deferred: tools},
+		&builtin.ToolLoad{Deferred: tools},
 		&builtin.Investigate{Delegator: later},
 	)
 
-	layers, err := buildPrompt(cfg, ws, tools, logger)
+	layers, err := buildPrompt(cfg, ws, tools, servers, logger)
 	if err != nil {
 		return err
 	}
@@ -1037,6 +1039,7 @@ func mcpServers(cfg config.Config, sessions *mcpauth.Store) []mcp.ServerConfig {
 
 			OAuth:    configured.OAuth,
 			Sessions: sessions,
+			Defer:    configured.Defer,
 		})
 	}
 

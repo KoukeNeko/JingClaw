@@ -71,15 +71,30 @@ func (r *Registry) MustRegister(tools ...Tool) {
 	}
 }
 
-// Specs lists every registered tool, in a stable order so the prompt prefix
-// stays byte-identical between runs and remains cacheable.
+// Specs lists every tool the model is shown, in a stable order so the prompt
+// prefix stays byte-identical between runs and remains cacheable.
+//
+// A deferred tool is registered — Lookup and Execute know it — and is not
+// here: it reaches the model only once a run has loaded it. DeferredSpecs is
+// the other half.
 func (r *Registry) Specs() []Spec {
+	return r.specsWhere(func(spec Spec) bool { return !spec.Deferred })
+}
+
+// DeferredSpecs lists the tools kept out of the prompt until asked for.
+func (r *Registry) DeferredSpecs() []Spec {
+	return r.specsWhere(func(spec Spec) bool { return spec.Deferred })
+}
+
+func (r *Registry) specsWhere(keep func(Spec) bool) []Spec {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	specs := make([]Spec, 0, len(r.tools))
 	for _, t := range r.tools {
-		specs = append(specs, t.Spec())
+		if spec := t.Spec(); keep(spec) {
+			specs = append(specs, spec)
+		}
 	}
 	sort.Slice(specs, func(i, j int) bool { return specs[i].Name < specs[j].Name })
 

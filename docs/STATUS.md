@@ -596,6 +596,21 @@ is released, so a later one cannot extend it by mistake. Three mutations are
 caught: never releasing, never finishing in place, and leaving a table-first
 answer standing.
 
+**Tool servers the prompt names in one line.** Every declared tool costs
+every request its schema, and one MCP server can carry forty — ssh-manager on
+the author's machine exposes 37, playwright 24 — so a handful of servers put a
+hundred schemas in front of the model a turn. A server marked `defer = true`
+registers its tools as before and declares none of them: the prompt names the
+server once, and the model reaches a tool through `tool_search` and
+`tool_load`, the shape Claude Code uses for its own MCP tools and JingClaw
+already used for skills. What a session has loaded is read from its log — a
+`tool_load` that completed without error — and declared on every later
+request, so a daemon restarted mid-session reaches the same set; a load the
+registry rejected loads nothing, and a tool that stopped being deferred is not
+declared twice. Found on the way: the declarations were computed once per run
+and reused for every request in it, so nothing loaded in one turn could have
+reached the next.
+
 ## Not done
 
 **Built but nothing uses it**

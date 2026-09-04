@@ -190,6 +190,9 @@ enabled = false
 # rather than blocking a run on a page no one will see. "jingclaw mcp list"
 # says which servers need one.
 # oauth = false
+# Keep this server's tools out of the prompt until the model asks for one
+# by name (tool_search, tool_load). For servers with many tools.
+# defer = false
 
 # ── Interfaces ──────────────────────────────────────────────
 

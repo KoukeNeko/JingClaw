@@ -176,6 +176,12 @@ type Spec struct {
 
 	Level        Level
 	Capabilities Capabilities
+
+	// Deferred means registered but not declared: the tool can be looked up,
+	// validated and run, and is left out of what the model is shown until a
+	// run loads it by name. For servers whose tools would otherwise put a
+	// hundred schemas in front of the model every turn.
+	Deferred bool
 }
 
 // Call is one invocation requested by the model.

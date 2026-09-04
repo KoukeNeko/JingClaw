@@ -49,6 +49,9 @@ type ServerConfig struct {
 	// Name distinguishes this server's tools from every other source of tools.
 	Name string
 
+	// Defer keeps the tools registered but out of the prompt until loaded.
+	Defer bool
+
 	// Command runs the server as a child of this daemon, speaking over its
 	// standard streams. URL reaches one that is already running, over HTTP.
 	// Exactly one of them is given.
@@ -209,6 +212,11 @@ type Server struct {
 	tools     []tool.Tool
 	logger    *slog.Logger
 
+	// deferred says this server's tools are kept out of the prompt until a
+	// run loads one; the prompt names the server in one line instead.
+	deferred bool
+	level    tool.Level
+
 	// closeOnce guards against a double Close from shutdown racing a failure
 	// path; the SDK's session is not documented as tolerating one.
 	closeOnce sync.Once
@@ -245,6 +253,8 @@ func Connect(
 
 	server := &Server{
 		name:      cfg.Name,
+		deferred:  cfg.Defer,
+		level:     cfg.Level,
 		session:   session,
 		limits:    limits,
 		artifacts: artifacts,
@@ -282,6 +292,12 @@ func (s *Server) Name() string { return s.name }
 // Tools are the adapted tools, ready to register.
 func (s *Server) Tools() []tool.Tool { return s.tools }
 
+// Deferred says the tools are registered but not declared until loaded.
+func (s *Server) Deferred() bool { return s.deferred }
+
+// Level is what every tool on this server is gated at.
+func (s *Server) Level() tool.Level { return s.level }
+
 func (s *Server) Close() error {
 	var err error
 	s.closeOnce.Do(func() { err = s.session.Close() })
@@ -309,6 +325,7 @@ func (s *Server) adapt(cfg ServerConfig, offered *sdk.Tool) (tool.Tool, error) {
 			Description: describe(cfg.Name, offered),
 			InputSchema: schema,
 			Level:       cfg.Level,
+			Deferred:    cfg.Defer,
 			// Assumed, not asked. What runs behind an MCP call is another
 			// program on this machine; claiming it cannot reach the network or
 			// cannot destroy anything would be a guess in the direction that

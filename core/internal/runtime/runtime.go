@@ -503,6 +503,10 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 
 	// Fixed for the life of the run, and not small: a dozen tool schemas is
 	// real weight, and history must not be allowed to grow into it.
+	//
+	// A deferred tool the session loads mid-run is declared on top of this
+	// per request and, like the plan, is not counted here: a load is one
+	// schema, bounded and rare, where history is what grows without limit.
 	overhead := estimateRequestOverhead(system, declarations)
 
 	// The loop is the agent: settle whatever is outstanding, generate, act on
@@ -569,7 +573,7 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 			Model:    r.modelFor(ctx, run.SessionID),
 			System:   r.withPlan(ctx, run.SessionID, system),
 			Messages: messages,
-			Tools:    declarations,
+			Tools:    r.withLoaded(ctx, run, declarations),
 		})
 		if err != nil {
 			// generateTurn has already recorded the outcome.
@@ -1347,13 +1351,17 @@ func (r *Runtime) toolDeclarations() []provider.ToolDeclaration {
 	specs := r.opts.Tools.Specs()
 	declarations := make([]provider.ToolDeclaration, 0, len(specs))
 	for _, spec := range specs {
-		declarations = append(declarations, provider.ToolDeclaration{
-			Name:        spec.Name,
-			Description: spec.Description,
-			InputSchema: spec.InputSchema,
-		})
+		declarations = append(declarations, declarationOf(spec))
 	}
 	return declarations
+}
+
+func declarationOf(spec tool.Spec) provider.ToolDeclaration {
+	return provider.ToolDeclaration{
+		Name:        spec.Name,
+		Description: spec.Description,
+		InputSchema: spec.InputSchema,
+	}
 }
 
 // withPlan appends the current plan to the system prompt for one turn.
