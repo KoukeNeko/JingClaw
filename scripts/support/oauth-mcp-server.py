@@ -15,6 +15,7 @@ because a stub that accepts anything proves nothing about the client.
 import base64
 import hashlib
 import json
+import socketserver
 import sys
 import threading
 import uuid
@@ -253,8 +254,24 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json(200, payload)
 
 
+class LoopbackServer(ThreadingHTTPServer):
+    """An HTTP server that does not look its own name up.
+
+    HTTPServer.server_bind resolves the machine's fully qualified name, a DNS
+    call this stub has no use for — the name only ever appears in error pages
+    nobody reads — and one that hangs on some machines: under one Python on
+    the author's laptop it never returned, and the check reported that the
+    stub had not started, with nothing on stderr to say why.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = self.server_address[0]
+        self.server_port = self.server_address[1]
+
+
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LoopbackServer(("127.0.0.1", 0), Handler)
     global ORIGIN
     ORIGIN = f"http://127.0.0.1:{server.server_address[1]}"
 
