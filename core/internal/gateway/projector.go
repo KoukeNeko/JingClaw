@@ -271,9 +271,32 @@ type StatusPayload struct {
 
 // Observe queues whatever this event warrants saying.
 func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Event) error {
+	// A worker's tool calls count towards its parent whether or not anything
+	// is delivered — the footer under the parent's answer is built from them.
+	// Recorded before the target check, which a worker may fail.
+	switch payload := event.Payload.(type) {
+	case domain.ToolCallRequested:
+		for _, record := range p.recordsFor(run) {
+			record.requested(payload)
+		}
+	case domain.ToolCallCompleted:
+		for _, record := range p.recordsFor(run) {
+			record.completed(payload, event.Seq)
+		}
+	}
+
 	target, ok := externalTarget(run)
 	if !ok {
 		return nil
+	}
+
+	// A worker shows the conversation only that it is working, and shows it
+	// on the parent's line. Its text is the parent's tool result and never
+	// posts; its ending must not take the parent's line down or account for
+	// itself under an answer that is not its own. So: still-going statuses
+	// go out under the parent's run id, and everything else stays in.
+	if run.Kind == domain.RunWorker && run.ParentRunID != "" {
+		return p.observeForParent(ctx, run, target, event)
 	}
 
 	switch payload := event.Payload.(type) {
@@ -335,9 +358,6 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		})
 
 	case domain.ToolCallRequested:
-		for _, record := range p.recordsFor(run) {
-			record.requested(payload)
-		}
 		if payload.Name == "web_read" {
 			// The address as well as the state. A platform that draws a
 			// reaction has the same emoji whichever page it went to, and
@@ -366,9 +386,6 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		})
 
 	case domain.ToolCallCompleted:
-		for _, record := range p.recordsFor(run) {
-			record.completed(payload, event.Seq)
-		}
 		if payload.Name == "web_read" {
 			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "network_finished"})
 		}
@@ -728,12 +745,19 @@ func describeCall(name, arguments string) string {
 	// The keys tools use for the thing they are working on. In order, because
 	// a tool with two of them is working on the first: exec_command has a
 	// program and arguments, and the program is what it is doing.
+	//
+	// A named list rather than "the first string argument": a tool from a
+	// server names its arguments however it likes, and one of them may be a
+	// key or a token. This line is posted to a room other people read, so
+	// only the keys that mean "the thing being worked on" are ever shown.
+	// text, content and input are what tools that take prose call it — zhtw
+	// takes "text".
 	for _, key := range []string{
 		"path", "pattern", "query", "program", "file_path", "url",
-		"name", "question",
+		"name", "question", "text", "content", "input",
 	} {
 		value, ok := decoded[key].(string)
-		if !ok || value == "" {
+		if !ok || strings.TrimSpace(value) == "" {
 			continue
 		}
 		return name + " " + boundToALine(value)
@@ -878,4 +902,35 @@ func describePlan(items []domain.PlanItem) string {
 		return fmt.Sprintf("plan: %d of %d done", done, len(items))
 	}
 	return fmt.Sprintf("plan: %d of %d done — %s", done, len(items), current)
+}
+
+// observeForParent is what a worker's event does to the conversation: the
+// parent's working line says what the worker is doing, and nothing else.
+func (p *Projector) observeForParent(
+	ctx context.Context, worker domain.Run, target ConversationRef, event domain.Event,
+) error {
+	// Under the parent's id, so the platform edits the parent's line rather
+	// than starting one for a run the conversation is not shown.
+	as := worker
+	as.ID = worker.ParentRunID
+
+	switch payload := event.Payload.(type) {
+	case domain.RunStateChanged:
+		if payload.Status != domain.RunRunning {
+			return nil
+		}
+		return p.enqueue(ctx, as, target, DispatchStatus, StatusPayload{
+			State: "provider_started", Detail: "thinking",
+		})
+	case domain.ToolCallRequested:
+		if !p.shouldSayWorking(as.ID) {
+			return nil
+		}
+		return p.enqueue(ctx, as, target, DispatchStatus, StatusPayload{
+			State:  "working",
+			Detail: describeCall(payload.Name, payload.Arguments),
+		})
+	default:
+		return nil
+	}
 }

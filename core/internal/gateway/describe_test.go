@@ -21,3 +21,21 @@ func TestACallWithNothingWorthNamingStillSaysSomething(t *testing.T) {
 		}
 	}
 }
+
+// A tool from a server names its arguments however it likes, and the working
+// line is posted to a room other people read. The keys that mean "the thing
+// being worked on" are shown; anything else — which may be a credential — is
+// not, whatever it is called.
+func TestACallFromAServerShowsItsSubjectAndNeverItsSecrets(t *testing.T) {
+	for arguments, want := range map[string]string{
+		`{"explain":true,"text":"報告江董，小弟已經復活"}`: "mcp_zhtw_zhtw 報告江董，小弟已經復活",
+		`{"content":"a paragraph"}`:             "mcp_zhtw_zhtw a paragraph",
+		`{"api_key":"sk-live-do-not-print"}`:    "mcp_zhtw_zhtw",
+		`{"token":"abc","explain":true}`:        "mcp_zhtw_zhtw",
+		`{"text":"   "}`:                        "mcp_zhtw_zhtw",
+	} {
+		if got := describeCall("mcp_zhtw_zhtw", arguments); got != want {
+			t.Errorf("%q described as %q, want %q", arguments, got, want)
+		}
+	}
+}

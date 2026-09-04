@@ -74,6 +74,13 @@ func (r *Runtime) Investigate(
 		Kind:        domain.RunWorker,
 		ParentRunID: parent,
 		CreatedAt:   r.opts.Now(),
+
+		// Where the parent is being watched from, so a channel can be told
+		// what the worker is doing. Not so the worker's answer goes there —
+		// the projector posts none of a worker's text — but its working line
+		// is the only sign the conversation gets that anything is happening
+		// while the parent waits.
+		DeliveryTargets: asking.DeliveryTargets,
 	}
 	if err := r.opts.Store.CreateRun(ctx, child); err != nil {
 		return "", err

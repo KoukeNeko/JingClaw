@@ -617,6 +617,18 @@ parent's behalf. Its calls now count towards the parent's record as well as
 its own, so the line under an answer says `mcp_zhtw_zhtw` or `skill_load`
 rather than only `investigate`.
 
+**A worker's work shows on the parent's line.** A worker now carries the
+parent's delivery target, and the projector routes its still-going statuses —
+thinking, working on a tool — under the parent's run id, so the one line under
+the conversation says `mcp_zhtw_zhtw …` while the worker runs it. Nothing
+else of a worker's reaches the channel: its text is the parent's tool result,
+and its ending must not take the parent's line down. Found on the way: the
+projector's tool records were behind the target check, so the footer fold
+never ran for a worker in production; recording now happens first. The
+working line also names what a server's tool is working on — `text`,
+`content`, `input` are subject keys now — and only those: a tool's other
+arguments may be a credential, and the line is posted to a room.
+
 ## Not done
 
 **Built but nothing uses it**
@@ -801,7 +813,9 @@ rather than in logic a unit test was looking at.
 16. The footer under an answer listed only the run's own tool calls, so a
    run that delegated to a worker said "investigate" where a person wanted to
    see the MCP tool or the skill that did the work — the worker's steps are
-   hidden from the conversation on purpose, and its tool use went with them
+   hidden from the conversation on purpose, and its tool use went with them.
+   The live line had the same gap: a worker had no delivery target, so while
+   it ran an MCP tool the channel saw "thinking" and nothing else
 15. A streamed answer that turned out to hold a table was said twice on
    Discord: the message it had been growing in was left standing with the
    whole answer, table written out, and the same answer was then posted again

@@ -32,6 +32,8 @@ type harness struct {
 	store     *sqlite.Store
 	runtime   *runtime.Runtime
 	artifacts *artifact.Store
+	provider  *fake.Provider
+	projector *gateway.Projector
 }
 
 func newHarness(t *testing.T, chunkDelay time.Duration) *harness {
@@ -66,6 +68,7 @@ func newHarness(t *testing.T, chunkDelay time.Duration) *harness {
 	}
 
 	permissions := permission.New(permission.LocalProfile())
+	scripted := fake.New(chunkDelay)
 	projector := gateway.NewProjector(store,
 		func() string { return fmt.Sprintf("dsp_%d", counter.Add(1)) },
 		func() time.Time { return time.Unix(0, 0).UTC() })
@@ -73,7 +76,7 @@ func newHarness(t *testing.T, chunkDelay time.Duration) *harness {
 	rt := runtime.New(ctx, runtime.Options{
 		Store:         store,
 		Hub:           event.NewHub(),
-		Provider:      fake.New(chunkDelay),
+		Provider:      scripted,
 		Model:         fake.ModelID,
 		Tools:         registry,
 		Permissions:   permissions,
@@ -107,7 +110,11 @@ func newHarness(t *testing.T, chunkDelay time.Duration) *harness {
 		Logger:        slog.New(slog.DiscardHandler),
 	}
 
-	return &harness{ingress: ingress, store: store, runtime: rt, artifacts: artifacts}
+	// After the runtime exists, because delegating needs it. Registered here
+	// rather than above so a test can script a worker.
+	registry.MustRegister(&builtin.Investigate{Delegator: rt})
+
+	return &harness{ingress: ingress, store: store, runtime: rt, artifacts: artifacts, provider: scripted, projector: projector}
 }
 
 func (h *harness) bind(t *testing.T, profile string, allowed ...string) {
