@@ -431,3 +431,25 @@ func readManifest(staging, name string) (Staged, error) {
 	staged.Dir = filepath.Join(staging, name)
 	return staged, nil
 }
+
+// StagedSkill reads back one staged skill: what Stage recorded about where it
+// came from, and the skill as it now sits on disk.
+//
+// For an approval a person is about to decide. The manifest carries the source
+// and the digests; the skill carries the description and the instructions
+// themselves, so the decision is made against the real bytes.
+func StagedSkill(root, name string) (Staged, Skill, error) {
+	if err := safeName(name); err != nil {
+		return Staged{}, Skill{}, err
+	}
+	staging := filepath.Join(root, ".staged")
+	manifest, err := readManifest(staging, name)
+	if err != nil {
+		return Staged{}, Skill{}, err
+	}
+	one, err := Read(filepath.Join(staging, name))
+	if err != nil {
+		return Staged{}, Skill{}, fmt.Errorf("skill: staged %q is not readable: %w", name, err)
+	}
+	return manifest, one, nil
+}

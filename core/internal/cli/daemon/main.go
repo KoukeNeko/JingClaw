@@ -400,6 +400,8 @@ func run(args []string) error {
 		&builtin.AskUser{},
 		&builtin.Now{},
 		&builtin.SkillLoad{Skills: installedSkills{}, Activations: later},
+		&builtin.SkillStage{Installer: deploymentSkills{}},
+		&builtin.SkillActivate{Installer: deploymentSkills{}},
 		&builtin.Investigate{Delegator: later},
 	)
 
@@ -1366,6 +1368,46 @@ func (installedSkills) Installed() ([]skill.Skill, error) {
 	}
 	found2, _, err := skill.Installed(dir.Skills())
 	return found2, err
+}
+
+// deploymentSkills fetches, stages and activates skills in the deployment's
+// own skills directory, for skill_stage and skill_activate.
+//
+// The same directory installedSkills reads and the CLI installs into, resolved
+// per call rather than kept, so the daemon has one answer for where a skill
+// lives.
+type deploymentSkills struct{}
+
+func (deploymentSkills) installer() (*skill.Installer, error) {
+	dir, found := home.Resolve()
+	if !found {
+		return nil, fmt.Errorf("skill: there is no home directory to install into")
+	}
+	return &skill.Installer{Root: dir.Skills(), Now: time.Now}, nil
+}
+
+func (d deploymentSkills) Stage(ctx context.Context, source skill.Source) (skill.Staged, error) {
+	installer, err := d.installer()
+	if err != nil {
+		return skill.Staged{}, err
+	}
+	return installer.Stage(ctx, source)
+}
+
+func (d deploymentSkills) Activate(name string) (skill.Locked, error) {
+	installer, err := d.installer()
+	if err != nil {
+		return skill.Locked{}, err
+	}
+	return installer.Activate(name)
+}
+
+func (deploymentSkills) Staged(name string) (skill.Staged, skill.Skill, error) {
+	dir, found := home.Resolve()
+	if !found {
+		return skill.Staged{}, skill.Skill{}, fmt.Errorf("skill: there is no home directory")
+	}
+	return skill.StagedSkill(dir.Skills(), name)
 }
 
 // confinement is the sandbox this deployment asked for, or nil for none.
