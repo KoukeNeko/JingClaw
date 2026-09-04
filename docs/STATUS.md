@@ -569,6 +569,22 @@ both halves — the wrapper importable, and no browser-sized binary in the image
 — because "just bake it in and make the first read faster" is exactly the kind
 of change that gets made later by somebody who never read the licence.
 
+**An agent can propose a skill, and a person still decides.** Installing a
+skill used to be operator-only at the CLI, because a skill is standing
+instructions placed in front of the model — text it will follow in every
+future session. The agent now has two tools: skill_stage fetches a pinned
+commit into a staging area that steers nothing (network_read, so where an
+operator is present the agent may fetch and look), and skill_activate installs
+a staged skill (remember, the level every attended profile stops for). The
+activate approval is built from the staged bytes, not the model's claim: it
+shows the source, the exact commit, a digest of the whole directory, the size,
+the instructions themselves, and says plainly that this becomes standing
+instructions — because a description alone is the author vouching for their own
+skill. The invariant underneath is a test rather than a claim: the permission
+engine has no skill input, so the most permission-hostile skill anyone could
+write decides no exec_command call differently, and a tool cannot lower the
+level it is judged at.
+
 ## Not done
 
 **Built but nothing uses it**

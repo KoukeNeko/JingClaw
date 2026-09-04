@@ -1,5 +1,7 @@
 # Agent-proposed, human-approved skill install
 
+**Status: done.** All six steps landed; see the commits and `scripts/verify-skill-proposal.sh`.
+
 ## Context
 
 Today a skill is installed only by an operator at the CLI:
@@ -29,7 +31,10 @@ Two tools, because there are two genuinely different acts:
    not the author's prose. Low blast radius: bytes on disk that steer nothing.
 
 2. **`skill_activate(name)`** — move a staged skill into `skills/<name>/` and
-   record it in the lockfile. `high_impact`. The approval's preview is built
+   record it in the lockfile. `remember`, not `high_impact`: high_impact is
+   Deny in every profile (CLI-only), while remember is the level every attended
+   profile stops for — and it is the honest fit, since a skill is standing
+   instructions believed across sessions like a memory. The approval's preview is built
    from the *staged bytes already on disk* — no network in the render path —
    and shows the whole honest surface: name, repo, exact commit, a digest of
    the entire installed tree, size, the description line, and a prominent
@@ -89,8 +94,8 @@ hash proves nobody swapped what you approved, not what you approved):
    becomes `Stage` then `Activate`. **← this increment.**
 2. **Whole-tree digest.** Add a digest over the installed directory, not only
    SKILL.md, and carry it in `Staged`/`Locked`.
-3. **Tools.** `skill_stage` (execute/network level) and `skill_activate`
-   (high_impact). Staged skills are never offered to the model.
+3. **Tools.** `skill_stage` (network_read) and `skill_activate` (remember).
+   Staged skills are never offered to the model.
 4. **Rich activate preview.** `previewOf` for `skill_activate` reads the staged
    bytes and renders the surface above with the blast-radius warning.
 5. **Invariant test.** An activated skill's text cannot change a permission
@@ -105,8 +110,9 @@ hash proves nobody swapped what you approved, not what you approved):
   activated.
 - The invariant test (step 5).
 - `scripts/verify-skill-proposal.sh`: an end-to-end run where the agent stages
-  from a local `file://` repo, the staged skill steers nothing, activation is
-  approved, and only then does the catalogue list it.
+  from a repository served over `git://` (a local path is refused on purpose),
+  the staged skill steers nothing, activation stops for an approval, and only
+  answering it installs the skill and puts it in the catalogue.
 
 ## Open decision
 
