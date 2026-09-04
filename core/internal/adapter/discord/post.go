@@ -152,7 +152,8 @@ func (a *Adapter) postReactionStatus(
 	}
 
 	emoji, remove := reactionForStatus(payload.State)
-	if emoji == "" && !remove {
+	cleared := reactionsCleared(payload.State)
+	if emoji == "" && !remove && len(cleared) == 0 {
 		return nil, nil
 	}
 	conversation := dispatch.Target
@@ -162,6 +163,18 @@ func (a *Adapter) postReactionStatus(
 	messageID, err := snowflake.Parse(conversation.SourceMessageID)
 	if err != nil {
 		return nil, fmt.Errorf("discord: unusable source message in dispatch %s: %w", dispatch.ID, err)
+	}
+	// What this state ends. The waiting mark comes off the moment the run
+	// starts, whichever way it ends up ending; a message still marked as
+	// waiting while its answer is being written would be a lie.
+	for _, done := range cleared {
+		if err := a.client.Rest.RemoveOwnReaction(channelID, messageID, done); err != nil {
+			a.config.Logger.Debug("could not clear a reaction",
+				"run_id", string(dispatch.RunID), "emoji", done, "error", err)
+		}
+	}
+	if emoji == "" && !remove {
+		return nil, nil
 	}
 	if remove {
 		if err := a.client.Rest.RemoveOwnReaction(channelID, messageID, emoji); err != nil {
@@ -195,8 +208,24 @@ func (a *Adapter) postReactionStatus(
 	return []string{message.ID.String()}, nil
 }
 
+// waitingMark is the reaction on a message waiting its turn: received, and
+// in line behind one still being answered.
+const waitingMark = "📥"
+
+// reactionsCleared names the reactions a state ends.
+func reactionsCleared(state string) []string {
+	switch state {
+	case "provider_started", "completed", "failed", "cancelled":
+		return []string{waitingMark}
+	default:
+		return nil
+	}
+}
+
 func reactionForStatus(state string) (string, bool) {
 	switch state {
+	case "queued":
+		return waitingMark, false
 	case "network_started":
 		return "🌍", false
 	case "network_finished":

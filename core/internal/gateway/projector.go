@@ -497,6 +497,15 @@ func (p *Projector) observeState(
 	payload domain.RunStateChanged,
 ) error {
 	switch payload.Status {
+	case domain.RunQueued:
+		// In line behind a message still being answered. Said as a reaction
+		// on the person's own message rather than as a line: they can see it
+		// was received and is waiting, and the line under the conversation
+		// stays about the answer being written.
+		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
+			State: "queued", Detail: "waiting for the message before it",
+		})
+
 	case domain.RunRunning:
 		// Seeing a run start is what makes its eventual summary complete. A
 		// run resumed from an approval after a restart never passes here, and

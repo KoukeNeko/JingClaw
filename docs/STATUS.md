@@ -656,6 +656,17 @@ contract now explains the bracketed line — it never had, and the model had
 been guessing what the time meant; with a sender on it, guessing wrong means
 answering the wrong person.
 
+**One message at a time per session.** A second message while the first is
+being answered waits its turn: it stays `Queued` in the store, the log says
+so, and it starts the moment the first is done — in the order the messages
+arrived. Sessions do not wait for each other. A waiting run can be
+interrupted where it stands, and one left waiting when the daemon stopped
+goes back in line at the next start rather than being marked as failed. On
+Discord the waiting message itself is marked 📥, and the mark comes off the
+moment the run starts (or is cancelled before it does). A worker shares its
+parent's session and a resumed run rejoins one; neither owns the turn, so
+neither hands it on.
+
 ## Not done
 
 **Built but nothing uses it**
@@ -843,6 +854,12 @@ rather than in logic a unit test was looking at.
    hidden from the conversation on purpose, and its tool use went with them.
    The live line had the same gap: a worker had no delivery target, so while
    it ran an MCP tool the channel saw "thinking" and nothing else
+17. Every message started its own run at once, so two people typing into
+   one channel got two answers written in parallel, each with a status line
+   of its own — the "two thinking lines" a person saw. There was no queue.
+   Found beside it: a test's fake stream never returned io.EOF after
+   Completed, so its run never finished; nobody noticed while a second turn
+   could run beside a first that never ended
 15. A streamed answer that turned out to hold a table was said twice on
    Discord: the message it had been growing in was left standing with the
    whole answer, table written out, and the same answer was then posted again

@@ -24,6 +24,7 @@ type sent struct {
 	// Method is the HTTP verb: POST for a new message, PATCH for one edited
 	// in place, DELETE for one taken down.
 	Method  string
+	Path    string
 	Content string
 	File    []byte
 }
@@ -43,7 +44,7 @@ func stubDiscord(t *testing.T) (*Adapter, *[]sent) {
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		record := sent{Method: r.Method}
+		record := sent{Method: r.Method, Path: r.URL.Path}
 
 		if strings.HasPrefix(r.Header.Get("content-type"), "multipart/") {
 			if err := r.ParseMultipartForm(8 << 20); err != nil {

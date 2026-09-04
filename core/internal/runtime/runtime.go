@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -212,8 +213,16 @@ type Options struct {
 type Runtime struct {
 	opts Options
 
-	mu       sync.RWMutex
-	active   map[domain.RunID]*activeRun
+	mu     sync.RWMutex
+	active map[domain.RunID]*activeRun
+
+	// queued holds the runs waiting their turn, per session, oldest first;
+	// busy names the sessions with a run executing. One run at a time per
+	// session: a conversation answers in the order it was spoken to, and two
+	// people typing into one channel got two answers written at once, each
+	// with a status line of its own.
+	queued   map[domain.SessionID][]queuedRun
+	busy     map[domain.SessionID]bool
 	draining bool
 
 	// group owns every run goroutine, so shutdown can wait for them instead of
@@ -231,6 +240,13 @@ type activeRun struct {
 
 	cancel context.CancelCauseFunc
 	done   chan struct{}
+
+	// owner says this run holds its session's turn — it came in through admit
+	// and must hand the session on when it is done. A worker shares its
+	// parent's session and a resumed run rejoins one; neither owns the turn,
+	// and a hand-off from either would start the next message while the
+	// conversation is still being answered.
+	owner bool
 }
 
 // New builds a runtime.
@@ -271,6 +287,8 @@ func New(ctx context.Context, opts Options) *Runtime {
 	return &Runtime{
 		opts:     opts,
 		active:   make(map[domain.RunID]*activeRun),
+		queued:   make(map[domain.SessionID][]queuedRun),
+		busy:     make(map[domain.SessionID]bool),
 		group:    group,
 		groupCtx: groupCtx,
 	}
@@ -294,13 +312,28 @@ func (r *Runtime) RecoverOrphanedRuns(ctx context.Context) (int, error) {
 	}
 
 	orphans := make([]domain.Run, 0, len(unfinished))
+	var waiting []domain.Run
 	for _, run := range unfinished {
 		if isDurablyPaused(run.Status) {
 			r.opts.Logger.Info("leaving a paused run alone",
 				"run_id", string(run.ID), "status", string(run.Status))
 			continue
 		}
+		if run.Status == domain.RunQueued {
+			// It never started, so nothing about it was lost with the
+			// process. Its message is in the log; it goes back in line.
+			waiting = append(waiting, run)
+			continue
+		}
 		orphans = append(orphans, run)
+	}
+	sort.Slice(waiting, func(a, b int) bool { return waiting[a].CreatedAt.Before(waiting[b].CreatedAt) })
+	for _, run := range waiting {
+		if err := r.admit(ctx, run); err != nil {
+			return 0, fmt.Errorf("runtime: requeue run %s: %w", run.ID, err)
+		}
+		r.opts.Logger.Info("put a waiting run back in line",
+			"run_id", string(run.ID), "session_id", string(run.SessionID))
 	}
 
 	for _, run := range orphans {
@@ -460,25 +493,91 @@ func (r *Runtime) SendTurnTo(
 
 	// The run's context descends from the runtime group rather than the
 	// request, so the run outlives the RPC that started it.
-	runCtx, cancel := context.WithCancelCause(r.groupCtx)
+	if err := r.admit(ctx, run); err != nil {
+		return "", "", err
+	}
+	return runID, messageID, nil
+}
 
-	tracked := &activeRun{session: sessionID, cancel: cancel, done: make(chan struct{})}
+// queuedRun is a run waiting for the one before it in its session to finish.
+type queuedRun struct {
+	run     domain.Run
+	ctx     context.Context
+	cancel  context.CancelCauseFunc
+	tracked *activeRun
+}
+
+// admit starts a run if its session is idle and queues it otherwise.
+//
+// Tracked either way, from the moment it is admitted: Wait blocks on it and
+// InterruptRun can reach it whether it is executing or still in line. A run
+// that has to wait says so in the log — the Queued transition is what a
+// channel reacts to — and one that can start at once does not, so a lone
+// message never flickers through a queue it was never in.
+func (r *Runtime) admit(ctx context.Context, run domain.Run) error {
+	runCtx, cancel := context.WithCancelCause(r.groupCtx)
+	tracked := &activeRun{session: run.SessionID, cancel: cancel, done: make(chan struct{}), owner: true}
+	waiting := queuedRun{run: run, ctx: runCtx, cancel: cancel, tracked: tracked}
 
 	r.mu.Lock()
-	r.active[runID] = tracked
+	r.active[run.ID] = tracked
+	if r.busy[run.SessionID] {
+		r.queued[run.SessionID] = append(r.queued[run.SessionID], waiting)
+		r.mu.Unlock()
+		return r.transition(ctx, run, domain.RunQueued, "")
+	}
+	r.busy[run.SessionID] = true
 	r.mu.Unlock()
 
-	r.group.Go(func() error {
-		defer r.releaseRun(runID, tracked)
-		defer cancel(nil)
+	r.launch(waiting)
+	return nil
+}
 
+// launch executes a run in the group, and hands the session to the next in
+// line when it is done.
+func (r *Runtime) launch(waiting queuedRun) {
+	r.group.Go(func() error {
+		defer r.releaseRun(waiting.run.ID, waiting.tracked)
+		defer waiting.cancel(nil)
+		if waiting.ctx.Err() != nil {
+			// Interrupted while it waited. Said so, rather than executed
+			// against a context that is already gone.
+			r.finish(context.WithoutCancel(waiting.ctx), waiting.run, domain.RunCancelled, "cancelled while queued")
+			return nil
+		}
 		// A failing run is a normal outcome recorded in the log, not a reason
 		// to tear down the whole daemon, so this never returns a non-nil error.
-		r.execute(runCtx, run)
+		r.execute(waiting.ctx, waiting.run)
 		return nil
 	})
+}
 
-	return runID, messageID, nil
+// dequeue takes a run out of its session's line, if it is there.
+func (r *Runtime) dequeue(session domain.SessionID, id domain.RunID) (queuedRun, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	line := r.queued[session]
+	for index, waiting := range line {
+		if waiting.run.ID == id {
+			r.queued[session] = append(line[:index:index], line[index+1:]...)
+			return waiting, true
+		}
+	}
+	return queuedRun{}, false
+}
+
+// next hands the session to the run that has waited longest, or frees it.
+func (r *Runtime) next(session domain.SessionID) (queuedRun, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	line := r.queued[session]
+	if len(line) == 0 {
+		delete(r.busy, session)
+		delete(r.queued, session)
+		return queuedRun{}, false
+	}
+	r.queued[session] = line[1:]
+	return line[0], true
 }
 
 func (r *Runtime) execute(ctx context.Context, run domain.Run) {
@@ -728,6 +827,16 @@ func (r *Runtime) InterruptRun(ctx context.Context, id domain.RunID, reason stri
 	if reason != "" {
 		cause = fmt.Errorf("%w: %s", ErrUserInterrupted, reason)
 	}
+
+	// Still in line: it never started, so there is nothing to stop — it is
+	// taken out of the line and finished as cancelled here and now, rather
+	// than left to discover the cancellation when its turn comes.
+	if waiting, queued := r.dequeue(run.SessionID, id); queued {
+		waiting.cancel(cause)
+		r.finish(ctx, waiting.run, domain.RunCancelled, reason)
+		r.releaseRun(id, waiting.tracked)
+		return domain.RunCancelled, nil
+	}
 	tracked.cancel(cause)
 
 	return domain.RunCancelling, nil
@@ -746,6 +855,16 @@ func (r *Runtime) releaseRun(id domain.RunID, tracked *activeRun) {
 	r.mu.Unlock()
 
 	close(tracked.done)
+
+	// The session is this run's to hand on. Whoever waited longest goes
+	// next; nobody waiting frees the session for the next message to start
+	// at once.
+	if !tracked.owner {
+		return
+	}
+	if following, ok := r.next(tracked.session); ok {
+		r.launch(following)
+	}
 }
 
 // Wait blocks until a run stops moving: finished, failed, or parked on a

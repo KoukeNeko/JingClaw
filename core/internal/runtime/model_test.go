@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -70,14 +71,22 @@ func systemText(req provider.Request) string {
 	return out.String()
 }
 
-type oneWord struct{ done bool }
+// oneWord says one word and ends. It used to answer Completed forever after
+// the word rather than io.EOF, which nobody noticed while a second turn could
+// run beside a first that never finished; a session that answers one message
+// at a time noticed at once.
+type oneWord struct{ step int }
 
 func (s *oneWord) Recv(context.Context) (provider.Event, error) {
-	if s.done {
+	s.step++
+	switch s.step {
+	case 1:
+		return provider.TextDelta{Text: "ok"}, nil
+	case 2:
 		return provider.Completed{StopReason: domain.StopEndTurn}, nil
+	default:
+		return nil, io.EOF
 	}
-	s.done = true
-	return provider.TextDelta{Text: "ok"}, nil
 }
 
 func (s *oneWord) Close() error { return nil }

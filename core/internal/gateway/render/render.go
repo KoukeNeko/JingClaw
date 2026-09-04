@@ -293,6 +293,10 @@ func renderStatus(payload jcgateway.StatusPayload, style Style) string {
 	switch payload.State {
 	case "running":
 		return "👀"
+	case "queued":
+		// A reaction, not a line: the message is waiting its turn, and a line
+		// saying so under the previous answer would read as part of it.
+		return ""
 	// Every state that means "still going" draws the same line. They are
 	// separate states because a platform that shows a reaction wants a
 	// different emoji for each; a platform that shows words wants the words,
