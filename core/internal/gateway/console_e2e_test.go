@@ -379,8 +379,17 @@ func TestOnlyAConsoleGetsTheLog(t *testing.T) {
 			if len(logs) == 0 {
 				t.Fatal("a console was sent no log")
 			}
-			if logs[0].Tool != "read_file" {
-				t.Errorf("the log names %q", logs[0].Tool)
+			// The feed has the message, the run and the call going out
+			// before it; the finished call is the one that carries the
+			// tool's name.
+			named := false
+			for _, log := range logs {
+				if log.Tool == "read_file" {
+					named = true
+				}
+			}
+			if !named {
+				t.Errorf("no log names the finished call: %+v", logs)
 			}
 		})
 	}
@@ -533,8 +542,25 @@ func TestAConsoleStillCannotRunACommand(t *testing.T) {
 		if dispatch.Kind == gateway.DispatchApproval {
 			t.Error("a console was offered the chance to approve running a program")
 		}
-		if strings.Contains(dispatch.Payload, "hello") {
+		if dispatch.Kind != gateway.DispatchLog {
+			if strings.Contains(dispatch.Payload, "hello") {
+				t.Errorf("a command ran from a console: %s", dispatch.Payload)
+			}
+			continue
+		}
+		// The feed shows the call going out with the arguments it was asked
+		// with — that is what a console is for, and the terminal shows the
+		// same. What must never appear is the call having run: a finished
+		// exec that did not fail, or output it printed.
+		var log gateway.LogPayload
+		if err := json.Unmarshal([]byte(dispatch.Payload), &log); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if log.Tool == "exec_command" && !log.IsError {
 			t.Errorf("a command ran from a console: %s", dispatch.Payload)
+		}
+		if strings.Contains(log.Output, "hello") {
+			t.Errorf("a command's output reached the console: %s", dispatch.Payload)
 		}
 	}
 }

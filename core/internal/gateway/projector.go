@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/KoukeNeko/JingClaw/core/internal/console"
 	"log/slog"
 	"strings"
 	"sync"
@@ -135,13 +136,30 @@ type MessageFile struct {
 	MediaType string `json:"media_type,omitempty"`
 }
 
+// LogLine is one line of the console feed, in the terminal console's own
+// vocabulary so a person reading either sees the same thing.
+type LogLine struct {
+	Session string `json:"session"`
+	Kind    string `json:"kind"`
+	State   string `json:"state,omitempty"`
+	Meta    string `json:"meta,omitempty"`
+	Preview string `json:"preview,omitempty"`
+}
+
 // LogPayload is one thing that happened, for a channel that wants the detail.
 //
 // Only sent to a console. A platform is expected to show these as they arrive
 // and leave them, unlike a status line, which is the answer to "what is it
 // doing now" and is rewritten when that changes.
 type LogPayload struct {
-	Tool    string `json:"tool"`
+	// Line is the event as the terminal console would draw it — MESSAGE,
+	// RUN, TOOL →, TOOL ✓, ANSWER — for a console channel that mirrors the
+	// deployment's feed. Set for every mirrored event; the tool fields below
+	// are filled in as well for a tool call, so what a console reads about a
+	// finished call is the same whichever way it arrived.
+	Line *LogLine `json:"line,omitempty"`
+
+	Tool    string `json:"tool,omitempty"`
 	Summary string `json:"summary,omitempty"`
 
 	DurationMS int64 `json:"duration_ms,omitempty"`
@@ -290,6 +308,14 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		return nil
 	}
 
+	// A console is the deployment's log, wherever the run is happening. The
+	// terminal console shows every run's lines; a console channel is the same
+	// thing for somebody not at the machine, so it gets the same lines — for
+	// a run in a public room as much as for its own.
+	if err := p.mirrorToConsoles(ctx, run, event); err != nil {
+		return err
+	}
+
 	// A worker shows the conversation only that it is working, and shows it
 	// on the parent's line. Its text is the parent's tool result and never
 	// posts; its ending must not take the parent's line down or account for
@@ -393,23 +419,11 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "memory_finished"})
 		}
 
-		// A finished call is not news to a room full of people, and it is
-		// exactly what the operator of a private one wants: what ran, how long
-		// it took, and whether it worked. A console is a log; an ordinary
-		// channel is a conversation.
-		if !p.isConsole(ctx, target) {
-			return nil
-		}
-		output, cut := boundOutput(payload.Content, maxLoggedOutput)
-		return p.enqueue(ctx, run, target, DispatchLog, LogPayload{
-			Tool:            payload.Name,
-			Summary:         payload.Summary,
-			Output:          output,
-			OutputTruncated: cut || payload.Truncated,
-			DurationMS:      payload.DurationMS,
-			IsError:         payload.IsError,
-			Artifact:        artifactID(payload.Artifact),
-		})
+		// A finished call is not news to a room full of people. What the
+		// operator of a private one wants — what ran, how long, whether it
+		// worked, and what it printed — reaches every console through the
+		// mirror above, this room included when it is one.
+		return nil
 
 	case domain.UsageChanged:
 		p.record(run.ID).usage = payload.Usage
@@ -933,4 +947,77 @@ func (p *Projector) observeForParent(
 	default:
 		return nil
 	}
+}
+
+// mirrorToConsoles sends the event, as the terminal console would draw it, to
+// every console channel of the deployment.
+//
+// Every console rather than the run's own: an operator's private room is a
+// window on the whole deployment, the way the terminal is, and a run that
+// happens in a public room is exactly the one they want to watch. Bound to
+// what console.Describe chooses to show, so the two consoles never disagree
+// about what the feed contains. A tool's output travels with a finished call,
+// bounded here so a build log does not cross the queue to be thrown away.
+func (p *Projector) mirrorToConsoles(ctx context.Context, run domain.Run, event domain.Event) error {
+	line, worth := console.Describe(event)
+	if !worth {
+		return nil
+	}
+
+	consoles, err := p.consoleTargets(ctx)
+	if err != nil {
+		p.Logger.Warn("could not list the console channels", "error", err)
+		return nil
+	}
+	if len(consoles) == 0 {
+		return nil
+	}
+
+	payload := LogPayload{Line: &LogLine{
+		Session: string(line.Session),
+		Kind:    line.Kind,
+		State:   line.State,
+		Meta:    line.Meta,
+		Preview: boundToALine(line.Preview),
+	}}
+	if completed, ok := event.Payload.(domain.ToolCallCompleted); ok {
+		output, cut := boundOutput(completed.Content, maxLoggedOutput)
+		payload.Tool = completed.Name
+		payload.Summary = completed.Summary
+		payload.Output = output
+		payload.OutputTruncated = cut || completed.Truncated
+		payload.DurationMS = completed.DurationMS
+		payload.IsError = completed.IsError
+		if completed.Artifact != nil {
+			payload.Artifact = completed.Artifact.ID
+		}
+	}
+
+	for _, target := range consoles {
+		if err := p.enqueue(ctx, run, target, DispatchLog, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// consoleTargets is every room bound as a console, as somewhere to post.
+func (p *Projector) consoleTargets(ctx context.Context) ([]ConversationRef, error) {
+	bindings, err := p.Store.ListBindings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var targets []ConversationRef
+	for _, binding := range bindings {
+		if binding.PermissionProfile != ConsoleProfileName {
+			continue
+		}
+		targets = append(targets, ConversationRef{
+			Platform:  binding.Platform,
+			AccountID: binding.AccountID,
+			TenantID:  binding.TenantID,
+			ChannelID: binding.ChannelID,
+		})
+	}
+	return targets, nil
 }

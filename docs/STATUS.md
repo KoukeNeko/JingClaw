@@ -629,6 +629,17 @@ working line also names what a server's tool is working on — `text`,
 `content`, `input` are subject keys now — and only those: a tool's other
 arguments may be a credential, and the line is posted to a room.
 
+**A console channel is the terminal console, for somebody not at the
+machine.** A room bound as a console used to see only the finished tool calls
+of runs that happened in it. It now mirrors every run's feed — the message
+that started it, the run, each tool going out and coming back, the answer —
+in the terminal console's own vocabulary (`console.Describe` draws both, so
+the two never disagree), for a run in a public room as much as its own. The
+public room sees none of it. What a console must never show is a command
+having run from it, and the check for that is now "no finished exec that did
+not fail, and no output", because the call going out with its arguments is
+exactly what a console is for.
+
 ## Not done
 
 **Built but nothing uses it**

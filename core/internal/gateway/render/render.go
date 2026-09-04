@@ -412,6 +412,30 @@ func renderToolList(tools []jcgateway.ToolUse, style Style) string {
 func renderLog(payload jcgateway.LogPayload, style Style) string {
 	var out strings.Builder
 
+	if line := payload.Line; line != nil {
+		// The terminal console's line, in the same order of words, so a
+		// person reading either sees the same thing. The platform stamps
+		// the time; the session names the conversation.
+		fmt.Fprintf(&out, "%s`#%s` **%s**", style.SubduedPrefix, shortSession(line.Session), line.Kind)
+		if line.State != "" {
+			fmt.Fprintf(&out, " %s", line.State)
+		}
+		if line.Meta != "" {
+			fmt.Fprintf(&out, " `%s`", line.Meta)
+		}
+		if preview := strings.Join(strings.Fields(line.Preview), " "); preview != "" {
+			fmt.Fprintf(&out, " %s", preview)
+		}
+		if output := strings.TrimSpace(payload.Output); output != "" {
+			lead := ""
+			if payload.OutputTruncated {
+				lead = "…\n"
+			}
+			fmt.Fprintf(&out, "\n%s", style.block(lead+output))
+		}
+		return out.String()
+	}
+
 	mark := "·"
 	if payload.IsError {
 		mark = "✗"
@@ -781,4 +805,14 @@ func openFence(chunk string) string {
 		return ""
 	}
 	return "```" + language
+}
+
+// shortSession is the tail of a session id, enough to tell conversations
+// apart on a line and short enough not to be the line.
+func shortSession(id string) string {
+	const keep = 8
+	if len(id) <= keep {
+		return id
+	}
+	return id[len(id)-keep:]
 }
