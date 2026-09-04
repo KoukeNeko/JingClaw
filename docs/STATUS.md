@@ -644,8 +644,10 @@ exactly what a console is for.
 writes in front of a person's turn carried only the time. In a room several
 people type in, the model answered everybody as one person, because nothing it
 was shown told it otherwise. The line now reads
-`[2026-09-04T22:46:07+08:00 · from doeshing on discord via the gateway]` —
-who, from the platform's own name for them; the way in, so a turn typed at
+`[2026-09-04T22:46:07+08:00 · from <@1234…> (doeshing) on discord via the
+gateway]` — who, written the way the platform addresses them, `<@id>` on
+Discord, because the id is stable and a reply can ping it where a display
+name is neither; the way in, so a turn typed at
 this machine says "this machine" and a schedule says which one, and neither
 is dressed up as a person nobody named. From the event and nothing else, for
 the same reason the time is: rebuilt on every request, it has to be the same

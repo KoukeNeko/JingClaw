@@ -311,10 +311,14 @@ func whoSentIt(origin domain.RunOrigin) string {
 		who := "somebody"
 		platform := ""
 		if origin.Principal != nil {
-			if origin.Principal.DisplayName != "" {
-				who = origin.Principal.DisplayName
-			} else if origin.Principal.PrincipalID != "" {
-				who = origin.Principal.PrincipalID
+			// The platform's own way of naming them first, so a reply can use
+			// it; the name they go by beside it, so a person reading the log
+			// can too.
+			if mention := origin.Principal.Mention(); mention != "" {
+				who = mention
+				if name := origin.Principal.DisplayName; name != "" && name != mention {
+					who += " (" + name + ")"
+				}
 			}
 			platform = origin.Principal.Platform
 		}

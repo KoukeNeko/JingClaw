@@ -92,6 +92,23 @@ type ExternalPrincipal struct {
 	DisplayName string
 }
 
+// Mention is the principal written the way their platform addresses them.
+//
+// On Discord that is <@id>: the id is the platform's stable name for a
+// person, where a display name is whatever they typed this week and may be
+// somebody else's, and written this way it is also what a reply can use to
+// reach them. Platforms without such a form get the display name, and a
+// principal with neither is nothing rather than a made-up name.
+func (p ExternalPrincipal) Mention() string {
+	if p.Platform == "discord" && p.PrincipalID != "" {
+		return "<@" + p.PrincipalID + ">"
+	}
+	if p.DisplayName != "" {
+		return p.DisplayName
+	}
+	return p.PrincipalID
+}
+
 // RunOrigin says where something came from and, when that is knowable, who
 // was behind it.
 //

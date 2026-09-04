@@ -111,11 +111,14 @@ In front of every turn a person takes, the agent is shown one line this
 machine wrote — never mixed into their words:
 
 ```
-[2026-09-04T22:46:07+08:00 · from doeshing on discord via the gateway]
+[2026-09-04T22:46:07+08:00 · from <@123456789012345678> (doeshing) on discord via the gateway]
 ```
 
-When it was sent, who sent it (the platform's own name for them), and the way
-it came in. A turn typed at the terminal says `from this machine`; a schedule
+When it was sent, who sent it, and the way it came in. On Discord the sender
+is written as the platform addresses them — `<@id>` — because the id is the
+platform's stable name for a person where a display name is whatever they
+typed this week and may be somebody else's, and because written that way it
+is what a reply can use to reach them; the name they go by sits beside it. A turn typed at the terminal says `from this machine`; a schedule
 says which schedule. In a room several people type in, this is how the agent
 tells them apart and knows who it is answering — before it, everybody in a
 channel was one person to it.

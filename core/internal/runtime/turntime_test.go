@@ -225,12 +225,15 @@ func TestATurnSaysWhoSentItAndFromWhere(t *testing.T) {
 	if len(spoken) != 2 {
 		t.Fatalf("%d user turns reached the model, want two", len(spoken))
 	}
-	for _, want := range []string{"roc_general", "discord", "gateway"} {
+	// On Discord the sender is written as the platform addresses them — the
+	// id, which a reply can ping and a display name cannot spoof — with the
+	// name they go by beside it.
+	for _, want := range []string{"<@u_roc>", "roc_general", "discord", "gateway"} {
 		if !strings.Contains(spoken[0], want) {
 			t.Errorf("the first turn does not say %q:\n%s", want, spoken[0])
 		}
 	}
-	if !strings.Contains(spoken[1], "doeshing") || strings.Contains(spoken[1], "roc_general") {
+	if !strings.Contains(spoken[1], "<@u_doe>") || strings.Contains(spoken[1], "u_roc") {
 		t.Errorf("the second turn does not name its own sender alone:\n%s", spoken[1])
 	}
 	if !stamped.MatchString(spoken[0]) {
