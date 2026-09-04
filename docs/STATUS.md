@@ -611,6 +611,12 @@ declared twice. Found on the way: the declarations were computed once per run
 and reused for every request in it, so nothing loaded in one turn could have
 reached the next.
 
+**The footer names every tool that did the work.** A worker's steps stay out
+of the conversation, and rightly, but the tools it ran were run on the
+parent's behalf. Its calls now count towards the parent's record as well as
+its own, so the line under an answer says `mcp_zhtw_zhtw` or `skill_load`
+rather than only `investigate`.
+
 ## Not done
 
 **Built but nothing uses it**
@@ -792,6 +798,10 @@ rather than in logic a unit test was looking at.
 14. Seeding wrote each file as it decoded the next, so an unusable persona
    left the configuration behind: created once, never replaced, and no longer
    correctable by fixing the variable the error named
+16. The footer under an answer listed only the run's own tool calls, so a
+   run that delegated to a worker said "investigate" where a person wanted to
+   see the MCP tool or the skill that did the work — the worker's steps are
+   hidden from the conversation on purpose, and its tool use went with them
 15. A streamed answer that turned out to hold a table was said twice on
    Discord: the message it had been growing in was left standing with the
    whole answer, table written out, and the same answer was then posted again

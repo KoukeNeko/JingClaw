@@ -335,7 +335,9 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		})
 
 	case domain.ToolCallRequested:
-		p.record(run.ID).requested(payload)
+		for _, record := range p.recordsFor(run) {
+			record.requested(payload)
+		}
 		if payload.Name == "web_read" {
 			// The address as well as the state. A platform that draws a
 			// reaction has the same emoji whichever page it went to, and
@@ -364,7 +366,9 @@ func (p *Projector) Observe(ctx context.Context, run domain.Run, event domain.Ev
 		})
 
 	case domain.ToolCallCompleted:
-		p.record(run.ID).completed(payload, event.Seq)
+		for _, record := range p.recordsFor(run) {
+			record.completed(payload, event.Seq)
+		}
 		if payload.Name == "web_read" {
 			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{State: "network_finished"})
 		}
@@ -598,6 +602,22 @@ func (p *Projector) approvalRoute(ctx context.Context, target ConversationRef) A
 
 // record returns a run's accumulator, creating it if this is the first thing
 // seen for that run.
+// recordsFor is every record a run's tool calls count towards: its own, and
+// its parent's when it is a worker.
+//
+// A worker's steps are kept out of the conversation on purpose, but the tools
+// it ran were run on the parent's behalf, and a footer that listed only the
+// parent's own calls would say "investigate" where a person wants to see the
+// MCP tool or the skill that actually did the work. Counted in both, not
+// moved: the worker's own record still says what it did.
+func (p *Projector) recordsFor(run domain.Run) []*runRecord {
+	records := []*runRecord{p.record(run.ID)}
+	if run.Kind == domain.RunWorker && run.ParentRunID != "" {
+		records = append(records, p.record(run.ParentRunID))
+	}
+	return records
+}
+
 func (p *Projector) record(run domain.RunID) *runRecord {
 	p.mu.Lock()
 	defer p.mu.Unlock()
