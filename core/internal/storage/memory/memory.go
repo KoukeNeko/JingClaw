@@ -368,7 +368,9 @@ func (s *Store) PruneEvents(
 	kept := events[:0]
 	var removed int64
 	for _, event := range events {
-		if event.Seq <= through {
+		// A fold stays whatever the cut: it stands in for the range it
+		// covers, and a rebuild reads every fold there is.
+		if event.Seq <= through && event.Kind != domain.EventConversationCompacted {
 			removed++
 			// Only ever upwards: sessions are pruned in no particular order,
 			// so a later prune can be of older events.

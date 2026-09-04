@@ -91,7 +91,7 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 
 	keep := int64(float64(budget.Window)*budget.KeepFraction) - overhead
 
-	cut, through, ok := planCompaction(messages, alreadyFolded, keep)
+	plan, ok := planCompaction(messages, alreadyFolded, keep)
 	if !ok {
 		// Over budget and nothing to be done about it, which happens when the
 		// most recent turn is on its own larger than the window. Saying so is
@@ -102,20 +102,22 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 		return
 	}
 
-	summary, err := r.summarise(ctx, messages[:cut], budget.SummaryTokens)
+	summary, err := r.summarise(ctx, messages[plan.start:plan.cut], budget.SummaryTokens)
 	if err != nil {
 		r.opts.Logger.Warn("could not summarise the conversation",
 			"run_id", string(run.ID), "error", err)
 		return
 	}
 
-	after := overhead + estimateSummary(summary) + estimateMessages(messages[cut:])
+	after := overhead + estimateMessages(messages[:plan.start]) +
+		estimateSummary(summary) + estimateMessages(messages[plan.cut:])
 
 	if err := r.append(ctx, run.SessionID, run.ID, domain.EventConversationCompacted,
 		domain.ConversationCompacted{
 			Summary:        summary,
-			ThroughSeq:     through,
-			MessagesFolded: cut,
+			FromSeq:        plan.from,
+			ThroughSeq:     plan.through,
+			MessagesFolded: plan.cut - plan.start,
 			TokensBefore:   before,
 			TokensAfter:    after,
 		}); err != nil {
@@ -126,7 +128,9 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 
 	r.opts.Logger.Info("compacted the conversation",
 		"run_id", string(run.ID),
-		"messages_folded", cut,
+		"messages_folded", plan.cut-plan.start,
+		"from_seq", uint64(plan.from),
+		"through_seq", uint64(plan.through),
 		"tokens_before", before,
 		"tokens_after", after,
 	)
@@ -147,29 +151,73 @@ func (r *Runtime) compactIfNeeded(ctx context.Context, run domain.Run, overhead 
 	}
 }
 
+// foldPlan is what one compaction will do: summarise messages[start:cut] into
+// a fold covering the log from `from` through `through`.
+type foldPlan struct {
+	start, cut    int
+	from, through domain.Seq
+}
+
+// maxFoldsInHead is how many folds may stand in front of the conversation
+// before they are condensed into one.
+//
+// Each fold is bounded, but their number is not: a session that has been
+// compacted thirty times would open with thirty summaries, and the room they
+// take is room the verbatim tail does not get. Condensing folds is the one
+// case where a summary is written from summaries, and it is done rarely and
+// said plainly to the model when it is.
+const maxFoldsInHead = 6
+
 // planCompaction decides what to fold, and whether folding it is worth doing.
 //
-// The second question is the one that is easy to miss. A conversation whose
-// only foldable message is the summary already in front of it would summarise
-// a summary, record the same point in the log, and come out exactly the size
-// it went in — then do it again on the next turn, and the one after. A
-// compaction that does not advance is a loop with a model call in it.
+// The folds already in front of the conversation are not summarised again:
+// the fold being written covers the events after the last one, and it is
+// written from those events alone. Summarising a summary loses a little each
+// time and — the case that is easy to miss — a conversation whose only
+// foldable message is a fold would record the same point in the log, come out
+// exactly the size it went in, and do it again on the next turn. A compaction
+// that does not advance is a loop with a model call in it.
+//
+// Only once the folds themselves have piled up are they condensed, and then
+// all of them together with the events being folded, into one fold that
+// starts where the first of them did.
 func planCompaction(
 	messages []boundedMessage,
 	alreadyFolded domain.Seq,
 	keep int64,
-) (cut int, through domain.Seq, ok bool) {
-	cut = chooseCut(messages, keep)
-	if cut <= 0 {
-		return 0, 0, false
+) (foldPlan, bool) {
+	head := foldHead(messages)
+
+	cut := chooseCut(messages, keep)
+	if cut <= head {
+		return foldPlan{}, false
 	}
 
-	through = messages[cut-1].LastSeq
-	if through <= alreadyFolded {
-		return 0, 0, false
+	plan := foldPlan{
+		start:   head,
+		cut:     cut,
+		from:    alreadyFolded + 1,
+		through: messages[cut-1].LastSeq,
+	}
+	if plan.through <= alreadyFolded {
+		return foldPlan{}, false
 	}
 
-	return cut, through, true
+	if head >= maxFoldsInHead {
+		plan.start = 0
+		plan.from = messages[0].FromSeq
+	}
+
+	return plan, true
+}
+
+// foldHead counts the folds at the front of the conversation.
+func foldHead(messages []boundedMessage) int {
+	head := 0
+	for head < len(messages) && messages[head].Fold {
+		head++
+	}
+	return head
 }
 
 // chooseCut decides how much history to fold, returning the index the verbatim
@@ -276,9 +324,16 @@ func renderTranscript(messages []boundedMessage, maxBytes int) string {
 		// the model and comes back looking like the model's own words, so
 		// anything that arrived from outside has to carry that label into the
 		// summary or it is laundered by being condensed.
-		if item.Trust == domain.TrustUntrusted {
+		//
+		// A fold is neither: it is an earlier summary, and only reaches here
+		// when several are being condensed. Labelled as what it is, so it is
+		// not read as something the user said.
+		switch {
+		case item.Fold:
+			transcript.WriteString("\n[an earlier summary of this session, written by you]\n")
+		case item.Trust == domain.TrustUntrusted:
 			fmt.Fprintf(&transcript, "\n[%s — from outside this machine]\n", item.Message.Role)
-		} else {
+		default:
 			fmt.Fprintf(&transcript, "\n[%s]\n", item.Message.Role)
 		}
 		for _, block := range item.Message.Content {

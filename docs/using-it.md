@@ -349,6 +349,16 @@ call the model made has a recorded result — and the cut never leaves the
 conversation starting with a tool result whose call has been folded away. Both
 are properties the tests assert directly.
 
+Each fold covers one range of the log and is written from those events alone.
+The next compaction does not hand the model the summary already in front of
+the conversation to condense again; it folds the turns after it, and the
+conversation opens with every fold that stands, in order, followed by the
+verbatim tail. A turn is condensed once, in the words that condensed it, and
+a fold once written is sent byte for byte on every later turn — which is what
+keeps the front of the conversation a prefix the provider can go on caching.
+Only when six folds have piled up are they condensed into one, and the model
+is told that is what it is being asked to do.
+
 The window comes from the provider. It can be set in `[context]` for a local
 model served by something that does not report one; with neither, compaction
 stays off, because summarising against a guessed window would either throw work

@@ -160,8 +160,16 @@ func (s *Store) PruneEvents(
 			return fmt.Errorf("sqlite: read what is about to be pruned: %w", err)
 		}
 
+		// A fold is never discarded, however far behind the cut it is. It is
+		// what stands in for the events around it, and a conversation is
+		// rebuilt from every fold it has, each covering its own range; take
+		// one away and that range of the session is gone rather than
+		// condensed. The watermark still rises past it, which is right: what
+		// a client resuming into the gap must not be told is that nothing
+		// happened, and a fold left standing says the opposite.
 		result, err := tx.ExecContext(ctx,
-			`DELETE FROM events WHERE session_id = ? AND seq <= ?`, string(id), int64(through))
+			`DELETE FROM events WHERE session_id = ? AND seq <= ? AND kind != ?`,
+			string(id), int64(through), string(domain.EventConversationCompacted))
 		if err != nil {
 			return fmt.Errorf("sqlite: prune events: %w", err)
 		}

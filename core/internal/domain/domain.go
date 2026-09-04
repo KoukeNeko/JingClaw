@@ -636,6 +636,16 @@ type Artifact struct {
 type ConversationCompacted struct {
 	Summary string
 
+	// FromSeq is the first event folded into the summary, and ThroughSeq the
+	// last. A fold covers that range and no other: the summary it carries was
+	// written from those events alone, never from an earlier summary, so a
+	// turn is condensed once and stays in the words that condensed it.
+	//
+	// Zero on folds written before ranges were recorded. Such a fold was a
+	// summary of everything before ThroughSeq, earlier summaries included,
+	// and is read that way.
+	FromSeq Seq
+
 	// ThroughSeq is the last event folded into the summary. Everything after
 	// it is replayed as it was.
 	ThroughSeq Seq

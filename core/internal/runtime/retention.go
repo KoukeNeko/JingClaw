@@ -55,13 +55,17 @@ func (r *Runtime) PruneSession(
 // safeCut is the highest sequence that may be discarded.
 //
 // Everything up to the last fold, less a margin the caller asked to keep. The
-// fold event itself stays: it is what tells a rebuild that history was folded
-// rather than lost, and a client drawing the conversation shows it.
+// fold events themselves stay — every one of them, which the store sees to,
+// since each covers its own range of what went: they are what tell a rebuild
+// that history was folded rather than lost, and a client drawing the
+// conversation shows them.
 func safeCut(events []domain.Event, keepAfterFold int) domain.Seq {
 	lastFold := -1
+	var reach domain.Seq
 	for index, event := range events {
-		if _, folded := event.Payload.(domain.ConversationCompacted); folded {
+		if fold, folded := event.Payload.(domain.ConversationCompacted); folded {
 			lastFold = index
+			reach = fold.ThroughSeq
 		}
 	}
 	if lastFold <= 0 {
@@ -73,5 +77,15 @@ func safeCut(events []domain.Event, keepAfterFold int) domain.Seq {
 	if cutIndex < 0 {
 		return 0
 	}
-	return events[cutIndex].Seq
+	cut := events[cutIndex].Seq
+
+	// And never past what the fold reaches. The fold event is appended after
+	// the turn it was made for — and after anything that turn had already
+	// done — so the events between where its range ends and where it sits
+	// are ones the rebuild still reads. Cutting at the event before the fold
+	// discarded the very message the model was about to be asked to answer.
+	if cut > reach {
+		cut = reach
+	}
+	return cut
 }

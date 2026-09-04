@@ -667,6 +667,25 @@ moment the run starts (or is cancelled before it does). A worker shares its
 parent's session and a resumed run rejoins one; neither owns the turn, so
 neither hands it on.
 
+**A fold covers a range, once.** A compaction used to hand the summariser the
+summary already in front of the conversation together with the turns after
+it, and record one summary of everything. Every fold was a summary of a
+summary: the beginning of a long session was retold through each fold after
+it, losing a little every time, and the front of the conversation was
+rewritten on every compaction — the one part of the request a provider is
+paid to cache. A fold now records `from_seq` as well as `through_seq`, is
+written from the events in that range and nothing else, and stands: the
+conversation opens with every fold in order, then the verbatim tail. One rule
+decides which folds stand — a fold replaces every earlier fold that starts at
+or after it does — and it reads a fold from before ranges were recorded (from
+zero) as what it was, a summary of everything before it. Once six have piled
+up they are condensed into one, the only time a summary is written from
+summaries, and the transcript labels them as earlier summaries rather than as
+something the user said. Retention keeps every fold, since each is the only
+thing standing in for its range. Mutation-checked: feed the folds to the
+summariser, let only the last fold stand, prune folds, never condense, and
+label a fold as a user turn — each killed by a test.
+
 ## Not done
 
 **Built but nothing uses it**
@@ -867,6 +886,13 @@ rather than in logic a unit test was looking at.
    messages and never finished the growing one in place the way the ordinary
    path did — found by a person reading it on a phone, where two copies of a
    long answer is the whole screen
+18. Retention cut at the event before the fold, and the fold event is
+   appended after the turn it was made for — so with no margin the message
+   the model was about to answer was discarded the moment it was folded past,
+   and the model was asked to answer a summary with no question after it.
+   Hidden by the default margin of two hundred events; found by a test with
+   none, tracing why a session compacted every second turn instead of every
+   turn
 
 Two were found by reading rather than running: the daemon deleting a
 replacement's discovery file, and compaction summarising its own summary.

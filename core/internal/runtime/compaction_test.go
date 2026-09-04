@@ -34,6 +34,13 @@ type compactingProvider struct {
 	summaries   int
 	summaryFail error
 	reply       string
+
+	// numbered makes each summary distinct — "SUMMARY-…-3." for the third —
+	// so a test can tell which fold a request carries and which it does not.
+	numbered bool
+
+	// turnFail, when set, fails every ordinary turn at the provider.
+	turnFail error
 }
 
 func (p *compactingProvider) Name() string { return "compacting" }
@@ -53,16 +60,35 @@ func (p *compactingProvider) Generate(_ context.Context, req provider.Request) (
 		if p.summaryFail != nil {
 			return nil, p.summaryFail
 		}
+		summary := theSummary
+		if p.numbered {
+			summary = nthSummary(p.summaries)
+		}
 		return &scriptedStream{events: []provider.Event{
-			provider.TextDelta{Text: theSummary},
+			provider.TextDelta{Text: summary},
 			provider.Completed{},
 		}}, nil
 	}
 
+	if p.turnFail != nil {
+		return nil, p.turnFail
+	}
 	return &scriptedStream{events: []provider.Event{
 		provider.TextDelta{Text: p.reply},
 		provider.Completed{},
 	}}, nil
+}
+
+func (p *compactingProvider) failTurns(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.turnFail = err
+}
+
+// nthSummary is what a numbered provider writes for its nth fold. The full
+// stop closes the number, so "-1." is never mistaken for the start of "-10.".
+func nthSummary(n int) string {
+	return fmt.Sprintf("%s-%d.", theSummary, n)
 }
 
 func isSummarisation(req provider.Request) bool {
@@ -77,16 +103,26 @@ func isSummarisation(req provider.Request) bool {
 
 // turnRequests returns the ordinary requests, without the summarisation ones.
 func (p *compactingProvider) turnRequests() []provider.Request {
+	return p.requestsWhere(func(req provider.Request) bool { return !isSummarisation(req) })
+}
+
+// summaryRequests returns only the requests that asked for a summary, in the
+// order they were made.
+func (p *compactingProvider) summaryRequests() []provider.Request {
+	return p.requestsWhere(isSummarisation)
+}
+
+func (p *compactingProvider) requestsWhere(keep func(provider.Request) bool) []provider.Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var turns []provider.Request
+	var matching []provider.Request
 	for _, req := range p.requests {
-		if !isSummarisation(req) {
-			turns = append(turns, req)
+		if keep(req) {
+			matching = append(matching, req)
 		}
 	}
-	return turns
+	return matching
 }
 
 func (p *compactingProvider) summaryCount() int {
@@ -102,6 +138,7 @@ func newCompactionHarness(
 	store *memory.Store,
 	model *compactingProvider,
 	window int64,
+	tweaks ...func(*runtime.Options),
 ) *runtime.Runtime {
 	t.Helper()
 
@@ -113,7 +150,7 @@ func newCompactionHarness(
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	return runtime.New(ctx, runtime.Options{
+	options := runtime.Options{
 		Store:    store,
 		Hub:      event.NewHub(),
 		Provider: model,
@@ -135,7 +172,11 @@ func newCompactionHarness(
 		NewScheduleID: next("sch"),
 		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
 		Logger:        slog.New(slog.DiscardHandler),
-	})
+	}
+	for _, tweak := range tweaks {
+		tweak(&options)
+	}
+	return runtime.New(ctx, options)
 }
 
 func requestText(req provider.Request) string {

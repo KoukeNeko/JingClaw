@@ -138,6 +138,7 @@ type skillActivatedJSON struct {
 
 type conversationCompactedJSON struct {
 	Summary        string `json:"summary"`
+	FromSeq        uint64 `json:"from_seq,omitempty"`
 	ThroughSeq     uint64 `json:"through_seq"`
 	MessagesFolded int    `json:"messages_folded,omitempty"`
 	TokensBefore   int64  `json:"tokens_before,omitempty"`
@@ -324,6 +325,7 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 	case domain.ConversationCompacted:
 		return json.Marshal(conversationCompactedJSON{
 			Summary:        p.Summary,
+			FromSeq:        uint64(p.FromSeq),
 			ThroughSeq:     uint64(p.ThroughSeq),
 			MessagesFolded: p.MessagesFolded,
 			TokensBefore:   p.TokensBefore,
@@ -503,6 +505,7 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 		}
 		return domain.ConversationCompacted{
 			Summary:        p.Summary,
+			FromSeq:        domain.Seq(p.FromSeq),
 			ThroughSeq:     domain.Seq(p.ThroughSeq),
 			MessagesFolded: p.MessagesFolded,
 			TokensBefore:   p.TokensBefore,

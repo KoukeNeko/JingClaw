@@ -42,6 +42,14 @@ type boundedMessage struct {
 	// the label on untrusted material is lost exactly when it is hardest to
 	// notice.
 	Trust domain.TrustLevel
+
+	// Fold marks a message that is a summary standing in for a range of the
+	// log rather than something anybody said, and FromSeq is where that range
+	// begins. The next compaction reads both: a fold is never summarised
+	// again on its own, and when several are condensed into one the new fold
+	// covers from the first one's start.
+	Fold    bool
+	FromSeq domain.Seq
 }
 
 func plainMessages(bounded []boundedMessage) []provider.Message {
@@ -52,16 +60,17 @@ func plainMessages(bounded []boundedMessage) []provider.Message {
 	return messages
 }
 
-// buildBoundedConversation replays the log, starting from the most recent
-// compaction if there is one.
+// buildBoundedConversation replays the log, starting from its folds if there
+// are any.
 //
-// Only the most recent matters: each summary already accounts for everything
-// before it, earlier summaries included. Events older than its ThroughSeq are
-// still in the log and still visible to clients; they are simply no longer
-// part of what the model sees.
+// Each fold stands in for one range of the log, so the conversation opens with
+// every fold that still stands, in order, and then the events after the last
+// one as they were. Events inside a fold's range are still in the log and
+// still visible to clients; they are simply no longer part of what the model
+// sees.
 //
-// The sequence that summary replaces comes back with the messages, because the
-// next compaction has to be able to tell whether it would actually fold
+// The sequence the last fold reaches comes back with the messages, because
+// the next compaction has to be able to tell whether it would actually fold
 // anything new.
 //
 // Which run is asking matters, and only because of delegation: a worker's
@@ -83,22 +92,19 @@ func (r *Runtime) buildBoundedConversation(
 		return nil, 0, err
 	}
 
-	var (
-		summary    string
-		throughSeq domain.Seq
-	)
-	for _, event := range events {
-		if compacted, ok := event.Payload.(domain.ConversationCompacted); ok {
-			summary, throughSeq = compacted.Summary, compacted.ThroughSeq
-		}
+	folds := foldsIn(events)
+
+	var throughSeq domain.Seq
+	if len(folds) > 0 {
+		throughSeq = folds[len(folds)-1].ThroughSeq
 	}
 
 	builder := &conversationBuilder{
 		attachments:   r.opts.Attachments,
 		maxImageBytes: r.opts.MaxImageBytes,
 	}
-	if summary != "" {
-		builder.seed(summary, throughSeq)
+	for _, fold := range folds {
+		builder.seed(fold)
 	}
 
 	for _, event := range events {
@@ -114,6 +120,34 @@ func (r *Runtime) buildBoundedConversation(
 	}
 
 	return builder.finish(), throughSeq, nil
+}
+
+// foldsIn reads the folds a session has recorded and keeps the ones that
+// still stand, in the order their ranges fall.
+//
+// A fold replaces every earlier fold whose range begins at or after its own
+// start: what those held has been condensed into it, and reading both would
+// say the same thing twice. That one rule covers every fold there is. A fold
+// written before ranges were recorded starts at zero and so replaces all of
+// them, which is exactly what it was — a summary of everything before it. A
+// fold that consolidated several starts where the first of them did. And an
+// ordinary fold starts after the last one and replaces nothing.
+func foldsIn(events []domain.Event) []domain.ConversationCompacted {
+	var standing []domain.ConversationCompacted
+	for _, event := range events {
+		fold, ok := event.Payload.(domain.ConversationCompacted)
+		if !ok {
+			continue
+		}
+		kept := standing[:0]
+		for _, earlier := range standing {
+			if earlier.FromSeq < fold.FromSeq {
+				kept = append(kept, earlier)
+			}
+		}
+		standing = append(kept, fold)
+	}
+	return standing
 }
 
 // summaryPreamble frames the summary as what it is. A model handed a condensed
@@ -148,18 +182,20 @@ type conversationBuilder struct {
 	maxImageBytes int64
 }
 
-// seed starts the conversation from a summary rather than from the beginning.
+// seed puts a fold into the conversation in place of the range it covers.
 //
-// Its sequence is the one the summary replaces, not the sequence of the event
-// that recorded it, so that a later compaction folding this message reports a
-// point the replay can act on.
-func (b *conversationBuilder) seed(summary string, throughSeq domain.Seq) {
+// Its sequence is the one the summary reaches, not the sequence of the event
+// that recorded it, so that a later compaction folding past this message
+// reports a point the replay can act on.
+func (b *conversationBuilder) seed(fold domain.ConversationCompacted) {
 	b.messages = append(b.messages, boundedMessage{
 		Message: provider.Message{
 			Role:    provider.RoleUser,
-			Content: provider.Text(summaryPreamble + summary),
+			Content: provider.Text(summaryPreamble + fold.Summary),
 		},
-		LastSeq: throughSeq,
+		LastSeq: fold.ThroughSeq,
+		Fold:    true,
+		FromSeq: fold.FromSeq,
 	})
 }
 

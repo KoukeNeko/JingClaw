@@ -186,11 +186,13 @@ func TestCompactionRefusesToSummariseItsOwnSummary(t *testing.T) {
 				Content: provider.Text(summaryPreamble + "everything up to here"),
 			},
 			LastSeq: alreadyFolded,
+			Fold:    true,
+			FromSeq: 1,
 		},
 		userMessage(60, strings.Repeat("a", 200_000)),
 	}
 
-	if _, _, ok := planCompaction(messages, alreadyFolded, 500); ok {
+	if _, ok := planCompaction(messages, alreadyFolded, 500); ok {
 		t.Error("it would fold only the summary it just wrote")
 	}
 }
@@ -207,6 +209,8 @@ func TestCompactionProceedsWhenThereIsSomethingNewToFold(t *testing.T) {
 				Content: provider.Text(summaryPreamble + "everything up to here"),
 			},
 			LastSeq: alreadyFolded,
+			Fold:    true,
+			FromSeq: 1,
 		},
 		userMessage(60, strings.Repeat("a", 8000)),
 		assistantCall(70, "call_1", "read_file"),
@@ -214,15 +218,21 @@ func TestCompactionProceedsWhenThereIsSomethingNewToFold(t *testing.T) {
 		userMessage(90, "and now?"),
 	}
 
-	cut, through, ok := planCompaction(messages, alreadyFolded, 200)
+	plan, ok := planCompaction(messages, alreadyFolded, 200)
 	if !ok {
 		t.Fatal("it refused to fold history it had never folded")
 	}
-	if cut < 2 {
-		t.Errorf("cut is %d, which folds nothing but the summary", cut)
+	if plan.cut < 2 {
+		t.Errorf("cut is %d, which folds nothing but the summary", plan.cut)
 	}
-	if through <= alreadyFolded {
-		t.Errorf("through is %d, not past the %d already folded", through, alreadyFolded)
+	if plan.start != 1 {
+		t.Errorf("the plan starts at %d; the summary at 0 is not to be summarised again", plan.start)
+	}
+	if plan.through <= alreadyFolded {
+		t.Errorf("through is %d, not past the %d already folded", plan.through, alreadyFolded)
+	}
+	if plan.from != alreadyFolded+1 {
+		t.Errorf("the new fold starts at %d, not right after the %d already folded", plan.from, alreadyFolded)
 	}
 }
 
