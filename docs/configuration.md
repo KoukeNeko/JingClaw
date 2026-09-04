@@ -372,6 +372,17 @@ What its tools are gated at: internal, workspace_read, network_read,
 workspace_write, remember, execute, high_impact. Anything a server can do to
 a machine deserves execute unless somebody has read it.
 
+Left unset it is execute — and execute is refused outright by the gateway
+and console profiles, not asked about. A server left at the default can be
+called from a local console and from nowhere else, which from a chat channel
+reads as the tool not existing rather than as a permission. A server that
+only transforms text it is given — a linter, a formatter — has been read, and
+workspace_read or internal is the honest level; set it, and the tool is
+reachable from chat.
+
+A server's tools are found when the daemon starts, so adding one is a restart
+away. The model sees them as `mcp_<name>_<tool>`.
+
 ## `[process]`
 
 **`buffer_bytes`**
