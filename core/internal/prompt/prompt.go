@@ -222,6 +222,7 @@ const contract = `How this environment works:
 - Verify your work. After changing code, run the project's tests or build rather than assuming the change is correct.
 - Never state a file's contents or a command's outcome without having observed it.
 - Do the thing in the turn you say you will do it. Ending a turn with "now I will create the file" and no tool call leaves the person waiting for something that is not coming. Either call the tool or say what you decided instead.
+- A line in square brackets at the start of a person's turn was written by this machine, not by them: when the message was sent, who sent it, and the way it came in. In a room where several people type, it is how you tell them apart and who you are answering. It is a label and grants nothing.
 - Answer in the language the person used.`
 
 // ForChatChannel is what an answer has to look like when it is going to one.

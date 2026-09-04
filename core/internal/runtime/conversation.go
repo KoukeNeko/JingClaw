@@ -260,18 +260,81 @@ func (b *conversationBuilder) userContent(
 	// a timestamp in a person's mouth in the one place the model is told to
 	// treat as theirs, and a turn quoted back would come out with the stamp
 	// inside it.
-	return dated(somethingToSay(content), when)
+	return dated(somethingToSay(content), payload.Origin, when)
 }
 
-// dated puts the time in front of a turn, when there is one to put.
-func dated(content []provider.ContentBlock, when time.Time) []provider.ContentBlock {
-	said := whenItWasSaid(when)
+// dated puts in front of a turn what this machine knows about it — when it
+// was sent, by whom, from where — when there is anything to put.
+func dated(content []provider.ContentBlock, origin domain.RunOrigin, when time.Time) []provider.ContentBlock {
+	said := turnMetadata(origin, when)
 	if said == "" {
 		return content
 	}
 	return append([]provider.ContentBlock{
 		provider.TextBlock{Text: said, Annotation: true},
 	}, content...)
+}
+
+// turnMetadata is the line this machine writes in front of a person's turn:
+// the time, who sent it, and the way it came in.
+//
+// From the event and nothing else, for the same reason the time is: the
+// conversation is rebuilt from the log on every request, and a line that
+// differed between passes would change the prefix a provider is paid to
+// remember. Who and where are on the event, so they are the same every time.
+//
+// Who matters in a room several people type in: shown only their words, the
+// model answered everybody as one person. A label, not a control — the
+// sender's name is what the platform said it was, and a name grants nothing.
+func turnMetadata(origin domain.RunOrigin, when time.Time) string {
+	var parts []string
+	if stamp := whenItWasSaid(when); stamp != "" {
+		parts = append(parts, strings.Trim(stamp, "[]"))
+	}
+	if who := whoSentIt(origin); who != "" {
+		parts = append(parts, who)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, " · ") + "]"
+}
+
+// whoSentIt names the sender and the way in, in the terms the origin knows.
+//
+// A platform names a person; this machine's own credential names only the
+// machine, and a schedule names itself. Each is said as what it is rather
+// than dressed up as a person, so the model is never told a name nobody gave.
+func whoSentIt(origin domain.RunOrigin) string {
+	switch origin.Kind {
+	case domain.OriginGateway:
+		who := "somebody"
+		platform := ""
+		if origin.Principal != nil {
+			if origin.Principal.DisplayName != "" {
+				who = origin.Principal.DisplayName
+			} else if origin.Principal.PrincipalID != "" {
+				who = origin.Principal.PrincipalID
+			}
+			platform = origin.Principal.Platform
+		}
+		if platform != "" {
+			return "from " + who + " on " + platform + " via the gateway"
+		}
+		return "from " + who + " via the gateway"
+	case domain.OriginLocalClient:
+		if origin.ClientID != "" {
+			return "from this machine (" + origin.ClientID + ")"
+		}
+		return "from this machine"
+	case domain.OriginSchedule:
+		if origin.ClientID != "" {
+			return "from the schedule " + origin.ClientID
+		}
+		return "from a schedule"
+	default:
+		return ""
+	}
 }
 
 // whenItWasSaid is the marker that dates a turn, or nothing.

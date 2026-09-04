@@ -66,3 +66,21 @@ func TestADatedTurnStillSaysWhenThereIsNothingInIt(t *testing.T) {
 		t.Errorf("the turn lost its date on the way: %q", joined)
 	}
 }
+
+// The line is built from the event alone. No time and nobody: nothing. A
+// sender with no time is still worth naming.
+func TestTheTurnLineNamesWhatTheEventKnows(t *testing.T) {
+	if line := turnMetadata(domain.RunOrigin{}, time.Time{}); line != "" {
+		t.Errorf("an event with nothing on it produced %q", line)
+	}
+
+	who := domain.FromAPlatformAccount("discord", "u1", "doeshing")
+	undated := turnMetadata(who, time.Time{})
+	if !strings.Contains(undated, "doeshing") {
+		t.Errorf("a sender with no time was not named: %q", undated)
+	}
+	if stamped := turnMetadata(who, time.Unix(1788197468, 0)); !strings.Contains(stamped, "doeshing") ||
+		!strings.Contains(stamped, "2026-") {
+		t.Errorf("the line does not carry both who and when: %q", stamped)
+	}
+}

@@ -193,3 +193,80 @@ func firstUserBlocks(t *testing.T, model *compactingProvider) []provider.Content
 	t.Fatal("the request has no user turn in it")
 	return nil
 }
+
+// sayAs is say, from somebody in particular.
+func sayAs(t *testing.T, rt *runtime.Runtime, session domain.SessionID, text string, origin domain.RunOrigin) {
+	t.Helper()
+	runID, _, err := rt.SendTurnTo(context.Background(), session, domain.Turn{
+		Text:    text,
+		Origin:  origin,
+		Targets: []domain.DeliveryTarget{{Kind: domain.DeliveryLocalClient}},
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	waitForRun(t, rt, runID)
+}
+
+// A turn says who sent it and from where, not only when.
+//
+// In a room several people type in, the model was answering everybody as one
+// person, because nothing it was shown told it otherwise. The line this
+// machine writes in front of a turn now names the sender and the way in —
+// from the event, so it is the same on every rebuild, like the time.
+func TestATurnSaysWhoSentItAndFromWhere(t *testing.T) {
+	model, rt := aConversation(t)
+	session := aSession(t, rt)
+
+	sayAs(t, rt, session, "真的嗎", domain.FromAPlatformAccount("discord", "u_roc", "roc_general"))
+	sayAs(t, rt, session, "共匪抓到", domain.FromAPlatformAccount("discord", "u_doe", "doeshing"))
+
+	spoken := userTurnsSentTo(t, model)
+	if len(spoken) != 2 {
+		t.Fatalf("%d user turns reached the model, want two", len(spoken))
+	}
+	for _, want := range []string{"roc_general", "discord", "gateway"} {
+		if !strings.Contains(spoken[0], want) {
+			t.Errorf("the first turn does not say %q:\n%s", want, spoken[0])
+		}
+	}
+	if !strings.Contains(spoken[1], "doeshing") || strings.Contains(spoken[1], "roc_general") {
+		t.Errorf("the second turn does not name its own sender alone:\n%s", spoken[1])
+	}
+	if !stamped.MatchString(spoken[0]) {
+		t.Errorf("naming the sender lost the time:\n%s", spoken[0])
+	}
+}
+
+// A turn typed at this machine says so, and does not invent a person: the
+// loopback credential identifies the machine, not who is at it.
+func TestATurnFromThisMachineSaysSo(t *testing.T) {
+	model, rt := aConversation(t)
+	session := aSession(t, rt)
+	say(t, rt, session, "hello")
+
+	turn := userTurnsSentTo(t, model)[0]
+	if !strings.Contains(turn, "this machine") || !strings.Contains(turn, "cli") {
+		t.Errorf("a local turn does not say it came from this machine:\n%s", turn)
+	}
+}
+
+// Who sent it goes in the annotation, never into what they said.
+func TestTheSenderIsNotMixedIntoWhatWasSaid(t *testing.T) {
+	model, rt := aConversation(t)
+	session := aSession(t, rt)
+	sayAs(t, rt, session, "what is in this file", domain.FromAPlatformAccount("discord", "u1", "doeshing"))
+
+	for _, block := range firstUserBlocks(t, model) {
+		text, ok := block.(provider.TextBlock)
+		if !ok {
+			continue
+		}
+		if strings.Contains(text.Text, "what is in this file") && strings.Contains(text.Text, "doeshing") {
+			t.Errorf("the sender was written into what they said: %q", text.Text)
+		}
+		if strings.Contains(text.Text, "doeshing") && !text.Annotation {
+			t.Errorf("the sender line is not marked as this machine's: %q", text.Text)
+		}
+	}
+}

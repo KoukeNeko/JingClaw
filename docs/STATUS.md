@@ -640,6 +640,20 @@ having run from it, and the check for that is now "no finished exec that did
 not fail, and no output", because the call going out with its arguments is
 exactly what a console is for.
 
+**A turn says who sent it, and the way it came in.** The line this machine
+writes in front of a person's turn carried only the time. In a room several
+people type in, the model answered everybody as one person, because nothing it
+was shown told it otherwise. The line now reads
+`[2026-09-04T22:46:07+08:00 · from doeshing on discord via the gateway]` —
+who, from the platform's own name for them; the way in, so a turn typed at
+this machine says "this machine" and a schedule says which one, and neither
+is dressed up as a person nobody named. From the event and nothing else, for
+the same reason the time is: rebuilt on every request, it has to be the same
+line every time or the cached prefix changes for nothing. The prompt's
+contract now explains the bracketed line — it never had, and the model had
+been guessing what the time meant; with a sender on it, guessing wrong means
+answering the wrong person.
+
 ## Not done
 
 **Built but nothing uses it**
