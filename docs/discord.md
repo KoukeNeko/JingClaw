@@ -28,6 +28,26 @@ edits to one message. Which message is live is held in the adapter's memory
 rather than in the outbox, because it is a presentation detail: losing it
 across a restart costs one extra line in a channel, not a wrong one.
 
+## A private console channel
+
+A channel bound as a console (`[[gateway.discord.consoles]]`) is the terminal
+console for somebody not at the machine. Every run in the deployment shows up
+there line by line, whichever room it is happening in:
+
+```
+-# `#ses_01M1` **MESSAGE** `gateway:doeshing` 那來輕鬆一點
+-# `#ses_01M1` **RUN** running
+-# `#ses_01M1` **TOOL** → `mcp_zhtw_zhtw` {"explain":true,"text":"報告江董…"}
+-# `#ses_01M1` **TOOL** ✓ `mcp_zhtw_zhtw` mcp_zhtw_zhtw: ok
+-# `#ses_01M1` **ANSWER** end_turn
+-# `#ses_01M1` **RUN** completed
+```
+
+The same lines the terminal draws, because the same code draws them. A
+finished call carries what the tool printed, in a code block, bounded. The
+room the run is happening in sees its answer and its working line, and none
+of this.
+
 ## Answers as they are written
 
 A model writing for twenty seconds used to be twenty seconds of nothing

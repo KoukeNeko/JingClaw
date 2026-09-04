@@ -530,6 +530,15 @@ Private channels you control. As above, and additionally: pages are fetched
 unattended, and an approval can be answered by replying "approve <id>" or
 "deny <id>". The channel is told what it is the first time it is used.
 
+A console is also the terminal console, for somebody not at the machine. It
+mirrors every run's feed — the message that started it, the run, each tool
+going out and coming back with what it printed, the answer — for a run in a
+public room as much as one in the console itself, drawn by the same code that
+draws the terminal so the two never disagree. The public room sees none of
+it. Running a program from a console is still refused: the feed shows the
+call going out with its arguments, which is what a console is for, and never
+a call that ran.
+
 ## `[gateway.telegram]`
 
 **`token_env`**
