@@ -34,6 +34,13 @@ type Locked struct {
 	// answer "is what I am reading what I agreed to".
 	Digest string `json:"digest"`
 
+	// TreeDigest is the hash of the whole installed directory, not only
+	// SKILL.md. A skill can read the files beside its instructions, so what
+	// arrived is the directory and not one file in it; a check that hashed
+	// SKILL.md alone would call a skill unchanged while a sibling it reads had
+	// been rewritten.
+	TreeDigest string `json:"tree_digest,omitempty"`
+
 	// Version is what the skill claimed, for somebody reading a listing. Not
 	// identity: a file edited without touching this line is a different skill
 	// wearing the same number.

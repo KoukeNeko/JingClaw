@@ -3,11 +3,16 @@ package skill
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -31,75 +36,179 @@ type Installer struct {
 // the source: two sources offering a skill of the same name is a collision to
 // refuse rather than to resolve by path, and a repository that could choose
 // its own directory could choose one already taken.
-func (i *Installer) Install(ctx context.Context, source Source) (Locked, error) {
+// Staged is a fetched, verified skill that is not yet in front of the model.
+//
+// The point of the split. Fetching bytes into a directory that steers nothing
+// is a small act; putting standing instructions in front of the model for
+// every future session is the large one. A skill lands here first, described
+// by what actually arrived rather than by what the source claimed, so the
+// decision to activate is made against the real thing.
+type Staged struct {
+	Name        string `json:"name"`
+	Source      Source `json:"source"`
+	Description string `json:"description"`
+	Version     string `json:"version,omitempty"`
+
+	// Digest is the SKILL.md hash; TreeDigest is the whole directory's.
+	Digest     string `json:"digest"`
+	TreeDigest string `json:"tree_digest"`
+	Size       int64  `json:"size"`
+
+	// Dir is where it is staged, derived from the root and not stored.
+	Dir string `json:"-"`
+}
+
+// Stage fetches and verifies a skill without installing it.
+//
+// What arrives is read and hashed here, so a caller — an approval a person is
+// about to decide — describes the skill by its own bytes rather than by what
+// the agent proposing it said. Nothing is put where the catalogue reads until
+// Activate.
+func (i *Installer) Stage(ctx context.Context, source Source) (Staged, error) {
 	if err := os.MkdirAll(i.Root, 0o755); err != nil {
-		return Locked{}, fmt.Errorf("skill: %w", err)
+		return Staged{}, fmt.Errorf("skill: %w", err)
 	}
 
 	// Fetched somewhere else first, so a repository that turns out not to
-	// hold a skill leaves nothing behind — and so that a failed install
-	// cannot half-replace one that was working.
-	staged, err := os.MkdirTemp(i.Root, ".fetching-*")
+	// hold a skill leaves nothing behind.
+	fetched, err := os.MkdirTemp(i.Root, ".fetching-*")
 	if err != nil {
-		return Locked{}, fmt.Errorf("skill: %w", err)
+		return Staged{}, fmt.Errorf("skill: %w", err)
 	}
-	defer os.RemoveAll(staged)
+	defer os.RemoveAll(fetched)
 
-	if err := fetch(ctx, source, staged); err != nil {
-		return Locked{}, err
+	if err := fetch(ctx, source, fetched); err != nil {
+		return Staged{}, err
 	}
 
-	from := staged
+	from := fetched
 	if source.Path != "" {
-		from = filepath.Join(staged, filepath.FromSlash(source.Path))
-		// Checked after joining rather than before: a path that climbs out
-		// through a symlink in the repository would pass a check on the text
-		// alone.
-		if err := within(staged, from); err != nil {
-			return Locked{}, err
+		from = filepath.Join(fetched, filepath.FromSlash(source.Path))
+		if err := within(fetched, from); err != nil {
+			return Staged{}, err
 		}
 	}
 
-	// Read before it is installed, so a directory that is not a skill is
-	// refused with the same reason the catalogue would have given.
 	one, err := Read(from)
 	if err != nil {
-		return Locked{}, fmt.Errorf("skill: %s holds no skill this can read: %w", source, err)
+		return Staged{}, fmt.Errorf("skill: %s holds no skill this can read: %w", source, err)
 	}
-
-	// The name becomes a directory, and it came from the repository's own
-	// frontmatter. A name that climbs out of the tree, or hides among the
-	// installer's own directories, is refused before it is used as a path.
 	if err := safeName(one.Name); err != nil {
-		return Locked{}, err
+		return Staged{}, err
 	}
 
 	// The git metadata is not part of a skill and is the largest thing in the
-	// clone. Removed before the move so what lands is only what was asked for.
-	if err := os.RemoveAll(filepath.Join(staged, ".git")); err != nil {
-		return Locked{}, fmt.Errorf("skill: %w", err)
+	// clone. Removed before the digest so what is hashed is only what lands.
+	if err := os.RemoveAll(filepath.Join(fetched, ".git")); err != nil {
+		return Staged{}, fmt.Errorf("skill: %w", err)
 	}
 
-	if err := i.replace(from, one.Name); err != nil {
+	tree, size, err := treeDigest(from)
+	if err != nil {
+		return Staged{}, err
+	}
+
+	staged := Staged{
+		Name:        one.Name,
+		Source:      source,
+		Description: one.Description,
+		Version:     one.Version,
+		Digest:      one.Digest,
+		TreeDigest:  tree,
+		Size:        size,
+		Dir:         filepath.Join(i.staging(), one.Name),
+	}
+
+	if err := os.MkdirAll(i.staging(), 0o755); err != nil {
+		return Staged{}, fmt.Errorf("skill: %w", err)
+	}
+	if err := i.moveInto(from, staged.Dir); err != nil {
+		return Staged{}, err
+	}
+	// The source is not in the skill's own files, and Activate needs it to
+	// write the lock. Beside the staged directory rather than inside it, so it
+	// is not part of what lands and not part of the tree digest.
+	if err := writeManifest(i.staging(), staged); err != nil {
+		return Staged{}, err
+	}
+	return staged, nil
+}
+
+// Activate installs a staged skill, checking it is still the bytes that were
+// staged.
+//
+// The tree is hashed again and compared to what Stage recorded: a decision to
+// trust a skill was made against particular bytes, and content swapped between
+// the decision and the install would otherwise land unnoticed.
+func (i *Installer) Activate(name string) (Locked, error) {
+	if err := safeName(name); err != nil {
 		return Locked{}, err
 	}
 
+	manifest, err := readManifest(i.staging(), name)
+	if err != nil {
+		return Locked{}, err
+	}
+
+	stagedDir := filepath.Join(i.staging(), name)
+	one, err := Read(stagedDir)
+	if err != nil {
+		return Locked{}, fmt.Errorf("skill: staged %q is not readable: %w", name, err)
+	}
+	if one.Name != name {
+		return Locked{}, fmt.Errorf("skill: staged as %q but calls itself %q", name, one.Name)
+	}
+
+	tree, _, err := treeDigest(stagedDir)
+	if err != nil {
+		return Locked{}, err
+	}
+	if tree != manifest.TreeDigest {
+		return Locked{}, fmt.Errorf(
+			"skill: %q changed after it was staged; stage it again", name)
+	}
+
+	if err := i.moveInto(stagedDir, filepath.Join(i.Root, name)); err != nil {
+		return Locked{}, err
+	}
+	_ = os.Remove(manifestPath(i.staging(), name))
+	// Only if empty: os.Remove refuses a directory that still holds other
+	// staged skills, which is exactly the right condition.
+	_ = os.Remove(i.staging())
+
 	return Locked{
 		Name:        one.Name,
-		From:        source,
+		From:        manifest.Source,
 		Digest:      one.Digest,
+		TreeDigest:  tree,
 		Version:     one.Version,
 		InstalledAt: i.now(),
 	}, nil
 }
 
-// replace moves a fetched skill into place, over whatever was there.
+// Install fetches one skill and installs it in a single step.
+//
+// Stage then Activate, for the operator at the CLI who has the source in front
+// of them and is deciding by looking at it rather than at an approval.
+func (i *Installer) Install(ctx context.Context, source Source) (Locked, error) {
+	staged, err := i.Stage(ctx, source)
+	if err != nil {
+		return Locked{}, err
+	}
+	return i.Activate(staged.Name)
+}
+
+// staging is where fetched-but-not-installed skills wait. A dot-directory, so
+// the catalogue never reads it as a skill.
+func (i *Installer) staging() string {
+	return filepath.Join(i.Root, ".staged")
+}
+
+// moveInto moves a directory into place, over whatever was there.
 //
 // The old one is moved aside rather than deleted first, so a failed rename
-// leaves the working skill where it was rather than nothing at all.
-func (i *Installer) replace(from, name string) error {
-	to := filepath.Join(i.Root, name)
-
+// leaves what was working where it was rather than nothing at all.
+func (i *Installer) moveInto(from, to string) error {
 	replaced := ""
 	if _, err := os.Stat(to); err == nil {
 		replaced = to + ".replacing"
@@ -118,7 +227,7 @@ func (i *Installer) replace(from, name string) error {
 			// had this morning.
 			_ = os.Rename(replaced, to)
 		}
-		return fmt.Errorf("skill: installing %s: %w", name, err)
+		return fmt.Errorf("skill: installing into %s: %w", to, err)
 	}
 
 	if replaced != "" {
@@ -246,4 +355,79 @@ func within(root, path string) error {
 		return fmt.Errorf("skill: that path leads outside the repository")
 	}
 	return nil
+}
+
+// treeDigest hashes every file under a directory, so what is compared later is
+// the whole skill and not one file in it.
+//
+// Deterministic: files are hashed in sorted path order, each preceded by its
+// path and length, so a rename cannot pass for an edit and a file cannot be
+// confused with the one after it.
+func treeDigest(dir string) (digest string, size int64, err error) {
+	var files []string
+	walkErr := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	})
+	if walkErr != nil {
+		return "", 0, fmt.Errorf("skill: hashing %s: %w", dir, walkErr)
+	}
+	sort.Strings(files)
+
+	sum := sha256.New()
+	for _, rel := range files {
+		content, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		if err != nil {
+			return "", 0, fmt.Errorf("skill: hashing %s: %w", dir, err)
+		}
+		fmt.Fprintf(sum, "%s\x00%d\x00", rel, len(content))
+		sum.Write(content)
+		size += int64(len(content))
+	}
+	return "sha256:" + hex.EncodeToString(sum.Sum(nil)), size, nil
+}
+
+// manifestPath is where a staged skill's source is recorded, beside the staged
+// directory rather than inside it so it is not part of what lands.
+func manifestPath(staging, name string) string {
+	return filepath.Join(staging, name+".json")
+}
+
+func writeManifest(staging string, staged Staged) error {
+	raw, err := json.MarshalIndent(staged, "", "  ")
+	if err != nil {
+		return fmt.Errorf("skill: %w", err)
+	}
+	if err := os.WriteFile(manifestPath(staging, staged.Name), raw, 0o600); err != nil {
+		return fmt.Errorf("skill: %w", err)
+	}
+	return nil
+}
+
+// readManifest loads what Stage recorded, and says plainly when nothing is
+// staged under that name.
+func readManifest(staging, name string) (Staged, error) {
+	raw, err := os.ReadFile(manifestPath(staging, name))
+	if os.IsNotExist(err) {
+		return Staged{}, fmt.Errorf("skill: no skill named %q is staged", name)
+	}
+	if err != nil {
+		return Staged{}, fmt.Errorf("skill: %w", err)
+	}
+	var staged Staged
+	if err := json.Unmarshal(raw, &staged); err != nil {
+		return Staged{}, fmt.Errorf("skill: the staging record for %q is unreadable: %w", name, err)
+	}
+	staged.Dir = filepath.Join(staging, name)
+	return staged, nil
 }

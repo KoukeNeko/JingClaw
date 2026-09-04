@@ -326,3 +326,142 @@ Hide among the installer's own directories.
 		t.Fatal("a skill named itself a dot-directory and was installed")
 	}
 }
+
+// aRepositoryWith builds a repository whose skill directory also holds a
+// sibling file, so a check can tell a whole-tree hash from a SKILL.md one.
+func aRepositoryWith(t *testing.T, body, siblingName, siblingBody string) (string, string) {
+	t.Helper()
+	dir, _ := aRepository(t, body)
+	if err := os.WriteFile(filepath.Join(dir, "release", siblingName), []byte(siblingBody), 0o644); err != nil {
+		t.Fatalf("sibling: %v", err)
+	}
+	git := exec.Command("git", "add", "-A")
+	git.Dir = dir
+	git.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+	if out, err := git.CombinedOutput(); err != nil {
+		t.Skipf("git unusable: %v %s", err, out)
+	}
+	commit := exec.Command("git", "commit", "--quiet", "-m", "with sibling")
+	commit.Dir = dir
+	commit.Env = git.Env
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Skipf("git unusable: %v %s", err, out)
+	}
+	head := exec.Command("git", "rev-parse", "HEAD")
+	head.Dir = dir
+	head.Env = git.Env
+	out, err := head.CombinedOutput()
+	if err != nil {
+		t.Skipf("git unusable: %v %s", err, out)
+	}
+	return dir, strings.TrimSpace(string(out))
+}
+
+// Staging fetches and verifies without installing: the skill is described by
+// what arrived, and the catalogue does not have it until it is activated.
+func TestStagingDoesNotInstall(t *testing.T) {
+	repo, commit := aRepository(t, aSkill)
+	installer := installing(t)
+
+	staged, err := installer.Stage(context.Background(), fromLocal(repo, commit, "release"))
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	if staged.Name != "release" || staged.Description == "" {
+		t.Errorf("the staged skill is not described by what arrived: %+v", staged)
+	}
+	if !strings.HasPrefix(staged.TreeDigest, "sha256:") || staged.Size == 0 {
+		t.Errorf("no tree digest or size: %+v", staged)
+	}
+
+	// Not in the catalogue: staging must not put instructions in front of the
+	// model.
+	found, _, err := Installed(installer.Root)
+	if err != nil {
+		t.Fatalf("installed: %v", err)
+	}
+	if len(found) != 0 {
+		t.Errorf("a staged skill is in the catalogue: %+v", found)
+	}
+
+	// Activating it is what installs it.
+	locked, err := installer.Activate("release")
+	if err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	if locked.TreeDigest != staged.TreeDigest {
+		t.Errorf("the lock records a different tree than was staged: %q vs %q", locked.TreeDigest, staged.TreeDigest)
+	}
+	if locked.From != staged.Source {
+		t.Errorf("the lock did not record where it was fetched: %+v", locked.From)
+	}
+	found, _, _ = Installed(installer.Root)
+	if len(found) != 1 || found[0].Name != "release" {
+		t.Fatalf("activating did not install it: %+v", found)
+	}
+}
+
+// Activating something nobody staged is refused, and says so.
+func TestActivatingWhatIsNotStaged(t *testing.T) {
+	installer := installing(t)
+	_, err := installer.Activate("release")
+	if err == nil {
+		t.Fatal("it activated a skill that was never staged")
+	}
+	// The reason is that nothing is staged, not that a directory would not
+	// read — the manifest is what says a skill was staged, and it carries the
+	// source the lock needs.
+	if !strings.Contains(err.Error(), "is staged") {
+		t.Errorf("the refusal does not say nothing was staged: %v", err)
+	}
+}
+
+// The tree digest covers the whole directory, not only SKILL.md — the point of
+// having it. A rewritten sibling file, which a skill can read, changes the
+// tree digest while the SKILL.md digest does not.
+func TestTheTreeDigestCoversSiblingFiles(t *testing.T) {
+	repo, commit := aRepositoryWith(t, aSkill, "helper.sh", "echo aaaaaa\n")
+	first := installing(t)
+	before, err := first.Stage(context.Background(), fromLocal(repo, commit, "release"))
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+
+	repo2, commit2 := aRepositoryWith(t, aSkill, "helper.sh", "echo bbbbbb\n")
+	second := installing(t)
+	after, err := second.Stage(context.Background(), fromLocal(repo2, commit2, "release"))
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+
+	if before.Digest != after.Digest {
+		t.Fatal("SKILL.md was unchanged, so this test cannot tell the digests apart")
+	}
+	// The two siblings are the same length, so only their content differs: a
+	// digest that hashed paths and sizes but not bytes would miss this.
+	if before.TreeDigest == after.TreeDigest {
+		t.Error("a rewritten sibling file did not change the tree digest")
+	}
+}
+
+// Content swapped between staging and activating is caught: a decision to
+// trust a skill was made against particular bytes.
+func TestActivateRefusesContentSwappedAfterStaging(t *testing.T) {
+	repo, commit := aRepository(t, aSkill)
+	installer := installing(t)
+
+	staged, err := installer.Stage(context.Background(), fromLocal(repo, commit, "release"))
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+
+	// Someone edits the staged instructions after the decision was recorded.
+	if err := os.WriteFile(filepath.Join(staged.Dir, FileName),
+		[]byte("---\nname: release\ndescription: swapped\n---\nrun something else\n"), 0o600); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+
+	if _, err := installer.Activate("release"); err == nil {
+		t.Fatal("activation accepted content that changed after it was staged")
+	}
+}
