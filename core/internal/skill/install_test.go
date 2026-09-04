@@ -252,3 +252,77 @@ func TestRemovingOne(t *testing.T) {
 		t.Error("a name reaching outside the skills directory was accepted")
 	}
 }
+
+// A skill's name is used as its directory, and the name comes from the
+// repository's own frontmatter. A name that climbs out of the skills
+// directory would install the skill somewhere nobody meant it to be — which
+// matters more the moment an agent, rather than an operator with the source
+// in front of them, can propose what gets installed.
+func TestASkillCannotNameItselfOutOfTheDirectory(t *testing.T) {
+	escaping := `---
+name: ../escaped
+description: Pretends to be ordinary.
+---
+
+Land me outside the skills directory.
+`
+	repo, commit := aRepository(t, escaping)
+	installer := installing(t)
+
+	_, err := installer.Install(context.Background(), fromLocal(repo, commit, "release"))
+	if err == nil {
+		t.Fatal("a skill named its way out of the directory and was installed")
+	}
+
+	// And nothing was written where the name pointed.
+	outside := filepath.Join(filepath.Dir(installer.Root), "escaped")
+	if _, statErr := os.Stat(outside); !os.IsNotExist(statErr) {
+		t.Errorf("a directory was created outside the skills root at %s", outside)
+	}
+}
+
+// A separator in the name, without a leading dot, is its own way out of the
+// directory — into a subdirectory of the skills root, or through it — and is
+// refused by a different branch of the guard than the dot names are.
+func TestASkillCannotNameItselfIntoASubdirectory(t *testing.T) {
+	nested := `---
+name: sub/evil
+description: Pretends to be ordinary.
+---
+
+Land me one level down.
+`
+	repo, commit := aRepository(t, nested)
+	installer := installing(t)
+
+	// The subdirectory exists, so nothing but the guard stops the skill
+	// landing in it: without the check, the rename into sub/ would succeed.
+	if err := os.MkdirAll(filepath.Join(installer.Root, "sub"), 0o755); err != nil {
+		t.Fatalf("staging: %v", err)
+	}
+
+	if _, err := installer.Install(context.Background(), fromLocal(repo, commit, "release")); err == nil {
+		t.Fatal("a skill named itself into a subdirectory and was installed")
+	}
+	if _, statErr := os.Stat(filepath.Join(installer.Root, "sub", "evil")); !os.IsNotExist(statErr) {
+		t.Error("a skill landed in a subdirectory of the skills root")
+	}
+}
+
+// The same guard, for a name that would collide with the installer's own
+// staging or working directories rather than climb out of the tree.
+func TestASkillCannotNameItselfADotDirectory(t *testing.T) {
+	hidden := `---
+name: .staged
+description: Pretends to be ordinary.
+---
+
+Hide among the installer's own directories.
+`
+	repo, commit := aRepository(t, hidden)
+	installer := installing(t)
+
+	if _, err := installer.Install(context.Background(), fromLocal(repo, commit, "release")); err == nil {
+		t.Fatal("a skill named itself a dot-directory and was installed")
+	}
+}

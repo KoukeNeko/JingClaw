@@ -67,6 +67,13 @@ func (i *Installer) Install(ctx context.Context, source Source) (Locked, error) 
 		return Locked{}, fmt.Errorf("skill: %s holds no skill this can read: %w", source, err)
 	}
 
+	// The name becomes a directory, and it came from the repository's own
+	// frontmatter. A name that climbs out of the tree, or hides among the
+	// installer's own directories, is refused before it is used as a path.
+	if err := safeName(one.Name); err != nil {
+		return Locked{}, err
+	}
+
 	// The git metadata is not part of a skill and is the largest thing in the
 	// clone. Removed before the move so what lands is only what was asked for.
 	if err := os.RemoveAll(filepath.Join(staged, ".git")); err != nil {
@@ -120,10 +127,27 @@ func (i *Installer) replace(from, name string) error {
 	return nil
 }
 
+// safeName refuses a skill name that could not be a directory beside the
+// others: it becomes one, and it comes from frontmatter the installer did not
+// write. A separator or a climb would put the skill outside the tree, and a
+// leading dot would hide it among the installer's own working directories or
+// collide with one.
+func safeName(name string) error {
+	switch {
+	case name == "", name == ".", name == "..":
+		return fmt.Errorf("skill: %q cannot name a skill", name)
+	case strings.ContainsAny(name, `/\`):
+		return fmt.Errorf("skill: %q cannot name a skill: it has a path separator", name)
+	case strings.HasPrefix(name, "."):
+		return fmt.Errorf("skill: %q cannot name a skill: it begins with a dot", name)
+	}
+	return nil
+}
+
 // Remove deletes an installed skill.
 func (i *Installer) Remove(name string) error {
-	if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
-		return fmt.Errorf("skill: %q cannot name a skill", name)
+	if err := safeName(name); err != nil {
+		return err
 	}
 
 	at := filepath.Join(i.Root, name)

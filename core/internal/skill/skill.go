@@ -111,6 +111,14 @@ func Installed(root string) ([]Skill, []Rejected, error) {
 			continue
 		}
 
+		// The installer's own working directories live here too — a staged
+		// skill and a fetch in flight — and both are named with a leading
+		// dot. A skill cannot be named that (safeName refuses it), so a
+		// dot-directory is never one to read.
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
 		one, err := Read(filepath.Join(root, entry.Name()))
 		if err != nil {
 			rejected = append(rejected, Rejected{Name: entry.Name(), Reason: err.Error()})
