@@ -30,6 +30,7 @@ func newSkillsCommand() *cobra.Command {
 	skills.AddCommand(
 		newSkillsInstallCommand(),
 		newSkillsListCommand(),
+		newSkillsStagedCommand(),
 		newSkillsRemoveCommand(),
 	)
 	return skills
@@ -125,6 +126,40 @@ func newSkillsListCommand() *cobra.Command {
 			// saying because what is on disk is what the model reads.
 			for _, changed := range skill.Changed(root, lock, installed) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "note: %s\n", changed)
+			}
+			return nil
+		},
+	}
+}
+
+// newSkillsStagedCommand shows what the agent has fetched and is waiting for
+// somebody to approve.
+//
+// The operator's window onto a proposal before it becomes standing
+// instructions: what it calls itself, where it came from, and the exact
+// commit — enough to go and read the source before approving the activation.
+func newSkillsStagedCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "staged",
+		Short: "Show skills fetched but not yet installed",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := skillsDir()
+			if err != nil {
+				return err
+			}
+
+			staged, err := skill.StagedSkills(root)
+			if err != nil {
+				return err
+			}
+			if len(staged) == 0 {
+				fmt.Fprintln(cmd.ErrOrStderr(), "nothing is staged")
+				return nil
+			}
+
+			for _, one := range staged {
+				fmt.Printf("%-20s %s#%s\n", one.Name, one.Source.Repository, one.Source.Commit)
 			}
 			return nil
 		},

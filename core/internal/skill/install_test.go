@@ -465,3 +465,35 @@ func TestActivateRefusesContentSwappedAfterStaging(t *testing.T) {
 		t.Fatal("activation accepted content that changed after it was staged")
 	}
 }
+
+// Staged skills can be listed, for an operator's window onto what the agent
+// proposed and nobody has approved.
+func TestStagedSkillsAreListed(t *testing.T) {
+	repo, commit := aRepository(t, aSkill)
+	installer := installing(t)
+
+	// Nothing staged yet.
+	if staged, err := StagedSkills(installer.Root); err != nil || len(staged) != 0 {
+		t.Fatalf("a fresh root listed %d staged skills (err %v)", len(staged), err)
+	}
+
+	if _, err := installer.Stage(context.Background(), fromLocal(repo, commit, "release")); err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+
+	staged, err := StagedSkills(installer.Root)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(staged) != 1 || staged[0].Name != "release" || staged[0].TreeDigest == "" {
+		t.Fatalf("the staged skill was not listed with what it needs: %+v", staged)
+	}
+
+	// Activating it takes it off the staged list.
+	if _, err := installer.Activate("release"); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	if staged, _ := StagedSkills(installer.Root); len(staged) != 0 {
+		t.Errorf("an activated skill is still listed as staged: %+v", staged)
+	}
+}

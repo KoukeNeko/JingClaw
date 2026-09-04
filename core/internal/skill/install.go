@@ -453,3 +453,34 @@ func StagedSkill(root, name string) (Staged, Skill, error) {
 	}
 	return manifest, one, nil
 }
+
+// StagedSkills lists what has been fetched and is waiting to be activated.
+//
+// For an operator's window onto what the agent proposed but nobody has yet
+// approved. Read from the manifests beside the staged directories, so a
+// half-written fetch with no manifest is not counted as staged.
+func StagedSkills(root string) ([]Staged, error) {
+	staging := filepath.Join(root, ".staged")
+	entries, err := os.ReadDir(staging)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("skill: read %s: %w", staging, err)
+	}
+
+	var staged []Staged
+	for _, entry := range entries {
+		name := strings.TrimSuffix(entry.Name(), ".json")
+		if entry.IsDir() || name == entry.Name() {
+			continue
+		}
+		manifest, err := readManifest(staging, name)
+		if err != nil {
+			continue
+		}
+		staged = append(staged, manifest)
+	}
+	sort.Slice(staged, func(a, b int) bool { return staged[a].Name < staged[b].Name })
+	return staged, nil
+}
