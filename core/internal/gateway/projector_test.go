@@ -38,13 +38,11 @@ func newHarness(t *testing.T, chunkDelay time.Duration) *harness {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 
 	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "gateway.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
 
 	ws, err := workspace.Open(t.TempDir())
 	if err != nil {
@@ -107,7 +105,30 @@ func newHarness(t *testing.T, chunkDelay time.Duration) *harness {
 		Logger:        slog.New(slog.DiscardHandler),
 	}
 
+	cleanupRuntime(t, cancel, rt, store)
+
 	return &harness{ingress: ingress, store: store, runtime: rt, artifacts: artifacts}
+}
+
+// cleanupRuntime tears a harness down in the one order Windows tolerates: the
+// runtime's goroutines are stopped and drained before the store they hold is
+// closed, and the store is closed before its file is removed.
+//
+// t.TempDir registers its RemoveAll the moment it is called, and cleanups run
+// last-registered-first, so registering this after the store is opened places
+// the drain ahead of that removal. Draining before closing matters because a
+// run goroutine writes its terminal state with a context that outlives
+// cancellation: close the store while one is still writing and Unix merely
+// unlinks a file that is still open, but Windows refuses to remove a file
+// another process holds — which is the flake this repairs.
+func cleanupRuntime(t *testing.T, cancel context.CancelFunc, rt *runtime.Runtime, store *sqlite.Store) {
+	t.Helper()
+
+	t.Cleanup(func() {
+		cancel()
+		_ = rt.Shutdown(context.Background())
+		_ = store.Close()
+	})
 }
 
 func (h *harness) bind(t *testing.T, profile string, allowed ...string) {

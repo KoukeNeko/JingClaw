@@ -66,13 +66,11 @@ func newSummaryHarness(t *testing.T, turns [][]provider.Event) *harness {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 
 	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "summary.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
 
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "notes.md"), []byte("what the file says"), 0o600); err != nil {
@@ -123,6 +121,8 @@ func newSummaryHarness(t *testing.T, turns [][]provider.Event) *harness {
 		Now:           time.Now,
 		Logger:        slog.New(slog.DiscardHandler),
 	})
+
+	cleanupRuntime(t, cancel, rt, store)
 
 	return &harness{
 		ingress: &gateway.Ingress{
