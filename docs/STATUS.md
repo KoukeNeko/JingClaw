@@ -585,6 +585,17 @@ engine has no skill input, so the most permission-hostile skill anyone could
 write decides no exec_command call differently, and a tool cannot lower the
 level it is judged at.
 
+**A streamed answer with a table is said once.** While an answer is written
+it grows in one Discord message. When it finishes and a table is to be drawn,
+the drawn-table path now finishes that growing message in place with what came
+before the table — the same shape as an answer with no table — and posts the
+picture and what follows after it. An answer that opens with a table has
+nothing at the front to finish the message into, so the growing message is
+taken down rather than left beside a picture of itself. Either way the answer
+is released, so a later one cannot extend it by mistake. Three mutations are
+caught: never releasing, never finishing in place, and leaving a table-first
+answer standing.
+
 ## Not done
 
 **Built but nothing uses it**
@@ -766,6 +777,13 @@ rather than in logic a unit test was looking at.
 14. Seeding wrote each file as it decoded the next, so an unusable persona
    left the configuration behind: created once, never replaced, and no longer
    correctable by fixing the variable the error named
+15. A streamed answer that turned out to hold a table was said twice on
+   Discord: the message it had been growing in was left standing with the
+   whole answer, table written out, and the same answer was then posted again
+   beside it as text, picture, text. The drawn-table path posted fresh
+   messages and never finished the growing one in place the way the ordinary
+   path did — found by a person reading it on a phone, where two copies of a
+   long answer is the whole screen
 
 Two were found by reading rather than running: the daemon deleting a
 replacement's discovery file, and compaction summarising its own summary.

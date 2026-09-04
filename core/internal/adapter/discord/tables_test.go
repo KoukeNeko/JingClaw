@@ -21,6 +21,9 @@ import (
 
 // sent is what the stub was asked to post, in order.
 type sent struct {
+	// Method is the HTTP verb: POST for a new message, PATCH for one edited
+	// in place, DELETE for one taken down.
+	Method  string
 	Content string
 	File    []byte
 }
@@ -40,7 +43,7 @@ func stubDiscord(t *testing.T) (*Adapter, *[]sent) {
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		record := sent{}
+		record := sent{Method: r.Method}
 
 		if strings.HasPrefix(r.Header.Get("content-type"), "multipart/") {
 			if err := r.ParseMultipartForm(8 << 20); err != nil {
@@ -92,10 +95,12 @@ func stubDiscord(t *testing.T) (*Adapter, *[]sent) {
 		t.Fatalf("build a client: %v", err)
 	}
 
-	return &Adapter{
-		client: client,
-		config: Config{TablesAsImages: true, Logger: slog.Default()},
-	}, &posted
+	// Built the way the daemon builds it, so the maps a growing answer lives
+	// in exist; a bare struct literal has none and the first streamed answer
+	// panics on assignment.
+	adapter := New(Config{TablesAsImages: true, Logger: slog.Default()}, nil, nil)
+	adapter.client = client
+	return adapter, &posted
 }
 
 func answerWith(t *testing.T, text string) jcgateway.Dispatch {
@@ -310,5 +315,113 @@ func TestProgramOutputIsStillPostedAsText(t *testing.T) {
 		if !strings.Contains(whole, expected) {
 			t.Errorf("%q did not survive:\n%s", expected, whole)
 		}
+	}
+}
+
+// A streamed answer that turns out to hold a table is not said twice.
+//
+// While it is being written, an answer grows in one message. When it finishes
+// and a table is to be drawn, what was said before the table has to replace
+// that growing message in place — the way finishAsMessages does — and the
+// picture and what follows come after it. Posting the split answer beside the
+// streamed one leaves the whole answer standing, table written out, and then
+// the same answer again in pieces.
+func TestAStreamedAnswerWithATableIsNotSaidTwice(t *testing.T) {
+	if _, err := tableimage.Load(nil); err != nil {
+		t.Skipf("no font with Chinese glyphs on this machine: %v", err)
+	}
+
+	adapter, posted := stubDiscord(t)
+	target := jcgateway.ConversationRef{ChannelID: "987654321098765432"}
+
+	// It starts being written: one message, growing.
+	partial := jcgateway.Dispatch{
+		Kind:    jcgateway.DispatchMessage,
+		Target:  target,
+		Payload: `{"text":"看一下這個：","message_id":"msg_1"}`,
+	}
+	if _, err := adapter.Post(t.Context(), partial); err != nil {
+		t.Fatalf("partial: %v", err)
+	}
+	if len(*posted) != 1 || (*posted)[0].Method != "POST" {
+		t.Fatalf("the partial did not start one message: %+v", *posted)
+	}
+
+	// Then the whole thing arrives, and it has a table in the middle.
+	payload, _ := json.Marshal(map[string]any{
+		"text":       answerWithATable,
+		"message_id": "msg_1",
+		"final":      true,
+	})
+	final := jcgateway.Dispatch{Kind: jcgateway.DispatchMessage, Target: target, Payload: string(payload)}
+	if _, err := adapter.Post(t.Context(), final); err != nil {
+		t.Fatalf("final: %v", err)
+	}
+
+	after := (*posted)[1:]
+
+	// The growing message is finished in place with what came before the
+	// table — not left as it was and the answer posted again beside it.
+	if len(after) == 0 || after[0].Method != "PATCH" {
+		t.Fatalf("the streamed message was not finished in place; what followed the partial was: %+v", after)
+	}
+	if !strings.Contains(after[0].Content, "看一下這個") || strings.Contains(after[0].Content, "項目") {
+		t.Errorf("the edited message should hold only what came before the table: %q", after[0].Content)
+	}
+
+	// Then the picture, then what was said after: two new messages, not three.
+	fresh := 0
+	for _, one := range after {
+		if one.Method == "POST" {
+			fresh++
+		}
+	}
+	if fresh != 2 {
+		t.Errorf("finishing posted %d new messages, want 2 (the picture and the text after): %+v", fresh, after)
+	}
+
+	// And the answer is released, so its message is not extended by mistake.
+	if _, still := adapter.liveAnswer("msg_1"); still {
+		t.Error("the finished answer kept its growing message")
+	}
+}
+
+// An answer that opens with a table has nothing at the front to finish the
+// growing message into. It is taken down — otherwise the table stands written
+// out, and then again as a picture of itself.
+func TestAStreamedAnswerThatOpensWithATableTakesTheGrowingMessageDown(t *testing.T) {
+	if _, err := tableimage.Load(nil); err != nil {
+		t.Skipf("no font with Chinese glyphs on this machine: %v", err)
+	}
+
+	adapter, posted := stubDiscord(t)
+	target := jcgateway.ConversationRef{ChannelID: "987654321098765432"}
+
+	partial := jcgateway.Dispatch{
+		Kind: jcgateway.DispatchMessage, Target: target,
+		Payload: `{"text":"| 項目 |","message_id":"msg_2"}`,
+	}
+	if _, err := adapter.Post(t.Context(), partial); err != nil {
+		t.Fatalf("partial: %v", err)
+	}
+
+	tableFirst := "| 項目 | 數據 |\n|---|---|\n| 融資 | 200 萬 |\n\n所以他們還在早期。"
+	payload, _ := json.Marshal(map[string]any{"text": tableFirst, "message_id": "msg_2", "final": true})
+	final := jcgateway.Dispatch{Kind: jcgateway.DispatchMessage, Target: target, Payload: string(payload)}
+	if _, err := adapter.Post(t.Context(), final); err != nil {
+		t.Fatalf("final: %v", err)
+	}
+
+	after := (*posted)[1:]
+	if len(after) == 0 || after[0].Method != "DELETE" {
+		t.Fatalf("the growing message was not taken down; what followed the partial was: %+v", after)
+	}
+	for _, one := range after {
+		if one.Method == "PATCH" {
+			t.Errorf("a message was edited in place though the answer opens with a table: %+v", after)
+		}
+	}
+	if _, still := adapter.liveAnswer("msg_2"); still {
+		t.Error("the finished answer kept its growing message")
 	}
 }
