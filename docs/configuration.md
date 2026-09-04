@@ -277,6 +277,33 @@ not evidence of anything: the production namespace of a service nobody has
 deployed since spring is correct, important and cold. What ends a memory is
 a correction, an end date it was given, or somebody removing it.
 
+**`curate`**
+
+Note what a person said about themselves and the project once they have
+been answered.
+
+On. After each answered turn the model is handed the person's own messages
+from that turn — nothing the assistant said, nothing a tool returned — and
+asked for at most three claims, each with the verbatim words it rests on. A
+claim whose words are not in the message it cites is dropped. What survives
+is a retrieval memory: looked up when wanted, never carried, never an
+instruction, and marked as approved by nobody. One small model call per
+answered turn; off, and memory is written only when the model calls
+`remember`.
+
+**`auto_recall`**
+
+How many notes are put in front of the turn being answered.
+
+Chosen by what the turn says, from the scopes its sender may read — the
+project's and their own, never another account's — and placed as a labelled
+block before their words, on that turn only. `0` puts none and leaves the
+`recall` tool as the only way in.
+
+**`auto_recall_bytes`**
+
+The ceiling on that block.
+
 ## `[web]`
 
 **`enabled`**

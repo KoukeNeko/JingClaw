@@ -128,6 +128,14 @@ enabled = true
 # Ask the model for other words when a lookup matches nothing. Costs one
 # small call, only on a search that already failed.
 # expand_queries = true
+# Note what a person said about themselves and the project once they have
+# been answered, as retrieval memories nobody approved: looked up, never
+# carried, never an instruction. One small model call per answered turn.
+# curate = true
+# How many of those notes go in front of the turn being answered, chosen by
+# what it says, and how much room they may take. 0 puts none.
+# auto_recall = 3
+# auto_recall_bytes = 1024
 
 # ── Capabilities ────────────────────────────────────────────
 

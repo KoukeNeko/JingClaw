@@ -146,6 +146,25 @@ type Options struct {
 	// the same recollections.
 	SystemPromptFor func(ctx context.Context, run domain.Run) string
 
+	// Recall puts what this machine noted in earlier conversations in front
+	// of the turn being answered: a label, written by this machine, listing
+	// claims and where each came from.
+	//
+	// Called once per run with the words of that turn, and what it returns
+	// is reused for every request the run makes. The turn is the last thing
+	// before the run's own calls and results, and a label that changed
+	// between requests would change the prefix everything after it is cached
+	// against. It is never put on an earlier turn: those are history, and
+	// history is not edited on the way out. Nil puts nothing.
+	Recall func(ctx context.Context, run domain.Run, said string) string
+
+	// AfterRun is told when a run that was having the conversation has
+	// completed, on a goroutine of its own, so nothing it does holds the
+	// session's turn. A worker is not reported, nor a run that failed or was
+	// cancelled: what is worth noting was said by somebody who got an answer.
+	// Nil is told nothing.
+	AfterRun func(ctx context.Context, run domain.Run)
+
 	// Delivery is told about events on runs whose output belongs somewhere
 	// other than a control-plane client.
 	//
@@ -247,6 +266,11 @@ type activeRun struct {
 	// and a hand-off from either would start the next message while the
 	// conversation is still being answered.
 	owner bool
+
+	// recalled is what Recall said for this run, once it has been asked. Nil
+	// until then; kept so every request the run makes carries the same
+	// label. Read and written under the runtime's lock.
+	recalled *string
 }
 
 // New builds a runtime.
@@ -671,7 +695,7 @@ func (r *Runtime) execute(ctx context.Context, run domain.Run) {
 		calls, err := r.generateTurn(ctx, run, provider.Request{
 			Model:    r.modelFor(ctx, run.SessionID),
 			System:   r.withPlan(ctx, run.SessionID, system),
-			Messages: messages,
+			Messages: r.withRecalled(ctx, run, messages),
 			Tools:    r.withLoaded(ctx, run, declarations),
 		})
 		if err != nil {
@@ -766,7 +790,26 @@ func (r *Runtime) finish(
 			"status", string(status),
 			"error", err,
 		)
+		return
 	}
+
+	r.tellAfterRun(run, status)
+}
+
+// tellAfterRun reports a completed conversation turn to whoever asked to
+// hear about them, in the group so shutdown waits for it, and never from the
+// run's own goroutine so the session is handed on the moment the answer is.
+func (r *Runtime) tellAfterRun(run domain.Run, status domain.RunStatus) {
+	if r.opts.AfterRun == nil || status != domain.RunCompleted || run.Kind == domain.RunWorker {
+		return
+	}
+	// transition wrote the new state onto its own copy; the one told about
+	// the run should not be reading a state it has already left.
+	run.Status = status
+	r.group.Go(func() error {
+		r.opts.AfterRun(r.groupCtx, run)
+		return nil
+	})
 }
 
 // transition writes the run's new state, then the event announcing it. Order

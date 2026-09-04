@@ -686,6 +686,39 @@ thing standing in for its range. Mutation-checked: feed the folds to the
 summariser, let only the last fold stand, prune folds, never condense, and
 label a fold as a user turn — each killed by a test.
 
+**It takes notes by itself.** Memory was a tool the model had to think to
+call, and it rarely did; a person had to say "remember this" and the same
+person had to say "recall" next week, which is not what anyone means by an
+assistant that remembers. Two hooks on the runtime now: `AfterRun` is told
+when a conversation turn has completed (on its own goroutine, in the group,
+never a worker or a failed run), and `Recall` is asked once per run for a
+label to put in front of the turn being answered. The memory package fills
+both. The **curator** reads the person's own `user.message` events from the
+run — nothing the assistant said, nothing a tool returned, nothing from
+another run — and asks the model for at most three claims, each with the
+verbatim quote it rests on and the message it is from; a claim whose quote is
+not in that message is dropped, which is the check a model cannot be trusted
+to make about itself. What survives is written as a retrieval memory with
+scope, trust, provenance, session and message read off the event, and
+`nobody (noted from …)` as the approver — visible in `memory list`, and
+never standing. A gateway turn writes only about its own principal. Nothing
+is written twice. **Noted** is the other direction: the same lookup the
+recall tool makes, made before the turn with the turn's own words, over the
+scopes its sender may read, rendered as a bracketed block naming who said
+each note and when, bounded in count and bytes, and placed after the
+when-and-who line and before the person's words — on that turn only, so
+history is never edited and the cached prefix stands. The prompt contract
+explains the block. Config: `[memory] curate`, `auto_recall`,
+`auto_recall_bytes`; on by default when memory is. Seventeen mutations —
+read other runs, skip the quote check, count a schedule as a person, write
+duplicates, let a gateway write project scope, drop the cap, make notes
+standing, label workers, ask on every request, report failed runs — each
+killed. What is deliberately not here yet: a canonical key and supersession
+for notes that restate each other (exact duplicates are the only ones
+caught), promotion of a note to standing with a person's approval, and the
+deterministic working-state reducer the compaction research proposed as the
+next step for folds.
+
 ## Not done
 
 **Built but nothing uses it**

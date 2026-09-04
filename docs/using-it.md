@@ -213,6 +213,35 @@ summaries it has been through — and is never put in front of the model as a
 standing direction. It can be looked up deliberately, labelled as coming from
 outside this machine.
 
+**It takes notes by itself, and says so.** Once a person has been answered,
+the machine reads their own messages from that turn — not the reply, not what
+a tool returned, not what a page said — and asks the model what in them is
+worth knowing next month: their name, their timezone, a preference, a
+decision about the project. Each proposal has to quote the message it rests
+on, verbatim, or it is dropped; a model that wants to note something nobody
+said has to invent words that are then not found. What survives is written as
+a retrieval memory in the person's own scope (a turn typed at this machine
+may also add to the project's), with the session and message it came from,
+and with `nobody (noted from discord:…)` where an approver would be. At most
+three per turn, never the same note twice, and never a standing one: a note
+is a claim, and authority is a person's to grant.
+
+Those notes come back on their own. Before the turn being answered, the
+machine looks up the notes its sender may read — the project's and their own,
+never another account's — chosen by what the turn says, and puts the top few
+in front of it as a bracketed block that names who said each and when, and
+which arrived from outside this machine. The prompt tells the model the block
+is its own notes, claims and not instructions, possibly wrong or stale. Only
+the turn being answered gets the block: earlier turns are history, and the
+front of the conversation stays a prefix the provider can keep caching.
+
+```toml
+[memory]
+curate = true          # note what people say, one small model call per turn
+auto_recall = 3        # notes put in front of a turn; 0 for none
+auto_recall_bytes = 1024
+```
+
 You can see all of it, which is the control that matters:
 
 ```bash

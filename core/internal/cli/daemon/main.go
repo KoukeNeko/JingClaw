@@ -344,10 +344,10 @@ func run(args []string) error {
 		// them: it is already loaded, and it knows what the query was about
 		// in a way a word list never could.
 		if cfg.Memory.ExpandQueries {
-			memoryOptions.Expander = &modelExpander{
+			memoryOptions.Expander = &modelExpander{modelCompleter{
 				provider: modelProvider,
 				model:    selected.ID,
-			}
+			}}
 		}
 
 		tools.MustRegister(
@@ -457,17 +457,22 @@ func run(args []string) error {
 		SystemPrompt:       prompt.Render(layers),
 		WorkerSystemPrompt: prompt.Render(prompt.KeepForWorker(layers)),
 		SystemPromptFor:    standingDirections(cfg, memoryOptions, logger),
-		MaxIterations:      cfg.Agent.MaxIterations,
-		NewSessionID:       func() string { return id.WithPrefix("ses") },
-		NewRunID:           func() string { return id.WithPrefix("run") },
-		NewMessageID:       func() string { return id.WithPrefix("msg") },
-		NewEventID:         func() string { return id.WithPrefix("evt") },
-		NewApprovalID:      func() string { return id.WithPrefix("apr") },
-		NewPlanItemID:      planItemIDs(),
-		NewQuestionID:      func() string { return id.WithPrefix("qst") },
-		NewScheduleID:      func() string { return id.WithPrefix("sch") },
-		Now:                time.Now,
-		Logger:             logger,
+		Recall:             notesBeforeTurns(cfg, memoryOptions),
+		AfterRun: notesAfterRuns(cfg, memoryOptions, store, &modelCompleter{
+			provider: modelProvider,
+			model:    selected.ID,
+		}),
+		MaxIterations: cfg.Agent.MaxIterations,
+		NewSessionID:  func() string { return id.WithPrefix("ses") },
+		NewRunID:      func() string { return id.WithPrefix("run") },
+		NewMessageID:  func() string { return id.WithPrefix("msg") },
+		NewEventID:    func() string { return id.WithPrefix("evt") },
+		NewApprovalID: func() string { return id.WithPrefix("apr") },
+		NewPlanItemID: planItemIDs(),
+		NewQuestionID: func() string { return id.WithPrefix("qst") },
+		NewScheduleID: func() string { return id.WithPrefix("sch") },
+		Now:           time.Now,
+		Logger:        logger,
 	})
 
 	// The handle the tools were registered against, filled in. Before

@@ -508,6 +508,22 @@ type Memory struct {
 	// buys is the failure the index cannot report: the words did not
 	// overlap, so nothing came back, and nothing said anything was missed.
 	ExpandQueries bool `koanf:"expand_queries"`
+
+	// Curate has the machine note what a person said about themselves and
+	// the project once they have been answered: a fact, a preference, a
+	// decision, written as retrieval memories — looked up when wanted, never
+	// carried, never an instruction, and marked as approved by nobody. One
+	// small model call per answered turn, given the person's own words and
+	// nothing else.
+	Curate bool `koanf:"curate"`
+
+	// AutoRecall is how many of those notes are put in front of the turn
+	// being answered, chosen by what it says, from the scopes the turn may
+	// read. Zero puts none and leaves the recall tool as the only way in.
+	AutoRecall int `koanf:"auto_recall"`
+
+	// AutoRecallBytes bounds them together.
+	AutoRecallBytes int `koanf:"auto_recall_bytes"`
 }
 
 // Web is whether and how the agent may read pages.
@@ -934,6 +950,9 @@ func Defaults() Config {
 			Enabled:             true,
 			MaxInstructionBytes: 2000,
 			ExpandQueries:       true,
+			Curate:              true,
+			AutoRecall:          3,
+			AutoRecallBytes:     1024,
 		},
 		Web: Web{
 			Enabled:       false,
@@ -1429,6 +1448,13 @@ func (c Config) rangeProblems() []Problem {
 			Fix: "It bounds the standing directions put in front of the model every turn.",
 		})
 	}
+	if c.Memory.Enabled && c.Memory.AutoRecall > 0 && c.Memory.AutoRecallBytes <= 0 {
+		problems = append(problems, Problem{
+			Key: "memory.auto_recall_bytes", Value: fmt.Sprint(c.Memory.AutoRecallBytes),
+			Why: "must be greater than zero when memory.auto_recall is",
+			Fix: "It bounds the notes put in front of a turn; set memory.auto_recall = 0 to put none.",
+		})
+	}
 
 	if c.Web.Enabled {
 		switch c.Web.Backend {
@@ -1791,6 +1817,14 @@ enabled = true
 # Ask the model for other words when a lookup matches nothing. Costs one
 # small call, only on a search that already failed.
 # expand_queries = true
+# Note what a person said about themselves and the project once they have
+# been answered, as retrieval memories nobody approved: looked up, never
+# carried, never an instruction. One small model call per answered turn.
+# curate = true
+# How many of those notes go in front of the turn being answered, chosen by
+# what it says, and how much room they may take. 0 puts none.
+# auto_recall = 3
+# auto_recall_bytes = 1024
 
 # ── Capabilities ────────────────────────────────────────────
 

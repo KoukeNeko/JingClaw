@@ -2,12 +2,7 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"strings"
-
-	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 )
 
 // expandInstruction asks for vocabulary and nothing else.
@@ -39,42 +34,18 @@ const expandMaxOutputTokens = 64
 // thing it is given is the query the agent already wrote, so this exposes
 // nothing to the provider that the run was not already sending it.
 type modelExpander struct {
-	provider provider.Provider
-	model    string
+	modelCompleter
 }
 
 func (e *modelExpander) Expand(ctx context.Context, query string) ([]string, error) {
-	stream, err := e.provider.Generate(ctx, provider.Request{
-		Model:  e.model,
-		System: provider.Text(expandInstruction),
-		Messages: []provider.Message{{
-			Role:    provider.RoleUser,
-			Content: provider.Text(query),
-		}},
-		MaxOutputTokens: expandMaxOutputTokens,
-	})
+	answer, err := e.Complete(ctx, expandInstruction, query, expandMaxOutputTokens)
 	if err != nil {
 		return nil, fmt.Errorf("ask for other words: %w", err)
-	}
-	defer func() { _ = stream.Close() }()
-
-	var answer strings.Builder
-	for {
-		event, err := stream.Recv(ctx)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read other words: %w", err)
-		}
-		if delta, ok := event.(provider.TextDelta); ok {
-			answer.WriteString(delta.Text)
-		}
 	}
 
 	// Returned whole rather than split here. What counts as a usable term is
 	// the searcher's business, and it applies the same rules to every
 	// expander instead of trusting each one to have split its own answer
 	// the way the index needs.
-	return []string{answer.String()}, nil
+	return []string{answer}, nil
 }
