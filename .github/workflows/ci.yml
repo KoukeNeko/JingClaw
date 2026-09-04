@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -167,3 +168,81 @@ jobs:
           labels: ${{ steps.names.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # One binary per platform, cut only from a tag. Pure Go with the sqlite
+  # driver in Go too, so every target cross-compiles from one runner — no
+  # per-OS matrix, because there is no cgo to need the host toolchain, and
+  # building them together keeps the six in step.
+  #
+  # The tests above have already run on this commit across the three OSes; a
+  # tag that failed them should not become a download, so this waits on them.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [core, end-to-end, proto]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      # The tag names the release; it is passed through the environment rather
+      # than interpolated into the shell, so a ref can never be run as one.
+      - name: Build every platform
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          mkdir -p dist
+          # -trimpath so the binary carries no build path; -s -w to drop the
+          # symbol and debug tables a released binary is not debugged with.
+          # The version is stamped in from the tag, so `jingclaw --version`
+          # says which build it is without a network call.
+          for target in \
+            linux/amd64 linux/arm64 \
+            darwin/amd64 darwin/arm64 \
+            windows/amd64 windows/arm64; do
+            os=${target%/*}
+            arch=${target#*/}
+            ext=""
+            [ "$os" = windows ] && ext=".exe"
+            out="dist/jingclaw-${os}-${arch}${ext}"
+            echo "building $out"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
+              -trimpath -ldflags="-s -w -X main.version=${TAG}" \
+              -o "$out" ./cmd/jingclaw
+          done
+          # One checksums file, so a download can be verified against something
+          # served from a different place than the binary.
+          ( cd dist && sha256sum jingclaw-* > SHA256SUMS )
+          ls -l dist
+
+      # macOS binaries are not signed or notarized yet. Gatekeeper will
+      # quarantine a downloaded one until they are; the release notes say how
+      # to clear it in the meantime, and signing slots in here later once the
+      # Developer ID credentials are wired as secrets.
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            core/dist/jingclaw-*
+            core/dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          body: |
+            One self-contained binary per platform. Verify with `SHA256SUMS`.
+
+            **macOS** builds are not yet signed or notarized, so Gatekeeper
+            will block a downloaded one. Until signing is in place, clear the
+            quarantine flag after downloading:
+
+            ```
+            xattr -d com.apple.quarantine jingclaw-darwin-arm64
+            chmod +x jingclaw-darwin-arm64
+            ```

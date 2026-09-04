@@ -21,6 +21,12 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/supervise"
 )
 
+// version is stamped in at build time with -ldflags "-X main.version=<tag>",
+// which the release does from the git tag. "dev" for any build that did not —
+// a local go build, a go install — so the value is never empty and never
+// claims to be a release it is not.
+var version = "dev"
+
 func main() {
 	// Before anything else, because this process may not be the program at
 	// all: it may be one started to confine a command and then become it.
@@ -38,8 +44,9 @@ func main() {
 
 func root() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "jingclaw",
-		Short: "A local agent that answers in chat",
+		Use:     "jingclaw",
+		Version: version,
+		Short:   "A local agent that answers in chat",
 		Long: "Run with no arguments to start everything and watch it.\n" +
 			"Everything else is for scripts, or for being one of the parts.",
 		SilenceUsage:  true,

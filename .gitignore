@@ -35,3 +35,6 @@ macos/.swiftpm/
 
 # Holds a bot token. compose reads it automatically.
 .env
+
+# Release binaries built locally by the same loop CI runs.
+core/dist/
