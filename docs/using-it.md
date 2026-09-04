@@ -105,6 +105,27 @@ a web console; it was removed. A page served over loopback, its own credential
 kind, its own pairing code and its own client at parity was a second product
 next to a terminal that already worked everywhere the first one did.
 
+## Who is talking
+
+In front of every turn a person takes, the agent is shown one line this
+machine wrote — never mixed into their words:
+
+```
+[2026-09-04T22:46:07+08:00 · from doeshing on discord via the gateway]
+```
+
+When it was sent, who sent it (the platform's own name for them), and the way
+it came in. A turn typed at the terminal says `from this machine`; a schedule
+says which schedule. In a room several people type in, this is how the agent
+tells them apart and knows who it is answering — before it, everybody in a
+channel was one person to it.
+
+It is a label, not a control. Somebody can type those characters into a
+message, and nothing here prevents it; what holds is that permissions come
+from where a run came from, and no line of text raises them. The time is the
+event's own, so the same turn reads the same on every rebuild and the prompt
+prefix a provider caches does not change for nothing.
+
 ## Images
 
 Send the bot a screenshot on Discord — **attached to the message that mentions
