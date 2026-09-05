@@ -42,9 +42,11 @@ const (
 	softMessageLength = 1900
 )
 
-// Sink receives messages the adapter has accepted.
+// Sink receives messages the adapter has accepted, and hears when one of
+// them is taken back.
 type Sink interface {
 	Deliver(ctx context.Context, message jcgateway.InboundMessage) error
+	Withdraw(ctx context.Context, withdrawal jcgateway.Withdrawal) error
 }
 
 type Config struct {
@@ -150,11 +152,17 @@ func (a *Adapter) Run(ctx context.Context) error {
 		// Asking for more would mean reading every message in every channel to
 		// find the few meant for us.
 		bot.WithGatewayConfigOpts(
-			gateway.WithIntents(gateway.IntentGuildMessages|gateway.IntentDirectMessages),
+			//
+			// Reactions are the one more thing asked for: a person pressing
+			// the waiting mark on their own message is how they take it back.
+			// Not privileged, and not the content of anything.
+			gateway.WithIntents(gateway.IntentGuildMessages|gateway.IntentDirectMessages|
+				gateway.IntentGuildMessageReactions|gateway.IntentDirectMessageReactions),
 			gateway.WithAutoReconnect(true),
 		),
 		bot.WithEventListenerFunc(a.onReady),
 		bot.WithEventListenerFunc(a.onMessage),
+		bot.WithEventListenerFunc(a.onReaction),
 		// A press is not a message, and it does not travel on the message
 		// intents above: Discord delivers interactions to a bot regardless.
 		// Keeping them on separate handlers is also what lets a room hold
@@ -272,6 +280,15 @@ func (a *Adapter) onMessage(event *events.MessageCreate) {
 	}
 }
 
+// inboundKey is what a message is claimed under when it arrives.
+//
+// Discord message ids are unique, which is exactly what deduplication needs:
+// a redelivery after a reconnect carries the same one. It is also what a
+// later gesture at the message — taking it back — is found by.
+func inboundKey(messageID snowflake.ID) string {
+	return "discord:" + messageID.String()
+}
+
 func (a *Adapter) addReaction(channelID, messageID snowflake.ID, emoji string) error {
 	return a.client.Rest.AddReaction(channelID, messageID, emoji)
 }
@@ -354,14 +371,12 @@ func (a *Adapter) toInbound(
 
 	return jcgateway.InboundMessage{
 		PlatformMessageID: message.ID.String(),
-		// Discord message ids are unique, which is exactly what deduplication
-		// needs: a redelivery after a reconnect carries the same one.
-		IdempotencyKey: "discord:" + message.ID.String(),
-		Principal:      principal,
-		Conversation:   conversation,
-		Text:           stripMention(message.Content, a.self()),
-		Trigger:        trigger,
-		OccurredAt:     message.CreatedAt,
+		IdempotencyKey:    inboundKey(message.ID),
+		Principal:         principal,
+		Conversation:      conversation,
+		Text:              stripMention(message.Content, a.self()),
+		Trigger:           trigger,
+		OccurredAt:        message.CreatedAt,
 	}
 }
 

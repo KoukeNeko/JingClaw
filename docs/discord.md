@@ -28,6 +28,28 @@ edits to one message. Which message is live is held in the adapter's memory
 rather than in the outbox, because it is a presentation detail: losing it
 across a restart costs one extra line in a channel, not a wrong one.
 
+## Waiting in line, and taking a message back
+
+A session answers one message at a time. A second message sent while the
+first is still being answered gets 📥 on it: received, and waiting its turn.
+The mark comes off the moment its turn comes.
+
+**Pressing that 📥 yourself takes the message back.** It comes out of the
+line at once, the bot swaps its 📥 for 🚮, and nothing is posted — the
+person who took it back is the one who would have read a line about it. The
+model is never shown the message; the log keeps it. Only the sender's press
+counts: anybody else's 📥 on the message does nothing at all.
+
+It is the waiting mark and not deleting the message, because people delete
+messages for many reasons — wrong channel, a typo they are about to fix — and
+not every one of them means "do not answer that". And it is not a way to stop
+an answer already being written: a message that has started has no 📥 to
+press, and stopping it is `interrupt` at a console, said deliberately.
+
+The bot needs no new permission for this beyond adding reactions, which it
+already does; it listens for reactions on the messages it marked, which is a
+standard intent and not a privileged one.
+
 ## A private console channel
 
 A channel bound as a console (`[[gateway.discord.consoles]]`) is the terminal

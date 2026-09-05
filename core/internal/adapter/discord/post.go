@@ -212,10 +212,14 @@ func (a *Adapter) postReactionStatus(
 // in line behind one still being answered.
 const waitingMark = "📥"
 
+// withdrawnMark is the reaction on a message its sender took back before it
+// was answered: put away, not stopped and not failed.
+const withdrawnMark = "🚮"
+
 // reactionsCleared names the reactions a state ends.
 func reactionsCleared(state string) []string {
 	switch state {
-	case "provider_started", "completed", "failed", "cancelled":
+	case "provider_started", "completed", "failed", "cancelled", "withdrawn":
 		return []string{waitingMark}
 	default:
 		return nil
@@ -245,6 +249,8 @@ func reactionForStatus(state string) (string, bool) {
 		return "❌", false
 	case "cancelled":
 		return "🛑", false
+	case "withdrawn":
+		return withdrawnMark, false
 	default:
 		return "", false
 	}
@@ -377,7 +383,7 @@ func isFinalStatus(payload string) bool {
 	}
 
 	switch status.State {
-	case "completed", "failed", "cancelled":
+	case "completed", "failed", "cancelled", "withdrawn":
 		return true
 	default:
 		return false

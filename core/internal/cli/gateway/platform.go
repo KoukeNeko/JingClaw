@@ -35,6 +35,7 @@ type adapter interface {
 // sink is where an adapter hands a message it has accepted.
 type sink interface {
 	Deliver(ctx context.Context, message gateway.InboundMessage) error
+	Withdraw(ctx context.Context, withdrawal gateway.Withdrawal) error
 }
 
 // decider is where an adapter hands a press on one of its controls.
