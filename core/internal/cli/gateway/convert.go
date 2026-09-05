@@ -106,6 +106,10 @@ func dispatchKindFromProto(kind controlv1.DispatchKind) gateway.DispatchKind {
 		return gateway.DispatchApproval
 	case controlv1.DispatchKind_DISPATCH_KIND_STATUS:
 		return gateway.DispatchStatus
+	case controlv1.DispatchKind_DISPATCH_KIND_QUESTION:
+		return gateway.DispatchQuestion
+	case controlv1.DispatchKind_DISPATCH_KIND_LOG:
+		return gateway.DispatchLog
 	default:
 		return ""
 	}

@@ -148,6 +148,8 @@ const (
 	DispatchKind_DISPATCH_KIND_MESSAGE     DispatchKind = 1
 	DispatchKind_DISPATCH_KIND_APPROVAL    DispatchKind = 2
 	DispatchKind_DISPATCH_KIND_STATUS      DispatchKind = 3
+	DispatchKind_DISPATCH_KIND_QUESTION    DispatchKind = 4
+	DispatchKind_DISPATCH_KIND_LOG         DispatchKind = 5
 )
 
 // Enum value maps for DispatchKind.
@@ -157,12 +159,16 @@ var (
 		1: "DISPATCH_KIND_MESSAGE",
 		2: "DISPATCH_KIND_APPROVAL",
 		3: "DISPATCH_KIND_STATUS",
+		4: "DISPATCH_KIND_QUESTION",
+		5: "DISPATCH_KIND_LOG",
 	}
 	DispatchKind_value = map[string]int32{
 		"DISPATCH_KIND_UNSPECIFIED": 0,
 		"DISPATCH_KIND_MESSAGE":     1,
 		"DISPATCH_KIND_APPROVAL":    2,
 		"DISPATCH_KIND_STATUS":      3,
+		"DISPATCH_KIND_QUESTION":    4,
+		"DISPATCH_KIND_LOG":         5,
 	}
 )
 
@@ -5244,12 +5250,14 @@ const file_jingclaw_control_v1_session_proto_rawDesc = "" +
 	"\x19DECISION_OUTCOME_RECORDED\x10\x01\x12\x1c\n" +
 	"\x18DECISION_OUTCOME_REFUSED\x10\x02\x12\x1c\n" +
 	"\x18DECISION_OUTCOME_ALREADY\x10\x03\x12 \n" +
-	"\x1cDECISION_OUTCOME_UNAVAILABLE\x10\x04*~\n" +
+	"\x1cDECISION_OUTCOME_UNAVAILABLE\x10\x04*\xb1\x01\n" +
 	"\fDispatchKind\x12\x1d\n" +
 	"\x19DISPATCH_KIND_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15DISPATCH_KIND_MESSAGE\x10\x01\x12\x1a\n" +
 	"\x16DISPATCH_KIND_APPROVAL\x10\x02\x12\x18\n" +
-	"\x14DISPATCH_KIND_STATUS\x10\x03*^\n" +
+	"\x14DISPATCH_KIND_STATUS\x10\x03\x12\x1a\n" +
+	"\x16DISPATCH_KIND_QUESTION\x10\x04\x12\x15\n" +
+	"\x11DISPATCH_KIND_LOG\x10\x05*^\n" +
 	"\vMessageRole\x12\x1c\n" +
 	"\x18MESSAGE_ROLE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11MESSAGE_ROLE_USER\x10\x01\x12\x1a\n" +

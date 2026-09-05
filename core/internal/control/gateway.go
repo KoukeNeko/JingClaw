@@ -274,7 +274,16 @@ func dispatchKindToProto(kind gateway.DispatchKind) controlv1.DispatchKind {
 		return controlv1.DispatchKind_DISPATCH_KIND_APPROVAL
 	case gateway.DispatchStatus:
 		return controlv1.DispatchKind_DISPATCH_KIND_STATUS
+	case gateway.DispatchQuestion:
+		return controlv1.DispatchKind_DISPATCH_KIND_QUESTION
+	case gateway.DispatchLog:
+		return controlv1.DispatchKind_DISPATCH_KIND_LOG
 	default:
+		// Reaching here is a kind the wire does not know. It is not a
+		// dispatch that can be delivered: the far side reads UNSPECIFIED as
+		// an empty kind and refuses to render it, so it sits in the outbox
+		// and is offered again on every reconnect, forever. The test over
+		// AllDispatchKinds is what keeps this branch unreachable.
 		return controlv1.DispatchKind_DISPATCH_KIND_UNSPECIFIED
 	}
 }

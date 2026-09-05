@@ -52,6 +52,20 @@ const (
 	DispatchLog DispatchKind = "log"
 )
 
+// AllDispatchKinds is every kind a dispatch can have.
+//
+// A kind has to be understood in more than one place — encoded onto the wire
+// by the daemon, decoded by the gateway, rendered by the adapter — and the
+// failure when one of them is missed is not a compile error. It is a dispatch
+// that reaches the far side as an empty kind, cannot be rendered, and is
+// offered again on every reconnect for the rest of the deployment's life.
+// Two kinds spent weeks that way. This list is what the tests check against.
+func AllDispatchKinds() []DispatchKind {
+	return []DispatchKind{
+		DispatchMessage, DispatchApproval, DispatchQuestion, DispatchStatus, DispatchLog,
+	}
+}
+
 // Dispatch is one thing to deliver to a platform.
 type Dispatch struct {
 	ID  string

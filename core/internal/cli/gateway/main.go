@@ -292,8 +292,15 @@ func (r *relay) post(ctx context.Context, dispatch *controlv1.Dispatch) error {
 		return err
 	}
 
-	messageIDs, err := r.poster.Post(ctx, converted)
-	if err != nil {
+	var messageIDs []string
+	if staleLog(converted, time.Now()) {
+		// Acknowledged without being posted. A log line is context for what
+		// is happening now; one from an hour ago, delivered after an outage,
+		// is a wall of stale subtext under an answer somebody already read.
+		// Two hundred of them arrived at once the first time this ran.
+		r.logger.Info("skipped a stale log line", "dispatch_id", converted.ID,
+			"age", time.Since(converted.CreatedAt).Round(time.Minute).String())
+	} else if messageIDs, err = r.poster.Post(ctx, converted); err != nil {
 		return err
 	}
 
