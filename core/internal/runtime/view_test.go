@@ -199,3 +199,50 @@ func TestAViewSaysWhatItIsWaitingOn(t *testing.T) {
 		t.Errorf("the active run is %s, want %s", view.ActiveRun.ID, runID)
 	}
 }
+
+// A question that waited its turn is drawn after the answer it waited for,
+// not in the middle of it — the same placement the model is shown.
+func TestAViewDrawsAQueuedQuestionAfterTheAnswerItWaitedFor(t *testing.T) {
+	model := &orderingProvider{release: make(chan struct{})}
+	rt, _ := newQueueRuntime(t, model)
+	ctx := context.Background()
+
+	session, err := rt.CreateSession(ctx, "queue view")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	first, _, err := rt.SendTurn(ctx, session.ID, "first question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send first: %v", err)
+	}
+	second, _, err := rt.SendTurn(ctx, session.ID, "second question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send second: %v", err)
+	}
+
+	// While the second is still in line, the view shows it waiting at the end,
+	// not splitting the first exchange.
+	model.release <- struct{}{}
+	if err := rt.Wait(ctx, first); err != nil {
+		t.Fatalf("wait first: %v", err)
+	}
+
+	view, err := rt.SessionViewOf(ctx, session.ID, 0)
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	var texts []string
+	for _, message := range view.Messages {
+		texts = append(texts, string(message.Role)+":"+strings.TrimSpace(message.Text))
+	}
+	want := []string{"user:first question", "assistant:answer 1", "user:second question"}
+	if strings.Join(texts, "|") != strings.Join(want, "|") {
+		t.Errorf("the view is ordered\n  %s\nwant\n  %s",
+			strings.Join(texts, "\n  "), strings.Join(want, "\n  "))
+	}
+
+	model.release <- struct{}{}
+	if err := rt.Wait(ctx, second); err != nil {
+		t.Fatalf("wait second: %v", err)
+	}
+}

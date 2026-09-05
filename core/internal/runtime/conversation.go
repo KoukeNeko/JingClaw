@@ -102,6 +102,7 @@ func (r *Runtime) buildBoundedConversation(
 	builder := &conversationBuilder{
 		attachments:   r.opts.Attachments,
 		maxImageBytes: r.opts.MaxImageBytes,
+		asking:        asking.ID,
 	}
 	for _, fold := range folds {
 		builder.seed(fold)
@@ -167,6 +168,11 @@ const summaryPreamble = "Summary of the earlier part of this conversation, " +
 // the sequence at flush time instead would attribute a message to whatever
 // event happened to trigger the flush.
 type conversationBuilder struct {
+	// asking is the run this conversation is for; held are questions whose
+	// runs have not started yet.
+	asking domain.RunID
+	held   []heldUser
+
 	messages []boundedMessage
 
 	pendingText      string
@@ -199,19 +205,38 @@ func (b *conversationBuilder) seed(fold domain.ConversationCompacted) {
 	})
 }
 
+// heldUser is a question whose run has not started yet.
+//
+// A message lands in the log the moment it arrives, and if its run had to wait
+// for the one before it, that moment is in the middle of the previous answer.
+// Replayed in log order it would split that answer and leave the model's own
+// last reply as the final thing it sees, so it would have nothing to answer.
+// It is held until its run does something, and placed there.
+type heldUser struct {
+	run     domain.RunID
+	message boundedMessage
+}
+
 func (b *conversationBuilder) apply(event domain.Event) {
+	if started(event) {
+		b.release(event.RunID)
+	}
+
 	switch payload := event.Payload.(type) {
 	case domain.UserMessageAdded:
-		b.flushAssistant()
-		b.flushResults()
-		b.messages = append(b.messages, boundedMessage{
+		message := boundedMessage{
 			Message: provider.Message{
 				Role:    provider.RoleUser,
 				Content: b.userContent(payload, event.OccurredAt),
 			},
 			LastSeq: event.Seq,
 			Trust:   payload.Trust,
-		})
+		}
+		if event.RunID == "" {
+			b.say(message)
+			return
+		}
+		b.held = append(b.held, heldUser{run: event.RunID, message: message})
 
 	case domain.AssistantTextDelta:
 		// Results already gathered belong before the reply they informed.
@@ -512,7 +537,60 @@ func (b *conversationBuilder) flushResults() {
 func (b *conversationBuilder) finish() []boundedMessage {
 	b.flushAssistant()
 	b.flushResults()
+
+	// The run asking for this conversation may not have done anything yet —
+	// it builds its conversation before it records that it is running — so
+	// its question is placed here, last, which is where a question being
+	// answered now belongs. Anything else still held is a run further down
+	// the line: not part of this conversation yet, and shown to the model
+	// only when its own turn comes.
+	b.release(b.asking)
+	b.held = nil
+
 	return b.messages
+}
+
+// started reports whether an event means its run is doing something.
+//
+// The queued transition is not that: it is the record of a run waiting, and
+// treating it as a start would place the question exactly where it is being
+// moved away from.
+func started(event domain.Event) bool {
+	if event.RunID == "" {
+		return false
+	}
+	switch payload := event.Payload.(type) {
+	case domain.UserMessageAdded:
+		return false
+	case domain.RunStateChanged:
+		return payload.Status != domain.RunQueued
+	default:
+		return true
+	}
+}
+
+// release places any question held for a run, keeping the order questions
+// arrived in.
+func (b *conversationBuilder) release(run domain.RunID) {
+	if run == "" || len(b.held) == 0 {
+		return
+	}
+	kept := b.held[:0]
+	for _, waiting := range b.held {
+		if waiting.run == run {
+			b.say(waiting.message)
+			continue
+		}
+		kept = append(kept, waiting)
+	}
+	b.held = kept
+}
+
+// say appends a user message, closing whatever the assistant had open first.
+func (b *conversationBuilder) say(message boundedMessage) {
+	b.flushAssistant()
+	b.flushResults()
+	b.messages = append(b.messages, message)
 }
 
 // pendingCall is a tool the model asked for that has no result yet.

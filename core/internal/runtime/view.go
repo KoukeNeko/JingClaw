@@ -154,6 +154,15 @@ func foldEvents(events []domain.Event) ([]ViewMessage, domain.RunID) {
 		byCall    = map[domain.ToolCallID]struct{ message, call int }{}
 	)
 
+	// Questions whose runs have not started yet, held until they do. The same
+	// reasoning as the conversation builder: a message that waited in line
+	// landed in the log mid-answer, and drawing it there splits the answer.
+	type heldView struct {
+		run     domain.RunID
+		message ViewMessage
+	}
+	var held []heldView
+
 	appendMessage := func(id domain.MessageID, role domain.MessageRole, event domain.Event) int {
 		messages = append(messages, ViewMessage{
 			ID: id, Role: role, At: event.OccurredAt.UnixNano(), Seq: event.Seq,
@@ -165,11 +174,40 @@ func foldEvents(events []domain.Event) ([]ViewMessage, domain.RunID) {
 		return index
 	}
 
+	place := func(message ViewMessage) {
+		messages = append(messages, message)
+		if message.ID != "" {
+			byMessage[message.ID] = len(messages) - 1
+		}
+	}
+	releaseHeld := func(run domain.RunID) {
+		kept := held[:0]
+		for _, waiting := range held {
+			if waiting.run == run {
+				place(waiting.message)
+				continue
+			}
+			kept = append(kept, waiting)
+		}
+		held = kept
+	}
+
 	for _, event := range events {
+		if started(event) {
+			releaseHeld(event.RunID)
+		}
+
 		switch payload := event.Payload.(type) {
 		case domain.UserMessageAdded:
-			index := appendMessage(payload.MessageID, domain.RoleUser, event)
-			messages[index].Text = payload.Text
+			message := ViewMessage{
+				ID: payload.MessageID, Role: domain.RoleUser, Text: payload.Text,
+				At: event.OccurredAt.UnixNano(), Seq: event.Seq,
+			}
+			if event.RunID == "" {
+				place(message)
+				continue
+			}
+			held = append(held, heldView{run: event.RunID, message: message})
 
 		case domain.AssistantTextDelta:
 			index, ok := byMessage[payload.MessageID]
@@ -244,6 +282,12 @@ func foldEvents(events []domain.Event) ([]ViewMessage, domain.RunID) {
 			}
 			active = event.RunID
 		}
+	}
+
+	// Whatever is still held is waiting its turn, and a view of the session
+	// now shows it after the current exchange, in the order it arrived.
+	for _, waiting := range held {
+		place(waiting.message)
 	}
 
 	return messages, active
