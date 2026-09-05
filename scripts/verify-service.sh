@@ -1,5 +1,6 @@
 #!/bin/sh
-# Proves the plist a service install would write names this executable, this
+# Proves the plist a service install would write runs a copy of this executable
+# kept under the deployment — never this file where it stands — and names this
 # deployment, and a PATH with the tools on it.
 #
 # What this cannot prove is that launchd then runs it. Loading a job would
@@ -53,9 +54,20 @@ plutil -lint "$WORK/plist" >/dev/null 2>&1 ||
 	fail "launchd could not parse it: $(plutil -lint "$WORK/plist" 2>&1)"
 printf 'ok   the plist is one launchd can parse\n'
 
-grep -q "<string>$WORK/jingclaw</string>" "$WORK/plist" ||
-	fail "it does not run the executable that printed it: $(cat "$WORK/plist")"
-printf 'ok   it runs the executable that printed it, by absolute path\n'
+# The service runs a copy under the deployment, not this file where it stands.
+# launchd cannot open a program inside a folder macOS protects, and a checkout
+# is usually in one: the service hangs in the loader before main, reported as
+# running, with nothing written anywhere. Naming this file was the defect.
+grep -q "<string>$DEPLOYMENT/bin/jingclaw</string>" "$WORK/plist" ||
+	fail "it does not run the copy under the deployment: $(cat "$WORK/plist")"
+grep -q "<string>$WORK/jingclaw</string>" "$WORK/plist" &&
+	fail "it still runs the executable where it stands, which launchd cannot open from a protected folder"
+printf 'ok   it runs a copy kept under the deployment, not this file\n'
+
+# Printing is a dry run. A dry run that leaves a copy behind is an install.
+[ -e "$DEPLOYMENT/bin/jingclaw" ] &&
+	fail "printing the plist copied the program into the deployment"
+printf 'ok   and printing it copied nothing\n'
 
 grep -q "<string>$DEPLOYMENT</string>" "$WORK/plist" ||
 	fail "it does not name this deployment: $(cat "$WORK/plist")"

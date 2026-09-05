@@ -73,12 +73,18 @@ func Commands() []*cobra.Command {
 // Gathered first so that a machine which cannot be described — no home
 // directory, no executable path — fails before it has changed anything.
 type job struct {
+	// Source is the program this command was run from; Executable is the copy
+	// of it the service runs, under the home directory.
+	Source     string
 	Executable string
 	Home       string
 	Output     string
 	Error      string
 	Path       string
 }
+
+// binaryName is what the service's copy of the program is called.
+const binaryName = "jingclaw"
 
 func describe() (job, error) {
 	if runtime.GOOS != darwin {
@@ -93,13 +99,19 @@ func describe() (job, error) {
 	// The path of this file, not the name on PATH. A machine commonly has an
 	// installed copy and a freshly built one, and a service that quietly runs
 	// the other one is the hardest kind of wrong to see.
-	executable, err := os.Executable()
+	source, err := os.Executable()
 	if err != nil {
 		return job{}, fmt.Errorf("service: find this program: %w", err)
 	}
 
+	// The service runs a copy under the home directory, never this file
+	// where it stands. launchd cannot open a program inside a folder macOS
+	// protects, and a checkout is usually in one: the service hangs in the
+	// loader before main, with nothing written anywhere to say why. That took
+	// a deployment down for days once and for hours a second time.
 	return job{
-		Executable: executable,
+		Source:     source,
+		Executable: filepath.Join(dir.Bin(), binaryName),
 		Home:       dir.Root,
 		Output:     filepath.Join(dir.Log(), outputName),
 		Error:      filepath.Join(dir.Log(), errorName),
@@ -243,6 +255,11 @@ func install(showOnly bool) error {
 		return fmt.Errorf("service: create the log directory: %w", err)
 	}
 
+	copied, err := stage(described)
+	if err != nil {
+		return err
+	}
+
 	// Unloaded first. Writing over the file of a loaded job leaves launchd
 	// running the previous one until the next login, which looks exactly like
 	// the install having done nothing.
@@ -260,9 +277,98 @@ func install(showOnly bool) error {
 	}
 
 	fmt.Printf("installed %s\n", path)
+	if copied {
+		fmt.Printf("copied    %s\n          -> %s\n", described.Source, described.Executable)
+	}
 	fmt.Printf("running   %s\n", described.Executable)
 	fmt.Printf("logging   %s\n", filepath.Dir(described.Output))
 	return nil
+}
+
+// stage puts the copy of the program in place, and says whether it had to.
+//
+// Nothing to do when the program is already the copy — installing from the
+// copy itself is how a service is repaired when the checkout has gone. The
+// copy is written beside its final name and renamed into place, so a service
+// that starts halfway through never sees half a program.
+func stage(described job) (bool, error) {
+	if sameFile(described.Source, described.Executable) {
+		return false, nil
+	}
+
+	program, err := os.ReadFile(described.Source)
+	if err != nil {
+		return false, fmt.Errorf("service: read this program: %w", err)
+	}
+
+	bin := filepath.Dir(described.Executable)
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		return false, fmt.Errorf("service: create %s: %w", bin, err)
+	}
+
+	staging := described.Executable + ".installing"
+	if err := os.WriteFile(staging, program, 0o755); err != nil {
+		return false, fmt.Errorf("service: write %s: %w", staging, err)
+	}
+	if err := os.Rename(staging, described.Executable); err != nil {
+		_ = os.Remove(staging)
+		return false, fmt.Errorf("service: put the program in place: %w", err)
+	}
+	return true, nil
+}
+
+// sameFile reports whether two paths are one file, however they are spelled.
+func sameFile(a, b string) bool {
+	if a == b {
+		return true
+	}
+	first, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	second, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(first, second)
+}
+
+// protectedFolders are the ones macOS gates behind a permission a background
+// service has no way to ask for.
+var protectedFolders = []string{"Documents", "Desktop", "Downloads"}
+
+// underProtectedFolder reports a path launchd will not be able to open.
+func underProtectedFolder(home, path string) bool {
+	if home == "" || path == "" {
+		return false
+	}
+	for _, folder := range protectedFolders {
+		root := filepath.Join(home, folder)
+		if path == root || strings.HasPrefix(path, root+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// installedProgram reads which program the plist on disk actually names.
+//
+// From the file rather than from describe(), because status is about what is
+// installed, and the two come apart exactly when somebody needs to know.
+func installedProgram(plist string) (string, bool) {
+	_, after, found := strings.Cut(plist, "<key>ProgramArguments</key>")
+	if !found {
+		return "", false
+	}
+	_, after, found = strings.Cut(after, "<string>")
+	if !found {
+		return "", false
+	}
+	program, _, found := strings.Cut(after, "</string>")
+	if !found {
+		return "", false
+	}
+	return strings.TrimSpace(program), true
 }
 
 func uninstall() error {
@@ -320,6 +426,26 @@ func status() error {
 		fmt.Println("loaded    yes")
 	} else {
 		fmt.Println("loaded    no (it will load at your next login)")
+	}
+
+	written, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("service: read %s: %w", path, err)
+	}
+	program, found := installedProgram(string(written))
+	if !found {
+		return nil
+	}
+	fmt.Printf("running   %s\n", program)
+
+	// Said here because nothing else will say it. A service pointed into one
+	// of these folders hangs in the loader before main, and launchd reports it
+	// as running.
+	userHome, _ := os.UserHomeDir()
+	if underProtectedFolder(userHome, program) {
+		fmt.Println("warning   that is inside a folder macOS protects; launchd cannot open it,")
+		fmt.Println("          and the service will hang before it starts, looking like it is running.")
+		fmt.Println("          Run `jingclaw service install` from a build to copy it somewhere it can.")
 	}
 	return nil
 }

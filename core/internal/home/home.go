@@ -35,6 +35,7 @@ const (
 	DataName      = "data"
 	RunName       = "run"
 	LogName       = "log"
+	BinName       = "bin"
 	SkillsName    = "skills"
 )
 
@@ -119,6 +120,15 @@ func (d Dir) Skills() string { return filepath.Join(d.Root, SkillsName) }
 // terminal, and a second copy on disk would be one more thing to remember to
 // look at.
 func (d Dir) Log() string { return filepath.Join(d.Root, LogName) }
+
+// Bin is where the service keeps its own copy of the program.
+//
+// A copy, because launchd cannot open a program that lives inside a folder
+// macOS protects — Documents, Desktop, Downloads — and a checkout is usually
+// in one. The service hangs in the loader before main, forever, with nothing
+// written anywhere to say so. A copy here is also a program that `go build`
+// does not replace underneath a running service.
+func (d Dir) Bin() string { return filepath.Join(d.Root, BinName) }
 
 // SecretFile is where a named credential lives.
 func (d Dir) SecretFile(name string) string { return filepath.Join(d.Root, name) }
