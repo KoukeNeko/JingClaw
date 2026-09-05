@@ -192,8 +192,22 @@ func foldEvents(events []domain.Event) ([]ViewMessage, domain.RunID) {
 		held = kept
 	}
 
+	discardHeld := func(run domain.RunID) {
+		kept := held[:0]
+		for _, waiting := range held {
+			if waiting.run != run {
+				kept = append(kept, waiting)
+			}
+		}
+		held = kept
+	}
+
 	for _, event := range events {
-		if started(event) {
+		// Taken back before it started: not drawn, the same as the model is
+		// not shown it.
+		if ended(event) {
+			discardHeld(event.RunID)
+		} else if started(event) {
 			releaseHeld(event.RunID)
 		}
 

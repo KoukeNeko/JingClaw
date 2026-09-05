@@ -62,6 +62,17 @@ func (s *answerStream) Recv(context.Context) (provider.Event, error) {
 }
 func (s *answerStream) Close() error { return nil }
 
+// said is a message's text without the clock a user message is stamped with.
+func said(message provider.Message) string {
+	text := strings.TrimSpace(lastText(message))
+	if strings.HasPrefix(text, "[") {
+		if end := strings.Index(text, "]"); end > 0 {
+			text = strings.TrimSpace(text[end+1:])
+		}
+	}
+	return text
+}
+
 func lastText(message provider.Message) string {
 	var text strings.Builder
 	for _, block := range message.Content {
@@ -133,5 +144,120 @@ func TestAQueuedMessageIsTheLastThingTheModelSees(t *testing.T) {
 	}
 	if shown[1].Role != provider.RoleAssistant || !strings.Contains(lastText(shown[1]), "answer 1") {
 		t.Errorf("the first answer does not follow the first question: %q", lastText(shown[1]))
+	}
+}
+
+// A message taken back while it waited is never shown to the model.
+//
+// It is in the log — the log is not rewritten — and its run ends as cancelled
+// without ever starting. Treating that ending as a start would place the
+// question in the conversation exactly as though it had been asked.
+func TestAMessageWithdrawnWhileQueuedIsNeverSeen(t *testing.T) {
+	model := &orderingProvider{release: make(chan struct{})}
+	rt, _ := newQueueRuntime(t, model)
+	ctx := context.Background()
+
+	session, err := rt.CreateSession(ctx, "withdraw")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	first, _, err := rt.SendTurn(ctx, session.ID, "first question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send first: %v", err)
+	}
+	second, _, err := rt.SendTurn(ctx, session.ID, "second question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send second: %v", err)
+	}
+
+	status, err := rt.InterruptRun(ctx, second, "withdrawn")
+	if err != nil {
+		t.Fatalf("withdraw: %v", err)
+	}
+	if status != domain.RunCancelled {
+		t.Fatalf("a run withdrawn from the line is %s, want %s", status, domain.RunCancelled)
+	}
+
+	model.release <- struct{}{}
+	if err := rt.Wait(ctx, first); err != nil {
+		t.Fatalf("wait first: %v", err)
+	}
+
+	third, _, err := rt.SendTurn(ctx, session.ID, "third question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send third: %v", err)
+	}
+	model.release <- struct{}{}
+	if err := rt.Wait(ctx, third); err != nil {
+		t.Fatalf("wait third: %v", err)
+	}
+
+	shown := model.request(1).Messages
+	var texts []string
+	for _, message := range shown {
+		texts = append(texts, string(message.Role)+":"+said(message))
+	}
+	want := []string{"user:first question", "assistant:answer 1", "user:third question"}
+	if strings.Join(texts, "|") != strings.Join(want, "|") {
+		t.Fatalf("the model was shown\n  %s\nwant\n  %s",
+			strings.Join(texts, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// Taking a message out of the middle of the line does not move the line. The
+// one behind it keeps waiting for the answer still being written, and gets
+// its turn — and only its turn — when that answer is done.
+func TestTakingOneBackLeavesTheRestWaiting(t *testing.T) {
+	model := &orderingProvider{release: make(chan struct{})}
+	rt, store := newQueueRuntime(t, model)
+	ctx := context.Background()
+
+	session, err := rt.CreateSession(ctx, "withdraw middle")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	first, _, err := rt.SendTurn(ctx, session.ID, "first question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send first: %v", err)
+	}
+	second, _, err := rt.SendTurn(ctx, session.ID, "second question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send second: %v", err)
+	}
+	third, _, err := rt.SendTurn(ctx, session.ID, "third question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send third: %v", err)
+	}
+
+	if _, err := rt.InterruptRun(ctx, second, "withdrawn"); err != nil {
+		t.Fatalf("withdraw: %v", err)
+	}
+	if err := rt.Wait(ctx, second); err != nil {
+		t.Fatalf("wait second: %v", err)
+	}
+
+	// The first is still inside Generate. The third must not have started.
+	if got := statusOf(t, store, third); got != domain.RunQueued {
+		t.Fatalf("the run behind a withdrawn one is %s while the first is still answering, want %s",
+			got, domain.RunQueued)
+	}
+
+	model.release <- struct{}{}
+	if err := rt.Wait(ctx, first); err != nil {
+		t.Fatalf("wait first: %v", err)
+	}
+	model.release <- struct{}{}
+	if err := rt.Wait(ctx, third); err != nil {
+		t.Fatalf("wait third: %v", err)
+	}
+
+	var texts []string
+	for _, message := range model.request(1).Messages {
+		texts = append(texts, string(message.Role)+":"+said(message))
+	}
+	want := []string{"user:first question", "assistant:answer 1", "user:third question"}
+	if strings.Join(texts, "|") != strings.Join(want, "|") {
+		t.Fatalf("the third run was shown\n  %s\nwant\n  %s",
+			strings.Join(texts, "\n  "), strings.Join(want, "\n  "))
 	}
 }

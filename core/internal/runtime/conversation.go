@@ -218,7 +218,12 @@ type heldUser struct {
 }
 
 func (b *conversationBuilder) apply(event domain.Event) {
-	if started(event) {
+	// A run that ends before it starts was taken back: its question is
+	// dropped, not placed. Checked first, because an ending is otherwise
+	// indistinguishable from a start.
+	if ended(event) {
+		b.discard(event.RunID)
+	} else if started(event) {
 		b.release(event.RunID)
 	}
 
@@ -567,6 +572,28 @@ func started(event domain.Event) bool {
 	default:
 		return true
 	}
+}
+
+// ended reports whether an event is a run reaching a terminal state.
+func ended(event domain.Event) bool {
+	if event.RunID == "" {
+		return false
+	}
+	changed, ok := event.Payload.(domain.RunStateChanged)
+	return ok && changed.Status.IsTerminal()
+}
+
+// discard forgets any question held for a run. A run that is over before it
+// began never asked anything the model should see; the log still has the
+// words, which is where a person looks for what they took back.
+func (b *conversationBuilder) discard(run domain.RunID) {
+	kept := b.held[:0]
+	for _, waiting := range b.held {
+		if waiting.run != run {
+			kept = append(kept, waiting)
+		}
+	}
+	b.held = kept
 }
 
 // release places any question held for a run, keeping the order questions

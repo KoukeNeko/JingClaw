@@ -584,6 +584,10 @@ func (r *Runtime) dequeue(session domain.SessionID, id domain.RunID) (queuedRun,
 	for index, waiting := range line {
 		if waiting.run.ID == id {
 			r.queued[session] = append(line[:index:index], line[index+1:]...)
+			// It never held the turn, so it has nothing to hand on. Left
+			// as owner, releasing it would start the next in line while the
+			// one before it is still being answered.
+			waiting.tracked.owner = false
 			return waiting, true
 		}
 	}

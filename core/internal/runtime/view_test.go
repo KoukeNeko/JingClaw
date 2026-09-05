@@ -246,3 +246,47 @@ func TestAViewDrawsAQueuedQuestionAfterTheAnswerItWaitedFor(t *testing.T) {
 		t.Fatalf("wait second: %v", err)
 	}
 }
+
+// A question taken back while it waited is not drawn: the person took it
+// back, and a view that still shows it would look like a question left
+// unanswered.
+func TestAViewLeavesOutAWithdrawnQuestion(t *testing.T) {
+	model := &orderingProvider{release: make(chan struct{})}
+	rt, _ := newQueueRuntime(t, model)
+	ctx := context.Background()
+
+	session, err := rt.CreateSession(ctx, "withdraw view")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	first, _, err := rt.SendTurn(ctx, session.ID, "first question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send first: %v", err)
+	}
+	second, _, err := rt.SendTurn(ctx, session.ID, "second question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send second: %v", err)
+	}
+	if _, err := rt.InterruptRun(ctx, second, "withdrawn"); err != nil {
+		t.Fatalf("withdraw: %v", err)
+	}
+
+	model.release <- struct{}{}
+	if err := rt.Wait(ctx, first); err != nil {
+		t.Fatalf("wait first: %v", err)
+	}
+
+	view, err := rt.SessionViewOf(ctx, session.ID, 0)
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	var texts []string
+	for _, message := range view.Messages {
+		texts = append(texts, string(message.Role)+":"+strings.TrimSpace(message.Text))
+	}
+	want := []string{"user:first question", "assistant:answer 1"}
+	if strings.Join(texts, "|") != strings.Join(want, "|") {
+		t.Errorf("the view shows\n  %s\nwant\n  %s",
+			strings.Join(texts, "\n  "), strings.Join(want, "\n  "))
+	}
+}
