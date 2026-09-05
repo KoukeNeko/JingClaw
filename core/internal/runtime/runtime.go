@@ -443,6 +443,11 @@ func (r *Runtime) Run(ctx context.Context, id domain.RunID) (domain.Run, error) 
 	return r.opts.Store.Run(ctx, id)
 }
 
+// Runs is every run a session has had, waiting ones included.
+func (r *Runtime) Runs(ctx context.Context, session domain.SessionID) ([]domain.Run, error) {
+	return r.opts.Store.ListRuns(ctx, session)
+}
+
 // SendTurn starts a run whose output goes back to the client that asked for
 // it.
 //

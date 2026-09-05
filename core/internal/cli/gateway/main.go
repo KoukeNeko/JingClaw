@@ -240,6 +240,30 @@ func outcomeFromProto(outcome controlv1.DecisionOutcome) gateway.DecisionOutcome
 	}
 }
 
+// Withdraw carries a message being taken back inward.
+//
+// Nothing to take back is not a failure and is not answered: the message had
+// started being answered, or was never one the agent took, and a room where
+// every stray press is answered is a room the bot is a nuisance in.
+func (r *relay) Withdraw(ctx context.Context, withdrawal gateway.Withdrawal) error {
+	resp, err := r.client.WithdrawInbound(ctx, connect.NewRequest(&controlv1.WithdrawInboundRequest{
+		Platform:          string(withdrawal.Principal.Platform),
+		AccountId:         withdrawal.Principal.AccountID,
+		TenantId:          withdrawal.Principal.TenantID,
+		PrincipalId:       withdrawal.Principal.ID,
+		IdempotencyKey:    withdrawal.InboundKey,
+		PlatformMessageId: withdrawal.MessageID,
+	}))
+	if err != nil {
+		return err
+	}
+	if resp.Msg.GetWithdrawn() {
+		r.logger.Info("took a waiting message back",
+			"message_id", withdrawal.MessageID, "principal", withdrawal.Principal.ID)
+	}
+	return nil
+}
+
 func (r *relay) deliver(ctx context.Context) error {
 	const retryDelay = 2 * time.Second
 

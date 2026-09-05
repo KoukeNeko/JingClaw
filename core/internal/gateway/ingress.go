@@ -68,6 +68,11 @@ type Ingress struct {
 	// deciding is unavailable rather than silently doing nothing.
 	Decisions DecidingRuntime
 
+	// Withdrawals is the reach needed to take a waiting message back out of
+	// its line. Left nil, pressing the mark does nothing, and the gateway is
+	// told so rather than left to wonder.
+	Withdrawals Withdrawer
+
 	// NewDispatchID names a message this program sends on its own behalf,
 	// rather than one produced by a run.
 	NewDispatchID func() string

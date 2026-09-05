@@ -110,6 +110,10 @@ type runRecord struct {
 	// seen says this record covers the run from its start.
 	seen bool
 
+	// waited says the run was seen in line. With seen still false when it
+	// ends, it ended before it began: taken back, not stopped.
+	waited bool
+
 	tools map[string]*ToolUse
 
 	// pending holds calls that have been requested but not yet finished, so a

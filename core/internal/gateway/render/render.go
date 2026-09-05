@@ -293,9 +293,10 @@ func renderStatus(payload jcgateway.StatusPayload, style Style) string {
 	switch payload.State {
 	case "running":
 		return "👀"
-	case "queued":
+	case "queued", "withdrawn":
 		// A reaction, not a line: the message is waiting its turn, and a line
-		// saying so under the previous answer would read as part of it.
+		// saying so under the previous answer would read as part of it. The
+		// same when it is taken back out of the line.
 		return ""
 	// Every state that means "still going" draws the same line. They are
 	// separate states because a platform that shows a reaction wants a

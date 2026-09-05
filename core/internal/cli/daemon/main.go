@@ -425,7 +425,7 @@ func run(args []string) error {
 	// Both halves of the gateway at once: accepting messages without routing
 	// replies back would answer into the void, and the two are built together
 	// so that cannot be half-configured.
-	plane := gateway.NewPlane(store, nil, permissions, artifacts, nil,
+	plane := gateway.NewPlane(store, nil, permissions, artifacts, nil, nil,
 		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
 	plane.Projector.Provider = modelProvider.Name()
 	plane.Projector.Model = selected.ID
@@ -536,6 +536,7 @@ func run(args []string) error {
 	// its own conversations; every other binding sees the narrow interface
 	// and cannot decide anything.
 	plane.Ingress.Decisions = rt
+	plane.Ingress.Withdrawals = rt
 
 	api := http.NewServeMux()
 	api.Handle(controlv1connect.NewSessionServiceHandler(

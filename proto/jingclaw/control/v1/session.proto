@@ -462,6 +462,27 @@ message DeliverDecisionRequest {
   bool allow = 10;
 }
 
+message WithdrawInboundRequest {
+  string platform = 1;
+  string account_id = 2;
+  string tenant_id = 3;
+
+  // The platform's stable identifier for whoever asked. Only the sender of a
+  // message may take it back, and this is what that is checked against.
+  string principal_id = 4;
+
+  // The key the message was claimed under when it arrived, and the
+  // platform's own id for it.
+  string idempotency_key = 5;
+  string platform_message_id = 6;
+}
+
+message WithdrawInboundResponse {
+  // False when there was nothing to take back: the message had started being
+  // answered, or was never one the agent took. The caller should do nothing.
+  bool withdrawn = 1;
+}
+
 message DeliverDecisionResponse {
   DecisionOutcome outcome = 1;
 }
@@ -596,6 +617,13 @@ service GatewayIngressService {
   // pressed something in a named channel and lets the daemon decide whether
   // that counts.
   rpc DeliverDecision(DeliverDecisionRequest) returns (DeliverDecisionResponse);
+
+  // Somebody took back a message that has not been answered yet.
+  //
+  // The gateway asserts who did it and which message; the daemon settles
+  // whether that person sent it and whether it is still waiting. Not a
+  // trigger on DeliverInbound: taking a message back is not a message.
+  rpc WithdrawInbound(WithdrawInboundRequest) returns (WithdrawInboundResponse);
 }
 
 // Binding management, spoken by an operator's control client rather than by a

@@ -203,6 +203,21 @@ func (s *Store) ClaimInbound(
 	return true, nil
 }
 
+// InboundSession reports where a claimed message went.
+func (s *Store) InboundSession(ctx context.Context, key string) (domain.SessionID, bool, error) {
+	var session string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT session_id FROM gateway_inbound WHERE idempotency_key = ?`, key,
+	).Scan(&session)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("sqlite: inbound session: %w", err)
+	}
+	return domain.SessionID(session), true, nil
+}
+
 const dispatchColumns = `id, seq, account_id, session_id, run_id, target,
 	kind, payload, created_at, delivered_at, platform_message_ids`
 

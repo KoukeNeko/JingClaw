@@ -686,3 +686,63 @@ func TestReasoningNeverReachesAPlatform(t *testing.T) {
 		}
 	}
 }
+
+// observeState feeds one run state transition to the projector.
+func observeState(t *testing.T, projector *gateway.Projector, run domain.Run, status domain.RunStatus) {
+	t.Helper()
+	if err := projector.Observe(context.Background(), run, domain.Event{
+		Kind:    domain.EventRunStateChanged,
+		Payload: domain.RunStateChanged{Status: status},
+	}); err != nil {
+		t.Fatalf("observe %s: %v", status, err)
+	}
+}
+
+// states is what the outbox says about a run, in order.
+func states(t *testing.T, store *sqlite.Store) []string {
+	t.Helper()
+	var seen []string
+	for _, dispatch := range enqueued(t, store) {
+		if dispatch.Kind != gateway.DispatchStatus {
+			continue
+		}
+		var payload gateway.StatusPayload
+		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+			t.Fatalf("decode status: %v", err)
+		}
+		seen = append(seen, payload.State)
+	}
+	return seen
+}
+
+// A message taken back while it waited is unmarked and nothing more. It was
+// not stopped and it did not fail; the person who took it back is the one who
+// would be reading, and a line about it is a line about nothing.
+func TestAMessageTakenBackIsUnmarkedAndNotMourned(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+	run := gatewayRun(*clock)
+
+	observeState(t, projector, run, domain.RunQueued)
+	observeState(t, projector, run, domain.RunCancelled)
+
+	got := strings.Join(states(t, store), ",")
+	if got != "queued,withdrawn" {
+		t.Errorf("the outbox says %q, want queued,withdrawn", got)
+	}
+}
+
+// A run that waited, started, and was then stopped was stopped: that is said
+// the way stopping is said.
+func TestARunStoppedAfterItStartedIsStillStopped(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+	run := gatewayRun(*clock)
+
+	observeState(t, projector, run, domain.RunQueued)
+	observeState(t, projector, run, domain.RunRunning)
+	observeState(t, projector, run, domain.RunCancelled)
+
+	got := strings.Join(states(t, store), ",")
+	if got != "queued,provider_started,cancelled" {
+		t.Errorf("the outbox says %q, want queued,provider_started,cancelled", got)
+	}
+}

@@ -52,6 +52,39 @@ func (s *GatewayServer) DeliverInbound(
 	}), nil
 }
 
+// WithdrawInbound carries a message being taken back inward.
+//
+// The caller says who and which message. Whether that person sent it, and
+// whether it is still waiting to be answered, is settled here.
+func (s *GatewayServer) WithdrawInbound(
+	ctx context.Context,
+	req *connect.Request[controlv1.WithdrawInboundRequest],
+) (*connect.Response[controlv1.WithdrawInboundResponse], error) {
+	message := req.Msg
+	if message.GetPrincipalId() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("principal_id is required"))
+	}
+	if message.GetIdempotencyKey() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("idempotency_key is required"))
+	}
+
+	withdrawn, err := s.ingress.Withdraw(ctx, gateway.Withdrawal{
+		Principal: gateway.Principal{
+			Platform:  gateway.Platform(message.GetPlatform()),
+			AccountID: message.GetAccountId(),
+			TenantID:  message.GetTenantId(),
+			ID:        message.GetPrincipalId(),
+		},
+		InboundKey: message.GetIdempotencyKey(),
+		MessageID:  message.GetPlatformMessageId(),
+	})
+	if err != nil {
+		return nil, gatewayError(err)
+	}
+
+	return connect.NewResponse(&controlv1.WithdrawInboundResponse{Withdrawn: withdrawn}), nil
+}
+
 // DeliverDecision carries a button press inward.
 //
 // What the caller is trusted to say is who pressed and where, because that is

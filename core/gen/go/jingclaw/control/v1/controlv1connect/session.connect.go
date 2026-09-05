@@ -49,6 +49,9 @@ const (
 	// GatewayIngressServiceDeliverDecisionProcedure is the fully-qualified name of the
 	// GatewayIngressService's DeliverDecision RPC.
 	GatewayIngressServiceDeliverDecisionProcedure = "/jingclaw.control.v1.GatewayIngressService/DeliverDecision"
+	// GatewayIngressServiceWithdrawInboundProcedure is the fully-qualified name of the
+	// GatewayIngressService's WithdrawInbound RPC.
+	GatewayIngressServiceWithdrawInboundProcedure = "/jingclaw.control.v1.GatewayIngressService/WithdrawInbound"
 	// ChannelServiceListBindingsProcedure is the fully-qualified name of the ChannelService's
 	// ListBindings RPC.
 	ChannelServiceListBindingsProcedure = "/jingclaw.control.v1.ChannelService/ListBindings"
@@ -127,6 +130,12 @@ type GatewayIngressServiceClient interface {
 	// pressed something in a named channel and lets the daemon decide whether
 	// that counts.
 	DeliverDecision(context.Context, *connect.Request[v1.DeliverDecisionRequest]) (*connect.Response[v1.DeliverDecisionResponse], error)
+	// Somebody took back a message that has not been answered yet.
+	//
+	// The gateway asserts who did it and which message; the daemon settles
+	// whether that person sent it and whether it is still waiting. Not a
+	// trigger on DeliverInbound: taking a message back is not a message.
+	WithdrawInbound(context.Context, *connect.Request[v1.WithdrawInboundRequest]) (*connect.Response[v1.WithdrawInboundResponse], error)
 }
 
 // NewGatewayIngressServiceClient constructs a client for the
@@ -164,6 +173,12 @@ func NewGatewayIngressServiceClient(httpClient connect.HTTPClient, baseURL strin
 			connect.WithSchema(gatewayIngressServiceMethods.ByName("DeliverDecision")),
 			connect.WithClientOptions(opts...),
 		),
+		withdrawInbound: connect.NewClient[v1.WithdrawInboundRequest, v1.WithdrawInboundResponse](
+			httpClient,
+			baseURL+GatewayIngressServiceWithdrawInboundProcedure,
+			connect.WithSchema(gatewayIngressServiceMethods.ByName("WithdrawInbound")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -173,6 +188,7 @@ type gatewayIngressServiceClient struct {
 	subscribeDispatches *connect.Client[v1.SubscribeDispatchesRequest, v1.SubscribeDispatchesResponse]
 	acknowledgeDispatch *connect.Client[v1.AcknowledgeDispatchRequest, v1.AcknowledgeDispatchResponse]
 	deliverDecision     *connect.Client[v1.DeliverDecisionRequest, v1.DeliverDecisionResponse]
+	withdrawInbound     *connect.Client[v1.WithdrawInboundRequest, v1.WithdrawInboundResponse]
 }
 
 // DeliverInbound calls jingclaw.control.v1.GatewayIngressService.DeliverInbound.
@@ -195,6 +211,11 @@ func (c *gatewayIngressServiceClient) DeliverDecision(ctx context.Context, req *
 	return c.deliverDecision.CallUnary(ctx, req)
 }
 
+// WithdrawInbound calls jingclaw.control.v1.GatewayIngressService.WithdrawInbound.
+func (c *gatewayIngressServiceClient) WithdrawInbound(ctx context.Context, req *connect.Request[v1.WithdrawInboundRequest]) (*connect.Response[v1.WithdrawInboundResponse], error) {
+	return c.withdrawInbound.CallUnary(ctx, req)
+}
+
 // GatewayIngressServiceHandler is an implementation of the
 // jingclaw.control.v1.GatewayIngressService service.
 type GatewayIngressServiceHandler interface {
@@ -207,6 +228,12 @@ type GatewayIngressServiceHandler interface {
 	// pressed something in a named channel and lets the daemon decide whether
 	// that counts.
 	DeliverDecision(context.Context, *connect.Request[v1.DeliverDecisionRequest]) (*connect.Response[v1.DeliverDecisionResponse], error)
+	// Somebody took back a message that has not been answered yet.
+	//
+	// The gateway asserts who did it and which message; the daemon settles
+	// whether that person sent it and whether it is still waiting. Not a
+	// trigger on DeliverInbound: taking a message back is not a message.
+	WithdrawInbound(context.Context, *connect.Request[v1.WithdrawInboundRequest]) (*connect.Response[v1.WithdrawInboundResponse], error)
 }
 
 // NewGatewayIngressServiceHandler builds an HTTP handler from the service implementation. It
@@ -240,6 +267,12 @@ func NewGatewayIngressServiceHandler(svc GatewayIngressServiceHandler, opts ...c
 		connect.WithSchema(gatewayIngressServiceMethods.ByName("DeliverDecision")),
 		connect.WithHandlerOptions(opts...),
 	)
+	gatewayIngressServiceWithdrawInboundHandler := connect.NewUnaryHandler(
+		GatewayIngressServiceWithdrawInboundProcedure,
+		svc.WithdrawInbound,
+		connect.WithSchema(gatewayIngressServiceMethods.ByName("WithdrawInbound")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.GatewayIngressService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case GatewayIngressServiceDeliverInboundProcedure:
@@ -250,6 +283,8 @@ func NewGatewayIngressServiceHandler(svc GatewayIngressServiceHandler, opts ...c
 			gatewayIngressServiceAcknowledgeDispatchHandler.ServeHTTP(w, r)
 		case GatewayIngressServiceDeliverDecisionProcedure:
 			gatewayIngressServiceDeliverDecisionHandler.ServeHTTP(w, r)
+		case GatewayIngressServiceWithdrawInboundProcedure:
+			gatewayIngressServiceWithdrawInboundHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -273,6 +308,10 @@ func (UnimplementedGatewayIngressServiceHandler) AcknowledgeDispatch(context.Con
 
 func (UnimplementedGatewayIngressServiceHandler) DeliverDecision(context.Context, *connect.Request[v1.DeliverDecisionRequest]) (*connect.Response[v1.DeliverDecisionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.GatewayIngressService.DeliverDecision is not implemented"))
+}
+
+func (UnimplementedGatewayIngressServiceHandler) WithdrawInbound(context.Context, *connect.Request[v1.WithdrawInboundRequest]) (*connect.Response[v1.WithdrawInboundResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.GatewayIngressService.WithdrawInbound is not implemented"))
 }
 
 // ChannelServiceClient is a client for the jingclaw.control.v1.ChannelService service.

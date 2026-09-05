@@ -502,6 +502,7 @@ func (p *Projector) observeState(
 		// on the person's own message rather than as a line: they can see it
 		// was received and is waiting, and the line under the conversation
 		// stays about the answer being written.
+		p.record(run.ID).waited = true
 		return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
 			State: "queued", Detail: "waiting for the message before it",
 		})
@@ -519,6 +520,16 @@ func (p *Projector) observeState(
 		})
 
 	case domain.RunFailed, domain.RunCancelled:
+		// Taken back before it was answered. Nothing failed and nothing was
+		// stopped: the message is unmarked and the room is not told, because
+		// the person who took it back is the one who would be reading.
+		if payload.Status == domain.RunCancelled && p.neverStarted(run.ID) {
+			p.close(ctx, run)
+			return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
+				State: "withdrawn", Detail: "taken back before it was answered",
+			})
+		}
+
 		// A run that ends badly must say so. Ending in silence looks exactly
 		// like still working. It still accounts for itself: work that failed
 		// halfway through was paid for, and a reader asking what it cost is
@@ -703,6 +714,14 @@ func (p *Projector) modelFor(ctx context.Context, sessionID domain.SessionID) st
 		return p.Model
 	}
 	return session.Model
+}
+
+// neverStarted reports a run this projector saw wait and never saw start.
+func (p *Projector) neverStarted(run domain.RunID) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	existing, ok := p.records[run]
+	return ok && existing.waited && !existing.seen
 }
 
 func (p *Projector) forget(run domain.RunID) {

@@ -114,6 +114,11 @@ type Store interface {
 	// without doing its work twice.
 	ClaimInbound(ctx context.Context, key, accountID string, session domain.SessionID, run domain.RunID, at time.Time) (bool, error)
 
+	// InboundSession is the session a claimed message went to, which is how
+	// a later gesture at that message — taking it back — finds the work it
+	// started.
+	InboundSession(ctx context.Context, key string) (domain.SessionID, bool, error)
+
 	// Outbox
 
 	EnqueueDispatch(ctx context.Context, dispatch Dispatch) (DispatchSeq, error)
