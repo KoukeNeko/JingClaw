@@ -746,3 +746,32 @@ func TestARunStoppedAfterItStartedIsStillStopped(t *testing.T) {
 		t.Errorf("the outbox says %q, want queued,provider_started,cancelled", got)
 	}
 }
+
+// What a run left behind is said to its channel, under its account of
+// itself; a run that left nothing says nothing more.
+func TestWhatWasNotedIsSaid(t *testing.T) {
+	projector, store, clock := newProjectorFixture(t)
+	run := gatewayRun(*clock)
+
+	if err := projector.Noted(context.Background(), run, 0); err != nil {
+		t.Fatalf("noted nothing: %v", err)
+	}
+	if got := states(t, store); len(got) != 0 {
+		t.Fatalf("a run that noted nothing said %v", got)
+	}
+
+	if err := projector.Noted(context.Background(), run, 2); err != nil {
+		t.Fatalf("noted: %v", err)
+	}
+	dispatches := enqueued(t, store)
+	if len(dispatches) != 1 {
+		t.Fatalf("%d dispatches, want one", len(dispatches))
+	}
+	var payload gateway.StatusPayload
+	if err := json.Unmarshal([]byte(dispatches[0].Payload), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.State != "noted" || payload.Detail != "2" {
+		t.Errorf("the channel is told %+v, want noted 2", payload)
+	}
+}

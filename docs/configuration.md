@@ -289,7 +289,8 @@ claim whose words are not in the message it cites is dropped. What survives
 is a retrieval memory: looked up when wanted, never carried, never an
 instruction, and marked as approved by nobody. One small model call per
 answered turn; off, and memory is written only when the model calls
-`remember`.
+`remember`. A channel is told how many notes a run left, under the line
+that accounts for the run.
 
 **`auto_recall`**
 

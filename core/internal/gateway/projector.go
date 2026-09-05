@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/KoukeNeko/JingClaw/core/internal/console"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -574,6 +575,25 @@ func (p *Projector) observeState(
 	default:
 		return nil
 	}
+}
+
+// Noted tells the channel that notes were taken from what its person said.
+//
+// After the run, not part of it: the notes are taken once the answer is
+// given, and the line under the answer has already been posted. A channel
+// that hears this adds it to that line, so the account of the run says what
+// it left behind as well as what it cost.
+func (p *Projector) Noted(ctx context.Context, run domain.Run, count int) error {
+	if count <= 0 {
+		return nil
+	}
+	target, ok := externalTarget(run)
+	if !ok {
+		return nil
+	}
+	return p.enqueue(ctx, run, target, DispatchStatus, StatusPayload{
+		State: "noted", Detail: strconv.Itoa(count),
+	})
 }
 
 // shouldSayWorking rate-limits the "what it is doing now" line, per run.

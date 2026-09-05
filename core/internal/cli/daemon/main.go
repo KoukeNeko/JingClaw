@@ -461,7 +461,7 @@ func run(args []string) error {
 		AfterRun: notesAfterRuns(cfg, memoryOptions, store, &modelCompleter{
 			provider: modelProvider,
 			model:    selected.ID,
-		}),
+		}, plane.Projector),
 		MaxIterations: cfg.Agent.MaxIterations,
 		NewSessionID:  func() string { return id.WithPrefix("ses") },
 		NewRunID:      func() string { return id.WithPrefix("run") },

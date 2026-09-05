@@ -651,3 +651,17 @@ func first(s string, n int) string {
 	}
 	return s[:n]
 }
+
+// What was noted is one short line, under the account of the run.
+func TestWhatWasNotedIsOneLine(t *testing.T) {
+	payload, _ := json.Marshal(jcgateway.StatusPayload{State: "noted", Detail: "2"})
+	text, err := Dispatch(jcgateway.Dispatch{
+		Kind: jcgateway.DispatchStatus, Payload: string(payload),
+	}, discordStyle)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(text, "📓 2 noted") {
+		t.Errorf("rendered %q, want the count and the notebook", text)
+	}
+}

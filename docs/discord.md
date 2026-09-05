@@ -28,6 +28,12 @@ edits to one message. Which message is live is held in the adapter's memory
 rather than in the outbox, because it is a presentation detail: losing it
 across a restart costs one extra line in a channel, not a wrong one.
 
+When the machine takes a note from what the person said — their name, a
+preference, a decision about the project (`memory.curate`) — that happens
+after the answer, and the line under it gains `📓 2 noted`. A `remember` the
+model called during the run is in the tool list like any other tool. Nothing
+is said for a run that noted nothing.
+
 ## Waiting in line, and taking a message back
 
 A session answers one message at a time. A second message sent while the

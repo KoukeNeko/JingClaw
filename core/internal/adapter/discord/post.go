@@ -151,6 +151,12 @@ func (a *Adapter) postReactionStatus(
 		return nil, fmt.Errorf("discord: decode reaction status: %w", err)
 	}
 
+	// Notes are taken after the run, and the line under the answer is
+	// already there. Said on that line rather than under it.
+	if payload.State == "noted" {
+		return a.addToTheAccount(channelID, dispatch, body)
+	}
+
 	emoji, remove := reactionForStatus(payload.State)
 	cleared := reactionsCleared(payload.State)
 	if emoji == "" && !remove && len(cleared) == 0 {
@@ -205,6 +211,7 @@ func (a *Adapter) postReactionStatus(
 	if err != nil {
 		return nil, fmt.Errorf("discord: post final status to %s: %w", channelID, err)
 	}
+	a.rememberAccount(dispatch.RunID, message.ID, body)
 	return []string{message.ID.String()}, nil
 }
 

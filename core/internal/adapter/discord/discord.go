@@ -121,6 +121,10 @@ type Adapter struct {
 	// with more of it extends what is already there rather than posting the
 	// same paragraph again.
 	answerMessages map[string]snowflake.ID
+
+	// accounts is the line under each answer, for adding what is learned
+	// after the run to it.
+	accounts map[domain.RunID]account
 }
 
 // New builds the adapter.
@@ -139,6 +143,7 @@ func New(config Config, sink Sink, decider Decider) *Adapter {
 		decider:        decider,
 		statusMessages: make(map[domain.RunID]snowflake.ID),
 		answerMessages: make(map[string]snowflake.ID),
+		accounts:       make(map[domain.RunID]account),
 	}
 }
 

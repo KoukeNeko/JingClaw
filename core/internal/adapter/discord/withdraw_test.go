@@ -2,6 +2,8 @@ package discord
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/disgoorg/disgo/discord"
@@ -105,5 +107,51 @@ func TestAMessageTakenBackIsPutAway(t *testing.T) {
 	}
 	if has(added, "🛑") {
 		t.Errorf("a withdrawal was marked as stopped: added %v", added)
+	}
+}
+
+// Notes taken after the run join the line under the answer rather than
+// becoming a second line; when that line is not known here, they are their
+// own line rather than lost.
+func TestWhatWasNotedJoinsTheLineUnderTheAnswer(t *testing.T) {
+	adapter, posted := stubDiscord(t)
+
+	done, _ := json.Marshal(jcgateway.StatusPayload{State: "completed", Detail: "12s"})
+	completed := statusFor(t, "completed")
+	completed.Payload = string(done)
+	if _, err := adapter.Post(t.Context(), completed); err != nil {
+		t.Fatalf("completed: %v", err)
+	}
+
+	*posted = nil
+	noted, _ := json.Marshal(jcgateway.StatusPayload{State: "noted", Detail: "2"})
+	dispatch := statusFor(t, "noted")
+	dispatch.Payload = string(noted)
+	ids, err := adapter.Post(t.Context(), dispatch)
+	if err != nil {
+		t.Fatalf("noted: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("what was noted became its own message %v; it should join the line", ids)
+	}
+	var edited bool
+	for _, one := range *posted {
+		if one.Method == "PATCH" && strings.Contains(one.Content, "📓 2 noted") && strings.Contains(one.Content, "12s") {
+			edited = true
+		}
+	}
+	if !edited {
+		t.Errorf("the line under the answer was not rewritten with what was noted: %+v", *posted)
+	}
+
+	// A run this adapter has no line for — after a restart, say.
+	*posted = nil
+	dispatch.RunID = "run_unknown"
+	ids, err = adapter.Post(t.Context(), dispatch)
+	if err != nil {
+		t.Fatalf("noted, no line: %v", err)
+	}
+	if len(ids) != 1 {
+		t.Errorf("with no line to join, what was noted was not posted on its own: %v", ids)
 	}
 }

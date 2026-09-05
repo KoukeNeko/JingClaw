@@ -309,6 +309,9 @@ func renderStatus(payload jcgateway.StatusPayload, style Style) string {
 		return style.SubduedPrefix + "⋯ " + payload.Detail
 	case "completed":
 		return renderCompletionStatus(payload, style)
+	case "noted":
+		// What the run left behind, said under its account of itself.
+		return style.SubduedPrefix + "📓 " + payload.Detail + " noted"
 	case "cancelled":
 		return style.italic("Stopped.") + renderSummary(payload.Summary, style)
 	case "failed":
