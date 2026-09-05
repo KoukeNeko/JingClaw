@@ -719,6 +719,24 @@ caught), promotion of a note to standing with a person's approval, and the
 deterministic working-state reducer the compaction research proposed as the
 next step for folds.
 
+**2026-09-05 — three seams, one machine fact.** A queued message was never
+answered: its event landed mid-answer and the rebuilt conversation ended with
+the assistant's own reply. Log and question dispatches never crossed the wire:
+the proto enum did not know them, so they arrived empty and retried forever;
+AllDispatchKinds plus a test on each side now guards it. The launchd service hung
+in dyld before main because the binary lived under ~/Documents, which launchd
+cannot open; install now runs a copy from <home>/bin. And a picture posted in a
+different message from the mention was never fetched; the reply target and the
+sender's own recent unaddressed messages now count.
+
+**2026-09-05 — a waiting message can be taken back.** The sender pressing the
+📥 the bot put on their message takes it out of the line: WithdrawInbound
+carries who and which message, the daemon checks it is theirs and still
+waiting, the model is never shown it, the view leaves it out, and the channel
+sees 🚮 and no line. Found on the way: a run pulled out of the line handed the
+session on as though it had held the turn, starting the next message while the
+first was still being answered. The console lists the line with `queue`.
+
 ## Not done
 
 **Built but nothing uses it**
