@@ -91,6 +91,11 @@ type Adapter struct {
 	// is the shared one, found in the usual places.
 	fonts func() (tableimage.Fonts, error)
 
+	// messages answers questions about messages other than the one that
+	// arrived. Nil means ask the connection; a test sets it to something that
+	// answers without one.
+	messages messageSource
+
 	// selfID is written by the Ready handler and read by the message handler,
 	// which run on different goroutines.
 	//
@@ -256,7 +261,7 @@ func (a *Adapter) onMessage(event *events.MessageCreate) {
 	defer cancel()
 
 	inbound := a.toInbound(message, event.GuildID, trigger)
-	inbound.Attachments = a.collectAttachments(ctx, message.Attachments)
+	inbound.Attachments = a.collectAttachments(ctx, a.attachmentsFor(ctx, message, event.GuildID))
 
 	if err := a.sink.Deliver(ctx, inbound); err != nil {
 		a.config.Logger.Warn("could not hand a message to the agent",
