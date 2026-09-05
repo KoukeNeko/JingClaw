@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -69,6 +70,9 @@ func (s *session) run(ctx context.Context, line string) bool {
 
 	case "focus":
 		s.focus(command.Arg(0))
+
+	case "queue":
+		s.showQueue(ctx)
 
 	case "interrupt":
 		s.interrupt(ctx, command)
@@ -404,6 +408,58 @@ func (s *session) answer(ctx context.Context, command console.Command) {
 		return
 	}
 	s.say("answered " + id)
+}
+
+// showQueue lists the messages waiting their turn, with the run id that
+// interrupt takes to pull one out of line.
+func (s *session) showQueue(ctx context.Context) {
+	sessions, err := s.daemon.ListSessions(ctx, connect.NewRequest(&controlv1.ListSessionsRequest{}))
+	if err != nil {
+		s.say("could not list the sessions: " + err.Error())
+		return
+	}
+
+	found := 0
+	for _, session := range sessions.Msg.GetSessions() {
+		if focused := s.focusedOn(); focused != "" && domain.SessionID(session.GetId()) != focused {
+			continue
+		}
+		listed, err := s.daemon.ListRuns(ctx, connect.NewRequest(
+			&controlv1.ListRunsRequest{SessionId: session.GetId()}))
+		if err != nil {
+			s.say("could not read the line: " + err.Error())
+			return
+		}
+		for _, run := range listed.Msg.GetRuns() {
+			if run.GetStatus() != controlv1.RunStatus_RUN_STATUS_QUEUED {
+				continue
+			}
+			found++
+			s.say(fmt.Sprintf("  %s  %s  waiting %s  %s",
+				run.GetId(), session.GetId(),
+				time.Since(run.GetCreatedAt().AsTime()).Round(time.Second),
+				sentFrom(run.GetOrigin())))
+		}
+	}
+
+	if found == 0 {
+		s.say("nothing is waiting in line.")
+	}
+}
+
+// sentFrom says where a run's message came from, for a listing.
+func sentFrom(origin *controlv1.RunOrigin) string {
+	if principal := origin.GetPrincipal(); principal != nil {
+		who := principal.GetDisplayName()
+		if who == "" {
+			who = principal.GetPrincipalId()
+		}
+		return "from " + who + " on " + principal.GetPlatform()
+	}
+	if origin.GetClientId() != "" {
+		return "from " + origin.GetClientId()
+	}
+	return ""
 }
 
 func (s *session) interrupt(ctx context.Context, command console.Command) {

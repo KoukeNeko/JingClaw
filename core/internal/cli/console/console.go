@@ -172,6 +172,9 @@ type controlv1connectSessionService interface {
 	ListSessions(
 		context.Context, *connect.Request[controlv1.ListSessionsRequest],
 	) (*connect.Response[controlv1.ListSessionsResponse], error)
+	ListRuns(
+		context.Context, *connect.Request[controlv1.ListRunsRequest],
+	) (*connect.Response[controlv1.ListRunsResponse], error)
 	ListApprovals(
 		context.Context, *connect.Request[controlv1.ListApprovalsRequest],
 	) (*connect.Response[controlv1.ListApprovalsResponse], error)
