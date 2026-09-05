@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func aJob() job {
@@ -185,5 +186,52 @@ func TestStatusReadsTheProgramFromThePlist(t *testing.T) {
 	}
 	if _, found := installedProgram("<plist></plist>"); found {
 		t.Error("a program was read from a plist that names none")
+	}
+}
+
+// bootout returns before launchd has finished with the job. Installing waits
+// for it to be gone rather than bootstrapping into a job still being torn
+// down, which fails with an I/O error that names nothing.
+func TestInstallWaitsForTheOldJobToBeGone(t *testing.T) {
+	remaining := 3
+	stillThere := func() bool {
+		remaining--
+		return remaining > 0
+	}
+	if !waitUntilGone(stillThere, time.Millisecond, time.Second) {
+		t.Fatal("gave up on a job that was about to be gone")
+	}
+
+	forever := func() bool { return true }
+	if waitUntilGone(forever, time.Millisecond, 20*time.Millisecond) {
+		t.Fatal("claimed a job was gone that never went")
+	}
+}
+
+// A bootstrap that fails once, while launchd is still catching up, is tried
+// again; one that keeps failing is reported as it stands after the last try.
+func TestBootstrapIsRetriedALittle(t *testing.T) {
+	calls := 0
+	flaky := func() error {
+		calls++
+		if calls < 3 {
+			return errors.New("Bootstrap failed: 5: Input/output error")
+		}
+		return nil
+	}
+	if err := withRetries(5, time.Millisecond, flaky); err != nil {
+		t.Fatalf("a bootstrap that succeeds on the third try was reported as failed: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("tried %d times, want 3", calls)
+	}
+
+	calls = 0
+	hopeless := func() error { calls++; return errors.New("still no") }
+	if err := withRetries(3, time.Millisecond, hopeless); err == nil {
+		t.Fatal("a bootstrap that never succeeds was reported as fine")
+	}
+	if calls != 3 {
+		t.Errorf("tried %d times, want exactly the 3 allowed", calls)
 	}
 }

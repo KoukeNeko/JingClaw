@@ -263,16 +263,26 @@ func install(showOnly bool) error {
 	// Unloaded first. Writing over the file of a loaded job leaves launchd
 	// running the previous one until the next login, which looks exactly like
 	// the install having done nothing.
+	//
+	// And then waited for. bootout returns before launchd has finished with
+	// the job, and a bootstrap that arrives while it is still being torn down
+	// fails with an I/O error that names nothing — leaving the file written,
+	// the job unloaded, and the service down until somebody notices.
 	if loaded() {
 		if err := bootout(); err != nil {
 			return err
+		}
+		if !waitUntilGone(loaded, unloadPoll, unloadTimeout) {
+			return errors.New("service: launchd is still winding the old job down; try again in a moment")
 		}
 	}
 
 	if err := os.WriteFile(path, []byte(described.plist()), 0o644); err != nil {
 		return fmt.Errorf("service: write %s: %w", path, err)
 	}
-	if err := launchctl("bootstrap", loginSession(), path); err != nil {
+	if err := withRetries(bootstrapAttempts, bootstrapBackoff, func() error {
+		return launchctl("bootstrap", loginSession(), path)
+	}); err != nil {
 		return err
 	}
 
@@ -283,6 +293,56 @@ func install(showOnly bool) error {
 	fmt.Printf("running   %s\n", described.Executable)
 	fmt.Printf("logging   %s\n", filepath.Dir(described.Output))
 	return nil
+}
+
+const (
+	// unloadTimeout is how long launchd gets to finish with a job that was
+	// just booted out. It is usually done in well under a second.
+	unloadTimeout = 10 * time.Second
+	unloadPoll    = 100 * time.Millisecond
+
+	// bootstrapAttempts and bootstrapBackoff cover the case the wait above
+	// did not: launchd saying the job is gone and still refusing to load
+	// another for a moment.
+	bootstrapAttempts = 5
+	bootstrapBackoff  = 500 * time.Millisecond
+)
+
+// waitUntilGone polls until the condition stops holding, or the deadline.
+//
+// Returns whether it stopped holding. The caller decides what that means;
+// this only knows how to wait without waiting forever.
+func waitUntilGone(holds func() bool, poll, deadline time.Duration) bool {
+	stop := time.Now().Add(deadline)
+	for holds() {
+		if time.Now().After(stop) {
+			return false
+		}
+		time.Sleep(poll)
+	}
+	return true
+}
+
+// withRetries tries something a few times, waiting a little longer each time.
+//
+// The last error is the one returned: it is what the situation looks like
+// after every attempt, and the first one is what it looked like before any of
+// them had a chance.
+func withRetries(attempts int, backoff time.Duration, try func() error) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var last error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		last = try()
+		if last == nil {
+			return nil
+		}
+		if attempt < attempts {
+			time.Sleep(backoff * time.Duration(attempt))
+		}
+	}
+	return last
 }
 
 // stage puts the copy of the program in place, and says whether it had to.
