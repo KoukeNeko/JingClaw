@@ -483,11 +483,7 @@ func (p *Projector) noteFormatting(run domain.Run, text string) {
 		return
 	}
 
-	logger := p.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-	logger.Info("the model drew a table inside a fence, which is left as written",
+	p.log().Info("the model drew a table inside a fence, which is left as written",
 		"run_id", string(run.ID), "session_id", string(run.SessionID))
 }
 
@@ -734,6 +730,14 @@ func (p *Projector) modelFor(ctx context.Context, sessionID domain.SessionID) st
 		return p.Model
 	}
 	return session.Model
+}
+
+// log is the projector's logger, or the default one when none was given.
+func (p *Projector) log() *slog.Logger {
+	if p.Logger != nil {
+		return p.Logger
+	}
+	return slog.Default()
 }
 
 // neverStarted reports a run this projector saw wait and never saw start.
@@ -1014,7 +1018,7 @@ func (p *Projector) mirrorToConsoles(ctx context.Context, run domain.Run, event 
 
 	consoles, err := p.consoleTargets(ctx)
 	if err != nil {
-		p.Logger.Warn("could not list the console channels", "error", err)
+		p.log().Warn("could not list the console channels", "error", err)
 		return nil
 	}
 	if len(consoles) == 0 {
