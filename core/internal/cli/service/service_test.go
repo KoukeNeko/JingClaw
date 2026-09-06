@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -92,20 +93,22 @@ func TestAPathWithMarkupInItDoesNotBreakThePlist(t *testing.T) {
 // launchd cannot open a program inside a folder macOS protects, and it does
 // not fail: it hangs in the loader before main, with nothing written anywhere.
 func TestABinaryUnderAProtectedFolderIsNoticed(t *testing.T) {
-	home := "/Users/someone"
+	// Spelled with the platform's separator: the rule is about folders, and
+	// the check runs wherever the tests do.
+	home := filepath.Join(string(filepath.Separator), "Users", "someone")
 	for _, path := range []string{
-		"/Users/someone/Documents/GitHub/JingClaw/core/bin/jingclaw",
-		"/Users/someone/Desktop/jingclaw",
-		"/Users/someone/Downloads/build/jingclaw",
+		filepath.Join(home, "Documents", "GitHub", "JingClaw", "core", "bin", "jingclaw"),
+		filepath.Join(home, "Desktop", "jingclaw"),
+		filepath.Join(home, "Downloads", "build", "jingclaw"),
 	} {
 		if !underProtectedFolder(home, path) {
 			t.Errorf("%s was not recognised as somewhere launchd cannot open", path)
 		}
 	}
 	for _, path := range []string{
-		"/Users/someone/.jingclaw/bin/jingclaw",
-		"/usr/local/bin/jingclaw",
-		"/Users/someone/Documentsx/jingclaw",
+		filepath.Join(home, ".jingclaw", "bin", "jingclaw"),
+		filepath.Join(string(filepath.Separator), "usr", "local", "bin", "jingclaw"),
+		filepath.Join(home, "Documentsx", "jingclaw"),
 	} {
 		if underProtectedFolder(home, path) {
 			t.Errorf("%s was called protected, which would warn about a path that works", path)
@@ -140,6 +143,10 @@ func TestStagingCopiesTheProgramIntoHome(t *testing.T) {
 	}
 	if string(installed) != "#!/bin/sh\necho built\n" {
 		t.Errorf("the copy differs from the source: %q", installed)
+	}
+	if runtime.GOOS == "windows" {
+		// No executable bit to check, and the service is launchd's anyway.
+		return
 	}
 	info, err := os.Stat(described.Executable)
 	if err != nil {
