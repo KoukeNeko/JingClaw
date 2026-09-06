@@ -352,18 +352,6 @@ func alreadyRunning() (bool, error) {
 	return alive(file.PID), nil
 }
 
-// alive asks whether a process exists, without disturbing it.
-func alive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return process.Signal(syscall.Signal(0)) == nil
-}
-
 // supervised is a started part and the group that contains its tree, so that
 // stopping the part takes with it whatever the part started.
 type supervised struct {

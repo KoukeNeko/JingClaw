@@ -3,6 +3,7 @@ package supervise
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/console"
@@ -249,5 +250,21 @@ func TestWhatIsKeptIsWhatWasSaidLast(t *testing.T) {
 	}
 	if len(kept) > 20 {
 		t.Errorf("it kept %d bytes against a limit of 20", len(kept))
+	}
+}
+
+// alive must track a real process on the platform it runs on. This is the
+// check the supervisor polls to decide the daemon came up, and it was Unix
+// only: Signal(0) is meaningless on Windows, so a healthy daemon read as gone
+// and the supervisor tore it down. Run on every OS in CI, this fails there
+// rather than in a terminal on the far side of an SSH session.
+func TestAliveTracksAProcess(t *testing.T) {
+	if !alive(os.Getpid()) {
+		t.Error("this very process is not seen as alive")
+	}
+	// A pid the OS will not have handed out. Zero and negatives are refused
+	// up front; this exercises the lookup itself.
+	if alive(0x7fffffff) {
+		t.Error("a pid nothing owns is seen as alive")
 	}
 }
