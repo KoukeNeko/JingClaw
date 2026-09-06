@@ -17,8 +17,10 @@ import (
 
 const (
 	// defaultMaxMessages is where an answer stops being something to read in a
-	// channel. Three is about as much as anybody scrolls past willingly.
-	defaultMaxMessages = 3
+	// channel and becomes a file. Ten is a long answer read in place; it was
+	// three, and a person reading a persona's self-introduction in a channel
+	// found a file where the rest of it should have been.
+	defaultMaxMessages = 10
 
 	// defaultMaxAttachmentBytes is well under what Discord accepts, because
 	// the point is to be readable rather than to be the largest possible file.

@@ -512,7 +512,8 @@ it. A second bot means a second account_id.
 
 **`max_messages`**
 
-How many messages one answer may become before it goes as a file instead.
+How many messages one answer may be split into before it goes as a file
+instead. Ten by default.
 
 **`max_attachment_bytes`**
 

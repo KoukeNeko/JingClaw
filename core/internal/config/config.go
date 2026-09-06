@@ -992,7 +992,7 @@ func Defaults() Config {
 				AccountID:          "main",
 				TokenEnv:           []string{"DISCORD_BOT_TOKEN"},
 				TokenFile:          "discord.token",
-				MaxMessages:        3,
+				MaxMessages:        10,
 				MaxAttachmentBytes: 4 << 20,
 			},
 			Telegram: Telegram{
@@ -1913,8 +1913,9 @@ token_env = ["DISCORD_BOT_TOKEN"]
 token_file = "discord.token"
 # A second bot needs a second account_id.
 account_id = "main"
-# Past this many, an answer is sent as a file instead.
-# max_messages = 3
+# A long answer is split into messages; past this many, it is sent as a
+# file instead.
+# max_messages = 10
 # Draw a table as a picture rather than writing it out in a code block.
 # Aligned, because the layout is decided here rather than by whatever font the
 # reader's client uses — but an answer with a table in it then arrives as

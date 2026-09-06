@@ -94,10 +94,10 @@ belongs to the final version, when the whole thing is known.
 
 ## Long answers on Discord
 
-A reply that needs eight messages is a channel somebody has to scroll past for
-the rest of the day. Past `gateway.max_messages` (three by default) the answer
-goes as a `.txt` attachment instead, with its opening in the message so a
-reader can tell whether it is worth opening:
+A long answer is split at paragraph boundaries into as many messages as it
+needs, each under Discord's limit. Past `gateway.discord.max_messages` (ten by
+default, around 19 KB) it goes as a `.txt` attachment instead, with its
+opening in the message so a reader can tell whether it is worth opening:
 
 ```
 Here is what I found. The suite fails in three places, all in the
