@@ -100,7 +100,7 @@ func tail(text string, n int) string {
 // for the rest of the day. Past a few, it becomes a file.
 func TestALongAnswerBecomesAFile(t *testing.T) {
 	short := strings.Repeat("a sentence of a plausible length. ", 40)
-	long := strings.Repeat("a sentence of a plausible length. ", 400)
+	long := strings.Repeat("a sentence of a plausible length. ", 1200)
 
 	if segments := render.Split(short, discordStyle); len(segments) > defaultMaxMessages {
 		t.Fatalf("the short answer already needs %d messages; the test proves nothing",
