@@ -534,6 +534,12 @@ type queuedRun struct {
 	ctx     context.Context
 	cancel  context.CancelCauseFunc
 	tracked *activeRun
+
+	// admitted closes once the run's wait is on record. A run handed the
+	// session before then would be started, and could finish, ahead of the
+	// write saying it is waiting — which would then land on top of its
+	// ending and leave a finished run recorded as still in line.
+	admitted chan struct{}
 }
 
 // admit starts a run if its session is idle and queues it otherwise.
@@ -546,18 +552,32 @@ type queuedRun struct {
 func (r *Runtime) admit(ctx context.Context, run domain.Run) error {
 	runCtx, cancel := context.WithCancelCause(r.groupCtx)
 	tracked := &activeRun{session: run.SessionID, cancel: cancel, done: make(chan struct{}), owner: true}
-	waiting := queuedRun{run: run, ctx: runCtx, cancel: cancel, tracked: tracked}
+	admitted := make(chan struct{})
+	waiting := queuedRun{run: run, ctx: runCtx, cancel: cancel, tracked: tracked, admitted: admitted}
 
 	r.mu.Lock()
 	r.active[run.ID] = tracked
 	if r.busy[run.SessionID] {
 		r.queued[run.SessionID] = append(r.queued[run.SessionID], waiting)
 		r.mu.Unlock()
-		return r.transition(ctx, run, domain.RunQueued, "")
+
+		err := r.transition(ctx, run, domain.RunQueued, "")
+		close(admitted)
+		if err != nil {
+			// Its wait was not recorded, so it is not waiting: out of the
+			// line, and finished here rather than left for a turn that would
+			// start a run the log never admitted.
+			if left, ok := r.dequeue(run.SessionID, run.ID); ok {
+				left.cancel(err)
+				r.releaseRun(run.ID, left.tracked)
+			}
+		}
+		return err
 	}
 	r.busy[run.SessionID] = true
 	r.mu.Unlock()
 
+	close(admitted)
 	r.launch(waiting)
 	return nil
 }
@@ -568,6 +588,9 @@ func (r *Runtime) launch(waiting queuedRun) {
 	r.group.Go(func() error {
 		defer r.releaseRun(waiting.run.ID, waiting.tracked)
 		defer waiting.cancel(nil)
+		// Not before its wait is on record. Handed the session at once, a run
+		// can otherwise finish ahead of that record and be overwritten by it.
+		<-waiting.admitted
 		if waiting.ctx.Err() != nil {
 			// Interrupted while it waited. Said so, rather than executed
 			// against a context that is already gone.

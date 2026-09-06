@@ -12,6 +12,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
+	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/memory"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
 )
@@ -51,13 +52,19 @@ func (s *oneLine) Close() error { return nil }
 
 func newQueueRuntime(t *testing.T, model provider.Provider) (*runtime.Runtime, *memory.Store) {
 	t.Helper()
+	store := memory.New()
+	return newQueueRuntimeOn(t, model, store), store
+}
+
+// newQueueRuntimeOn builds the runtime over a store of the test's choosing.
+func newQueueRuntimeOn(t *testing.T, model provider.Provider, store storage.Store) *runtime.Runtime {
+	t.Helper()
 	var counter atomic.Uint64
 	next := func(prefix string) runtime.IDGenerator {
 		return func() string { return prefix + "_" + itoa(counter.Add(1)) }
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	store := memory.New()
 	rt := runtime.New(ctx, runtime.Options{
 		Store: store, Hub: event.NewHub(), Provider: model, Model: "gated",
 		Tools: tool.NewRegistry(), MaxIterations: 3,
@@ -66,7 +73,7 @@ func newQueueRuntime(t *testing.T, model provider.Provider) (*runtime.Runtime, *
 		NewQuestionID: next("qst"), NewScheduleID: next("sch"),
 		Now: time.Now, Logger: slog.New(slog.DiscardHandler),
 	})
-	return rt, store
+	return rt
 }
 
 func itoa(n uint64) string {

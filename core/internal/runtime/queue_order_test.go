@@ -6,9 +6,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
+	"github.com/KoukeNeko/JingClaw/core/internal/storage"
+	"github.com/KoukeNeko/JingClaw/core/internal/storage/memory"
 )
 
 // orderingProvider holds the first call open until released, and records
@@ -259,5 +262,94 @@ func TestTakingOneBackLeavesTheRestWaiting(t *testing.T) {
 	if strings.Join(texts, "|") != strings.Join(want, "|") {
 		t.Fatalf("the third run was shown\n  %s\nwant\n  %s",
 			strings.Join(texts, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// slowToQueue is a store whose record of a run waiting arrives late: the
+// write is held at a gate the test opens. Everything else is the store
+// underneath.
+type slowToQueue struct {
+	storage.Store
+	gate chan struct{}
+}
+
+func (s *slowToQueue) UpdateRun(ctx context.Context, run domain.Run) error {
+	if run.Status == domain.RunQueued {
+		select {
+		case <-s.gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return s.Store.UpdateRun(ctx, run)
+}
+
+// The record of a run waiting cannot land after the run has finished.
+//
+// Admitting a run puts it in line and then writes that it is waiting. If the
+// run before it ends in between, the waiting run is started and can finish
+// before that write lands — and the write then says a finished run is
+// waiting. Nothing tracks it and nothing is terminal, so waiting on it fails,
+// and a restart puts it back in line to be answered a second time.
+func TestAWaitingRunIsNotStartedBeforeItIsRecordedAsWaiting(t *testing.T) {
+	model := &orderingProvider{release: make(chan struct{})}
+	store := &slowToQueue{Store: memory.New(), gate: make(chan struct{})}
+	rt := newQueueRuntimeOn(t, model, store)
+	ctx := context.Background()
+
+	session, err := rt.CreateSession(ctx, "late record")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	first, _, err := rt.SendTurn(ctx, session.ID, "first question", domain.RunOrigin{})
+	if err != nil {
+		t.Fatalf("send first: %v", err)
+	}
+
+	// The second is admitted in the background: it goes into the line, and
+	// its record of waiting is held at the gate.
+	sent := make(chan domain.RunID, 1)
+	go func() {
+		second, _, err := rt.SendTurn(ctx, session.ID, "second question", domain.RunOrigin{})
+		if err != nil {
+			t.Errorf("send second: %v", err)
+		}
+		sent <- second
+	}()
+	var second domain.RunID
+	eventually(t, "the second run to be in line", func() bool {
+		runs, _ := rt.Runs(ctx, session.ID)
+		for _, run := range runs {
+			if run.ID != first {
+				second = run.ID
+			}
+		}
+		return second != ""
+	})
+
+	// The first finishes while the second's record is still held. The second
+	// must not be started, let alone finished, before that record lands.
+	model.release <- struct{}{}
+	if err := rt.Wait(ctx, first); err != nil {
+		t.Fatalf("wait first: %v", err)
+	}
+	go func() { model.release <- struct{}{} }()
+
+	// Give the second every chance to run ahead of its record: if it does,
+	// the store says completed here, and the late record then says queued.
+	time.Sleep(50 * time.Millisecond)
+	close(store.gate)
+	if got := <-sent; got != second {
+		t.Fatalf("the second run is %s, but the line held %s", got, second)
+	}
+	eventually(t, "the second run to finish", func() bool {
+		return statusOf(t, store.Store.(*memory.Store), second).IsTerminal()
+	})
+
+	if err := rt.Wait(ctx, second); err != nil {
+		t.Fatalf("waiting for the second run: %v", err)
+	}
+	if got := statusOf(t, store.Store.(*memory.Store), second); got != domain.RunCompleted {
+		t.Fatalf("the second run is recorded as %s after finishing, want %s", got, domain.RunCompleted)
 	}
 }
