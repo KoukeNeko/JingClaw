@@ -57,9 +57,10 @@ func TestAProcessCanBeReadWhileItIsStillRunning(t *testing.T) {
 	start, io, stop := newProcessTools(t)
 	ctx := context.Background()
 
+	program, args := printThenStay(t, "listening on 3000", 30)
 	started, err := start.Execute(ctx, callWith(t, startProcessArgs{
-		Program: "sh",
-		Args:    []string{"-c", "echo listening on 3000; sleep 30"},
+		Program: program,
+		Args:    args,
 	}))
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -90,8 +91,9 @@ func TestReadingTwiceDoesNotRepeatTheOutput(t *testing.T) {
 	start, io, _ := newProcessTools(t)
 	ctx := context.Background()
 
+	program, args := printThenStay(t, "once", 5)
 	started, err := start.Execute(ctx, callWith(t, startProcessArgs{
-		Program: "sh", Args: []string{"-c", "echo once; sleep 5"},
+		Program: program, Args: args,
 	}))
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -124,8 +126,9 @@ func TestInputAndTheAnswerAreOneCall(t *testing.T) {
 	start, io, _ := newProcessTools(t)
 	ctx := context.Background()
 
+	program, args := greetFromStdin(t)
 	started, err := start.Execute(ctx, callWith(t, startProcessArgs{
-		Program: "sh", Args: []string{"-c", "read name; echo hello $name"},
+		Program: program, Args: args,
 	}))
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -149,8 +152,9 @@ func TestAFinishedProcessSaysHowItEnded(t *testing.T) {
 	start, io, _ := newProcessTools(t)
 	ctx := context.Background()
 
+	program, args := printThenExit(t, "done", 2)
 	started, err := start.Execute(ctx, callWith(t, startProcessArgs{
-		Program: "sh", Args: []string{"-c", "echo done; exit 2"},
+		Program: program, Args: args,
 	}))
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -270,8 +274,9 @@ func TestWhatIsRunningCanBeListed(t *testing.T) {
 		t.Errorf("a session that started nothing does not say so: %q", empty.Content)
 	}
 
+	program, args, shown := sleepCommand(t, 30)
 	started, err := start.Execute(ctx, callWith(t, startProcessArgs{
-		Program: "sh", Args: []string{"-c", "sleep 30"},
+		Program: program, Args: args,
 	}))
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -285,7 +290,7 @@ func TestWhatIsRunningCanBeListed(t *testing.T) {
 	if !strings.Contains(listed.Content, id) {
 		t.Errorf("the process is not listed:\n%s", listed.Content)
 	}
-	if !strings.Contains(listed.Content, "sleep 30") {
+	if !strings.Contains(listed.Content, shown) {
 		t.Errorf("the listing does not say what is running:\n%s", listed.Content)
 	}
 	if !strings.Contains(listed.Content, "running") {
@@ -302,8 +307,9 @@ func TestTheListingIsPerSession(t *testing.T) {
 	start, _, _ := newProcessTools(t)
 	ctx := context.Background()
 
+	program, args, _ := sleepCommand(t, 30)
 	if _, err := start.Execute(ctx, callWith(t, startProcessArgs{
-		Program: "sh", Args: []string{"-c", "sleep 30"},
+		Program: program, Args: args,
 	})); err != nil {
 		t.Fatalf("start: %v", err)
 	}
