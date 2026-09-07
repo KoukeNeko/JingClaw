@@ -31,6 +31,19 @@ func newWorkspace(t *testing.T) (*workspace.Workspace, string) {
 	return ws, root
 }
 
+// requireSymlinks skips a test unless this machine can actually create a
+// symlink. On Unix that is always; on Windows it needs Developer Mode or an
+// elevated process. Probing rather than skipping the whole OS means the escape
+// guarantees are tested for real on a Windows box that permits it, instead of
+// being taken on trust.
+func requireSymlinks(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, "target"), filepath.Join(dir, "probe")); err != nil {
+		t.Skipf("symlinks are not available here: %v", err)
+	}
+}
+
 func TestResolveAcceptsPathsInsideTheRoot(t *testing.T) {
 	ws, _ := newWorkspace(t)
 
@@ -112,9 +125,7 @@ func TestResolveRejectsWindowsDeviceAndStreamNames(t *testing.T) {
 // A symlink is the case lexical cleaning cannot catch: the path looks entirely
 // innocent and still lands outside.
 func TestResolveRejectsSymlinkEscape(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs elevation on Windows")
-	}
+	requireSymlinks(t)
 
 	ws, root := newWorkspace(t)
 
@@ -134,9 +145,7 @@ func TestResolveRejectsSymlinkEscape(t *testing.T) {
 }
 
 func TestResolveRejectsSymlinkedDirectoryEscape(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs elevation on Windows")
-	}
+	requireSymlinks(t)
 
 	ws, root := newWorkspace(t)
 
@@ -160,9 +169,7 @@ func TestResolveRejectsSymlinkedDirectoryEscape(t *testing.T) {
 
 // A symlink that stays inside the workspace is ordinary and must keep working.
 func TestResolveAllowsInternalSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs elevation on Windows")
-	}
+	requireSymlinks(t)
 
 	ws, root := newWorkspace(t)
 

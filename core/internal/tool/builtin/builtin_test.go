@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -63,6 +62,18 @@ func newFixture(t *testing.T) (*workspace.Workspace, *tool.Registry, string) {
 	)
 
 	return ws, registry, root
+}
+
+// requireSymlinks skips a test unless this machine can actually create a
+// symlink. On Unix that is always; on Windows it needs Developer Mode or an
+// elevated process. Probing rather than skipping the whole OS means the escape
+// guarantee is tested for real on a Windows box that permits it.
+func requireSymlinks(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, "target"), filepath.Join(dir, "probe")); err != nil {
+		t.Skipf("symlinks are not available here: %v", err)
+	}
 }
 
 func call(t *testing.T, registry *tool.Registry, name string, args map[string]any) tool.Result {
@@ -332,9 +343,7 @@ func TestSpecsAreStablyOrdered(t *testing.T) {
 }
 
 func TestSymlinkEscapeIsRefusedAtTheToolSurface(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs elevation on Windows")
-	}
+	requireSymlinks(t)
 
 	_, registry, root := newFixture(t)
 
