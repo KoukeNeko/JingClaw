@@ -1,6 +1,7 @@
 package builtin_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -43,6 +44,44 @@ func exitCommand(code string) (string, []string) {
 		return "cmd.exe", []string{"/d", "/s", "/c", "exit " + code}
 	}
 	return "/bin/sh", []string{"-c", "exit " + code}
+}
+
+// printThenIdleCommand prints a line and then idles far longer than any timeout
+// the tests set, so a timeout has something to interrupt and something to have
+// captured. On Windows the line is flushed explicitly, because a cancelled
+// command should still surface what it managed to say before it was stopped.
+func printThenIdleCommand(line string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "powershell", []string{"-NoProfile", "-Command",
+			fmt.Sprintf("[Console]::Out.WriteLine('%s'); [Console]::Out.Flush(); Start-Sleep 31", line)}
+	}
+	return "/bin/sh", []string{"-c", "echo " + line + "; sleep 30"}
+}
+
+// spawnSurvivorCommand starts a background child that writes marker after a
+// delay, then idles. The delay is longer than any timeout plus the grace period
+// the caller allows before a hard kill, so the file appears only if the process
+// tree was left running — which is the thing that must not happen.
+func spawnSurvivorCommand(marker string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		inner := fmt.Sprintf(
+			"Start-Sleep 10; New-Item -ItemType File -Path %s -Force | Out-Null",
+			powerShellString(marker))
+		script := fmt.Sprintf(
+			"Start-Process -NoNewWindow powershell -ArgumentList '-NoProfile','-Command',%s; "+
+				"Write-Output spawned; Start-Sleep 31",
+			powerShellString(inner))
+		return "powershell", []string{"-NoProfile", "-Command", script}
+	}
+	return "/bin/sh", []string{"-c",
+		"(sleep 10; touch " + marker + ") & echo spawned; sleep 30"}
+}
+
+// powerShellString wraps a value as a single-quoted PowerShell string, doubling
+// any embedded quote, so a Windows path with backslashes survives being nested
+// inside another command untouched.
+func powerShellString(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func TestExecReturnsOutputAndSuccess(t *testing.T) {
@@ -97,16 +136,13 @@ func TestUnknownProgramIsReportedClearly(t *testing.T) {
 // A hung command has to stop, and what it printed before hanging is usually
 // where the answer is.
 func TestTimeoutKillsTheCommandAndKeepsItsOutput(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("needs a POSIX shell for the sleep loop")
-	}
-
 	registry, _ := newExecFixture(t)
 
+	program, args := printThenIdleCommand("starting")
 	started := time.Now()
 	result := call(t, registry, "exec_command", map[string]any{
-		"program":         "/bin/sh",
-		"args":            []string{"-c", "echo starting; sleep 30"},
+		"program":         program,
+		"args":            args,
 		"timeout_seconds": 1,
 	})
 	elapsed := time.Since(started)
@@ -127,27 +163,25 @@ func TestTimeoutKillsTheCommandAndKeepsItsOutput(t *testing.T) {
 // Killing only the started process leaves its children holding the pipes open
 // and the ports bound.
 func TestTimeoutKillsTheWholeProcessTree(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("process groups are POSIX; Windows needs a Job Object")
-	}
-
 	registry, root := newExecFixture(t)
 	marker := filepath.Join(root, "child-still-alive")
 
-	// A child that outlives its parent and then writes a file. If the group is
-	// killed, the file never appears.
+	// A child that outlives its parent and then writes a file. If the tree is
+	// stopped, the file never appears. The child waits longer than the timeout
+	// plus the grace period before the hard kill, so the test does not depend on
+	// a graceful signal being honoured — only on nothing surviving the stop.
+	program, args := spawnSurvivorCommand(marker)
 	result := call(t, registry, "exec_command", map[string]any{
-		"program": "/bin/sh",
-		"args": []string{"-c",
-			"(sleep 3; touch " + marker + ") & echo spawned; sleep 30"},
+		"program":         program,
+		"args":            args,
 		"timeout_seconds": 1,
 	})
 	if !result.IsError {
 		t.Fatal("the command was expected to time out")
 	}
 
-	// Long enough for the orphan to have written the file, had it survived.
-	time.Sleep(4 * time.Second)
+	// Past the moment the orphan would have written the file, had it survived.
+	time.Sleep(12 * time.Second)
 
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("a child process outlived the killed command")

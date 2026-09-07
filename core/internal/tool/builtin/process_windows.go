@@ -48,12 +48,19 @@ func (g *processGroup) started(command *exec.Cmd) error {
 	return winjob.Resume(command.Process.Pid)
 }
 
-// terminate ends the whole tree at once.
+// terminate asks the command to stop, gently where it can.
 //
-// There is no graceful signal to send: Windows has no SIGTERM, and the console
-// control events that come closest do not reach a process started without a
-// console.
-func (g *processGroup) terminate(*exec.Cmd) error {
+// Windows has no SIGTERM. A console break is the nearest graceful stop: it
+// reaches a command in its own process group and lets it flush before the
+// caller's WaitDelay escalates to a kill. Where the break cannot be delivered —
+// a daemon with no console — end the whole tree at once instead. The job still
+// closes behind either path, so nothing outlives the command.
+func (g *processGroup) terminate(command *exec.Cmd) error {
+	if command.Process != nil {
+		if err := winjob.SignalBreak(command.Process.Pid); err == nil {
+			return nil
+		}
+	}
 	return g.job.Terminate()
 }
 

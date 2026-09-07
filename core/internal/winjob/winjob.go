@@ -55,9 +55,12 @@ func New() (*Job, error) {
 }
 
 // Configure asks for the command to start suspended, so Assign can place it in
-// a job before its first instruction runs.
+// a job before its first instruction runs, and in its own process group, so a
+// console break can be aimed at the tree without also reaching this process.
 func Configure(command *exec.Cmd) {
-	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
+	command.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: windows.CREATE_SUSPENDED | windows.CREATE_NEW_PROCESS_GROUP,
+	}
 }
 
 // Assign puts a running process into the job.
@@ -72,6 +75,20 @@ func (j *Job) Assign(pid int) error {
 
 	if err := windows.AssignProcessToJobObject(j.handle, process); err != nil {
 		return fmt.Errorf("winjob: assign %d: %w", pid, err)
+	}
+	return nil
+}
+
+// SignalBreak asks a process group to stop the gentle way Windows allows.
+//
+// It is the nearest thing to a SIGTERM: a CTRL_BREAK reaches a process started
+// in its own group (see Configure) and gives it a chance to shut down before it
+// is killed. The break only lands on a process that shares a console with this
+// one, so a daemon started without a console cannot deliver it and the caller
+// has to fall back to Terminate. The process group id is the root process's pid.
+func SignalBreak(pid int) error {
+	if err := windows.GenerateConsoleCtrlEvent(windows.CTRL_BREAK_EVENT, uint32(pid)); err != nil {
+		return fmt.Errorf("winjob: break %d: %w", pid, err)
 	}
 	return nil
 }
