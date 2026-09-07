@@ -173,8 +173,14 @@ func (t *ExecCommand) Execute(ctx context.Context, call tool.Call) (tool.Result,
 
 	// Killing the process alone leaves its children behind, holding the pipes
 	// open and the port bound. The whole group has to go.
-	configureProcessGroup(command)
-	command.Cancel = func() error { return terminateGroup(command) }
+	group, err := newProcessGroup()
+	if err != nil {
+		return tool.Result{}, tool.Errorf(tool.CodeInternal,
+			"", "cannot contain this command's processes: %v", err)
+	}
+	defer group.close()
+	group.configure(command)
+	command.Cancel = func() error { return group.terminate(command) }
 	command.WaitDelay = 5 * time.Second
 
 	var combined bytes.Buffer
@@ -185,10 +191,29 @@ func (t *ExecCommand) Execute(ctx context.Context, call tool.Call) (tool.Result,
 	command.Stdin = nil
 
 	started := time.Now()
-	runErr := command.Run()
+	runErr := runInGroup(command, group)
 	elapsed := time.Since(started)
 
 	return t.result(ctx, args, combined.Bytes(), runErr, runCtx, elapsed, limits.MaxCommandOutput)
+}
+
+// runInGroup starts the command, places it in its process group, then waits.
+//
+// Run cannot be used because the group has to be joined between the process
+// existing and its first instruction: on Windows the command is started
+// suspended and only resumed once it is inside the job, which closes the window
+// in which a child could escape. On failure to join, the process is killed and
+// reaped rather than leaked.
+func runInGroup(command *exec.Cmd, group *processGroup) error {
+	if err := command.Start(); err != nil {
+		return err
+	}
+	if err := group.started(command); err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return err
+	}
+	return command.Wait()
 }
 
 func (t *ExecCommand) result(

@@ -2,24 +2,62 @@
 
 package builtin
 
-import "os/exec"
+import (
+	"os/exec"
 
-// configureProcessGroup is a no-op here.
+	"github.com/KoukeNeko/JingClaw/core/internal/winjob"
+)
+
+// processGroup contains a command and everything it spawns in a Windows job
+// object, so that cancelling the command stops the tree rather than leaving
+// descendants behind.
 //
-// Windows has no process groups in the POSIX sense. Containing a process tree
-// properly needs a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, which
-// is a larger piece of work; until then a cancelled command kills the process
-// it started and may leave descendants behind.
-func configureProcessGroup(*exec.Cmd) {}
+// Windows has no process group in the POSIX sense; a job object with
+// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is the nearest equivalent that actually
+// holds a process's children. The same building block contains the daemon's
+// managed processes.
+type processGroup struct {
+	job *winjob.Job
+}
 
-// terminateGroup kills the started process.
+// newProcessGroup creates the job the command will be assigned to, before it is
+// started so there is something to assign it to the moment it exists.
+func newProcessGroup() (*processGroup, error) {
+	job, err := winjob.New()
+	if err != nil {
+		return nil, err
+	}
+	return &processGroup{job: job}, nil
+}
+
+// configure asks for the command to start suspended, so started can assign it
+// before its first instruction runs — closing the window in which it could
+// spawn a child that escapes the job.
+func (g *processGroup) configure(command *exec.Cmd) {
+	winjob.Configure(command)
+}
+
+// started assigns the running process to the job and lets it go.
+func (g *processGroup) started(command *exec.Cmd) error {
+	if command.Process == nil {
+		return nil
+	}
+	if err := g.job.Assign(command.Process.Pid); err != nil {
+		return err
+	}
+	return winjob.Resume(command.Process.Pid)
+}
+
+// terminate ends the whole tree at once.
 //
 // There is no graceful signal to send: Windows has no SIGTERM, and the console
 // control events that come closest do not reach a process started without a
 // console.
-func terminateGroup(command *exec.Cmd) error {
-	if command.Process == nil {
-		return nil
-	}
-	return command.Process.Kill()
+func (g *processGroup) terminate(*exec.Cmd) error {
+	return g.job.Terminate()
+}
+
+// close releases the job, ending anything still in it that terminate did not.
+func (g *processGroup) close() {
+	g.job.Close()
 }
