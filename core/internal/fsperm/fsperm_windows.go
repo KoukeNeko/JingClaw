@@ -63,11 +63,18 @@ func Restrict(path string) error {
 	return nil
 }
 
-// EnsureOwnerOnly reports whether path grants access to nobody but its owner
-// and the machine's own accounts — LocalSystem and the Administrators group,
-// which can take ownership regardless of what the list says. detail names the
-// principal that fails the test when the answer is false; it never contains
-// the file's contents.
+// EnsureOwnerOnly reports whether path grants access to nobody but its owner,
+// the account the daemon runs as, and the machine's own accounts — LocalSystem
+// and the Administrators group, which can take ownership regardless of what the
+// list says. detail names the principal that fails the test when the answer is
+// false; it never contains the file's contents.
+//
+// The running account is trusted alongside the file's owner because the two are
+// not always the same principal on Windows: a file created while elevated is
+// owned by the Administrators group, not by the user who created it, so the
+// user's own grant on their own credential would otherwise read as an exposure.
+// This mirrors the Unix mode check, which never asks who owns the file, only
+// whether anyone other than the reader can get at it.
 func EnsureOwnerOnly(path string) (ownerOnly bool, detail string, err error) {
 	sd, err := windows.GetNamedSecurityInfo(
 		path,
@@ -140,8 +147,13 @@ func ownerOf(path string) (*windows.SID, error) {
 }
 
 // trustedSIDs are the principals whose access does not count as an exposure:
-// the file's own owner, LocalSystem, and the Administrators group.
+// the file's own owner, the account the daemon runs as, LocalSystem, and the
+// Administrators group.
 func trustedSIDs(owner *windows.SID) ([]*windows.SID, error) {
+	self, err := currentUserSID()
+	if err != nil {
+		return nil, err
+	}
 	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
 	if err != nil {
 		return nil, fmt.Errorf("fsperm: resolve LocalSystem SID: %w", err)
@@ -150,7 +162,22 @@ func trustedSIDs(owner *windows.SID) ([]*windows.SID, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fsperm: resolve Administrators SID: %w", err)
 	}
-	return []*windows.SID{owner, system, admins}, nil
+	return []*windows.SID{owner, self, system, admins}, nil
+}
+
+// currentUserSID reads the user SID of the process's own access token — the
+// account the daemon runs as. The token is a pseudo-handle that needs no close,
+// and the SID is copied out so it outlives the token user buffer.
+func currentUserSID() (*windows.SID, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return nil, fmt.Errorf("fsperm: read process token user: %w", err)
+	}
+	copied, err := user.User.Sid.Copy()
+	if err != nil {
+		return nil, fmt.Errorf("fsperm: copy process token user: %w", err)
+	}
+	return copied, nil
 }
 
 func isTrusted(sid *windows.SID, trusted []*windows.SID) bool {
