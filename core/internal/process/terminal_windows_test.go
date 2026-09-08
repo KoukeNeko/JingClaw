@@ -24,10 +24,10 @@ func TestAWindowsTerminalRunsAProgramAndResizes(t *testing.T) {
 		Program:   shell,
 		Args: []string{"/c",
 			"echo terminal-works & %SystemRoot%\\System32\\ping.exe -n 4 127.0.0.1 >nul"},
-		Env:       []string{"SystemRoot=" + os.Getenv("SystemRoot")},
-		Terminal:  true,
-		Columns:   80,
-		Rows:      25,
+		Env:      []string{"SystemRoot=" + os.Getenv("SystemRoot")},
+		Terminal: true,
+		Columns:  80,
+		Rows:     25,
 	})
 	if err != nil {
 		t.Fatalf("start: %v", err)

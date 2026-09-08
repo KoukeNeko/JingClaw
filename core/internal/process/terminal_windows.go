@@ -46,6 +46,6 @@ func resizeTerminal(terminal terminalFile, columns, rows int) error {
 // consoleProcess is a program started by a Windows pseudo console.
 type consoleProcess struct{ console *conpty.Console }
 
-func (p consoleProcess) pid() int          { return p.console.PID() }
+func (p consoleProcess) pid() int           { return p.console.PID() }
 func (p consoleProcess) wait() (int, error) { return p.console.Wait() }
-func (p consoleProcess) kill() error       { return p.console.Kill() }
+func (p consoleProcess) kill() error        { return p.console.Kill() }
