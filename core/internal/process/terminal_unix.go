@@ -17,7 +17,7 @@ import (
 // installer that asks a question, ssh. Most of them decide what to do by
 // looking at what they are attached to — block-buffering their output for a
 // pipe, and often refusing to prompt at all.
-func startWithTerminal(command *exec.Cmd, columns, rows int) (terminalFile, error) {
+func startWithTerminal(command *exec.Cmd, group *procGroup, columns, rows int) (terminalFile, running, error) {
 	size := &pty.Winsize{Cols: uint16(columns), Rows: uint16(rows)}
 	if size.Cols == 0 {
 		size.Cols = defaultColumns
@@ -41,9 +41,15 @@ func startWithTerminal(command *exec.Cmd, columns, rows int) (terminalFile, erro
 
 	file, err := pty.StartWithSize(command, size)
 	if err != nil {
-		return nil, fmt.Errorf("process: open a terminal for %s: %w", command.Path, err)
+		return nil, nil, fmt.Errorf("process: open a terminal for %s: %w", command.Path, err)
 	}
-	return file, nil
+	if err := group.started(command); err != nil {
+		_ = file.Close()
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return nil, nil, err
+	}
+	return file, execProcess{command}, nil
 }
 
 func resizeTerminal(terminal terminalFile, columns, rows int) error {

@@ -29,6 +29,10 @@ func (g *procGroup) configure(command *exec.Cmd) {
 // for at creation and the kernel made it.
 func (g *procGroup) started(*exec.Cmd) error { return nil }
 
+// containRunning has nothing to do: a program on a terminal is its own session
+// leader already, which is the containment here.
+func (g *procGroup) containRunning(int) error { return nil }
+
 // terminate asks the whole group to stop.
 //
 // SIGTERM so a program can flush what it was holding; the caller kills after a

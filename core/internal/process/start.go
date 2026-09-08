@@ -96,19 +96,14 @@ func (m *Manager) Start(options StartOptions) (State, error) {
 // launch starts the program, with a terminal or with pipes.
 func (m *Manager) launch(one *handle, options StartOptions) error {
 	if options.Terminal {
-		terminal, err := startWithTerminal(one.command, options.Columns, options.Rows)
+		terminal, proc, err := startWithTerminal(one.command, one.group, options.Columns, options.Rows)
 		if err != nil {
 			return err
 		}
 		if terminal != nil {
 			one.terminal = terminal
 			one.input = terminal
-			if err := one.group.started(one.command); err != nil {
-				_ = terminal.Close()
-				_ = one.command.Process.Kill()
-				_ = one.command.Wait()
-				return err
-			}
+			one.proc = proc
 			go func() { _, _ = io.Copy(one.buffer, terminal) }()
 			return nil
 		}
@@ -142,28 +137,18 @@ func (m *Manager) launch(one *handle, options StartOptions) error {
 		_ = one.command.Wait()
 		return err
 	}
+	one.proc = execProcess{one.command}
 	return nil
 }
 
 // reap waits for the program and records how it ended.
 func (m *Manager) reap(one *handle) {
-	err := one.command.Wait()
+	code, err := one.proc.wait()
 
 	one.mu.Lock()
 	one.finished = true
 	one.waitErr = err
-	var exit *exec.ExitError
-	switch {
-	case err == nil:
-		one.exitCode = 0
-	case errors.As(err, &exit):
-		one.exitCode = exit.ExitCode()
-	default:
-		// Something other than the program failing — the pipe, the wait
-		// itself. Not zero, because zero is the one value that means it
-		// worked.
-		one.exitCode = -1
-	}
+	one.exitCode = code
 	one.mu.Unlock()
 
 	if one.terminal != nil {
@@ -281,8 +266,8 @@ func (m *Manager) Stop(id ID) (State, error) {
 	select {
 	case <-one.done:
 	case <-time.After(stopGrace):
-		if one.command.Process != nil {
-			_ = one.command.Process.Kill()
+		if one.proc != nil {
+			_ = one.proc.kill()
 		}
 		<-one.done
 	}

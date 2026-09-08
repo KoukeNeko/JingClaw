@@ -43,6 +43,15 @@ func (g *procGroup) started(command *exec.Cmd) error {
 	return winjob.Resume(command.Process.Pid)
 }
 
+// containRunning puts an already-running process into the job — one this
+// package did not start through os/exec, such as a program a pseudo console
+// created. Unlike a command, it cannot be started suspended and assigned before
+// its first instruction, so a child it spawns in the moment before assignment
+// could escape; the window is small and the job takes everything after.
+func (g *procGroup) containRunning(pid int) error {
+	return g.job.Assign(pid)
+}
+
 // terminate ends the whole tree at once.
 func (g *procGroup) terminate(*exec.Cmd) error {
 	return g.job.Terminate()

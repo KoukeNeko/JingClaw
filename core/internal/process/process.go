@@ -115,7 +115,12 @@ type handle struct {
 	program string
 	args    []string
 
+	// command is how a piped program, and a program on a Unix terminal, is
+	// built and started. A Windows terminal program is started by its pseudo
+	// console instead; proc is what the rest of the lifecycle goes through, so
+	// it does not matter which of the two started the program.
 	command *exec.Cmd
+	proc    running
 
 	// group contains the process and its descendants, so that stopping it
 	// stops the tree rather than orphaning whatever it started. Its shape is
@@ -151,8 +156,8 @@ func (h *handle) state(now time.Time) State {
 	defer h.mu.Unlock()
 
 	pid := 0
-	if h.command.Process != nil {
-		pid = h.command.Process.Pid
+	if h.proc != nil {
+		pid = h.proc.pid()
 	}
 
 	return State{
