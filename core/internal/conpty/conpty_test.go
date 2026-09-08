@@ -4,6 +4,7 @@ package conpty
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -43,7 +44,7 @@ func drain(console *Console) (*bytes.Buffer, *sync.Mutex, <-chan struct{}) {
 // gone before its line is ever drawn.
 func TestAProgramRunsUnderAPseudoConsole(t *testing.T) {
 	console, err := Start("cmd.exe",
-		[]string{"/c", "echo hello-conpty & ping -n 3 127.0.0.1 >nul"}, "", 80, 25)
+		[]string{"/c", "echo hello-conpty & ping -n 3 127.0.0.1 >nul"}, "", nil, 80, 25)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -76,9 +77,48 @@ func TestAProgramRunsUnderAPseudoConsole(t *testing.T) {
 	}
 }
 
+// The program is handed exactly the environment it is given and nothing else,
+// so the daemon's own secrets in this process's environment never reach it.
+func TestTheProgramGetsOnlyTheEnvironmentItIsGiven(t *testing.T) {
+	t.Setenv("CONPTY_SECRET", "must-not-leak")
+
+	shell := os.Getenv("ComSpec")
+	if shell == "" {
+		t.Skip("no command interpreter to run")
+	}
+
+	console, err := Start(shell,
+		[]string{"/c", "echo given=[%CONPTY_GIVEN%] secret=[%CONPTY_SECRET%] & ping -n 3 127.0.0.1 >nul"},
+		"",
+		[]string{"CONPTY_GIVEN=handed-in", "SystemRoot=" + os.Getenv("SystemRoot")},
+		80, 25)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer console.Close()
+
+	output, mu, done := drain(console)
+	if _, err := console.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	console.EndOutput()
+	<-done
+
+	mu.Lock()
+	text := output.String()
+	mu.Unlock()
+
+	if !strings.Contains(text, "given=[handed-in]") {
+		t.Errorf("the given environment did not reach the program:\n%q", text)
+	}
+	if strings.Contains(text, "must-not-leak") {
+		t.Error("a secret from this process's environment leaked to the program")
+	}
+}
+
 // A terminal that cannot be resized is not one the interactive tools can use.
 func TestAPseudoConsoleCanBeResized(t *testing.T) {
-	console, err := Start("cmd.exe", []string{"/c", "echo sized"}, "", 80, 25)
+	console, err := Start("cmd.exe", []string{"/c", "echo sized"}, "", nil, 80, 25)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
