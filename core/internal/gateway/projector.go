@@ -1045,6 +1045,19 @@ func (p *Projector) mirrorToConsoles(ctx context.Context, run domain.Run, event 
 		}
 	}
 
+	// A failure's reason is the one preview worth more than the line it sits
+	// on: the part that says why is past where the line is bound, and clipped
+	// away it leaves an operator with a failure and no cause. Carried whole in
+	// the block under the line, the way a tool's output is, so the mirrored
+	// console does not omit it any more than the terminal one does.
+	if changed, ok := event.Payload.(domain.RunStateChanged); ok &&
+		changed.Status == domain.RunFailed && strings.TrimSpace(changed.Reason) != "" {
+		output, cut := boundOutput(changed.Reason, maxLoggedOutput)
+		payload.Output = output
+		payload.OutputTruncated = cut
+		payload.IsError = true
+	}
+
 	for _, target := range consoles {
 		if err := p.enqueue(ctx, run, target, DispatchLog, payload); err != nil {
 			return err

@@ -3,6 +3,7 @@ package gateway_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
@@ -90,5 +91,46 @@ func TestAConsoleMirrorsARunThatHappensElsewhere(t *testing.T) {
 	// console.
 	if toolDone.Output == "" {
 		t.Error("the console was not shown what the tool returned")
+	}
+}
+
+// Why a run failed is the one preview worth more than its line: bound to the
+// width it stops before the part that says why. The mirrored console carries
+// the whole reason in the block under the line, the way the terminal one
+// prints it in full.
+func TestAConsoleMirrorsWhyARunFailed(t *testing.T) {
+	h := newSummaryHarness(t, nil) // no turns: the model errors at once
+	h.bind(t, "gateway", "user_1")       // where the run happens
+	bindConsole(t, h, "channel_console") // the operator's window
+
+	accepted, err := h.ingress.Accept(context.Background(),
+		message("m1", "do something", discordPrincipal("user_1")))
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	_ = h.runtime.Wait(context.Background(), accepted.RunID)
+
+	var failed *gateway.LogPayload
+	for _, dispatch := range h.dispatches(t) {
+		if dispatch.Kind != gateway.DispatchLog {
+			continue
+		}
+		var payload gateway.LogPayload
+		if err := json.Unmarshal([]byte(dispatch.Payload), &payload); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if payload.Line != nil && payload.Line.Kind == "RUN" && payload.Line.State == "failed" {
+			failed = &payload
+		}
+	}
+
+	if failed == nil {
+		t.Fatal("the console never saw the run fail")
+	}
+	if failed.Output == "" {
+		t.Fatal("the failed line carried no reason block; the reason was omitted")
+	}
+	if !strings.Contains(failed.Output, "ran out of turns") {
+		t.Errorf("the block does not carry the whole reason: %q", failed.Output)
 	}
 }
