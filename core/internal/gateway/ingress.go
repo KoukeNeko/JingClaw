@@ -269,9 +269,12 @@ func (i *Ingress) title(message InboundMessage) string {
 	}
 
 	text := message.Text
-	const maxTitle = 60
-	if len(text) > maxTitle {
-		text = text[:maxTitle] + "…"
+	// By runes, not bytes. text[:60] can fall inside a multi-byte character
+	// and leave half of one, so a title of Chinese — three bytes to a
+	// character — ends in a broken rune the moment it is longer than the cap.
+	const maxTitleRunes = 60
+	if runes := []rune(text); len(runes) > maxTitleRunes {
+		text = string(runes[:maxTitleRunes]) + "…"
 	}
 	if text == "" {
 		text = string(message.Conversation.Platform) + " conversation"
