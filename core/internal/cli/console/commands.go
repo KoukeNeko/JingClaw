@@ -56,6 +56,9 @@ func (s *session) run(ctx context.Context, line string) bool {
 	case "open":
 		s.openStoredOutput(ctx, command.Arg(0))
 
+	case "why":
+		s.whyLastFailed()
+
 	case "questions":
 		s.showQuestions(ctx)
 
@@ -214,6 +217,33 @@ func (s *session) sayEachLine(text string) {
 	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
 		s.say("  " + line)
 	}
+}
+
+// whyLastFailed reprints the last run failure with nothing clipped.
+//
+// The reason it exists is the same one showOneApproval does: the running log
+// clips, and the reason a run failed is exactly the thing a prefix does not
+// answer — the error type after the colon, the id, the sentence a provider
+// wrote. ListRuns cannot bring it back, so this reads it from what the console
+// kept as it went past.
+func (s *session) whyLastFailed() {
+	failed := s.lastFailed()
+	if failed == nil {
+		s.say("no run has failed while this console has been open.")
+		return
+	}
+
+	header := string(failed.session) + " failed"
+	if failed.kind != "" {
+		header += ": " + failed.kind
+	}
+	s.say(header)
+
+	if strings.TrimSpace(failed.reason) == "" {
+		s.say("  it gave no reason.")
+		return
+	}
+	s.sayEachLine(failed.reason)
 }
 
 // openStoredOutput writes stored output out and hands it to the machine.

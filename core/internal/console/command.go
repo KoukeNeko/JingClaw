@@ -46,6 +46,7 @@ var known = []struct {
 	{Verb: "deny", Aliases: []string{"refuse", "no"}, Takes: "<id>", What: "refuse a waiting call"},
 	{Verb: "show", Takes: "<id>", What: "the whole of a waiting call, not the clipped line"},
 	{Verb: "open", Takes: "[id]", What: "open stored output in whatever reads that kind"},
+	{Verb: "why", What: "the whole reason the last run failed, not the clipped line"},
 	{Verb: "questions", Aliases: []string{"asked"}, What: "what the agent has stopped to ask"},
 	{Verb: "answer", Takes: "<id> <text>", What: "answer a question it is waiting on"},
 	{Verb: "sessions", Aliases: []string{"ls"}, What: "the conversations there are"},

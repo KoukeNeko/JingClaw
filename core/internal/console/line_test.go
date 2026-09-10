@@ -71,6 +71,30 @@ func TestEveryLineNamesItsSession(t *testing.T) {
 	}
 }
 
+// The stable token naming what went wrong belongs on the failed line, so it
+// names the failure in a word even where the reason is clipped away.
+func TestAFailedRunNamesWhatWentWrong(t *testing.T) {
+	line, shown := Describe(anEvent(domain.RunStateChanged{
+		Status:      domain.RunFailed,
+		FailureKind: "quota_exhausted",
+		Reason:      "provider gemini (gemini-3.8-flash): quota_exhausted: ...",
+	}))
+	if !shown {
+		t.Fatal("a failed run produced no line")
+	}
+	if !strings.Contains(line.String(), "quota_exhausted") {
+		t.Errorf("the failure kind is not on the line: %s", line.String())
+	}
+}
+
+// The states that do not fail carry no kind, so their lines are unchanged.
+func TestARunningLineHasNoFailureKind(t *testing.T) {
+	line, _ := Describe(anEvent(domain.RunStateChanged{Status: domain.RunRunning}))
+	if line.Meta != "" {
+		t.Errorf("a running line carries a kind: %q", line.Meta)
+	}
+}
+
 // A token at a time is not something anyone reads; the completed message says
 // it once.
 func TestDeltasAreNotShown(t *testing.T) {

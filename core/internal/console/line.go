@@ -158,6 +158,10 @@ func Describe(event domain.Event) (Line, bool) {
 	case domain.RunStateChanged:
 		line.Kind = "RUN"
 		line.State = string(payload.Status)
+		// The stable token before the prose, so the failed line names what went
+		// wrong in a word even where the reason is clipped. Empty on the states
+		// that do not fail, so those lines are unchanged.
+		line.Meta = payload.FailureKind
 		line.Preview = payload.Reason
 
 	case domain.AssistantMessageCompleted:

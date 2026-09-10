@@ -146,12 +146,26 @@ type session struct {
 	// stored is the last output a call left behind, so `open` with no
 	// argument means the one just mentioned in the log rather than nothing.
 	stored storedOutput
+
+	// lastFailure is the last run failure seen, so `why` can bring back the
+	// whole of a reason after its line has scrolled off. Kept because the
+	// reason lives only in the event that went past — ListRuns does not carry
+	// it — and the log line threw most of it away to the width. Nil until one
+	// has failed, which is not the same as one that failed for no reason.
+	lastFailure *failure
 }
 
 // storedOutput is an artifact the console has seen go past.
 type storedOutput struct {
 	id        string
 	mediaType string
+}
+
+// failure is a run that ended in failure, as much of it as is worth reprinting.
+type failure struct {
+	session domain.SessionID
+	kind    string
+	reason  string
 }
 
 // artifactReader is the part of the artifact service the console uses.
@@ -318,6 +332,33 @@ func (s *session) show(event *controlv1.Event) {
 		return
 	}
 	s.screen.Log(line.String())
+
+	// A failure is the one payload where the clipped line is not enough: the
+	// part worth reading is what a 72-cell line does not reach, and unlike an
+	// approval or an artifact there is nowhere to ask for the rest. So the
+	// whole reason is printed here under the summary, and kept for `why` to
+	// bring back once it has scrolled away.
+	if changed, isRun := read.Payload.(domain.RunStateChanged); isRun && changed.Status == domain.RunFailed {
+		record := failure{session: read.SessionID, kind: changed.FailureKind, reason: changed.Reason}
+		s.rememberFailure(record)
+		if strings.TrimSpace(record.reason) != "" {
+			s.sayEachLine(record.reason)
+		}
+	}
+}
+
+// rememberFailure keeps the last run failure so `why` can reprint it.
+func (s *session) rememberFailure(record failure) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastFailure = &record
+}
+
+// lastFailed is the failure `why` reprints, or nil if none has been seen.
+func (s *session) lastFailed() *failure {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastFailure
 }
 
 // noteStoredOutput keeps the last stored output that went past.
