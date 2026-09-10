@@ -99,7 +99,7 @@ func TestAConsoleMirrorsARunThatHappensElsewhere(t *testing.T) {
 // the whole reason in the block under the line, the way the terminal one
 // prints it in full.
 func TestAConsoleMirrorsWhyARunFailed(t *testing.T) {
-	h := newSummaryHarness(t, nil) // no turns: the model errors at once
+	h := newSummaryHarness(t, nil)       // no turns: the model errors at once
 	h.bind(t, "gateway", "user_1")       // where the run happens
 	bindConsole(t, h, "channel_console") // the operator's window
 
