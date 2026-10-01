@@ -53,6 +53,7 @@ func Run(t *testing.T, newStore Factory) {
 		"MemoryCorrectionSupersedes":  testMemoryCorrectionSupersedes,
 		"MemorySearchFindsByWord":     testMemorySearchFindsByWord,
 		"MemorySearchRespectsScope":   testMemorySearchRespectsScope,
+		"MemorySearchFindsChinese":    testMemorySearchFindsChinese,
 		"MemoryForgetActuallyRemoves": testMemoryForgetActuallyRemoves,
 		"MemoryProvenanceSurvives":    testMemoryProvenanceSurvives,
 		"PlanRoundTrip":               testPlanRoundTrip,
@@ -778,6 +779,41 @@ func testMemorySearchFindsByWord(t *testing.T, newStore Factory) {
 	}
 	if len(none) != 0 {
 		t.Errorf("a word nobody wrote returned %d memories", len(none))
+	}
+}
+
+// Chinese has no spaces, so a search that only splits on them treats a whole
+// sentence as one word: the memory is written, and then nothing short of that
+// exact sentence finds it again.
+func testMemorySearchFindsChinese(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	remember(t, store, newMemory("mem_1", "使用者偏好用繁體中文回覆",
+		domain.ScopeWorkspace, "/srv/app"), "")
+	remember(t, store, newMemory("mem_2", "部署腳本需要 sudo 權限",
+		domain.ScopeWorkspace, "/srv/app"), "")
+
+	for _, query := range []string{
+		"繁體中文",
+		"中文",
+		"回覆要用什麼語言？請用中文",
+	} {
+		found, err := store.SearchMemories(ctx, query, storage.MemoryQuery{})
+		if err != nil {
+			t.Fatalf("search %q: %v", query, err)
+		}
+		if len(found) != 1 || found[0].ID != "mem_1" {
+			t.Errorf("searching for %q returned %+v", query, found)
+		}
+	}
+
+	none, err := store.SearchMemories(ctx, "資料庫遷移", storage.MemoryQuery{})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("words nobody wrote returned %d memories", len(none))
 	}
 }
 

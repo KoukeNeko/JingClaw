@@ -255,12 +255,11 @@ what is matched. Embeddings remain the thing most likely to be missed later.
 
 Two things it does not do. Its tokens are not counted in the run's usage,
 which is the same gap compaction's summary call already has: both go straight
-to the provider rather than through the turn that reports usage. And it cannot
-help a memory written in Chinese, because the search index behind it cannot
-find one at all — fts5's default tokenizer reads a run of Han characters as a
-single token, so 「元件」 matches nothing in a memory containing 「既有的元件」.
-Expansion then fires on every such lookup and pays for a call that cannot
-help. That is a defect in the index, not in this, and it is open.
+to the provider rather than through the turn that reports usage. It also could
+not help a memory written in Chinese, because the search index behind it could
+not find one at all — fts5's default tokenizer reads a run of Han characters as
+a single token, so 「元件」 matched nothing in a memory containing 「既有的元件」.
+That defect in the index is fixed; see 2026-10-02 below.
 
 **Approving from a channel, by name.** A room can now hold three separate
 powers: being in it, being allowed to ask the agent for something, and being
@@ -736,6 +735,15 @@ waiting, the model is never shown it, the view leaves it out, and the channel
 sees 🚮 and no line. Found on the way: a run pulled out of the line handed the
 session on as though it had held the turn, starting the next message while the
 first was still being answered. The console lists the line with `queue`.
+
+**2026-10-02 — notes found in Chinese.** The memory
+index holds storage.SearchText rather than the text: a run of Han or kana
+becomes its overlapping pairs of characters, and a query is rewritten the same
+way, so 繁體中文 and 中文 both find 使用者偏好用繁體中文回覆. Migration 0018
+replaces the index; the store writes each entry in the same transaction as the
+memory and, on opening, indexes any memory the index lacks — every one, the
+first time. Only deletion stays a trigger, so a row written by sqlite3 by hand
+still inserts, and is indexed at the next start.
 
 ## Not done
 

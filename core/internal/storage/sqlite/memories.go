@@ -62,6 +62,9 @@ func (s *Store) Remember(
 		); err != nil {
 			return fmt.Errorf("sqlite: remember: %w", err)
 		}
+		if err := indexMemory(ctx, tx, memory.ID, memory.Text); err != nil {
+			return err
+		}
 
 		if supersedes == "" {
 			return nil
@@ -104,6 +107,61 @@ func (s *Store) Remember(
 		}
 		if affected == 0 {
 			return fmt.Errorf("sqlite: %s is not a memory that can be superseded", supersedes)
+		}
+		return nil
+	})
+}
+
+// indexMemory puts one memory in the search index, as storage.SearchText.
+func indexMemory(ctx context.Context, tx *sql.Tx, id domain.MemoryID, text string) error {
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO memories_fts(rowid, text)
+		SELECT rowid, ? FROM memories WHERE id = ?`,
+		storage.SearchText(text), string(id),
+	); err != nil {
+		return fmt.Errorf("sqlite: index memory %s: %w", id, err)
+	}
+	return nil
+}
+
+// indexMemories fills in whatever the search index lacks: every memory once,
+// after the index is rebuilt, and afterwards any row written by something
+// other than this store. A memory missing from the index is not an error
+// anybody sees — it is the agent quietly unable to recall it.
+func (s *Store) indexMemories(ctx context.Context) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT id, text FROM memories
+			 WHERE rowid NOT IN (SELECT rowid FROM memories_fts)`)
+		if err != nil {
+			return fmt.Errorf("sqlite: find unindexed memories: %w", err)
+		}
+
+		type unindexed struct {
+			id   domain.MemoryID
+			text string
+		}
+		var missing []unindexed
+		for rows.Next() {
+			var row unindexed
+			if err := rows.Scan(&row.id, &row.text); err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("sqlite: scan unindexed memory: %w", err)
+			}
+			missing = append(missing, row)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("sqlite: read unindexed memories: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+
+		for _, row := range missing {
+			if err := indexMemory(ctx, tx, row.id, row.text); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -243,10 +301,14 @@ func memoryLimit(query storage.MemoryQuery) string {
 // Every word becomes a quoted phrase, so nothing in it is read as MATCH
 // syntax. Without this, a search is a way to write query operators, and the
 // scope filter stops being the only thing deciding which rows come back.
+//
+// The words are storage.SearchTerms, the same rewrite the index was built
+// from, so a Chinese question is asked in the pairs a Chinese memory is
+// stored as.
 func ftsPhrase(text string) string {
 	var terms []string
 
-	for _, word := range strings.Fields(text) {
+	for _, word := range storage.SearchTerms(text) {
 		cleaned := strings.Map(func(r rune) rune {
 			if r == '"' {
 				return -1

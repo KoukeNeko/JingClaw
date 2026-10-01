@@ -63,13 +63,13 @@ func (s *Store) SearchMemories(
 	text string,
 	query storage.MemoryQuery,
 ) ([]domain.Memory, error) {
-	terms := strings.Fields(strings.ToLower(text))
+	terms := storage.SearchTerms(strings.ToLower(text))
 	if len(terms) == 0 {
 		return nil, nil
 	}
 
 	return s.selectMemories(query, func(candidate domain.Memory) bool {
-		body := strings.ToLower(candidate.Text)
+		body := storage.SearchText(strings.ToLower(candidate.Text))
 		return slices.ContainsFunc(terms, func(term string) bool {
 			return strings.Contains(body, term)
 		})
