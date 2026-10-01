@@ -41,6 +41,11 @@ const (
 
 	aboutPerson  = "person"
 	aboutProject = "project"
+
+	// knownLimit is how many existing notes the curator is shown. Enough for
+	// the ones a turn is likely to restate; a list longer than that is a
+	// prompt about the past rather than about what was just said.
+	knownLimit = 10
 )
 
 // curateInstruction is written as a closed task with a stated output shape,
@@ -61,7 +66,10 @@ Answer with a JSON array and nothing else. Each item is an object:
   "quote": the exact words from the message that support it, copied verbatim
   "message": the number of the message the quote is from
   "about": "person" or "project"
-At most three items. If nothing is worth keeping, answer [].`
+At most three items. If nothing is worth keeping, answer [].
+
+If the messages are followed by notes already kept, leave out anything they
+already say, even in other words. Only what is new is worth an item.`
 
 // Curator notices what a person said that is worth keeping, once they have
 // been answered.
@@ -114,7 +122,13 @@ func (c *Curator) Curate(ctx context.Context, run domain.Run) ([]domain.Memory, 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
 
-	answer, err := c.Model.Complete(ctx, curateInstruction, renderSpoken(said), curateMaxOutputTokens)
+	known, err := c.knownFor(ctx, run, said)
+	if err != nil {
+		return nil, err
+	}
+
+	answer, err := c.Model.Complete(ctx, curateInstruction,
+		renderSpoken(said)+renderKnown(known), curateMaxOutputTokens)
 	if err != nil {
 		return nil, fmt.Errorf("ask what is worth keeping: %w", err)
 	}
@@ -170,6 +184,45 @@ func renderSpoken(said []spoken) string {
 	var out strings.Builder
 	for _, item := range said {
 		fmt.Fprintf(&out, "#%d\n%s\n\n", item.number, item.message.Text)
+	}
+	return strings.TrimRight(out.String(), "\n")
+}
+
+// knownFor is what is already noted that the person's messages touch on, from
+// the scopes their run may read.
+//
+// Without it every turn that restates a preference is a fresh chance to write
+// it down again in other words, and the exact-match check after the answer
+// cannot catch a paraphrase. Shown the existing note, the model can leave it
+// out. Nothing shown here can cause a write: a proposal still needs a quote
+// from what the person said.
+func (c *Curator) knownFor(ctx context.Context, run domain.Run, said []spoken) ([]domain.Memory, error) {
+	var text strings.Builder
+	for _, item := range said {
+		text.WriteString(item.message.Text)
+		text.WriteByte('\n')
+	}
+
+	found, err := c.Store.SearchMemories(ctx, text.String(), storage.MemoryQuery{
+		Scopes:     c.scopesFor(contextForRun(run)),
+		Activation: domain.MemoryRetrieval,
+		Limit:      knownLimit,
+		At:         c.Now(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("look up what is already noted: %w", err)
+	}
+	return found, nil
+}
+
+func renderKnown(known []domain.Memory) string {
+	if len(known) == 0 {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString("\n\nAlready noted:\n")
+	for _, memory := range known {
+		out.WriteString("- " + strings.TrimSpace(memory.Text) + "\n")
 	}
 	return strings.TrimRight(out.String(), "\n")
 }

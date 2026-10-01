@@ -242,6 +242,38 @@ func TestTheSameNoteIsNotWrittenTwice(t *testing.T) {
 	}
 }
 
+// What is already noted is shown to the model, so a turn that restates it in
+// other words is not a fresh chance to write it down again. Only from scopes
+// the person's run may read: what bob said is not alice's business.
+func TestTheCuratorIsShownWhatIsAlreadyNoted(t *testing.T) {
+	model := &scriptedModel{answer: "[]"}
+	curator := newCurator(t, model, said(1, theRun, alice, "我住在台北，習慣用繁體中文"))
+
+	for _, existing := range []domain.Memory{
+		{ID: "mem_alice", Scope: domain.ScopePrincipal, ScopeRef: "discord:111", Text: "Alice 偏好繁體中文"},
+		{ID: "mem_bob", Scope: domain.ScopePrincipal, ScopeRef: "discord:222", Text: "Bob 偏好繁體中文"},
+	} {
+		existing.Activation = domain.MemoryRetrieval
+		existing.CreatedAt = curator.Now().Add(-time.Hour)
+		if err := curator.Store.Remember(context.Background(), existing, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	curate(t, curator)
+
+	if len(model.inputs) != 1 {
+		t.Fatalf("the model was asked %d times", len(model.inputs))
+	}
+	input := model.inputs[0]
+	if !strings.Contains(input, "Already noted:\n- Alice 偏好繁體中文") {
+		t.Errorf("the existing note was not shown:\n%s", input)
+	}
+	if strings.Contains(input, "Bob") {
+		t.Errorf("another person's note was shown:\n%s", input)
+	}
+}
+
 // A turn from outside this machine writes only about the person it came from.
 // Project knowledge is read by runs that can execute programs, and only a turn
 // typed at this machine may add to it.

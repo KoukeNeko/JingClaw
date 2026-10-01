@@ -125,7 +125,9 @@ func (t *Remember) Spec() tool.Spec {
 		Description: "Write something down so later sessions know it. " +
 			"For durable facts and preferences, not for notes about the task in hand: " +
 			"this conversation already remembers itself. " +
-			"A person is asked before anything is written.",
+			"A retrieval memory is written as soon as you call this, so do not ask " +
+			"whether to remember something: write it, or decide not to. " +
+			"A standing memory waits for a person to agree.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {

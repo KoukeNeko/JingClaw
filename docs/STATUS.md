@@ -736,14 +736,18 @@ sees 🚮 and no line. Found on the way: a run pulled out of the line handed the
 session on as though it had held the turn, starting the next message while the
 first was still being answered. The console lists the line with `queue`.
 
-**2026-10-02 — notes found in Chinese.** The memory
+**2026-10-02 — notes found in Chinese, and fewer written twice.** The memory
 index holds storage.SearchText rather than the text: a run of Han or kana
 becomes its overlapping pairs of characters, and a query is rewritten the same
 way, so 繁體中文 and 中文 both find 使用者偏好用繁體中文回覆. Migration 0018
 replaces the index; the store writes each entry in the same transaction as the
 memory and, on opening, indexes any memory the index lacks — every one, the
 first time. Only deletion stays a trigger, so a row written by sqlite3 by hand
-still inserts, and is indexed at the next start.
+still inserts, and is indexed at the next start. The curator is now shown
+what is already noted in the scopes the run may read, and told to leave out
+what those notes already say, so restating a preference is no longer a fresh
+chance to write it again in other words; a proposal still needs a quote. The
+remember tool no longer claims a person is asked before every write.
 
 ## Not done
 
