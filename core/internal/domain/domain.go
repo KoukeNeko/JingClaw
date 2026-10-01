@@ -715,6 +715,7 @@ func AllEventKinds() []EventKind {
 		EventQuestionAnswered,
 		EventApprovalRequested,
 		EventApprovalResolved,
+		EventSkillActivated,
 		EventMemoriesNoted,
 	}
 }
