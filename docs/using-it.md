@@ -217,7 +217,9 @@ outside this machine.
 the machine reads their own messages from that turn — not the reply, not what
 a tool returned, not what a page said — and asks the model what in them is
 worth knowing next month: their name, their timezone, a preference, a
-decision about the project. Each proposal has to quote the message it rests
+decision about the project. A turn that failed is read with the next one that
+is answered, so "try again" does not lose what was said before it; a turn
+that was stopped or taken back is not. Each proposal has to quote the message it rests
 on, verbatim, or it is dropped; a model that wants to note something nobody
 said has to invent words that are then not found. What survives is written as
 a retrieval memory in the person's own scope (a turn typed at this machine

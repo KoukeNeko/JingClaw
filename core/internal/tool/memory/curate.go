@@ -144,30 +144,78 @@ type spoken struct {
 	message domain.UserMessageAdded
 }
 
-// spokenIn is the person's own messages in this run, and only those.
+// spokenIn is what people said in this run, and in the runs that failed since
+// the last one that was answered.
 //
-// A reply, a tool's result, a page the model read: none of that is the person
-// speaking, and a note taken from it would be the model writing down what it
-// read as though somebody had said it. Which is exactly how text from outside
-// becomes something the agent believes.
+// Only their own messages. A reply, a tool's result, a page the model read:
+// none of that is the person speaking, and a note taken from it would be the
+// model writing down what it read as though somebody had said it. Which is
+// exactly how text from outside becomes something the agent believes.
+//
+// A run that failed was never answered, so nobody was told about it, and
+// "try again" is all the next run says. Its words are carried into the run
+// that is eventually answered rather than lost. A cancelled run's are not:
+// that is somebody stopping it or taking the message back, and a message
+// taken back is one the model was never to see.
 func (c *Curator) spokenIn(ctx context.Context, run domain.Run) ([]spoken, error) {
 	events, err := c.Events.ListAfter(ctx, run.SessionID, 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("read the run: %w", err)
 	}
 
-	var said []spoken
+	// How each run ended, read off the whole log: a message can be sent while
+	// the run before it is still going, so that run's ending may come after.
+	ended := map[domain.RunID]domain.RunStatus{}
 	for _, event := range events {
-		if event.RunID != run.ID {
-			continue
+		if changed, ok := event.Payload.(domain.RunStateChanged); ok {
+			ended[event.RunID] = changed.Status
 		}
-		message, ok := event.Payload.(domain.UserMessageAdded)
-		if !ok || !aPersonSent(message.Origin) || strings.TrimSpace(message.Text) == "" {
-			continue
-		}
-		said = append(said, spoken{number: len(said) + 1, seq: event.Seq, message: message})
 	}
-	return said, nil
+
+	var said, carried []spoken
+	for _, event := range events {
+		message, ok := personSaid(event)
+		if !ok {
+			continue
+		}
+		item := spoken{seq: event.Seq, message: message}
+
+		if event.RunID == run.ID {
+			said = append(said, item)
+			continue
+		}
+		if len(said) > 0 {
+			// Sent after this run began, so it is a later run's to note.
+			continue
+		}
+		switch ended[event.RunID] {
+		case domain.RunFailed:
+			carried = append(carried, item)
+		case domain.RunCompleted:
+			// That run was answered, and anything that failed before it
+			// was noted with it.
+			carried = nil
+		}
+	}
+	if len(said) == 0 {
+		return nil, nil
+	}
+
+	all := append(carried, said...)
+	for i := range all {
+		all[i].number = i + 1
+	}
+	return all, nil
+}
+
+// personSaid is a message a person sent, as opposed to anything else in the
+// log, including a turn a schedule wrote.
+func personSaid(event domain.Event) (domain.UserMessageAdded, bool) {
+	message, ok := event.Payload.(domain.UserMessageAdded)
+	if !ok || !aPersonSent(message.Origin) || strings.TrimSpace(message.Text) == "" {
+		return domain.UserMessageAdded{}, false
+	}
+	return message, true
 }
 
 // aPersonSent says whether a turn came from somebody, as opposed to a schedule.

@@ -73,6 +73,13 @@ func toolSaid(seq domain.Seq, run domain.RunID, text string) domain.Event {
 	}
 }
 
+func ended(seq domain.Seq, run domain.RunID, status domain.RunStatus) domain.Event {
+	return domain.Event{
+		SessionID: theSession, RunID: run, Seq: seq, Kind: domain.EventRunStateChanged,
+		Payload: domain.RunStateChanged{Status: status},
+	}
+}
+
 func newCurator(t *testing.T, model *scriptedModel, events ...domain.Event) *Curator {
 	t.Helper()
 	counter := 0
@@ -271,6 +278,49 @@ func TestTheCuratorIsShownWhatIsAlreadyNoted(t *testing.T) {
 	}
 	if strings.Contains(input, "Bob") {
 		t.Errorf("another person's note was shown:\n%s", input)
+	}
+}
+
+// A run that failed was never answered, so what was said in it is noted with
+// the run that eventually is. A cancelled one is not: that is somebody
+// stopping it or taking the message back. And once a run has been answered,
+// what failed before it was already noted with it.
+func TestWordsFromAFailedRunAreNotedWithTheNextAnswer(t *testing.T) {
+	const (
+		answered  = domain.RunID("run_answered")
+		failed    = domain.RunID("run_failed")
+		cancelled = domain.RunID("run_cancelled")
+		running   = domain.RunID("run_failed_late")
+	)
+	model := &scriptedModel{answer: "[]"}
+	curator := newCurator(t, model,
+		said(1, answered, alice, "ALREADY-ANSWERED earlier"),
+		ended(2, answered, domain.RunCompleted),
+		said(3, failed, alice, "FAILED-ONCE my name is Alice"),
+		ended(4, failed, domain.RunFailed),
+		said(5, cancelled, alice, "TAKEN-BACK never mind"),
+		ended(6, cancelled, domain.RunCancelled),
+		said(7, running, alice, "FAILED-LATE I use vim"),
+		said(8, theRun, alice, "try again"),
+		// The run before this one ended after this message was sent.
+		ended(9, running, domain.RunFailed),
+	)
+
+	curate(t, curator)
+
+	if len(model.inputs) != 1 {
+		t.Fatalf("the model was asked %d times", len(model.inputs))
+	}
+	input := model.inputs[0]
+	for _, want := range []string{"#1\nFAILED-ONCE", "#2\nFAILED-LATE", "#3\ntry again"} {
+		if !strings.Contains(input, want) {
+			t.Errorf("the model was not shown %q:\n%s", want, input)
+		}
+	}
+	for _, unwanted := range []string{"ALREADY-ANSWERED", "TAKEN-BACK"} {
+		if strings.Contains(input, unwanted) {
+			t.Errorf("the model was shown %q:\n%s", unwanted, input)
+		}
 	}
 }
 
