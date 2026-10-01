@@ -62,7 +62,8 @@ made about the project, a constraint they set. Not what they asked for this
 once, not what the assistant answered, not something mentioned in passing.
 
 Answer with a JSON array and nothing else. Each item is an object:
-  "claim": one plain sentence in the third person
+  "claim": one plain sentence in the third person, in the language the
+           person wrote in, so it is found again by how they ask
   "quote": the exact words from the message that support it, copied verbatim
   "message": the number of the message the quote is from
   "about": "person" or "project"

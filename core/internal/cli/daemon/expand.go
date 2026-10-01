@@ -17,7 +17,9 @@ const expandInstruction = `You are helping search a small collection of notes ` 
 
 A search for the words below found nothing. List other words that a note about
 the same subject might have been written in: broader terms, the general idea a
-specific thing is an instance of, and the ordinary name for a technical one.
+specific thing is an instance of, the ordinary name for a technical one, and
+the same words in the other language when the notes may be in English or
+Chinese.
 
 Answer with the words only, separated by spaces, on a single line. No more than
 eight. No numbering, no punctuation, no explanation. If nothing sensible comes
