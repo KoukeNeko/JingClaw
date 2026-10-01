@@ -45,6 +45,12 @@ type Store interface {
 	Memories(ctx context.Context, query storage.MemoryQuery) ([]domain.Memory, error)
 	SearchMemories(ctx context.Context, text string, query storage.MemoryQuery) ([]domain.Memory, error)
 	Memory(ctx context.Context, id domain.MemoryID) (domain.Memory, error)
+
+	SetMemoryVector(ctx context.Context, id domain.MemoryID, model string, vector []float32) error
+	UnembeddedMemories(ctx context.Context, model string, limit int) ([]domain.Memory, error)
+	NearestMemories(
+		ctx context.Context, model string, vector []float32, min float64, query storage.MemoryQuery,
+	) ([]domain.Memory, error)
 }
 
 // Options are what both tools share.
@@ -79,6 +85,21 @@ type Options struct {
 	// "nothing", and this is a second chance at a better one. Making a run
 	// wait on it is a worse outcome than not broadening the search.
 	ExpandTimeout time.Duration
+
+	// Embedder finds memories by meaning as well as by their words. Left
+	// nil, search is by words alone.
+	Embedder Embedder
+
+	// MinSimilarity is how alike a memory has to be to be put in front of a
+	// turn by meaning alone, unasked, from 0 to 1. RecallMinSimilarity is the
+	// same for a search that was asked for, and lower, because whoever asked
+	// judges what comes back. Zero uses defaults measured on one model;
+	// another model wants its own.
+	MinSimilarity       float64
+	RecallMinSimilarity float64
+
+	// EmbedTimeout bounds one embedding request. Zero uses a default.
+	EmbedTimeout time.Duration
 }
 
 // scopesFor decides which memories a turn may see.
@@ -273,6 +294,7 @@ func (t *Remember) Execute(ctx context.Context, call tool.Call) (tool.Result, er
 	if err := t.Store.Remember(ctx, written, supersedes); err != nil {
 		return tool.Result{}, tool.Errorf(tool.CodeInternal, "", "%v", err)
 	}
+	t.remembered(ctx, []domain.Memory{written})
 
 	summary := fmt.Sprintf("remembered as %s", written.ID)
 	if supersedes != "" {
@@ -555,7 +577,7 @@ func (t *Recall) lookUp(
 		return found, false, err
 	}
 
-	found, err := t.Store.SearchMemories(ctx, text, query)
+	found, err := t.searchAsked(ctx, text, query)
 	if err != nil {
 		return nil, false, err
 	}

@@ -339,6 +339,16 @@ func run(args []string) error {
 		Log:          logger,
 	}
 	if cfg.Memory.Enabled {
+		embedder, err := buildEmbedder(cfg.Memory.Embedding)
+		if err != nil {
+			return err
+		}
+		if embedder != nil {
+			memoryOptions.Embedder = embedder
+			memoryOptions.MinSimilarity = cfg.Memory.Embedding.MinSimilarity
+			memoryOptions.RecallMinSimilarity = cfg.Memory.Embedding.RecallMinSimilarity
+		}
+
 		// A lookup that matched nothing may be tried once more with other
 		// words, and the model running the session is the one asked for
 		// them: it is already loaded, and it knows what the query was about
@@ -495,6 +505,11 @@ func run(args []string) error {
 	// machine that was asleep ran no timers and has to work out what came due
 	// while it was gone, and then every minute.
 	go watchSchedules(rootCtx, rt, logger)
+
+	// Memories written before there was an embedder, or under another
+	// model, or while it was down, are given vectors in the background:
+	// until then they are found by their words, the way they always were.
+	go embedMissingMemories(rootCtx, memoryOptions, logger)
 
 	controlToken, err := control.NewToken(control.ScopeControl)
 	if err != nil {

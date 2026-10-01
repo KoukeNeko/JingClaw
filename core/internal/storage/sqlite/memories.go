@@ -420,3 +420,104 @@ func nullableID(id domain.MemoryID) any {
 	}
 	return string(id)
 }
+
+func (s *Store) SetMemoryVector(
+	ctx context.Context,
+	id domain.MemoryID,
+	model string,
+	vector []float32,
+) error {
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO memory_vectors (memory_id, model, vector) VALUES (?, ?, ?)
+		ON CONFLICT (memory_id, model) DO UPDATE SET vector = excluded.vector`,
+		string(id), model, storage.EncodeVector(vector),
+	); err != nil {
+		return fmt.Errorf("sqlite: keep the vector of %s: %w", id, err)
+	}
+	return nil
+}
+
+func (s *Store) UnembeddedMemories(ctx context.Context, model string, limit int) ([]domain.Memory, error) {
+	return s.queryMemories(ctx, `
+		SELECT `+memoryColumns+` FROM memories
+		 WHERE invalidated_at IS NULL
+		   AND id NOT IN (SELECT memory_id FROM memory_vectors WHERE model = ?)
+		 ORDER BY created_at, id`+memoryLimit(storage.MemoryQuery{Limit: limit}),
+		model)
+}
+
+// NearestMemories compares against every vector the query selects, here in
+// Go. The driver cannot load a vector extension, and a store holds memories
+// by the hundred rather than the million: reading them all is a few
+// milliseconds, which is less than the embedding that asked.
+func (s *Store) NearestMemories(
+	ctx context.Context,
+	model string,
+	vector []float32,
+	min float64,
+	query storage.MemoryQuery,
+) ([]domain.Memory, error) {
+	where, args := memoryFilter(query)
+	if where == "" {
+		where = " WHERE"
+	} else {
+		where += " AND"
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT memories.id, memory_vectors.vector
+		  FROM memories
+		  JOIN memory_vectors ON memory_vectors.memory_id = memories.id`+
+		where+` memory_vectors.model = ?`,
+		append(args, model)...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: read memory vectors: %w", err)
+	}
+
+	var (
+		ids     []domain.MemoryID
+		vectors [][]float32
+	)
+	for rows.Next() {
+		var (
+			id  string
+			raw []byte
+		)
+		if err := rows.Scan(&id, &raw); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("sqlite: scan memory vector: %w", err)
+		}
+		decoded, err := storage.DecodeVector(raw)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, domain.MemoryID(id))
+		vectors = append(vectors, decoded)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("sqlite: read memory vectors: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	// Ranked on ids first and read in full only for what survives: the
+	// vectors are the large part, and most of them are not near.
+	candidates := make([]domain.Memory, len(ids))
+	for i, id := range ids {
+		candidates[i] = domain.Memory{ID: id}
+	}
+	nearest := storage.Nearest(vector, candidates, vectors, min, query.Limit)
+
+	out := make([]domain.Memory, 0, len(nearest))
+	for _, near := range nearest {
+		memory, err := s.Memory(ctx, near.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, memory)
+	}
+	return out, nil
+}

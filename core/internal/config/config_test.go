@@ -292,6 +292,16 @@ func TestValidateRejectsBadValues(t *testing.T) {
 			mutate:  func(c *config.Config) { c.Provider.Retry.Jitter = 2 },
 			mention: "jitter",
 		},
+		{
+			name:    "an embedding model with nowhere to ask",
+			mutate:  func(c *config.Config) { c.Memory.Embedding.Model = "qwen3-embedding:0.6b" },
+			mention: "memory.embedding.base_url",
+		},
+		{
+			name:    "a similarity that is not one",
+			mutate:  func(c *config.Config) { c.Memory.Embedding.RecallMinSimilarity = 1.5 },
+			mention: "memory.embedding.recall_min_similarity",
+		},
 	}
 
 	for _, test := range tests {

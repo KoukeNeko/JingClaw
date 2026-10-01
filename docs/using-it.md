@@ -267,12 +267,39 @@ that is still in the event log, because an append-only log cannot forget, and
 that is the price of it being able to say what happened. The provenance on each
 memory is what tells you where else to look.
 
-Retrieval is SQLite FTS5, and it fails silently — it does not crash, the agent
-just looks as though it forgot. `TestRecallOnParaphrase` measures exactly that
-against a corpus of realistic paraphrases and prints what it missed. It stands
-at **6 of 11**, and the misses are all the same shape: the same thing said in
-other words. That number is the evidence for adding embeddings when the time
-comes, and there is no point adding them before there is a number.
+Retrieval by words is SQLite FTS5, and it fails silently — it does not crash,
+the agent just looks as though it forgot. `TestRecallOnParaphrase` measures
+exactly that against a corpus of realistic paraphrases and prints what it
+missed. It stands at **6 of 11**, and the misses are all the same shape: the
+same thing said in other words, or in the other language.
+
+Name an embedding model and memories are found by meaning as well. Any
+OpenAI-compatible `/embeddings` endpoint works; Ollama on this machine is the
+one that sends nothing anywhere:
+
+```toml
+[memory.embedding]
+model = "qwen3-embedding:0.6b"          # ollama pull qwen3-embedding:0.6b
+base_url = "http://127.0.0.1:11434/v1"
+```
+
+Each search runs both ways and merges the two lists by rank, so a note found
+by its exact words and a note that means the same thing in other words both
+come back. A note is found by meaning alone only when it is alike enough:
+`min_similarity` for the notes put in front of a turn unasked, and the lower
+`recall_min_similarity` when the model searches and can judge what it gets.
+Memories written before the model was named, or while the endpoint was down,
+are embedded when the daemon starts; until then they are found by their words,
+and a search whose embedding fails is a search by words. Every memory and
+every turn a person types is sent to the endpoint, which is why it is off
+until a model is named.
+
+`TestRealRecallWithEmbeddings` measures it against a real model. On
+qwen3-embedding:0.6b, over seventeen questions in other words and both
+languages, the first note returned was the right one for **17** when asked
+and **11** unasked, against **7** by words alone; none of eight unrelated
+turns had a note put in front of them. The two default lines were measured on
+that model, and another model draws them elsewhere.
 
 The reasoning, the evidence behind it, and what is deliberately not built are
 in `docs/research/05-memory.md`.

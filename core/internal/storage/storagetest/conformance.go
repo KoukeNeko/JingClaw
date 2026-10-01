@@ -54,6 +54,9 @@ func Run(t *testing.T, newStore Factory) {
 		"MemorySearchFindsByWord":     testMemorySearchFindsByWord,
 		"MemorySearchRespectsScope":   testMemorySearchRespectsScope,
 		"MemorySearchFindsChinese":    testMemorySearchFindsChinese,
+		"MemoryNearestByVector":       testMemoryNearestByVector,
+		"MemoryVectorsAreForgotten":   testMemoryVectorsAreForgotten,
+		"MemoryUnembeddedPerModel":    testMemoryUnembeddedPerModel,
 		"MemoryForgetActuallyRemoves": testMemoryForgetActuallyRemoves,
 		"MemoryProvenanceSurvives":    testMemoryProvenanceSurvives,
 		"PlanRoundTrip":               testPlanRoundTrip,
@@ -814,6 +817,120 @@ func testMemorySearchFindsChinese(t *testing.T, newStore Factory) {
 	}
 	if len(none) != 0 {
 		t.Errorf("words nobody wrote returned %d memories", len(none))
+	}
+}
+
+// Nearest is closest first, nothing below the floor, nothing outside the
+// query's scopes, and nothing from another model.
+func testMemoryNearestByVector(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	remember(t, store, newMemory("mem_near", "near", domain.ScopeWorkspace, "/srv/app"), "")
+	remember(t, store, newMemory("mem_nearer", "nearer", domain.ScopeWorkspace, "/srv/app"), "")
+	remember(t, store, newMemory("mem_far", "far", domain.ScopeWorkspace, "/srv/app"), "")
+	remember(t, store, newMemory("mem_theirs", "theirs", domain.ScopePrincipal, "discord:1"), "")
+	remember(t, store, newMemory("mem_other_model", "other", domain.ScopeWorkspace, "/srv/app"), "")
+
+	for id, vector := range map[domain.MemoryID][]float32{
+		"mem_near":   {1, 1, 0},
+		"mem_nearer": {1, 0.1, 0},
+		"mem_far":    {0, 0, 1},
+		"mem_theirs": {1, 0, 0},
+	} {
+		if err := store.SetMemoryVector(ctx, id, "model-a", vector); err != nil {
+			t.Fatalf("set vector %s: %v", id, err)
+		}
+	}
+	if err := store.SetMemoryVector(ctx, "mem_other_model", "model-b", []float32{1, 0, 0}); err != nil {
+		t.Fatalf("set vector: %v", err)
+	}
+
+	found, err := store.NearestMemories(ctx, "model-a", []float32{1, 0, 0}, 0.5, storage.MemoryQuery{
+		Scopes: []storage.MemoryScopeRef{{Scope: domain.ScopeWorkspace, Ref: "/srv/app"}},
+	})
+	if err != nil {
+		t.Fatalf("nearest: %v", err)
+	}
+	var ids []domain.MemoryID
+	for _, memory := range found {
+		ids = append(ids, memory.ID)
+	}
+	if len(ids) != 2 || ids[0] != "mem_nearer" || ids[1] != "mem_near" {
+		t.Errorf("nearest returned %v, want [mem_nearer mem_near]", ids)
+	}
+	if len(found) > 0 && found[0].Text != "nearer" {
+		t.Errorf("nearest returned a memory without its text: %+v", found[0])
+	}
+
+	limited, err := store.NearestMemories(ctx, "model-a", []float32{1, 0, 0}, 0.5, storage.MemoryQuery{
+		Scopes: []storage.MemoryScopeRef{{Scope: domain.ScopeWorkspace, Ref: "/srv/app"}},
+		Limit:  1,
+	})
+	if err != nil {
+		t.Fatalf("nearest: %v", err)
+	}
+	if len(limited) != 1 || limited[0].ID != "mem_nearer" {
+		t.Errorf("a limit of one returned %+v", limited)
+	}
+}
+
+// A memory forgotten is forgotten by meaning too.
+func testMemoryVectorsAreForgotten(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	remember(t, store, newMemory("mem_1", "something regrettable", domain.ScopeWorkspace, "/srv/app"), "")
+	if err := store.SetMemoryVector(ctx, "mem_1", "model-a", []float32{1, 0}); err != nil {
+		t.Fatalf("set vector: %v", err)
+	}
+	if err := store.Forget(ctx, "mem_1"); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+
+	found, err := store.NearestMemories(ctx, "model-a", []float32{1, 0}, 0, storage.MemoryQuery{
+		IncludeInvalidated: true,
+	})
+	if err != nil {
+		t.Fatalf("nearest: %v", err)
+	}
+	if len(found) != 0 {
+		t.Errorf("a forgotten memory is still found by meaning: %+v", found)
+	}
+}
+
+// What is left to embed is per model, and leaves out what is no longer
+// believed.
+func testMemoryUnembeddedPerModel(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	remember(t, store, newMemory("mem_1", "first", domain.ScopeWorkspace, "/srv/app"), "")
+	second := newMemory("mem_2", "second", domain.ScopeWorkspace, "/srv/app")
+	second.CreatedAt = fixedTime().Add(time.Hour)
+	remember(t, store, second, "")
+	corrected := newMemory("mem_3", "third", domain.ScopeWorkspace, "/srv/app")
+	corrected.CreatedAt = fixedTime().Add(2 * time.Hour)
+	remember(t, store, corrected, "mem_2")
+
+	if err := store.SetMemoryVector(ctx, "mem_1", "model-a", []float32{1}); err != nil {
+		t.Fatalf("set vector: %v", err)
+	}
+
+	left, err := store.UnembeddedMemories(ctx, "model-a", 0)
+	if err != nil {
+		t.Fatalf("unembedded: %v", err)
+	}
+	if len(left) != 1 || left[0].ID != "mem_3" {
+		t.Errorf("left to embed for model-a: %+v, want only mem_3", left)
+	}
+
+	other, err := store.UnembeddedMemories(ctx, "model-b", 1)
+	if err != nil {
+		t.Fatalf("unembedded: %v", err)
+	}
+	if len(other) != 1 || other[0].ID != "mem_1" {
+		t.Errorf("left to embed for model-b with a limit of one: %+v, want mem_1", other)
 	}
 }
 

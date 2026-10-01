@@ -764,6 +764,23 @@ unrelated Chinese and English turns had a note put in front of it, and five
 of five related ones found theirs; recalling an English note from a Chinese
 question is still a miss, and still the case for embeddings.
 
+**2026-10-02 — memories found by meaning.** `[memory.embedding]` names any
+OpenAI-compatible `/embeddings` endpoint; off until a model is named. Vectors
+live in `memory_vectors` per memory and model (migration 0019), go when the
+memory is forgotten, and are compared in Go — the driver cannot load a vector
+extension, and a store of hundreds of memories is milliseconds to scan. Every
+search runs by words and by meaning and merges the lists by weighted
+reciprocal rank, meaning weighing 1.5, so a near miss on a common word does not
+outrank the note that means the same thing. Two lines, both measured on
+qwen3-embedding:0.6b: 0.56 for notes put in front of a turn unasked, where the
+closest note to an unrelated turn reached 0.553, and 0.45 for a search the
+model asked for, where the right note for a paraphrase scored from 0.49. A
+write is embedded after it is stored and never instead of it; what is missing
+a vector from the current model is embedded at start; a failed embedding is a
+search by words. `TestRealRecallWithEmbeddings`, against that model: 17 of
+17 right first when asked and 11 of 17 unasked, against 7 by words alone, and
+no unrelated turn given a note.
+
 ## Not done
 
 **Built but nothing uses it**

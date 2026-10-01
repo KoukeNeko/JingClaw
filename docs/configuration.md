@@ -305,6 +305,44 @@ block before their words, on that turn only. `0` puts none and leaves the
 
 The ceiling on that block.
 
+## `[memory.embedding]`
+
+Finding memories by meaning as well as by their words, through any
+OpenAI-compatible `/embeddings` endpoint. Off until `model` is set. Every
+memory, and every turn a person types, is sent to the endpoint.
+
+**`model`**
+
+The embedding model. Empty leaves search to words. Changing it makes every
+stored vector meaningless next to the new ones; memories are embedded again
+with the new model when the daemon starts.
+
+**`base_url`**
+
+The root `/embeddings` hangs off, usually ending in `/v1`: Ollama is
+`http://127.0.0.1:11434/v1`, OpenAI `https://api.openai.com/v1`, Gemini
+`https://generativelanguage.googleapis.com/v1beta/openai`. Required with a
+model.
+
+**`api_key_env`**, **`api_key_file`**
+
+Where the key comes from, when the endpoint needs one, the same as a
+provider's.
+
+**`min_similarity`**
+
+How alike a memory has to be to a turn, from 0 to 1, to be put in front of it
+by meaning alone without anybody asking. `0.56` was measured on
+qwen3-embedding:0.6b: the closest note to an unrelated turn never passed
+0.553. Another model draws the line elsewhere.
+
+**`recall_min_similarity`**
+
+The same line when the model searches with `recall`, and when notes are
+checked for what is already known. Lower, `0.45`, because what comes back is
+read and judged rather than put in front of a turn: on the same model the
+right note for a question in other words scored from 0.49.
+
 ## `[web]`
 
 **`enabled`**

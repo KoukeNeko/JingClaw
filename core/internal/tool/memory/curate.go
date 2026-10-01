@@ -135,7 +135,9 @@ func (c *Curator) Curate(ctx context.Context, run domain.Run) ([]domain.Memory, 
 	}
 
 	claims := checkProposals(parseProposals(answer), said, c.maxClaims())
-	return c.write(ctx, run, claims)
+	written, err := c.write(ctx, run, claims)
+	c.remembered(ctx, written)
+	return written, err
 }
 
 // spoken is one message a person sent, with where in the log it is.
@@ -252,7 +254,7 @@ func (c *Curator) knownFor(ctx context.Context, run domain.Run, said []spoken) (
 		text.WriteByte('\n')
 	}
 
-	found, err := c.Store.SearchMemories(ctx, text.String(), storage.MemoryQuery{
+	found, err := c.searchAsked(ctx, text.String(), storage.MemoryQuery{
 		Scopes:     c.scopesFor(contextForRun(run)),
 		Activation: domain.MemoryRetrieval,
 		Limit:      knownLimit,

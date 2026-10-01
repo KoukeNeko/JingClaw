@@ -217,6 +217,27 @@ type MemoryStore interface {
 	// else to look. Saying "deleted" without saying which of the two was meant
 	// is the part that would be dishonest.
 	Forget(ctx context.Context, id domain.MemoryID) error
+
+	// SetMemoryVector keeps what an embedding model made of a memory's text,
+	// replacing whatever that memory had before. Forgetting the memory
+	// forgets this too.
+	SetMemoryVector(ctx context.Context, id domain.MemoryID, model string, vector []float32) error
+
+	// UnembeddedMemories is up to limit memories still believed that have no
+	// vector from model, oldest first: what is left to embed after the model
+	// changed, or after a write whose embedding failed.
+	UnembeddedMemories(ctx context.Context, model string, limit int) ([]domain.Memory, error)
+
+	// NearestMemories is SearchMemories by meaning: the memories query
+	// selects whose vector from model is at least min alike to vector,
+	// closest first.
+	NearestMemories(
+		ctx context.Context,
+		model string,
+		vector []float32,
+		min float64,
+		query MemoryQuery,
+	) ([]domain.Memory, error)
 }
 
 // MemoryQuery narrows what comes back.

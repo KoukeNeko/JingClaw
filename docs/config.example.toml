@@ -137,6 +137,20 @@ enabled = true
 # auto_recall = 3
 # auto_recall_bytes = 1024
 
+[memory.embedding]
+# Find memories by what they mean as well as by their words, through any
+# OpenAI-compatible /embeddings endpoint. Off until a model is named. Every
+# memory and every turn a person types is sent there.
+# model = "qwen3-embedding:0.6b"
+# base_url = "http://127.0.0.1:11434/v1"
+# api_key_env = []
+# api_key_file = ""
+# How alike a memory must be to be found by meaning alone: put in front of a
+# turn unasked, and returned when the model searches. Measured on the model
+# above; another model draws the lines elsewhere.
+# min_similarity = 0.56
+# recall_min_similarity = 0.45
+
 # ── Capabilities ────────────────────────────────────────────
 
 [tools]

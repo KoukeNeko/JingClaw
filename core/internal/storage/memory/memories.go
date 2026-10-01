@@ -104,6 +104,7 @@ func (s *Store) Forget(_ context.Context, id domain.MemoryID) error {
 	}
 
 	delete(s.memories, id)
+	delete(s.memoryVectors, id)
 	s.memoryOrder = slices.DeleteFunc(s.memoryOrder,
 		func(candidate domain.MemoryID) bool { return candidate == id })
 
@@ -161,4 +162,71 @@ func inScope(candidate domain.Memory, scopes []storage.MemoryScopeRef) bool {
 	return slices.ContainsFunc(scopes, func(scope storage.MemoryScopeRef) bool {
 		return candidate.Scope == scope.Scope && candidate.ScopeRef == scope.Ref
 	})
+}
+
+func (s *Store) SetMemoryVector(
+	_ context.Context,
+	id domain.MemoryID,
+	model string,
+	vector []float32,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.memories[id]; !ok {
+		return fmt.Errorf("memory: no memory %s: %w", id, storage.ErrMemoryNotFound)
+	}
+	if s.memoryVectors[id] == nil {
+		s.memoryVectors[id] = map[string][]float32{}
+	}
+	s.memoryVectors[id][model] = slices.Clone(vector)
+	return nil
+}
+
+func (s *Store) UnembeddedMemories(_ context.Context, model string, limit int) ([]domain.Memory, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var out []domain.Memory
+	for _, id := range s.memoryOrder {
+		memory, ok := s.memories[id]
+		if !ok || memory.InvalidatedAt != nil {
+			continue
+		}
+		if _, embedded := s.memoryVectors[id][model]; embedded {
+			continue
+		}
+		out = append(out, memory)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *Store) NearestMemories(
+	_ context.Context,
+	model string,
+	vector []float32,
+	min float64,
+	query storage.MemoryQuery,
+) ([]domain.Memory, error) {
+	unlimited := query
+	unlimited.Limit = 0
+	// selectMemories holds the lock while it asks, so this reads the map
+	// directly rather than taking the lock a second time.
+	candidates := s.selectMemories(unlimited, func(candidate domain.Memory) bool {
+		_, embedded := s.memoryVectors[candidate.ID][model]
+		return embedded
+	})
+
+	s.mu.RLock()
+	vectors := make([][]float32, len(candidates))
+	for i, candidate := range candidates {
+		vectors[i] = s.memoryVectors[candidate.ID][model]
+	}
+	s.mu.RUnlock()
+
+	return storage.Nearest(vector, candidates, vectors, min, query.Limit), nil
 }

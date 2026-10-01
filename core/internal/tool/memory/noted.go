@@ -46,7 +46,7 @@ func (n *Noted) For(ctx context.Context, run domain.Run, said string) string {
 		return ""
 	}
 
-	found, err := n.Store.SearchMemories(ctx, said, storage.MemoryQuery{
+	found, err := n.searchUnasked(ctx, said, storage.MemoryQuery{
 		Scopes:     n.scopesFor(contextForRun(run)),
 		Activation: domain.MemoryRetrieval,
 		Limit:      n.limit(),

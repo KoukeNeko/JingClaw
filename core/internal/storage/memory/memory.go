@@ -44,6 +44,9 @@ type Store struct {
 	memories    map[domain.MemoryID]domain.Memory
 	memoryOrder []domain.MemoryID
 
+	// memoryVectors is each memory's vector per embedding model.
+	memoryVectors map[domain.MemoryID]map[string][]float32
+
 	schedules     map[domain.ScheduleID]domain.Schedule
 	scheduleOrder []domain.ScheduleID
 
@@ -72,8 +75,10 @@ func New() *Store {
 		pruned:    make(map[domain.SessionID]domain.Seq),
 		approvals: make(map[domain.ApprovalID]domain.Approval),
 		memories:  make(map[domain.MemoryID]domain.Memory),
-		schedules: make(map[domain.ScheduleID]domain.Schedule),
-		firings:   make(map[firingKey]domain.Firing),
+
+		memoryVectors: make(map[domain.MemoryID]map[string][]float32),
+		schedules:     make(map[domain.ScheduleID]domain.Schedule),
+		firings:       make(map[firingKey]domain.Firing),
 	}
 }
 

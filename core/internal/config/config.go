@@ -525,6 +525,35 @@ type Memory struct {
 
 	// AutoRecallBytes bounds them together.
 	AutoRecallBytes int `koanf:"auto_recall_bytes"`
+
+	// Embedding finds memories by what they mean as well as by their words.
+	Embedding Embedding `koanf:"embedding"`
+}
+
+// Embedding is an OpenAI-compatible /embeddings endpoint.
+//
+// Off unless a model is named. It sends every memory, and every turn a person
+// types, to whatever serves the endpoint, so it is a decision about where
+// those words go as much as about recall.
+type Embedding struct {
+	// Model is the embedding model. Empty leaves search to words.
+	Model string `koanf:"model"`
+
+	// BaseURL is the root /embeddings hangs off, usually ending in /v1.
+	BaseURL string `koanf:"base_url"`
+
+	// Where the key comes from, when the endpoint needs one.
+	APIKeyEnv  []string `koanf:"api_key_env"`
+	APIKeyFile string   `koanf:"api_key_file"`
+
+	// MinSimilarity is how alike a memory has to be to a turn to be put in
+	// front of it by meaning alone, unasked, from 0 to 1. Each model draws
+	// that line in a different place.
+	MinSimilarity float64 `koanf:"min_similarity"`
+
+	// RecallMinSimilarity is the same line for a search the model asked
+	// for. Lower, because the model reads what comes back and judges it.
+	RecallMinSimilarity float64 `koanf:"recall_min_similarity"`
 }
 
 // Web is whether and how the agent may read pages.
@@ -954,6 +983,10 @@ func Defaults() Config {
 			Curate:              true,
 			AutoRecall:          3,
 			AutoRecallBytes:     1024,
+			Embedding: Embedding{
+				MinSimilarity:       0.56,
+				RecallMinSimilarity: 0.45,
+			},
 		},
 		Web: Web{
 			Enabled:       false,
@@ -1449,6 +1482,28 @@ func (c Config) rangeProblems() []Problem {
 			Fix: "It bounds the standing directions put in front of the model every turn.",
 		})
 	}
+	if c.Memory.Embedding.Model != "" && c.Memory.Embedding.BaseURL == "" {
+		problems = append(problems, Problem{
+			Key: "memory.embedding.base_url", Value: `""`,
+			Why: "is needed when memory.embedding.model is set",
+			Fix: `For Ollama on this machine, "http://127.0.0.1:11434/v1".`,
+		})
+	}
+	for _, line := range []struct {
+		key   string
+		value float64
+	}{
+		{"memory.embedding.min_similarity", c.Memory.Embedding.MinSimilarity},
+		{"memory.embedding.recall_min_similarity", c.Memory.Embedding.RecallMinSimilarity},
+	} {
+		if line.value <= 0 || line.value >= 1 {
+			problems = append(problems, Problem{
+				Key: line.key, Value: fmt.Sprint(line.value),
+				Why: "must be between 0 and 1",
+				Fix: "It is the cosine similarity a memory must reach to be found by meaning alone.",
+			})
+		}
+	}
 	if c.Memory.Enabled && c.Memory.AutoRecall > 0 && c.Memory.AutoRecallBytes <= 0 {
 		problems = append(problems, Problem{
 			Key: "memory.auto_recall_bytes", Value: fmt.Sprint(c.Memory.AutoRecallBytes),
@@ -1826,6 +1881,20 @@ enabled = true
 # what it says, and how much room they may take. 0 puts none.
 # auto_recall = 3
 # auto_recall_bytes = 1024
+
+[memory.embedding]
+# Find memories by what they mean as well as by their words, through any
+# OpenAI-compatible /embeddings endpoint. Off until a model is named. Every
+# memory and every turn a person types is sent there.
+# model = "qwen3-embedding:0.6b"
+# base_url = "http://127.0.0.1:11434/v1"
+# api_key_env = []
+# api_key_file = ""
+# How alike a memory must be to be found by meaning alone: put in front of a
+# turn unasked, and returned when the model searches. Measured on the model
+# above; another model draws the lines elsewhere.
+# min_similarity = 0.56
+# recall_min_similarity = 0.45
 
 # ── Capabilities ────────────────────────────────────────────
 

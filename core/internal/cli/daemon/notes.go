@@ -2,9 +2,12 @@ package daemon
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
+	"github.com/KoukeNeko/JingClaw/core/internal/provider/openaicompat"
 	memorytool "github.com/KoukeNeko/JingClaw/core/internal/tool/memory"
 )
 
@@ -81,4 +84,43 @@ func notesBeforeTurns(
 		MaxBytes: cfg.Memory.AutoRecallBytes,
 	}
 	return noted.For
+}
+
+// buildEmbedder is the endpoint memories are embedded through, or nil when no
+// model is named.
+func buildEmbedder(cfg config.Embedding) (memorytool.Embedder, error) {
+	if cfg.Model == "" {
+		return nil, nil
+	}
+	key, err := optionalKey(cfg.APIKeyEnv, cfg.APIKeyFile)
+	if err != nil {
+		return nil, err
+	}
+	embedder, err := openaicompat.NewEmbedder(openaicompat.Config{
+		BaseURL: cfg.BaseURL,
+		APIKey:  key,
+		Name:    "embedding",
+	}, cfg.Model)
+	if err != nil {
+		return nil, fmt.Errorf("memory.embedding: %w", err)
+	}
+	return embedder, nil
+}
+
+// embedMissingMemories catches the store up with the embedder once, at start.
+// A failure is a line in the log: what is not embedded is still found by its
+// words, and the next start tries again.
+func embedMissingMemories(ctx context.Context, options memorytool.Options, logger *slog.Logger) {
+	if options.Embedder == nil {
+		return
+	}
+	done, err := options.EmbedMissing(ctx)
+	if err != nil {
+		logger.Warn("could not embed every memory; the rest are found by their words",
+			"model", options.Embedder.Model(), "embedded", done, "error", err)
+		return
+	}
+	if done > 0 {
+		logger.Info("embedded memories", "model", options.Embedder.Model(), "count", done)
+	}
 }
