@@ -28,7 +28,7 @@ abstraction is what the others plug into.
 **M1b — Discord gateway.** Verified live against a real bot: mention → run →
 tools → reply posted back to the thread.
 
-**Cross-session memory.** Off by default. `remember` / `recall`, provenance on
+**Cross-session memory.** On by default. `remember` / `recall`, provenance on
 every entry, correction by invalidation, real deletion, and `agent memory list`
 so a person can see everything the agent believes and where each belief came
 from. Gateway-origin memories are permanently untrusted and never become

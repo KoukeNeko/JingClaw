@@ -173,16 +173,16 @@ model reads can raise them.
 
 ## Memory
 
-Off by default. What is written here is read by every later session, by an
-agent that no longer knows where it came from, so turning it on is a decision
-somebody makes rather than one they inherit:
+On by default. What is written here is read by every later session, by an
+agent that no longer knows where it came from, so turning it off is a single
+line:
 
 ```toml
 [memory]
-enabled = true
+enabled = false
 ```
 
-Then `remember` writes something down and `recall` looks it up. Three rules
+Otherwise `remember` writes something down and `recall` looks it up. Three rules
 shape the rest, and each comes from something that has actually gone wrong in a
 shipped system rather than from taste.
 

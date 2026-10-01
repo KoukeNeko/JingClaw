@@ -491,9 +491,10 @@ type Artifacts struct {
 
 // Memory is what the agent carries between sessions.
 //
-// It is off by default. What is written here is read by every later session,
-// by an agent that no longer knows where it came from, so turning it on is a
-// decision somebody should make rather than one they inherit.
+// It is on by default. What is written here is read by every later session,
+// by an agent that no longer knows where it came from, so what is written
+// unattended is a retrieval memory marked as approved by nobody, and only a
+// person can make one standing.
 type Memory struct {
 	Enabled bool `koanf:"enabled"`
 
