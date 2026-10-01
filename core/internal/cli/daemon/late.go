@@ -35,6 +35,11 @@ func (r *theRuntime) SkillActivated(
 	return r.is.SkillActivated(ctx, session, run, activated)
 }
 
+// MemoriesNoted is notesRecorder.
+func (r *theRuntime) MemoriesNoted(ctx context.Context, run domain.Run, notes []string) error {
+	return r.is.MemoriesNoted(ctx, run, notes)
+}
+
 // Investigate is builtin.Delegator.
 func (r *theRuntime) Investigate(
 	ctx context.Context, parent domain.RunID, question string,

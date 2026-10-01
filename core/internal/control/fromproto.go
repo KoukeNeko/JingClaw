@@ -160,6 +160,10 @@ func EventFromProto(in *controlv1.Event) (domain.Event, error) {
 			Digest:  activated.GetDigest(),
 		}
 
+	case *controlv1.Event_MemoriesNoted:
+		out.Kind = domain.EventMemoriesNoted
+		out.Payload = domain.MemoriesNoted{Notes: p.MemoriesNoted.GetNotes()}
+
 	case *controlv1.Event_UsageChanged:
 		out.Kind = domain.EventUsageChanged
 		out.Payload = domain.UsageChanged{Usage: usageFromProto(p.UsageChanged.GetUsage())}

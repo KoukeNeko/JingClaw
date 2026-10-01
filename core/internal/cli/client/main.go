@@ -612,6 +612,9 @@ func describe(ev *controlv1.Event, showOutput bool) (label, detail string) {
 		return "run.directions", fmt.Sprintf("%d bytes of standing directions",
 			len(payload.RunDirections.GetText()))
 
+	case *controlv1.Event_MemoriesNoted:
+		return "memory.noted", strings.Join(payload.MemoriesNoted.GetNotes(), " · ")
+
 	case *controlv1.Event_ConversationCompacted:
 		// Worth showing rather than hiding. Somebody watching a session lose
 		// its memory of the last hour should be told, not left to infer it

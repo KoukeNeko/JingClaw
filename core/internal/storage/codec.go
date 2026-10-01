@@ -130,6 +130,10 @@ type approvalResolvedJSON struct {
 	DecidedBy  decidedByJSON `json:"decided_by,omitempty"`
 }
 
+type memoriesNotedJSON struct {
+	Notes []string `json:"notes"`
+}
+
 type skillActivatedJSON struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
@@ -386,6 +390,9 @@ func EncodePayload(payload domain.EventPayload) ([]byte, error) {
 			Name: p.Name, Version: p.Version, Digest: p.Digest,
 		})
 
+	case domain.MemoriesNoted:
+		return json.Marshal(memoriesNotedJSON{Notes: p.Notes})
+
 	case domain.ApprovalResolved:
 		return json.Marshal(approvalResolvedJSON{
 			ApprovalID: string(p.ApprovalID),
@@ -589,6 +596,13 @@ func DecodePayload(kind domain.EventKind, raw []byte) (domain.EventPayload, erro
 		return domain.SkillActivated{
 			Name: p.Name, Version: p.Version, Digest: p.Digest,
 		}, nil
+
+	case domain.EventMemoriesNoted:
+		var p memoriesNotedJSON
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("storage: decode %s: %w", kind, err)
+		}
+		return domain.MemoriesNoted{Notes: p.Notes}, nil
 
 	case domain.EventApprovalResolved:
 		var p approvalResolvedJSON

@@ -47,6 +47,7 @@ message Event {
     QuestionAsked question_asked = 23;
     QuestionAnswered question_answered = 24;
     SkillActivated skill_activated = 25;
+    MemoriesNoted memories_noted = 26;
   }
 }
 
@@ -376,4 +377,11 @@ message SkillActivated {
   // without touching its version line is different instructions wearing the
   // same number.
   string digest = 3;
+}
+
+// MemoriesNoted records what was written down from what people said in a run,
+// once it had been answered.
+message MemoriesNoted {
+  // The memories as written, in the order they were written.
+  repeated string notes = 1;
 }

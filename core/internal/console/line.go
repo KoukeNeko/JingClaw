@@ -10,6 +10,7 @@ package console
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -229,6 +230,11 @@ func Describe(event domain.Event) (Line, bool) {
 		// read, and a file edited without touching its version line would
 		// otherwise look like the same instructions.
 		line.Preview = payload.Digest
+
+	case domain.MemoriesNoted:
+		line.Kind = "NOTED"
+		line.Meta = strconv.Itoa(len(payload.Notes))
+		line.Preview = strings.Join(payload.Notes, " · ")
 
 	case domain.ConversationCompacted:
 		line.Kind = "COMPACTED"

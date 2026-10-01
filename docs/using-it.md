@@ -227,7 +227,10 @@ a retrieval memory in the person's own scope (a turn typed at this machine
 may also add to the project's), with the session and message it came from,
 and with `nobody (noted from discord:…)` where an approver would be. At most
 three per turn, never the same note twice, and never a standing one: a note
-is a claim, and authority is a person's to grant.
+is a claim, and authority is a person's to grant. The model is shown what is
+already noted, so a preference said again in other words is not written
+again. What was noted is a `memory.noted` event in the session: a chat
+channel shows the count under the answer, and the console shows the notes.
 
 Those notes come back on their own. Before the turn being answered, the
 machine looks up the notes its sender may read — the project's and their own,

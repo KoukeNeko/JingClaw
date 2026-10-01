@@ -125,6 +125,9 @@ func Payloads() map[domain.EventKind]domain.EventPayload {
 			Version: "1.2.0",
 			Digest:  "sha256:" + strings.Repeat("ab", 32),
 		},
+		domain.EventMemoriesNoted: domain.MemoriesNoted{
+			Notes: []string{"They edit in vim.", "部署前一定要先跑 make check"},
+		},
 		domain.EventApprovalRequested: domain.ApprovalRequested{
 			ApprovalID: "apr_1",
 			CallID:     "call_2",

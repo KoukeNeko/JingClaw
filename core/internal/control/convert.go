@@ -358,6 +358,11 @@ func eventToProto(ev domain.Event) (*controlv1.Event, error) {
 			},
 		}
 
+	case domain.MemoriesNoted:
+		out.Payload = &controlv1.Event_MemoriesNoted{
+			MemoriesNoted: &controlv1.MemoriesNoted{Notes: p.Notes},
+		}
+
 	case domain.UsageChanged:
 		out.Payload = &controlv1.Event_UsageChanged{
 			UsageChanged: &controlv1.UsageChanged{Usage: usageToProto(p.Usage)},

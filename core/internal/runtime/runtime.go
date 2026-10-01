@@ -1677,3 +1677,13 @@ func (r *Runtime) SkillActivated(
 ) error {
 	return r.append(ctx, session, run, domain.EventSkillActivated, activated)
 }
+
+// MemoriesNoted records what was written down from a run that is over.
+//
+// After the run rather than in it: notes are taken once the answer is given,
+// so this lands after the run's last state, which is where somebody watching
+// the session reads it.
+func (r *Runtime) MemoriesNoted(ctx context.Context, run domain.Run, notes []string) error {
+	return r.append(ctx, run.SessionID, run.ID, domain.EventMemoriesNoted,
+		domain.MemoriesNoted{Notes: notes})
+}

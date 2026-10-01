@@ -458,6 +458,7 @@ const (
 	EventQuestionAsked             EventKind = "question.asked"
 	EventQuestionAnswered          EventKind = "question.answered"
 	EventSkillActivated            EventKind = "skill.activated"
+	EventMemoriesNoted             EventKind = "memory.noted"
 )
 
 // FoldNotice stands where a compaction folded turns away.
@@ -714,6 +715,7 @@ func AllEventKinds() []EventKind {
 		EventQuestionAnswered,
 		EventApprovalRequested,
 		EventApprovalResolved,
+		EventMemoriesNoted,
 	}
 }
 
@@ -1029,6 +1031,19 @@ type SkillActivated struct {
 }
 
 func (SkillActivated) isEventPayload() {}
+
+// MemoriesNoted records what was written down from what people said in a run,
+// once it had been answered.
+//
+// In the log so that whoever is watching the session sees it happen, the
+// way a channel sees it under the answer. Notes taken where nobody can see
+// them are notes nobody can correct.
+type MemoriesNoted struct {
+	// Notes are the memories as written, in the order they were written.
+	Notes []string
+}
+
+func (MemoriesNoted) isEventPayload() {}
 
 // PlanItem is one step of what the agent says it is going to do.
 //

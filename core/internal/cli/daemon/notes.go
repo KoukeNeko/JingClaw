@@ -14,6 +14,13 @@ type Noter interface {
 	Noted(ctx context.Context, run domain.Run, count int) error
 }
 
+// notesRecorder puts what was noted in the session's log, where a console
+// watching the session sees it. A channel only hears the count, under the
+// answer; somebody at this machine sees the notes themselves.
+type notesRecorder interface {
+	MemoriesNoted(ctx context.Context, run domain.Run, notes []string) error
+}
+
 // notesAfterRuns is the runtime hook that notes what a person said once they
 // have been answered, or nil when the operator has that off.
 //
@@ -25,6 +32,7 @@ func notesAfterRuns(
 	events memorytool.EventReader,
 	model memorytool.Completer,
 	told Noter,
+	recorded notesRecorder,
 ) func(context.Context, domain.Run) {
 	if !cfg.Memory.Enabled || !cfg.Memory.Curate {
 		return nil
@@ -44,6 +52,15 @@ func notesAfterRuns(
 			"run_id", string(run.ID), "memories", len(written))
 		if err := told.Noted(ctx, run, len(written)); err != nil {
 			curator.Logger().Warn("could not tell the channel what was noted",
+				"run_id", string(run.ID), "error", err)
+		}
+
+		notes := make([]string, 0, len(written))
+		for _, memory := range written {
+			notes = append(notes, memory.Text)
+		}
+		if err := recorded.MemoriesNoted(ctx, run, notes); err != nil {
+			curator.Logger().Warn("could not record what was noted",
 				"run_id", string(run.ID), "error", err)
 		}
 	}

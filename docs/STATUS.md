@@ -749,6 +749,21 @@ what those notes already say, so restating a preference is no longer a fresh
 chance to write it again in other words; a proposal still needs a quote. The
 remember tool no longer claims a person is asked before every write.
 
+**2026-10-02 — notes that survive a failure, in the person's language, and
+visible at the console.** A failed run was never answered, so the curator
+never read it and "try again" was all the next run said; the curator now
+carries a failed run's words into the run that is eventually answered, and
+leaves a cancelled one's alone, since that is somebody stopping it or taking
+the message back. Claims are written in the language the person wrote in, and
+the query expander may offer the other language's words, because an English
+note about a Chinese conversation is found by neither the person's words nor
+the index. A `memory.noted` event carries the notes into the session after
+the run, so the console and `attach` show what was written and not only a
+channel's count. Measured and left alone: over twelve notes, one of ten
+unrelated Chinese and English turns had a note put in front of it, and five
+of five related ones found theirs; recalling an English note from a Chinese
+question is still a miss, and still the case for embeddings.
+
 ## Not done
 
 **Built but nothing uses it**
