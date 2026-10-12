@@ -1073,6 +1073,42 @@ func Load(path string) (Config, string, error) {
 		used = resolved
 	}
 
+	cfg, err := withEnvironment(k)
+	if err != nil {
+		return Config{}, "", err
+	}
+	return cfg, used, nil
+}
+
+// Candidate reads a configuration from the text of a file, the way Load reads
+// the file: the defaults, then the text, then the environment.
+//
+// For asking what a file would do before it is written. The same steps and not
+// a second, similar set, so that "this validates" and "this starts" cannot
+// come apart.
+func Candidate(content []byte) (Config, error) {
+	k := koanf.New(".")
+
+	if err := k.Load(structs.Provider(Defaults(), "koanf"), nil); err != nil {
+		return Config{}, fmt.Errorf("config: load defaults: %w", err)
+	}
+	if err := k.Load(fileText(content), toml.Parser()); err != nil {
+		return Config{}, fmt.Errorf("config: read the text: %w", err)
+	}
+	return withEnvironment(k)
+}
+
+// fileText is a file's content handed over without a file.
+type fileText []byte
+
+func (t fileText) ReadBytes() ([]byte, error) { return t, nil }
+func (t fileText) Read() (map[string]any, error) {
+	return nil, errors.New("config: text is read through a parser")
+}
+
+// withEnvironment is the end of loading: what the environment overrides, then
+// the struct.
+func withEnvironment(k *koanf.Koanf) (Config, error) {
 	// JINGCLAW_AGENT_NAME sets agent.name, and so on.
 	if err := k.Load(env.Provider(".", env.Opt{
 		Prefix: envPrefix,
@@ -1081,7 +1117,7 @@ func Load(path string) (Config, string, error) {
 			return strings.Replace(key, "_", ".", 1), value
 		},
 	}), nil); err != nil {
-		return Config{}, "", fmt.Errorf("config: read environment: %w", err)
+		return Config{}, fmt.Errorf("config: read environment: %w", err)
 	}
 
 	var cfg Config
@@ -1095,10 +1131,24 @@ func Load(path string) (Config, string, error) {
 			WeaklyTypedInput: true,
 		},
 	}); err != nil {
-		return Config{}, "", fmt.Errorf("config: decode: %w", err)
+		return Config{}, fmt.Errorf("config: decode: %w", err)
 	}
 
-	return cfg, used, nil
+	return cfg, nil
+}
+
+// EnvironmentName is the variable that would override a setting, and says
+// nothing for a setting no variable can reach.
+//
+// Only a key of the form section.name can come from the environment: the
+// first underscore is the one that becomes a dot, so a deeper key has no
+// spelling. A client showing which settings the file cannot change has to
+// know that, and the rule is here so it is not written a second time.
+func EnvironmentName(key string) (string, bool) {
+	if strings.Count(key, ".") != 1 {
+		return "", false
+	}
+	return envPrefix + strings.ToUpper(strings.Replace(key, ".", "_", 1)), true
 }
 
 // Problem is one setting that will not do.
