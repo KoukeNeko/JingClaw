@@ -891,8 +891,14 @@ type Channel struct {
 	// WorkspaceID names the workspace runs from here use.
 	WorkspaceID string `koanf:"workspace_id"`
 
-	// Users and Roles are who may trigger work. Both empty means nobody: a
-	// channel that answers anyone who finds it is not a default worth having.
+	// Users and Roles are who may trigger work. Both empty opens the channel
+	// to everyone the platform lets into it: the channel already has a
+	// membership, set up by whoever wrote this entry, and a second list here
+	// would have to be kept in step with it. They still run under the gateway
+	// profile, bots are refused either way, and the startup log marks the
+	// channel (who_may_speak) so a widening by accident is visible.
+	//
+	// Approvers below do not follow this: empty there is nobody.
 	Users []string `koanf:"users"`
 	Roles []string `koanf:"roles"`
 

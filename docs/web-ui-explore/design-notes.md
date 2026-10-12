@@ -107,7 +107,7 @@
 以下我都在程式碼裡看過。
 
 - **Linux 上開 `sandbox.enabled` 會擋掉所有 `exec_command`。** `daemon/main.go` 一律把部署目錄放進不可讀名單，而 Landlock 無法隱藏目錄，只要名單非空就拒絕（`sandbox/landlock_linux.go`）。範例設定寫「macOS only so far」，其實 Linux 有實作，只是目前跑不起來。
-- **頻道的 `users` 與 `roles` 都留空，實際是對所有進得了頻道的人開放**（`gateway.OpenToTheRoom`，範例設定也這樣寫）。但 `config.go` 的 `Channel` 結構註解（`Both empty means nobody`）與 `docs/configuration.md:583`（`Both empty permits nobody`）寫的是相反的。範例與實作一致、說明文字錯了，但這是安全相關的落差。
+- **頻道的 `users` 與 `roles` 都留空，實際是對所有進得了頻道的人開放**（`gateway.OpenToTheRoom`，範例設定也這樣寫）。**已修正，行為本身沒有改。** 當時 `config.go` 的 `Channel` 結構註解（`Both empty means nobody`）與 `docs/configuration.md`（`Both empty permits nobody`）寫的是相反的；範例與實作一致、說明文字錯了，這是安全相關的落差。現在這兩處，加上 `Binding` 欄位註解、`docs/roadmap.md`，以及 `jingclaw bindings` 的說明、警告與列表輸出，都已改成與實作一致。
 - `provider.anthropic.api_key_env` 預設是空的；範例設定把 `["ANTHROPIC_API_KEY"]` 當預設寫出來。選 `anthropic` 後端而沒填，環境變數不會被讀。
 - `ollama.think` 範例註解寫可以用 `"true"`／`"false"`，但驗證只接受 `off`、`on`、`low`…`max`。
 - `mcp.servers[].level`：`tool` 套件有 `network_read`，設定的驗證不收。

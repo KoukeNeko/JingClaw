@@ -232,9 +232,10 @@ it along with the daemon; binding a channel is the only step of your own.
 jingclaw bindings add --channel <id> --guild <id> --workspace ws --user <your-user-id>
 ```
 
-Every default is no: a channel with no binding is unreachable, a binding with
-nobody allowed permits nobody, overheard text is not a request, and bots are
-refused whatever the allowlist says. Runs from a channel use a stricter
+Nearly every default is no: a channel with no binding is unreachable, a binding
+that names nobody accepts only whoever the platform already lets into the
+channel, overheard text is not a request, and bots are refused whatever the
+allowlist says. Runs from a channel use a stricter
 profile that denies execution outright — approving from the same account that
 asked is one unbroken chain, so anything that runs a program has to be
 authorised from a local client.

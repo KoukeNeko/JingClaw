@@ -578,9 +578,18 @@ web pages stop and ask.
 
 Several channels may share an entry when they share their rules.
 
-**`users`**
+**`users`**, **`roles`**
 
-Both empty permits nobody, which is the right default for a room.
+Who may ask the agent for something, by platform user id or role id.
+
+Leaving both empty opens the channel to everyone the platform lets into it.
+The channel already has a membership, set up by whoever wrote this entry, and
+a second list here would have to be kept in step with it; the way that fails
+is somebody being added to the room and silently ignored. Whoever gets in
+still runs under the gateway profile, and bots are refused whatever these say.
+The startup log marks such a channel with `who_may_speak=anyone the platform
+lets in`, so a widening by accident shows before anyone turns up. To restrict
+a channel, name the people or roles.
 
 **`approvers`**
 

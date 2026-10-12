@@ -240,8 +240,9 @@ type Binding struct {
 	// traffic gets a stricter one than a local operator.
 	PermissionProfile string
 
-	// AllowedPrincipals and AllowedClaims decide who may trigger work. Empty
-	// means nobody: an unconfigured binding must not be an open door.
+	// AllowedPrincipals and AllowedClaims decide who may trigger work. Both
+	// empty means whoever the platform lets into the channel; see
+	// OpenToTheRoom and Permits.
 	AllowedPrincipals []string
 	AllowedClaims     []Claim
 
