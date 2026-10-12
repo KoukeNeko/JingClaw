@@ -48,15 +48,30 @@ func newBindingsListCommand() *cobra.Command {
 					binding.GetId(), binding.GetPlatform(), binding.GetAccountId(),
 					binding.GetChannelId(), binding.GetWorkspaceId(), binding.GetPermissionProfile())
 
-				if principals := binding.GetAllowedPrincipals(); len(principals) > 0 {
-					fmt.Printf("    may trigger: %s\n", strings.Join(principals, ", "))
-				} else {
-					fmt.Printf("    may trigger: nobody\n")
-				}
+				fmt.Printf("    may trigger: %s\n", whoMayTrigger(binding))
 			}
 			return nil
 		},
 	}
+}
+
+// whoMayTrigger says who a binding lets start work, in the words an operator
+// reads it by.
+//
+// A binding naming nobody is not closed: it accepts whoever the platform lets
+// into the channel, so a list that said "nobody" there would hide the one
+// configuration an operator most needs to see. Roles count as naming somebody
+// as much as accounts do.
+func whoMayTrigger(binding *controlv1.Binding) string {
+	named := append([]string(nil), binding.GetAllowedPrincipals()...)
+	for _, claim := range binding.GetAllowedClaims() {
+		named = append(named, claim.GetNamespace()+":"+claim.GetValue())
+	}
+
+	if len(named) == 0 {
+		return "anyone the platform lets in"
+	}
+	return strings.Join(named, ", ")
 }
 
 func newBindCommand() *cobra.Command {
@@ -75,8 +90,10 @@ func newBindCommand() *cobra.Command {
 		Use:   "add",
 		Short: "Let a channel reach a workspace",
 		Long: "Let a channel reach a workspace.\n\n" +
-			"A binding with nobody allowed permits nobody: pass --user or --role, " +
-			"using the platform's own identifiers rather than display names.",
+			"Pass --user or --role to name who may trigger work there, using the " +
+			"platform's own identifiers rather than display names. With neither, " +
+			"anyone the platform lets into the channel may; they still run under " +
+			"the profile, and bots are refused either way.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, err := dialChannels()
@@ -113,7 +130,7 @@ func newBindCommand() *cobra.Command {
 			fmt.Println(resp.Msg.GetBinding().GetId())
 			if len(users) == 0 && len(roles) == 0 {
 				fmt.Fprintln(os.Stderr,
-					"warning: this binding allows nobody; add --user or --role before it can be used")
+					"warning: this binding names nobody, so anyone the platform lets into the channel may trigger work")
 			}
 			return nil
 		},
