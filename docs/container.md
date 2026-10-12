@@ -482,12 +482,12 @@ services:
 
 Off by default, in the image as everywhere else, and left off here.
 
-Turning it on (`[sandbox] enabled = true`) needs Linux 5.13 for the filesystem
-rules and 6.7 for the network ones, and a container runtime that does not
-block the Landlock syscalls. Where it cannot be enforced the daemon refuses to
-run the command rather than running it unconfined — a sandbox somebody
-believes in and does not have is worse than none — so turning it on in a
-container that cannot enforce it stops the agent from doing anything.
+Turning it on (`[sandbox] enabled = true`) does not work in the image: the
+daemon refuses to start and says so. The sandbox always hides the deployment's
+own directory from a command, and Landlock — all Linux has — grants access
+rather than removing it, so it cannot do that. A sandbox somebody believes in
+and does not have is worse than none, so this is a refusal at startup rather
+than commands that run unconfined. See [`configuration.md`](configuration.md#sandbox).
 
 ## What this is not
 

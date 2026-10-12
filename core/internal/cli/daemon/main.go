@@ -1473,9 +1473,10 @@ func confinement(cfg config.Config, logger *slog.Logger) (*builtin.Confinement, 
 		// confining and is not.
 		return nil, errors.New(
 			"[sandbox] enabled is on and this machine cannot confine a command. " +
-				"macOS uses sandbox-exec, which every Mac has; Linux uses landlock, " +
-				"which needs a kernel that has it enabled. Nowhere else is " +
-				"implemented. Turn it off, or run it somewhere it works")
+				"macOS uses sandbox-exec, which every Mac has. Linux has a landlock " +
+				"backend that needs a kernel with it enabled, and even then " +
+				"cannot hide the deployment directory, so it is refused too. " +
+				"Nowhere else is implemented. Turn it off, or run it on macOS")
 	}
 
 	dir, found := home.Resolve()
@@ -1493,17 +1494,25 @@ func confinement(cfg config.Config, logger *slog.Logger) (*builtin.Confinement, 
 	// writing and not against the thing worth protecting.
 	hidden := append([]string{dir.Root}, expandHomes(cfg.Sandbox.Hidden)...)
 
+	policy := sandbox.Policy{
+		Writable:   dirs.Writable(),
+		Unreadable: hidden,
+		Network:    cfg.Sandbox.Network,
+	}
+
+	// Asked here with the real policy, not left to the first command: this
+	// one hides a directory, which landlock cannot do, so on Linux every
+	// command would otherwise be refused one at a time.
+	if err := sandbox.Check(policy); err != nil {
+		return nil, fmt.Errorf(
+			"[sandbox] enabled is on and this machine cannot keep the policy it "+
+				"needs: %w. Turn it off, or run it somewhere that can", err)
+	}
+
 	logger.Info("commands are confined",
 		"writable", dirs.Writable(), "network", cfg.Sandbox.Network, "hidden", hidden)
 
-	return &builtin.Confinement{
-		Policy: sandbox.Policy{
-			Writable:   dirs.Writable(),
-			Unreadable: hidden,
-			Network:    cfg.Sandbox.Network,
-		},
-		Environment: dirs.Environment(),
-	}, nil
+	return &builtin.Confinement{Policy: policy, Environment: dirs.Environment()}, nil
 }
 
 // expandHomes turns a leading ~ into the real home directory.

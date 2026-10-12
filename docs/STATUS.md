@@ -838,12 +838,17 @@ no unrelated turn given a note.
   parts from `os.Executable()` rather than the name on PATH, so an installed
   copy and a freshly built one cannot be mixed.
 
-- ~~**Nothing is sandboxed.**~~ There is now seatbelt on macOS and Landlock on
-  Linux, in `internal/sandbox`. Approval stops what should not be done; the
-  sandbox stops what is being done from reaching further than it said, which
-  is a different thing — an approved `npm test` no longer reads `~/.ssh`.
-  Landlock's network rules need ABI 4, and a policy asking for something the
-  kernel cannot promise is refused up front rather than quietly downgraded.
+- **Nothing is sandboxed on Linux.** There is seatbelt on macOS, in
+  `internal/sandbox`: approval stops what should not be done; the sandbox
+  stops what is being done from reaching further than it said, which is a
+  different thing — an approved `npm test` no longer reads `~/.ssh`. Linux has
+  a Landlock backend, but the daemon always hides its own directory and
+  Landlock grants access rather than removing it, so `[sandbox] enabled`
+  refuses to start there (it used to start and then refuse every command).
+  Fixing that means a deny-by-default read list, which needs a kernel with
+  Landlock to check. Its network rules need ABI 4, and a policy asking for
+  something the kernel cannot promise is refused up front rather than
+  quietly downgraded.
 
 - **A tool's declared effects are not this call's effects.** The lines under
   "This will" come from the tool's static capabilities, not from the arguments

@@ -28,3 +28,6 @@ func LooksConfined(string) bool { return false }
 // describeBackend is never reached: Available is false here, and Describe
 // asks it first.
 func describeBackend() string { return "not available here" }
+
+// keepable is never reached: Check asks Available first, which is false here.
+func keepable(Policy) error { return ErrUnavailable }

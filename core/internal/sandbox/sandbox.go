@@ -103,6 +103,19 @@ func (d Directories) Writable() []string {
 // notice.
 var ErrUnavailable = errors.New("sandbox: not available on this machine")
 
+// Check says whether this machine can hold every part of the policy.
+//
+// Asked at startup with the policy a deployment will use. Wrap asks the same
+// question, but only when a command is run — and a policy that can never be
+// kept would then refuse every command, one at a time, from inside tool
+// results the model paraphrases.
+func Check(policy Policy) error {
+	if !Available() {
+		return ErrUnavailable
+	}
+	return keepable(policy)
+}
+
 // resolve is the path the kernel will see.
 //
 // Symlinks followed, because the sandbox matches on what a path resolves to

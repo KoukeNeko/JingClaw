@@ -456,9 +456,13 @@ type Sandbox struct {
 	// gets it without asking finds out when something it relied on stops
 	// working.
 	//
-	// On, it is not advisory: a machine that cannot confine refuses to run
-	// the command. A sandbox that runs it anyway is one somebody believes in
-	// and does not have.
+	// On, it is not advisory: a machine that cannot confine refuses to start.
+	// A sandbox that runs the command anyway is one somebody believes in and
+	// does not have.
+	//
+	// That is every machine but a Mac for now. The deployment's own directory
+	// is always hidden from a command, and Linux's landlock grants access
+	// rather than removing it, so it has no way to hide one.
 	Enabled bool `koanf:"enabled"`
 
 	// Network allows confined commands to open connections.
@@ -1906,10 +1910,11 @@ backend = "fake"
 # what a build's dependencies will do, and this is the difference.
 #
 # Off by default because it changes what commands can do. On, it is not
-# advisory: a machine that cannot confine refuses to run the command rather
-# than running it unprotected.
+# advisory: a machine that cannot confine refuses to start rather than
+# running commands unprotected.
 #
-# macOS only so far.
+# macOS only so far. On Linux the daemon refuses to start with this on:
+# landlock cannot hide this deployment's directory from a command.
 # enabled = false
 # Let confined commands open connections. Off suits a build or a test, which
 # is most of what an agent runs.

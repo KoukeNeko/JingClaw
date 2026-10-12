@@ -74,6 +74,20 @@ else
 	printf 'ok   and a policy asking for no network is refused, this ABI being too old for it\n'
 fi
 
+# The package checks above use policies of their own. The daemon's always
+# hides its own directory, which landlock cannot do, so turning the sandbox on
+# has to stop it at startup and say why — not start, and refuse every command.
+REFUSED=$(docker run --rm -v "$PWD:/src" -w /src/core \
+	-e JINGCLAW_HOME=/tmp/jingclaw -e JINGCLAW_SANDBOX_ENABLED=true golang:alpine sh -c '
+	timeout 120 go run -buildvcs=false ./cmd/jingclaw daemon 2>&1
+' 2>&1 | tail -3)
+case "$REFUSED" in
+*"[sandbox] enabled"*"cannot hide"*) ;;
+*) fail "turning the sandbox on did not stop the daemon at startup, saying why:
+$REFUSED" ;;
+esac
+printf 'ok   and the daemon refuses to start with it on, rather than refusing every command\n'
+
 # And the daemon says which of those it will actually enforce, rather than
 # only that confinement is on.
 SAID=$(docker run --rm -v "$PWD:/src" -w /src/core golang:alpine sh -c '

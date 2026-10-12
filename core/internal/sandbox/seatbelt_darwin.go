@@ -166,5 +166,9 @@ func quote(path string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(path) + `"`
 }
 
+// keepable says whether Seatbelt can hold the policy, which it always can: it
+// subtracts access, so a hidden directory is just one more subtraction.
+func keepable(Policy) error { return nil }
+
 // describeBackend is what Seatbelt offers, which is all of it.
 func describeBackend() string { return "sandbox-exec (files and network)" }

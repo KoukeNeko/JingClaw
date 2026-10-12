@@ -405,6 +405,41 @@ the context window in one call can end a session in one call.
 Where output too large to show is kept, content-addressed. Empty uses the
 data directory.
 
+## `[sandbox]`
+
+**`enabled`**
+
+Confines every command `exec_command` runs: it may write to the workspace and
+to the deployment's own caches, and nowhere else. Approving a command says
+somebody meant to run it; it cannot say what a build's dependencies will do.
+
+Off by default, because it changes what commands can do. On, it is not
+advisory: a machine that cannot confine refuses to start, rather than running
+commands that only look protected.
+
+macOS only so far, through `sandbox-exec`. On Linux the daemon refuses to
+start with this on, and says why: the deployment's own directory is always
+hidden from a command, and Landlock grants access rather than removing it, so
+it cannot hide one directory while everything else stays readable. The Linux
+backend is in `internal/sandbox` and accepts only a policy that hides
+nothing; it becomes usable when the policy can be written as a list of what
+is readable.
+
+**`network`**
+
+Lets confined commands open connections. Off by default, because a build or a
+test is most of what an agent runs and neither needs one. One setting rather
+than an exception per command: a list of programs allowed onto the network
+turns, one entry at a time, into a network anybody may reach.
+
+**`hidden`**
+
+Directories a confined command may not read, written with a leading `~` if
+you like. The deployment's own directory is always hidden and need not be
+listed. Confining writes says nothing about reads: a command that cannot write
+outside the workspace can still open `~/.ssh`, and having no network only means
+it cannot send what it found today.
+
 ## `[mcp]`
 
 **`start_timeout`**

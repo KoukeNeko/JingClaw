@@ -105,10 +105,11 @@ backend = "fake"
 # what a build's dependencies will do, and this is the difference.
 #
 # Off by default because it changes what commands can do. On, it is not
-# advisory: a machine that cannot confine refuses to run the command rather
-# than running it unprotected.
+# advisory: a machine that cannot confine refuses to start rather than
+# running commands unprotected.
 #
-# macOS only so far.
+# macOS only so far. On Linux the daemon refuses to start with this on:
+# landlock cannot hide this deployment's directory from a command.
 # enabled = false
 # Let confined commands open connections. Off suits a build or a test, which
 # is most of what an agent runs.
