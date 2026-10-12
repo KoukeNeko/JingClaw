@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=1440">
+<title>原稿 · JingClaw 設定</title><style>
+:root{--bg:#F3F4F5;--sheet:#FFFFFF;--ink:#14171B;--ink2:#444D57;--ink3:#58636E;--line:#D8DCE0;--line2:#E9ECEF;
+--red:#C0350D;--red-bg:#FCEDE7;--red-line:#E6AE9B;
+--serif:"Songti TC","Noto Serif CJK TC","Source Han Serif TC","PMingLiU",serif;
+--sans:"PingFang TC","Noto Sans CJK TC","Microsoft JhengHei",system-ui,sans-serif;
+--mono:"SF Mono","JetBrains Mono","Noto Sans Mono CJK TC","DejaVu Sans Mono",ui-monospace,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
+code{font-family:var(--mono)}
+.ic{display:inline-block;vertical-align:-2px}
+.app{display:grid;grid-template-columns:272px 1fr 352px;grid-template-rows:52px 1fr;height:900px}
+.top{grid-column:1/4;display:flex;align-items:center;justify-content:space-between;padding:0 24px;background:var(--sheet);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:baseline;gap:16px}
+.brand b{font:700 20px var(--serif);letter-spacing:.01em}
+.brand code{font-size:13px;color:var(--ink3)}
+.daemon{display:flex;align-items:center;gap:8px;color:var(--ink2);font-size:14px}
+.daemon code{font-size:13px;color:var(--ink)}
+.daemon i{width:8px;height:8px;border-radius:50%;background:var(--ink)}
+
+/* 左：目錄 */
+.toc{background:#F8F9FA;border-right:1px solid var(--line);padding:12px 12px 8px;overflow:hidden}
+.toc h2{font:700 14px var(--serif);padding:0 10px 6px;color:var(--ink2)}
+.toc ul{list-style:none}
+.toc .grp{margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid var(--line2)}
+.toc .grp:last-child{border:0}
+.toc li.nav{display:flex;justify-content:space-between;align-items:center;height:26px;padding:0 10px;font-size:14px;color:var(--ink2);border-radius:3px}
+.toc li.nav code{font-size:13px;color:var(--ink3)}
+.toc li.on{background:var(--ink);color:#fff}
+.toc li.on code{color:#C9CFD6}
+.sess-h{display:flex;justify-content:space-between;align-items:center;padding:8px 10px 4px;margin-top:2px;border-top:1.5px solid var(--ink)}
+.sess-h h2{padding:0}
+.sess-h button{font:13px var(--sans);color:var(--ink);background:none;border:1px solid var(--ink);border-radius:3px;padding:2px 9px;display:flex;gap:5px;align-items:center}
+.sess li{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:0 8px;align-items:start;padding:4px 10px;border-radius:3px}
+.sess .t{font-size:14px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess .s{font-size:13px;color:var(--ink3);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st{width:10px;height:10px;border-radius:50%;margin-top:5px;border:1.5px solid var(--ink3)}
+.st.run{background:var(--ink);border-color:var(--ink)}
+.st.approval,.st.input{background:var(--red);border-color:var(--red)}
+.st.failed{border-color:var(--red);background:#fff;position:relative}
+.st.failed:after{content:"";position:absolute;left:1px;top:3px;width:5px;height:1.5px;background:var(--red)}
+.pill{font-size:13px;color:var(--red);border:1px solid var(--red-line);background:var(--red-bg);border-radius:3px;padding:0 6px;line-height:19px;margin-top:1px}
+
+/* 中：文件 */
+.sheet{background:var(--sheet);padding:26px 56px 0;overflow:hidden}
+.meta{font-size:13px;color:var(--ink3)}
+.meta code{color:var(--ink2)}
+h1{font:700 32px/1.25 var(--serif);margin:6px 0 8px}
+.lede{font:15px/1.7 var(--serif);color:var(--ink2);max-width:640px}
+.tbl{margin-top:22px}
+.th{display:flex;align-items:baseline;justify-content:space-between;padding-bottom:6px;border-bottom:1.5px solid var(--ink)}
+.th code{font-size:15px;font-weight:700}
+.th span{font-size:13px;color:var(--ink3)}
+.row{display:grid;grid-template-columns:268px 1fr auto;column-gap:16px;align-items:center;min-height:38px;padding:5px 0;border-bottom:1px solid var(--line2)}
+.k{display:flex;align-items:baseline;gap:10px;white-space:nowrap}
+.k code{font-size:14px}
+.k .zh{font-size:13px;color:var(--ink3)}
+.v{font:15px var(--mono);min-height:26px;display:flex;align-items:center;gap:8px;border-bottom:1px dashed #C4CAD0;padding:0 2px;max-width:340px}
+.v.ph{color:var(--ink3);font-family:var(--sans);font-size:14px}
+.v .tag-ok{font:13px var(--sans);color:var(--ink2);margin-left:auto}
+.src{font-size:13px;color:var(--ink3);min-width:64px;text-align:right;white-space:nowrap}
+.src.env{color:var(--ink);font-weight:600}
+.note{grid-column:2/4;font:14px/1.5 var(--serif);color:var(--ink2);padding:2px 0 3px}
+/* 修訂 */
+.row.edit{background:var(--red-bg);margin:0 -10px;padding:5px 10px}
+.row.edit .v{border-bottom-color:var(--red-line)}
+.v del{color:var(--ink3);text-decoration:line-through;text-decoration-color:var(--red);text-decoration-thickness:1.5px}
+.v ins{color:var(--red);font-weight:700;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:4px}
+.row.edit .src{color:var(--red);font-weight:600}
+.row.bad .v ins{text-decoration-style:wavy}
+.row.bad .k code:after{content:" ①";color:var(--red);font:700 14px var(--sans)}
+.row.bad .note{color:var(--red)}
+.keep{margin-top:18px;font:14px var(--serif);color:var(--ink2);display:flex;gap:10px;align-items:center}
+.keep u{text-underline-offset:3px;color:var(--ink)}
+
+/* 右：邊註 */
+.margin{background:#F8F9FA;border-left:1px solid var(--line);padding:20px 20px 0;overflow:hidden}
+.blk{padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid var(--line)}
+.blk:last-child{border:0}
+.blk h3{font:700 17px var(--serif);display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.blk h3 span{font:13px var(--sans);color:var(--ink3);font-weight:400}
+.diff{font:13px/1.65 var(--mono);background:#fff;border:1px solid var(--line);border-radius:3px;padding:6px 0}
+.ln{padding:0 10px;white-space:pre}
+.ln.ctx{color:var(--ink3)}
+.ln.del{color:var(--ink3);background:#F1F2F4}
+.ln.add{color:var(--red);background:var(--red-bg);font-weight:600}
+.fine{font-size:13px;color:var(--ink3);margin-top:8px;line-height:1.5}
+.prob{background:var(--red-bg);border:1px solid var(--red-line);border-radius:3px;padding:10px 12px;font-size:14px;line-height:1.55}
+.prob .pk{font:600 13px var(--mono);color:var(--red)}
+.prob .pk b{font-family:var(--sans);margin-right:6px}
+.prob p{margin-top:3px;color:var(--ink)}
+.prob .fx{color:var(--ink2);margin-top:3px}
+.acts{display:flex;gap:8px;margin-top:2px}
+.btn{font:14px var(--sans);border-radius:3px;padding:7px 14px;border:1px solid var(--ink);background:#fff;color:var(--ink)}
+.btn.main{background:var(--ink);color:#fff}
+.btn.off{background:#E3E6E9;border-color:#E3E6E9;color:#444D57}
+.q{margin-bottom:12px}
+.q:last-child{margin-bottom:0}
+.q .who{font-size:13px;color:var(--ink3)}
+.q .what{font:15px/1.5 var(--serif);margin:2px 0 6px}
+.q pre{font:13px var(--mono);background:#fff;border:1px solid var(--line);border-radius:3px;padding:5px 10px;margin-bottom:8px}
+.q .btn{padding:4px 12px}
+</style></head><body>
+<div class="app">
+<header class="top"><div class="brand"><b>JingClaw</b><code>~/.jingclaw/config.toml</code></div>
+<div class="daemon"><i></i>運作中 <code>127.0.0.1:54832</code></div></header>
+
+<aside class="toc"><h2>設定</h2><ul class="grp"><li class="nav"><span>代理</span><code>[agent]</code></li><li class="nav on"><span>模型提供者</span><code>[provider]</code></li><li class="nav"><span>上下文</span><code>[context]</code></li></ul><ul class="grp"><li class="nav"><span>內建工具</span><code>[tools]</code></li><li class="nav"><span>沙盒</span><code>[sandbox]</code></li><li class="nav"><span>產出物</span><code>[artifacts]</code></li><li class="nav"><span>長駐程式</span><code>[process]</code></li><li class="nav"><span>網頁讀取</span><code>[web]</code></li><li class="nav"><span>MCP 伺服器</span><code>[mcp]</code></li></ul><ul class="grp"><li class="nav"><span>記憶</span><code>[memory]</code></li></ul><ul class="grp"><li class="nav"><span>閘道</span><code>[gateway]</code></li><li class="nav"><span>伺服器</span><code>[server]</code></li><li class="nav"><span>輸出節奏</span><code>[delivery]</code></li></ul><ul class="grp"><li class="nav"><span>人格</span><code>PERSONA.md</code></li><li class="nav"><span>指示</span><code>AGENTS.md</code></li></ul>
+<div class="sess-h"><h2>對話</h2><button><svg class="ic" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>新對話</button></div>
+<ul class="sess"><li><i class="st run"></i><div style="min-width:0"><div class="t">整理 core/ 的 lint 警告</div><div class="s">本機 · console · 2 分鐘前</div></div></li><li><i class="st approval"></i><div style="min-width:0"><div class="t">Discord #ops 週報整理</div><div class="s">Discord · #ops</div></div><span class="pill">待核准</span></li><li><i class="st input"></i><div style="min-width:0"><div class="t">備份腳本週日為什麼失敗</div><div class="s">本機 · console</div></div><span class="pill">待回答</span></li><li><i class="st done"></i><div style="min-width:0"><div class="t">memory 嵌入模型比較</div><div class="s">本機 · console · 昨天 23:40</div></div></li><li><i class="st done"></i><div style="min-width:0"><div class="t">每日 09:00 摘要</div><div class="s">排程 · 今天 09:00</div></div></li><li><i class="st failed"></i><div style="min-width:0"><div class="t">Telegram：訂位提醒</div><div class="s">Telegram · 3 天前</div></div></li></ul></aside>
+
+<main class="sheet">
+<div class="meta"><code>config.toml</code> › <code>[provider]</code></div>
+<h1>模型提供者</h1>
+<p class="lede">選擇由哪個模型回答。每個後端各自記著自己的模型與金鑰，切換只改 <code>backend</code> 這一行。金鑰只會讀環境變數或權限 600 的檔案，網頁看不到它的值。</p>
+<section class="tbl"><div class="th"><code>[provider]</code><span>共用</span></div><div class="row"><div class="k"><code>backend</code><span class="zh">後端</span></div><span class="v">&quot;anthropic&quot;<svg class="ic" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg></span><span class="src env">環境變數</span><div class="note">檔案寫的是 “fake”，被環境變數蓋過。</div></div></section><section class="tbl"><div class="th"><code>[provider.anthropic]</code><span>這個後端自己的模型與金鑰</span></div><div class="row"><div class="k"><code>model</code><span class="zh">模型</span></div><span class="v">&quot;claude-sonnet-4-5&quot;</span><span class="src file">檔案</span></div><div class="row"><div class="k"><code>api_key_env</code><span class="zh">金鑰環境變數</span></div><span class="v">[&quot;ANTHROPIC_API_KEY&quot;]<span class="tag-ok">已設定</span></span><span class="src default">預設</span></div><div class="row"><div class="k"><code>api_key_file</code><span class="zh">金鑰檔案</span></div><span class="v ph">未設定</span><span class="src default">預設</span></div><div class="row"><div class="k"><code>base_url</code><span class="zh">服務位址</span></div><span class="v ph">官方服務</span><span class="src default">預設</span></div></section><section class="tbl"><div class="th"><code>[provider.retry]</code><span>請求失敗時怎麼重送</span></div><div class="row edit"><div class="k"><code>max_attempts</code><span class="zh">最多嘗試次數</span></div><span class="v"><del>4</del><ins>6</ins></span><span class="src edit">未寫入</span><div class="note">1 代表不重試，0 代表不送出請求。</div></div><div class="row edit bad"><div class="k"><code>base_delay</code><span class="zh">起始等待</span></div><span class="v"><del>&quot;500ms&quot;</del><ins>&quot;45s&quot;</ins></span><span class="src edit">未寫入</span><div class="note">比 max_delay（30s）還長，詳見右側 ①。</div></div><div class="row"><div class="k"><code>max_delay</code><span class="zh">最長等待</span></div><span class="v">&quot;30s&quot;</span><span class="src default">預設</span></div><div class="row"><div class="k"><code>jitter</code><span class="zh">抖動</span></div><span class="v">0.3</span><span class="src default">預設</span></div><div class="row"><div class="k"><code>budget</code><span class="zh">總等待上限</span></div><span class="v">&quot;1m30s&quot;</span><span class="src default">預設</span></div></section>
+<p class="keep">其他後端的設定都還在：<code>gemini</code> · <code>ollama</code> · <code>openai_compat</code><u>展開</u></p>
+</main>
+
+<aside class="margin">
+<section class="blk"><h3>修訂<span>2 處，尚未寫入</span></h3><div class="diff"><div class="ln ctx">@@ [provider.retry]</div><div class="ln del">-# max_attempts = 4</div><div class="ln add">+max_attempts = 6</div><div class="ln del">-# base_delay = &quot;500ms&quot;</div><div class="ln add">+base_delay = &quot;45s&quot;</div></div>
+<p class="fine">寫入時只動這幾行，檔案裡其餘的註解原樣保留。</p></section>
+<section class="blk"><h3>問題<span>1 項</span></h3>
+<div class="prob"><div class="pk"><b>①</b>provider.retry.base_delay = &quot;45s&quot;</div>
+<p>比 provider.retry.max_delay（30s）還長。</p><p class="fx">第一次等待不能比最長等待還久。</p></div></section>
+<section class="blk"><div class="acts"><button class="btn off">先修正 1 項問題</button><button class="btn">捨棄修訂</button></div>
+<p class="fine">寫入後重啟 daemon 才會生效，對話不會因為重啟而遺失。</p></section>
+<section class="blk"><h3>等你處理<span>2 件</span></h3>
+<div class="q"><div class="who">Discord #ops 週報整理 · 11 分鐘前</div><div class="what">在 workspace 執行 go test ./...</div>
+<pre>$ go test ./...</pre><div class="acts"><button class="btn main">核准</button><button class="btn">拒絕</button></div></div>
+<div class="q"><div class="who">備份腳本週日為什麼失敗 · 1 小時前</div><div class="what">備份目的地是 NAS 還是 S3？</div>
+<div class="acts"><button class="btn">NAS</button><button class="btn">S3</button></div></div></section>
+</aside>
+</div></body></html>

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=1440">
+<title>值班台 · JingClaw</title><style>
+:root{--bg:#0A1317;--pane:#101C22;--pane2:#15252C;--line:#213840;--line2:#1A2D34;
+--tx:#E7F1F3;--tx2:#A6BBC1;--tx3:#86A0A7;--teal:#4CC9B4;--teal-d:#1F5E56;--amber:#F2AB40;--amber-bg:#2A2110;--coral:#F2705B;--coral-bg:#2B1713;
+--sans:"PingFang TC","Noto Sans CJK TC","Microsoft JhengHei",system-ui,sans-serif;
+--mono:"SF Mono","JetBrains Mono","Noto Sans Mono CJK TC","DejaVu Sans Mono",ui-monospace,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--tx);font:14px/1.5 var(--sans)}
+code{font-family:var(--mono)}
+.ic{display:inline-block;vertical-align:-2px}
+.app{display:grid;grid-template-columns:1fr 520px;grid-template-rows:60px 1fr;height:900px}
+.top{grid-column:1/3;display:flex;align-items:center;gap:28px;padding:0 28px;border-bottom:1px solid var(--line)}
+.top .brand{font:700 19px var(--sans);letter-spacing:.01em;margin-right:8px}
+.sum{display:flex;gap:26px;align-items:baseline;color:var(--tx2)}
+.sum b{font:600 26px/1 var(--sans);color:var(--tx);margin-right:6px;font-variant-numeric:tabular-nums}
+.sum .wait b{color:var(--amber)}
+.sum .run b{color:var(--teal)}
+.top .sp{flex:1}
+.pill-d{display:flex;align-items:center;gap:8px;color:var(--tx2);font-size:14px}
+.pill-d i{width:8px;height:8px;border-radius:50%;background:var(--teal)}
+.pill-d code{font-size:13px;color:var(--tx)}
+.top .set{font:14px var(--sans);color:var(--bg);background:var(--tx);border:0;border-radius:6px;padding:7px 16px;font-weight:600}
+
+/* 左：值班板 */
+.board{padding:22px 28px 0;overflow:hidden}
+.bh{display:flex;align-items:center;gap:16px;margin-bottom:16px}
+.bh h1{font:700 22px var(--sans)}
+.chips{display:flex;gap:8px;flex:1}
+.chip{font-size:14px;color:var(--tx2);border:1px solid var(--line);border-radius:999px;padding:3px 13px}
+.chip.on{background:var(--pane2);color:var(--tx);border-color:#2F4B54}
+.chip b{font-weight:600;margin-left:5px;font-variant-numeric:tabular-nums}
+.btn{font:14px var(--sans);border-radius:6px;padding:7px 15px;border:1px solid #33505A;background:transparent;color:var(--tx);display:inline-flex;gap:6px;align-items:center}
+.btn.amber{background:var(--amber);border-color:var(--amber);color:#1B1305;font-weight:700}
+.btn.sm{padding:4px 12px}
+
+.need{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px}
+.ask{background:var(--amber-bg);border:1px solid #5A4620;border-radius:10px;padding:14px 16px 14px;display:flex;flex-direction:column}
+.ask .tg{display:flex;align-items:center;gap:8px;color:var(--amber);font-weight:700;font-size:14px}
+.ask .tg i{width:9px;height:9px;border-radius:50%;background:var(--amber)}
+.ask .tg span{margin-left:auto;font-weight:400;color:var(--tx3);font-size:13px}
+.ask h2{font:600 17px/1.4 var(--sans);margin:8px 0 2px}
+.ask .from{font-size:13px;color:var(--tx3);margin-bottom:9px}
+.ask pre{font:13px/1.5 var(--mono);background:#07100E;border:1px solid #3A3118;border-radius:6px;padding:7px 11px;margin-bottom:11px;color:#F6E7C4;white-space:pre-wrap}
+.ask pre em{font-style:normal;color:var(--tx3)}
+.ask .acts{display:flex;gap:8px;align-items:center;margin-top:auto}
+.ask .hint{font-size:14px;color:var(--tx2)}
+.ask .eff{margin-left:auto;font-size:13px;color:var(--tx2)}
+
+.lh{display:grid;grid-template-columns:16px minmax(0,1fr) 236px 150px 70px 54px;column-gap:12px;font-size:13px;color:var(--tx3);padding:0 0 7px;border-bottom:1px solid var(--line)}
+.rw{display:grid;grid-template-columns:16px minmax(0,1fr) 236px 150px 70px 54px;column-gap:12px;align-items:center;height:64px;border-bottom:1px solid var(--line2)}
+.lamp{width:11px;height:11px;border-radius:50%;background:#3A545C}
+.lamp.run{background:var(--teal);box-shadow:0 0 0 4px rgba(76,201,180,.18)}
+.lamp.approval,.lamp.input{background:var(--amber);box-shadow:0 0 0 4px rgba(242,171,64,.2)}
+.lamp.failed{background:var(--coral)}
+.ti .t{font:600 15px/1.35 var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ti .o{font-size:13px;color:var(--tx3);line-height:1.35}
+.ti .o code{font-size:12.5px}
+.tl{position:relative;height:14px;background:var(--pane);border:1px solid var(--line2);border-radius:3px}
+.tl i{position:absolute;top:2px;bottom:2px;border-radius:2px;background:#3C5A63}
+.tl i.run{background:var(--teal)}
+.tl i.wait{background:var(--amber)}
+.mdl{font:13px var(--mono);color:var(--tx2);display:flex;gap:6px;align-items:center;white-space:nowrap}
+.mdl.ov{color:var(--teal)}
+.when{font-size:13px;color:var(--tx3);text-align:right;white-space:nowrap}
+.sched{display:flex;align-items:center;gap:12px;margin-top:14px;padding:10px 0;color:var(--tx2);font-size:14px}
+.sched b{color:var(--tx);font-weight:600}
+.sched code{font-size:13px}
+.sched .sp{flex:1}
+
+/* 右：設定抽屜 */
+.drawer{background:var(--pane);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.dh{display:flex;align-items:center;gap:12px;padding:0 22px;height:60px;border-bottom:1px solid var(--line);flex:none}
+.dh h2{font:700 17px var(--sans)}
+.sel{margin-left:auto;display:flex;align-items:center;gap:8px;border:1px solid #2F4B54;border-radius:6px;padding:5px 12px;font-size:14px}
+.sel code{font-size:13px;color:var(--tx3)}
+.db{padding:16px 22px 0;flex:1;overflow:hidden}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px}
+.g .full{grid-column:1/3}
+.sec{font:600 13px var(--sans);color:var(--tx3);margin:16px 0 8px;display:flex;justify-content:space-between}
+.sec:first-child{margin-top:0}
+.sec code{font-weight:400}
+.f label{display:flex;align-items:baseline;gap:8px;font-size:14px;margin-bottom:4px}
+.f label code{font-size:13px;color:var(--tx3)}
+.f label .s{margin-left:auto;font-size:13px;color:var(--tx3);white-space:nowrap}
+.in{height:36px;display:flex;align-items:center;gap:8px;padding:0 11px;background:var(--bg);border:1px solid #2B444C;border-radius:6px;font:14px var(--mono);color:var(--tx)}
+.in.ph{color:var(--tx3);font-family:var(--sans)}
+.in .ok{margin-left:auto;font:13px var(--sans);color:var(--teal)}
+.in .ok.bad{color:var(--coral)}
+.in.lock{color:var(--tx2);background:#0D181D;border-style:dashed}
+.in.lock .ic{margin-left:auto}
+.in.edit{border-color:var(--teal)}
+.in.edit s{color:var(--tx3)}
+.in.bad{border-color:var(--coral);background:var(--coral-bg)}
+.f .s.edit{color:var(--teal)}
+.f .s.bad{color:var(--coral)}
+.msg{font-size:13px;line-height:1.5;margin-top:4px;color:var(--coral)}
+.msg.mute{color:var(--tx3)}
+.keep{margin-top:14px;font-size:14px;color:var(--tx2)}
+.keep code{font-size:13px}
+.act{flex:none;padding:14px 22px;border-top:1px solid var(--line);background:#0C171C;display:flex;align-items:center;gap:10px}
+.act p{font-size:13px;color:var(--tx2);flex:1;line-height:1.4}
+.act p b{color:var(--coral);font-weight:600}
+.act .btn.off{border-color:#2A3F46;color:#8CA3AA}
+</style></head><body>
+<div class="app">
+<header class="top"><span class="brand">JingClaw</span>
+<div class="sum"><span class="wait"><b>2</b>件等你</span><span class="run"><b>1</b>進行中</span><span><b>6</b>段對話</span></div>
+<span class="sp"></span><span class="pill-d"><i></i>運作中 <code>127.0.0.1:54832</code></span><button class="set">設定</button></header>
+
+<main class="board">
+<div class="bh"><h1>對話</h1>
+<div class="chips"><span class="chip on">全部<b>6</b></span><span class="chip">進行中<b>1</b></span><span class="chip">等你<b>2</b></span><span class="chip">已結束<b>3</b></span></div>
+<button class="btn"><svg class="ic" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>新對話</button></div>
+
+<div class="need">
+<section class="ask"><div class="tg"><i></i>等你核准<span>11 分鐘前</span></div>
+<h2>在 workspace 執行 go test ./...</h2><div class="from">Discord #ops 週報整理</div>
+<pre><em>~/.jingclaw/workspace</em>
+$ go test ./...</pre>
+<div class="acts"><button class="btn amber">核准</button><button class="btn">拒絕</button><span class="eff">會執行程式</span></div></section>
+<section class="ask"><div class="tg"><i></i>等你回答<span>1 小時前</span></div>
+<h2>備份目的地是 NAS 還是 S3？</h2><div class="from">備份腳本週日為什麼失敗</div>
+<p class="hint">回答後，這段對話會接著執行。</p>
+<div class="acts"><button class="btn amber">NAS</button><button class="btn amber">S3</button><button class="btn">自己輸入</button></div></section>
+</div>
+
+<div class="lh"><span></span><span>對話</span><span>近 24 小時的執行</span><span>模型</span><span style="text-align:right">更新</span><span></span></div>
+<div class="rw"><i class="lamp run"></i><div class="ti" style="min-width:0"><div class="t">整理 core/ 的 lint 警告</div><div class="o">本機 · console · <code>ses_01K7QX2A</code></div></div><div class="tl"><i class="done" style="left:8%;width:3%"></i><i class="done" style="left:35%;width:5%"></i><i class="done" style="left:71%;width:4%"></i><i class="run" style="left:93%;width:7%"></i></div><span class="mdl">claude-sonnet-4-5<svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></span><span class="when">2 分鐘前</span><span><button class="btn sm">中斷</button></span></div><div class="rw"><i class="lamp approval"></i><div class="ti" style="min-width:0"><div class="t">Discord #ops 週報整理</div><div class="o">Discord · #ops · <code>ses_01K7Q9MT</code></div></div><div class="tl"><i class="done" style="left:62%;width:4%"></i><i class="done" style="left:78%;width:6%"></i><i class="wait" style="left:94%;width:5%"></i></div><span class="mdl">claude-sonnet-4-5<svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></span><span class="when">11 分鐘前</span><span></span></div><div class="rw"><i class="lamp input"></i><div class="ti" style="min-width:0"><div class="t">備份腳本週日為什麼失敗</div><div class="o">本機 · console · <code>ses_01K6H3PE</code></div></div><div class="tl"><i class="done" style="left:40%;width:6%"></i><i class="wait" style="left:90%;width:5%"></i></div><span class="mdl">claude-sonnet-4-5<svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></span><span class="when">1 小時前</span><span></span></div><div class="rw"><i class="lamp done"></i><div class="ti" style="min-width:0"><div class="t">memory 嵌入模型比較</div><div class="o">本機 · console · <code>ses_01K6B8YN</code></div></div><div class="tl"><i class="done" style="left:2%;width:5%"></i><i class="done" style="left:12%;width:3%"></i></div><span class="mdl ov">claude-opus-5-5<svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></span><span class="when">昨天 23:40</span><span></span></div><div class="rw"><i class="lamp done"></i><div class="ti" style="min-width:0"><div class="t">每日 09:00 摘要</div><div class="o">排程 · <code>ses_01K5A1VC</code></div></div><div class="tl"><i class="done" style="left:94%;width:3%"></i></div><span class="mdl">claude-sonnet-4-5<svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></span><span class="when">今天 09:00</span><span></span></div><div class="rw"><i class="lamp failed"></i><div class="ti" style="min-width:0"><div class="t">Telegram：訂位提醒</div><div class="o">Telegram · <code>ses_01K4Z6WR</code></div></div><div class="tl"></div><span class="mdl">claude-sonnet-4-5<svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></span><span class="when">3 天前</span><span></span></div>
+<div class="sched"><span><b>每天 09:00</b>（Asia/Taipei）</span><span>下次 明天 09:00</span><span class="sp"></span><button class="btn sm">暫停</button></div>
+</main>
+
+<aside class="drawer">
+<div class="dh"><h2>設定</h2><div class="sel">模型提供者 <code>[provider]</code><svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></div></div>
+<div class="db">
+<div class="sec">共用 <code>[provider]</code></div>
+<div class="g"><div class="f full"><label>後端<code>backend</code><span class="s">環境變數</span></label><div class="in lock">anthropic<svg class="ic" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg></div><div class="msg mute">檔案寫的是 “fake”，被環境變數蓋過。</div></div></div>
+<div class="sec">Anthropic <code>[provider.anthropic]</code></div>
+<div class="g"><div class="f"><label>模型<code>model</code><span class="s">檔案</span></label><div class="in">claude-sonnet-4-5</div></div><div class="f"><label>服務位址<code>base_url</code><span class="s">預設</span></label><div class="in ph">官方服務</div></div><div class="f"><label>金鑰環境變數<code>api_key_env</code><span class="s">預設</span></label><div class="in">ANTHROPIC_API_KEY<span class="ok">已設定</span></div></div><div class="f"><label>金鑰檔案<code>api_key_file</code><span class="s">預設</span></label><div class="in ph">未設定</div></div></div>
+<div class="sec">重送 <code>[provider.retry]</code></div>
+<div class="g"><div class="f"><label>最多嘗試次數<code>max_attempts</code></label><div class="in edit"><s>4</s>&nbsp;→&nbsp;6<span class="ok">未寫入</span></div></div><div class="f"><label>起始等待<code>base_delay</code></label><div class="in bad"><s>500ms</s>&nbsp;→&nbsp;45s<span class="ok bad">有問題</span></div><div class="msg">比 provider.retry.max_delay（30s）還長。第一次等待不能比最長等待還久。</div></div><div class="f"><label>最長等待<code>max_delay</code><span class="s">預設</span></label><div class="in">30s</div></div><div class="f"><label>抖動<code>jitter</code><span class="s">預設</span></label><div class="in">0.3</div></div><div class="f"><label>總等待上限<code>budget</code><span class="s">預設</span></label><div class="in">1m30s</div></div></div>
+<p class="keep">其他後端的設定都還在：<code>gemini</code> · <code>ollama</code> · <code>openai_compat</code></p>
+</div>
+<div class="act"><p>2 項未寫入，<b>1 項需修正</b><br>寫入後重啟才生效，對話不受影響</p><button class="btn">捨棄</button><button class="btn off">寫入</button></div>
+</aside>
+</div></body></html>
