@@ -1446,8 +1446,8 @@ func (c Config) rangeProblems() []Problem {
 		{"mcp.max_output", int64(c.MCP.MaxOutput), "Zero would discard whatever a tool server answered."},
 		{"artifacts.max_bytes", c.Artifacts.MaxBytes, "Zero would mean nothing can be kept."},
 		{"artifacts.max_image_bytes", c.Artifacts.MaxImageBytes, "Zero would mean no image is ever shown to the model."},
-		{"gateway.max_messages", int64(c.Gateway.Discord.MaxMessages), "Zero would send every answer as a file."},
-		{"gateway.max_attachment_bytes", int64(c.Gateway.Discord.MaxAttachmentBytes), "Zero would make every attachment empty."},
+		{"gateway.discord.max_messages", int64(c.Gateway.Discord.MaxMessages), "Zero would send every answer as a file."},
+		{"gateway.discord.max_attachment_bytes", int64(c.Gateway.Discord.MaxAttachmentBytes), "Zero would make every attachment empty."},
 		{"gateway.working_interval", int64(c.Gateway.WorkingInterval), "Zero would say what it is doing on every tool call."},
 		{"gateway.stream_interval", int64(c.Gateway.StreamInterval), "Zero would send a version of the answer per chunk."},
 	}
@@ -1471,7 +1471,7 @@ func (c Config) rangeProblems() []Problem {
 	if c.Provider.Retry.BaseDelay > c.Provider.Retry.MaxDelay {
 		problems = append(problems, Problem{
 			Key: "provider.retry.base_delay", Value: quote(c.Provider.Retry.BaseDelay.String()),
-			Why: fmt.Sprintf("is above model.retry.max_delay (%s)", c.Provider.Retry.MaxDelay),
+			Why: fmt.Sprintf("is above provider.retry.max_delay (%s)", c.Provider.Retry.MaxDelay),
 			Fix: "The first wait cannot be longer than the longest wait.",
 		})
 	}
