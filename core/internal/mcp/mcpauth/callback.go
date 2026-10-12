@@ -152,7 +152,7 @@ func (c *Callback) Fetch(
 	// Not fatal. A machine with no browser is a machine where somebody opens
 	// the announced URL themselves, and refusing here would make that
 	// impossible rather than inconvenient.
-	openBrowser(args.URL)
+	OpenBrowser(args.URL)
 
 	waiting, cancel := context.WithTimeout(ctx, callbackTimeout)
 	defer cancel()
@@ -276,14 +276,18 @@ func suppressed() bool { return os.Getenv(NoBrowser) != "" }
 // the flow is still completable by hand.
 const NoBrowser = "JINGCLAW_NO_BROWSER"
 
-// openBrowser asks the desktop to open a URL.
+// OpenBrowser asks the desktop to open a URL.
+//
+// Exported for the other thing that sends a person to a browser: the
+// dashboard, whose link has the same needs — the system browser, never an
+// embedded one, and a switch for a machine where opening one is wrong.
 //
 // The system browser, never an embedded one: RFC 8252 is explicit that an
 // embedded user-agent lets the app read what the person types into somebody
 // else's login page, and an authorization server has no way to tell.
 //
 // Failure is ignored on purpose — see Fetch.
-func openBrowser(open string) {
+func OpenBrowser(open string) {
 	if suppressed() {
 		return
 	}

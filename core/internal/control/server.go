@@ -16,6 +16,7 @@ import (
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
+	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
@@ -593,6 +594,10 @@ func toConnectError(err error) error {
 		errors.Is(err, storage.ErrQuestionAnswered):
 		// Someone already answered. FailedPrecondition rather than an error
 		// state: the prompt is settled, the client is simply late.
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	case errors.Is(err, config.ErrChangedUnderneath):
+		// Somebody else wrote the file after this edit read it. Not a fault of
+		// either: the client reads again and decides.
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 	case errors.Is(err, runtime.ErrNoAnswer):
 		// The caller sent nothing. InvalidArgument rather than internal: this

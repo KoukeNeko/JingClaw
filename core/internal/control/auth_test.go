@@ -19,6 +19,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	handler := control.AuthMiddleware(
 		[]control.Token{{Value: token, Scope: control.ScopeControl}},
+		nil,
 		port,
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
 	)
@@ -112,6 +113,7 @@ func TestGatewayCredentialCannotReachToolExecutingServices(t *testing.T) {
 			{Value: controlValue, Scope: control.ScopeControl},
 			{Value: gatewayValue, Scope: control.ScopeGateway},
 		},
+		nil,
 		port,
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
 	)
@@ -147,9 +149,23 @@ func TestGatewayCredentialCannotReachToolExecutingServices(t *testing.T) {
 			wantStatus: http.StatusForbidden,
 		},
 		{
+			// The settings decide what the agent may run, so a compromised
+			// gateway must not be able to loosen them.
+			name:       "gateway cannot change the settings",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ConfigService/WriteConfig",
+			wantStatus: http.StatusForbidden,
+		},
+		{
 			name:       "control reaches everything",
 			token:      controlValue,
 			path:       "/jingclaw.control.v1.SessionService/SendTurn",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "control reaches the settings",
+			token:      controlValue,
+			path:       "/jingclaw.control.v1.ConfigService/GetConfig",
 			wantStatus: http.StatusOK,
 		},
 		{

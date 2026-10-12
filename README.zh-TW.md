@@ -48,6 +48,7 @@ gateway，並給你一個 console 看著它們。在另一個終端機再跑一�
 ```bash
 jingclaw status      # 有沒有在跑，跑在哪
 jingclaw stop        # 停掉正在跑的那個
+jingclaw dashboard   # 開啟儀表板：有什麼在等你，以及設定
 ```
 
 想用容器？看 [`docs/container.md`](docs/container.md)——image 放在 GHCR，

@@ -91,7 +91,7 @@ func newHarness(t *testing.T, chunkDelay time.Duration) harness {
 	// exercised separately in TestAuthMiddleware.
 	handler := control.AuthMiddleware(
 		[]control.Token{{Value: testToken, Scope: control.ScopeControl}},
-		"", mux)
+		nil, "", mux)
 	server := httptest.NewUnstartedServer(h2c.NewHandler(handler, &http2.Server{}))
 	server.EnableHTTP2 = true
 	server.Start()

@@ -97,7 +97,7 @@ func newRootCommand() *cobra.Command {
 		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand(),
 		newArtifactCommand(), newMemoryCommand(),
 		newQuestionsCommand(), newAnswerCommand(), newProcessesCommand(),
-		newMCPCommand(&configPath), newScheduleCommand(), newSkillsCommand())
+		newMCPCommand(&configPath), newScheduleCommand(), newSkillsCommand(), newDashboardCommand())
 	return root
 }
 

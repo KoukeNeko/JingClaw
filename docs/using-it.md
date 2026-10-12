@@ -100,10 +100,44 @@ is dense within a session and a client that asks for something older than what
 is kept is told to resync rather than handed a conversation missing its middle.
 
 A console — one scrolling log across every session with a command line at the
-bottom, the shape a game server has — is the next thing being built. There was
-a web console; it was removed. A page served over loopback, its own credential
-kind, its own pairing code and its own client at parity was a second product
-next to a terminal that already worked everywhere the first one did.
+bottom, the shape a game server has — is the next thing being built.
+
+## The dashboard
+
+```bash
+jingclaw dashboard
+```
+
+Opens a page in your browser, served by the daemon on the same loopback
+address as everything else. It shows what is waiting on you and lets you
+approve, refuse or answer it; lists sessions and their runs; and edits the
+settings and the two instruction files without opening them.
+
+It is not a second client at parity with the terminal, and it does not carry a
+conversation: that stays in the chat channel. An earlier web console was
+removed because a page, its own credential kind, its own pairing and a client
+at parity was a second product next to a terminal that already worked
+everywhere. This one is narrower, and it is the same API: the page holds no
+state of its own, and decides nothing the terminal could not.
+
+The link `jingclaw dashboard` prints works once, for a minute. A browser is not
+given the credential the command line uses; it trades the link for one of its
+own, kept only in that tab, which ends when the daemon stops or after twelve
+hours. Run the command again to let another browser in, or the same one after a
+restart.
+
+Editing settings changes the file, and only the lines you changed: comments,
+order and settings this version does not know are left as they are, and the
+file it replaced is kept beside it as `config.toml.bak.1`, with two older ones
+behind it. The daemon reads settings when it starts, so a change takes effect
+after a restart — `jingclaw stop`, then `jingclaw`. The page says which
+settings are written but not yet in effect, and which the file cannot change
+because an environment variable or a flag decides them. The two instruction
+files are read again on every run and need no restart.
+
+A change that would stop the daemon starting is refused with the daemon's own
+explanation, by the same check it runs at startup. A file edited somewhere else
+after the page read it is not written over.
 
 ## Who is talking
 

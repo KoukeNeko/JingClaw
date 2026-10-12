@@ -23,9 +23,15 @@ answer it, not where you talk to it.
 | M2 | the console: one scrolling log, one command line |
 | M3 | skills, subagents, replay, sandboxing, remote fleet |
 
-The macOS, Windows and web clients are not being built. A terminal is a client
-that works everywhere, and three of them at parity was three times the work for
-the same thing.
+The macOS and Windows clients are not being built. A terminal is a client that
+works everywhere, and three of them at parity was three times the work for the
+same thing.
+
+The web dashboard is the exception, and deliberately not a client at parity: it
+carries no conversation. It is where you see what is waiting on you, approve it,
+and change the settings without opening a file — the part of a personal
+assistant's control surface that a terminal is worst at. See
+[using it](using-it.md#the-dashboard).
 
 ### Where it keeps things
 

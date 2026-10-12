@@ -1,0 +1,159 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+import "google/protobuf/struct.proto";
+import "jingclaw/control/v1/common.proto";
+
+// ConfigService is how a person reads and changes the daemon's settings
+// without opening the file.
+//
+// The file stays the source of truth. Nothing here keeps a second copy: an
+// edit is applied to the text of config.toml and nothing else in it moves —
+// not the comments, not the order, not a setting this version has never heard
+// of. A change takes effect when the daemon next starts, because that is when
+// settings are read and checked; this says so rather than pretending.
+//
+// Reachable by the operator's own credential and by nothing else. These are
+// the settings that decide what the agent may run.
+service ConfigService {
+  // GetConfig is what the file says, what is running, and which settings the
+  // file cannot change.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
+  // CheckConfig says what an edit would do, and writes nothing.
+  //
+  // The check is the one the daemon runs when it starts, so "this is fine"
+  // and "this will start" are the same statement.
+  rpc CheckConfig(CheckConfigRequest) returns (CheckConfigResponse);
+
+  // WriteConfig applies edits to the file, or refuses and says why.
+  //
+  // A file that is not the one the edit started from is refused with
+  // FAILED_PRECONDITION: somebody else changed it, and writing over theirs
+  // would discard it unseen.
+  rpc WriteConfig(WriteConfigRequest) returns (WriteConfigResponse);
+
+  // GetInstructionFile and PutInstructionFile are the two files that say who
+  // the agent is and how it works. They are files, not settings, and are read
+  // again on every run, so a change to one needs no restart.
+  rpc GetInstructionFile(GetInstructionFileRequest) returns (GetInstructionFileResponse);
+  rpc PutInstructionFile(PutInstructionFileRequest) returns (PutInstructionFileResponse);
+}
+
+message GetConfigRequest {}
+
+message GetConfigResponse {
+  // Where the file is, and a name for exactly what is in it. An edit says which
+  // version it started from by sending this back.
+  string path = 1;
+  string hash = 2;
+
+  // The settings the file sets, by dotted key such as provider.retry.base_delay.
+  // A setting the file does not mention is not here: it has its default.
+  google.protobuf.Struct file = 3;
+
+  // Every setting as this process is using it. Compared with the file, it says
+  // what is written but not yet in effect.
+  google.protobuf.Struct running = 4;
+
+  // Settings the file cannot change, because something wins over it.
+  repeated ConfigOverride overrides = 5;
+}
+
+message ConfigOverride {
+  string key = 1;
+
+  // "environment" or "flag".
+  string source = 2;
+
+  // The variable or the flag, as the operator wrote it.
+  string name = 3;
+}
+
+// ConfigEdit is one change: give a setting a value, or take it back.
+message ConfigEdit {
+  string key = 1;
+
+  // The value in the form GetConfig reports it. Ignored when remove is set.
+  google.protobuf.Value value = 2;
+
+  // Write the setting back as the commented-out default, so the file says
+  // nothing about it.
+  bool remove = 3;
+}
+
+// ConfigProblem is one setting that will not do, as the daemon would report it
+// on starting.
+message ConfigProblem {
+  string key = 1;
+  string value = 2;
+  string why = 3;
+  string fix = 4;
+}
+
+// ConfigDiffLine is one line of what a write changes. kind is "context" for a
+// section heading, "removed" or "added".
+message ConfigDiffLine {
+  string kind = 1;
+  string text = 2;
+}
+
+message CheckConfigRequest {
+  RequestMeta meta = 1;
+  repeated ConfigEdit edits = 2;
+}
+
+message CheckConfigResponse {
+  repeated ConfigProblem problems = 1;
+  repeated ConfigDiffLine diff = 2;
+}
+
+message WriteConfigRequest {
+  RequestMeta meta = 1;
+
+  // The hash from the GetConfig this edit started from.
+  string hash = 2;
+  repeated ConfigEdit edits = 3;
+}
+
+message WriteConfigResponse {
+  // False when the edit was refused; problems then says why, and the file is
+  // as it was.
+  bool written = 1;
+
+  // The file as it is now.
+  string hash = 2;
+  repeated ConfigProblem problems = 3;
+  repeated string changed_keys = 4;
+}
+
+enum InstructionFile {
+  INSTRUCTION_FILE_UNSPECIFIED = 0;
+  INSTRUCTION_FILE_PERSONA = 1;
+  INSTRUCTION_FILE_AGENTS = 2;
+}
+
+message GetInstructionFileRequest {
+  InstructionFile file = 1;
+}
+
+message GetInstructionFileResponse {
+  string path = 1;
+  string text = 2;
+  string hash = 3;
+}
+
+message PutInstructionFileRequest {
+  RequestMeta meta = 1;
+  InstructionFile file = 2;
+  string text = 3;
+
+  // The hash from the Get this edit started from, for the same reason as
+  // WriteConfig's.
+  string hash = 4;
+}
+
+message PutInstructionFileResponse {
+  string hash = 1;
+}

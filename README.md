@@ -48,6 +48,7 @@ again, and talk to it in Discord.
 ```bash
 jingclaw status      # running, and where
 jingclaw stop        # stop the one that is running
+jingclaw dashboard   # open the dashboard: what is waiting on you, and the settings
 ```
 
 Prefer a container? [`docs/container.md`](docs/container.md) — the image is on

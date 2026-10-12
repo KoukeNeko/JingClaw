@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JingClaw 值班台</title>
+<link rel="stylesheet" href="styles.css">
+<script src="schema.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+<script defer src="vendor/alpine.min.js"></script>
+</head>
+<body x-data="app" x-init="init()" @keydown.escape.window="esc()" x-cloak>
+<div class="app" :class="{open: drawer}">
+
+<!-- ═════════ 還沒連上：配對畫面 ═════════ -->
+<section class="connect" x-show="settled && !paired" aria-labelledby="t-connect">
+  <div class="cbox">
+    <h1 id="t-connect" x-text="pairFailed ? '這個連結用不了' : '還沒連上 daemon'"></h1>
+    <p>在跑 JingClaw 的那台機器上，開一個終端機執行：</p>
+    <pre><code>jingclaw dashboard</code></pre>
+    <p class="hint">連結只能用一次，一分鐘內有效。瀏覽器的連線會在 daemon 停止、或十二小時後結束，到時再執行一次就好。</p>
+    <p class="warn" x-show="pairFailed">這個連結已經用過、已經過期，或不是這個 daemon 發的。</p>
+  </div>
+</section>
+
+<!-- ═════════ 頂列 ═════════ -->
+<header class="top">
+  <span class="brand">JingClaw</span>
+  <div class="sum" aria-label="摘要">
+    <span class="wait"><b x-text="pending.length"></b>件等你</span>
+    <span class="run"><b x-text="counts.run"></b>進行中</span>
+    <span><b x-text="counts.all"></b>段對話</span>
+  </div>
+  <span class="sp"></span>
+  <template x-if="restartKeys.length">
+    <div class="rst-note"><span>已寫入 <b x-text="restartKeys.length"></b> 項，重啟後生效</span><span class="how">終端機執行 <code>jingclaw stop</code>，再執行 <code>jingclaw</code></span></div>
+  </template>
+  <span class="pill-d"><i :class="online ? 'ok' : 'down'"></i><span x-text="online ? '運作中' : '連不上 daemon'"></span><code x-text="daemonAddr"></code></span>
+  <button class="set" @click="drawer=!drawer" :aria-expanded="drawer" title="設定（Ctrl + ,）">設定<i class="dot" x-show="editKeys.length" aria-label="有未寫入的修改"></i></button>
+</header>
+
+<!-- ═════════ 左：看板 ═════════ -->
+<main class="board">
+
+  <template x-if="view==='board'">
+    <div class="bh">
+      <h1>對話</h1>
+      <div class="chips">
+        <button class="chip" :class="{on: filter==='all'}" @click="filter='all'">全部<b x-text="counts.all"></b></button>
+        <button class="chip" :class="{on: filter==='run'}" @click="filter='run'">進行中<b x-text="counts.run"></b></button>
+        <button class="chip" :class="{on: filter==='wait'}" @click="filter='wait'">等你<b x-text="counts.wait"></b></button>
+        <button class="chip" :class="{on: filter==='ended'}" @click="filter='ended'">已結束<b x-text="counts.ended"></b></button>
+      </div>
+      <button class="btn" @click="openNew()"><svg class="ic" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>新對話</button>
+    </div>
+  </template>
+
+  <template x-if="view==='session' && detail">
+    <div class="dt-head">
+      <button class="back" @click="back()">← 回到對話</button>
+      <div class="dt-title">
+        <div>
+          <h1 x-text="detail.title"></h1>
+          <p class="o"><span x-text="detail.origin.label"></span> · <code x-text="detail.id"></code> · 建立於 <span x-text="rel(detail.created)"></span> · 更新於 <span x-text="rel(detail.updated)"></span></p>
+        </div>
+        <div class="dt-tools">
+          <span class="stt" :class="detail.status"><i class="lamp" :class="detail.status"></i><span x-text="statusZh(detail.status)"></span></span>
+          <label class="mdl" :class="{ov: detail.model}">
+            <span class="vh">模型</span>
+            <select @change="setModel(detail, $event.target.value)" aria-label="這段對話使用的模型">
+              <option value="" :selected="!detail.model" x-text="'預設（' + defaultModel + '）'"></option>
+              <template x-for="m in models" :key="m.id"><option :value="m.id" :selected="m.id===detail.model" x-text="m.name + '　' + m.id"></option></template>
+            </select>
+          </label>
+          <button class="btn sm" x-show="detail.status==='run'" @click="interrupt(detail)">中斷</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- 等你處理：看板顯示全部，單一對話只顯示它自己的 -->
+  <section class="need" x-show="cards.length" aria-label="等你處理">
+    <template x-for="p in cards" :key="p.id">
+      <article class="ask" x-data="{t: ''}">
+        <div class="tg"><i></i><span x-text="p.type==='approval' ? '等你核准' : '等你回答'"></span><span class="ago" x-text="rel(p.created)"></span></div>
+        <template x-if="p.type==='approval'">
+          <div class="body">
+            <h2 x-text="p.x.summary"></h2>
+            <p class="from"><button class="lnk" @click="openSession(p.sid)" x-text="titleOf(p.sid)"></button></p>
+            <pre x-show="p.x.preview" x-text="p.x.preview"></pre>
+            <p class="warn" x-show="p.x.readForeign">這一輪讀過別人寫的內容，之後才提出這個請求。</p>
+            <div class="acts"><button class="btn amber" @click="decide(p, true)">核准</button><button class="btn" @click="decide(p, false)">拒絕</button></div>
+            <!-- daemon 說這個請求會做什麼，逐條照它的原話，不改寫 -->
+            <ul class="eff" x-show="p.x.effects.length"><template x-for="e in p.x.effects" :key="e"><li x-text="e"></li></template></ul>
+          </div>
+        </template>
+        <template x-if="p.type==='question'">
+          <div class="body">
+            <h2 x-text="p.x.prompt"></h2>
+            <p class="from"><button class="lnk" @click="openSession(p.sid)" x-text="titleOf(p.sid)"></button></p>
+            <p class="hint">回答後，這段對話會接著執行。</p>
+            <div class="acts">
+              <!-- 選擇題只能從選項裡挑，daemon 也會擋掉別的答案；文字題才有輸入框 -->
+              <div class="choices" x-show="p.x.choice"><template x-for="o in p.x.options" :key="o.id"><button class="btn amber" :title="o.detail" @click="answer(p, o.id)" x-text="o.label"></button></template></div>
+              <div class="own-row" x-show="!p.x.choice">
+                <input class="own" type="text" x-model="t" placeholder="用你自己的話回答" aria-label="回答" @keydown.enter="answer(p, t)">
+                <button class="btn amber" :disabled="!t.trim()" @click="answer(p, t)">送出</button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </article>
+    </template>
+  </section>
+  <p class="calm" x-show="!cards.length && view==='board'">目前沒有事在等你。</p>
+
+  <!-- 看板：對話列 -->
+  <template x-if="view==='board'">
+    <div>
+      <div class="lh"><span></span><span>對話</span><span>近 24 小時的執行</span><span>模型</span><span class="r">更新</span><span></span></div>
+      <template x-for="s in list" :key="s.id">
+        <div class="rw">
+          <i class="lamp" :class="s.status" role="img" :aria-label="statusZh(s.status)"></i>
+          <div class="ti">
+            <button class="t" @click="openSession(s.id)" x-text="s.title"></button>
+            <div class="o"><span x-text="s.origin.label"></span> · <code x-text="s.id.slice(0,12)"></code><span class="stz" :class="s.status" x-show="s.status!=='done'" x-text="' · ' + statusZh(s.status)"></span></div>
+          </div>
+          <div class="tl" role="img" aria-label="近 24 小時的執行"><template x-for="(g,i) in timeline(s.id)" :key="i"><i :class="g.c" :style="`left:${g.l}%;width:${g.w}%`"></i></template></div>
+          <label class="mdl" :class="{ov: s.model}">
+            <span class="vh">模型</span>
+            <select @change="setModel(s, $event.target.value)" aria-label="模型">
+              <option value="" :selected="!s.model" x-text="defaultModel"></option>
+              <template x-for="m in models" :key="m.id"><option :value="m.id" :selected="m.id===s.model" x-text="m.id"></option></template>
+            </select>
+          </label>
+          <span class="when" x-text="rel(s.updated)"></span>
+          <span class="rc"><button class="btn sm" x-show="s.status==='run'" @click="interrupt(s)">中斷</button></span>
+        </div>
+      </template>
+      <p class="calm" x-show="!list.length">這個分類下沒有對話。</p>
+
+      <section class="sch" x-show="schedules.length" aria-label="排程">
+        <h3>排程</h3>
+        <template x-for="sc in schedules" :key="sc.id">
+          <div class="sc" :class="{paused: sc.paused}">
+            <span class="sc-when"><b x-text="cron(sc.expression)"></b><span x-text="'（' + sc.zone + '）'"></span></span>
+            <span class="sc-what"><span x-text="sc.prompt"></span> · <button class="lnk" @click="openSession(sc.sessionId)" x-text="titleOf(sc.sessionId)"></button></span>
+            <span class="sc-next" x-text="sc.paused ? '已暫停' : '下次 ' + until(sc.next)"></span>
+            <button class="btn sm" @click="pause(sc)" x-text="sc.paused ? '恢復' : '暫停'"></button>
+            <button class="btn sm ghost" @click="askDelete(sc)" aria-label="刪除排程">刪除</button>
+          </div>
+        </template>
+      </section>
+    </div>
+  </template>
+
+  <!-- 單一對話：執行紀錄、排程 -->
+  <template x-if="view==='session' && detail">
+    <div>
+      <h3 class="h3s">執行紀錄</h3>
+      <div class="rt rt-h" x-show="runsOf(detail.id).length"><span>狀態</span><span>種類</span><span>來源</span><span>開始</span><span>時間</span><span>編號</span></div>
+      <template x-for="r in runsOf(detail.id)" :key="r.id">
+        <div class="rt">
+          <span class="stt" :class="r.ui"><i class="lamp" :class="r.ui"></i><span x-text="statusZh(r.ui)"></span></span>
+          <span x-text="r.kind==='worker' ? '子任務' : '對話'"></span>
+          <span x-text="r.origin"></span>
+          <span x-text="rel(r.start)"></span>
+          <span x-text="r.end ? dur(r.end - r.start) : '進行中'"></span>
+          <code x-text="r.id.slice(0,12)"></code>
+        </div>
+      </template>
+      <p class="calm" x-show="!runsOf(detail.id).length">還沒有執行過。</p>
+
+      <template x-if="schedulesOf(detail.id).length">
+        <div>
+          <h3 class="h3s">排程</h3>
+          <template x-for="sc in schedulesOf(detail.id)" :key="sc.id">
+            <div class="sc" :class="{paused: sc.paused}">
+              <span class="sc-when"><b x-text="cron(sc.expression)"></b><span x-text="'（' + sc.zone + '）'"></span></span>
+              <span class="sc-what" x-text="sc.prompt"></span>
+              <span class="sc-next" x-text="sc.paused ? '已暫停' : '下次 ' + until(sc.next)"></span>
+              <button class="btn sm" @click="pause(sc)" x-text="sc.paused ? '恢復' : '暫停'"></button>
+              <button class="btn sm ghost" @click="askDelete(sc)">刪除</button>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </template>
+</main>
+
+<!-- ═════════ 右：設定抽屜 ═════════ -->
+<aside class="drawer" x-show="drawer" aria-label="設定" :class="{helpall: helpAll}">
+  <div class="dh">
+    <h2>設定</h2>
+    <input class="srch" type="search" x-model.debounce.120ms="q" placeholder="搜尋設定" aria-label="搜尋設定名稱、鍵或說明">
+    <button class="sel" @click="menu=!menu" :aria-expanded="menu" aria-haspopup="true" :disabled="!!q.trim()">
+      <span x-text="tab==='file' ? (fileId==='persona' ? '人格' : '指示') : (sectionNow ? sectionNow.zh : '')"></span>
+      <code x-text="tab==='file' ? (fileId==='persona' ? 'PERSONA.md' : 'AGENTS.md') : (sectionNow ? '[' + sectionNow.table + ']' : '')"></code>
+      <svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+    </button>
+    <button class="x" @click="drawer=false" aria-label="關閉設定">×</button>
+  </div>
+
+  <div class="menu" x-show="menu" @click.outside="menu=false">
+    <template x-for="g in S.groups" :key="g">
+      <div class="mg">
+        <p class="mgt" x-text="g"></p>
+        <template x-for="sec in S.sections.filter(x => x.group === g)" :key="sec.id">
+          <button class="mi" :class="{on: tab==='section' && section===sec.id}" @click="pick(sec.id)">
+            <span x-text="sec.zh"></span><code x-text="'[' + sec.table + ']'"></code>
+            <b class="n edit" x-show="secEdits(sec.id)" x-text="secEdits(sec.id)" aria-label="未寫入"></b>
+            <b class="n err" x-show="secErrs(sec.id)" x-text="secErrs(sec.id)" aria-label="需修正"></b>
+          </button>
+        </template>
+      </div>
+    </template>
+    <div class="mg">
+      <p class="mgt">檔案</p>
+      <button class="mi" :class="{on: tab==='file' && fileId==='persona'}" @click="pickFile('persona')"><span>人格</span><code>PERSONA.md</code></button>
+      <button class="mi" :class="{on: tab==='file' && fileId==='agents'}" @click="pickFile('agents')"><span>指示</span><code>AGENTS.md</code></button>
+    </div>
+  </div>
+
+  <!-- 設定欄位 -->
+  <div class="db" x-show="tab==='section' || q.trim()">
+    <template x-if="!q.trim() && sectionNow">
+      <div class="lead">
+        <p x-text="sectionNow.blurb"></p>
+        <button class="lnk" @click="helpAll=!helpAll" x-text="helpAll ? '收起說明' : '展開所有說明'"></button>
+      </div>
+    </template>
+    <template x-if="q.trim()">
+      <div class="lead"><p>搜尋「<b x-text="q.trim()"></b>」</p><button class="lnk" @click="q=''">清除</button></div>
+    </template>
+
+    <div class="g">
+      <template x-for="r in rows" :key="r.id">
+        <div class="cell" :class="['k-' + r.kind, r.wide ? 'wide' : '', r.depth ? 'sub' : '']" x-show="!r.hide">
+
+          <template x-if="r.kind==='sec'"><h3 class="sech"><span x-text="r.sec.zh"></span><code x-text="'[' + r.sec.table + ']'"></code></h3></template>
+          <template x-if="r.kind==='none'"><p class="calm">找不到符合的設定。</p></template>
+
+          <template x-if="r.kind==='blk'">
+            <div class="blk"><span x-text="r.blk.zh || '共用'"></span><code x-text="'[' + r.blk.table + ']'"></code></div>
+          </template>
+
+          <template x-if="r.kind==='fold'">
+            <button class="fold" :class="{strong: r.strong}" @click="flip(r.fid, r.auto)" :aria-expanded="r.open">
+              <svg class="ic" :class="{rot: r.open}" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
+              <span x-text="r.label"></span><span class="cnt" x-text="r.n + (r.strong ? ' 組' : ' 項')"></span>
+            </button>
+          </template>
+
+          <!-- 列表（MCP 伺服器、通道…） -->
+          <template x-if="r.kind==='list'">
+            <div class="lst" :data-path="r.path">
+              <div class="lab"><span class="zh" x-text="r.f.zh"></span><code x-text="shortKey(r)"></code><span class="s" :class="rowSrc(r)" x-text="{env:'環境變數',file:'檔案',default:'預設',edit:'未寫入'}[rowSrc(r)]"></span>
+                <button class="rst" x-show="rowSrc(r)==='edit'" @click="revert(r.path)">還原</button></div>
+              <p class="help" x-html="md(r.f.help)"></p>
+              <p class="calm sm" x-show="!(val(r.path)||[]).length">還沒有任何一筆。</p>
+            </div>
+          </template>
+          <template x-if="r.kind==='item'">
+            <div class="item" :data-path="r.path">
+              <button class="ihead" @click="open[r.path] = !open[r.path]" :aria-expanded="r.expanded">
+                <svg class="ic" :class="{rot: r.expanded}" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
+                <span class="it" x-text="itemTitle(r.f, r.i)"></span><span class="n err" x-show="probs(r.path).length || problems.some(p => p.key.startsWith(r.path + '.'))">需修正</span>
+              </button>
+              <button class="rst" @click="delItem(r.f, r.i)" :aria-label="'移除第 ' + (r.i+1) + ' 筆'">移除</button>
+            </div>
+          </template>
+          <template x-if="r.kind==='add'"><button class="btn sm addb" @click="addItem(r.f)">＋ 新增一筆</button></template>
+
+          <!-- 一般欄位 -->
+          <template x-if="r.kind==='field'">
+            <div class="f" :data-path="r.path" :class="{locked: rowLocked(r), bad: probs(r.path).length, edit: rowSrc(r)==='edit', tog: r.f.type==='bool'}">
+              <div class="lab">
+                <label :for="'f-' + r.path"><span class="zh" x-text="r.f.zh"></span></label><code x-text="shortKey(r)"></code>
+                <span class="s" :class="rowSrc(r)" x-show="rowSrc(r)" x-text="pendingKey(r.path) && rowSrc(r)!=='edit' ? '已寫入 · 待重啟' : {env:'環境變數',file:'檔案',default:'預設',edit:'未寫入'}[rowSrc(r)]"></span>
+                <button class="rst" x-show="!r.lk && !rowLocked(r) && (rowSrc(r)==='edit' || !isDefault(r.path))" @click="rowSrc(r)==='edit' ? revert(r.path) : toDefault(r.path)" x-text="rowSrc(r)==='edit' ? '還原' : '改回預設'"></button>
+              </div>
+
+              <template x-if="r.f.type==='bool'">
+                <div class="swrap"><button type="button" role="switch" class="sw" :id="'f-' + r.path" :aria-checked="!!ev(r)" :disabled="rowLocked(r)" @click="es(r, !ev(r))"><i></i></button><span x-text="ev(r) ? '開' : '關'"></span></div>
+              </template>
+              <template x-if="r.f.type==='int' || r.f.type==='float'">
+                <div><input class="in mono" type="number" :id="'f-' + r.path" :value="ev(r)" :min="r.f.min" :max="r.f.max" :step="r.f.type==='float' ? 0.05 : 1" :disabled="rowLocked(r)" @input="num(r, $event.target.value)"><span class="hintx" x-text="hint(r)"></span></div>
+              </template>
+              <template x-if="r.f.type==='duration'">
+                <input class="in mono" type="text" :id="'f-' + r.path" :value="ev(r)" :placeholder="r.f.def" :disabled="rowLocked(r)" spellcheck="false" @input="es(r, $event.target.value)">
+              </template>
+              <template x-if="r.f.type==='string'">
+                <div><input class="in" :class="{mono: ['url','path','secretfile','addr'].includes(r.f.kind)}" type="text" :id="'f-' + r.path" :value="ev(r)" :placeholder="r.f.def || (r.f.kind==='secretfile' ? '未設定' : '')" :disabled="rowLocked(r)" spellcheck="false" @input="es(r, $event.target.value)">
+                  <span class="hintx" x-show="r.f.kind==='secretfile'" x-text="ev(r) ? '放在部署目錄（~/.jingclaw）下，權限必須是 600' : ''"></span></div>
+              </template>
+              <template x-if="r.f.type==='enum'">
+                <div><select class="in" :id="'f-' + r.path" :disabled="rowLocked(r)" @change="es(r, $event.target.value)">
+                    <template x-for="o in r.f.options" :key="o.v"><option :value="o.v" :selected="o.v===ev(r)" x-text="(o.zh || o.v || '（空）')"></option></template>
+                  </select>
+                  <span class="hintx" x-html="md((r.f.options.find(o => o.v===ev(r)) || {}).note)"></span></div>
+              </template>
+              <template x-if="r.f.type==='strings'">
+                <div class="chips2" :id="'f-' + r.path">
+                  <template x-for="(c,i) in (ev(r)||[])" :key="c + i">
+                    <span class="chip2"><span x-text="c"></span><button type="button" :disabled="rowLocked(r)" @click="delChip(r,i)" :aria-label="'移除 ' + c">×</button></span>
+                  </template>
+                  <input class="chipin" type="text" :disabled="rowLocked(r)" :placeholder="r.f.kind==='envnames' ? '加入環境變數名稱' : '加入一項，按 Enter'" aria-label="加入一項"
+                    @keydown.enter.prevent="addChip(r, $event.target.value); $event.target.value=''" @keydown.comma.prevent="addChip(r, $event.target.value); $event.target.value=''" @blur="addChip(r, $event.target.value); $event.target.value=''">
+                </div>
+              </template>
+              <template x-if="r.f.type==='map'">
+                <textarea class="in mono area" rows="3" :id="'f-' + r.path" :value="mapText(r)" placeholder="每行一組：名稱=值" spellcheck="false" :disabled="rowLocked(r)" @input="mapSet(r, $event.target.value)"></textarea>
+              </template>
+
+              <template x-for="p in probs(r.path)" :key="p.why">
+                <p class="msg"><span x-text="p.key + ' ' + p.why + '.'"></span> <span x-text="p.fix"></span></p>
+              </template>
+              <p class="msg mute" x-show="rowLocked(r)"><span x-text="lockNote(r.path)"></span><span x-text="' 蓋過了' + (r.path in file ? '；檔案裡寫的是 ' + JSON.stringify(file[r.path]) : '') + '。要改請改' + (lock[r.path] && lock[r.path].source === 'flag' ? '啟動時的旗標' : '環境變數') + '。'"></span></p>
+              <p class="help" x-html="md(r.f.help)"></p>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- 檔案：人格、指示 -->
+  <div class="db" x-show="tab==='file' && !q.trim()">
+    <template x-for="id in [fileId]" :key="id">
+      <div class="doc">
+        <div class="lead"><p x-text="id==='persona' ? '它是誰、怎麼說話。放在設定檔旁邊，不是設定值。' : '做事的方式與專案慣例。通用的 AGENTS.md 格式，其他工具也會讀。'"></p></div>
+        <textarea class="in mono doc-area" x-model="docs[id].draft" :disabled="!docs[id].loaded" spellcheck="false" :aria-label="id==='persona' ? 'PERSONA.md 內容' : 'AGENTS.md 內容'"></textarea>
+        <p class="help show">每次執行都會重新讀取，存檔後不需要重啟。放在 <code>~/.jingclaw/</code>，不在 agent 可以修改的 workspace 裡。</p>
+      </div>
+    </template>
+  </div>
+
+  <div class="act" x-show="tab==='section' || q.trim()">
+    <p>
+      <template x-if="editKeys.length"><span><b x-text="editKeys.length"></b> 項未寫入<template x-if="problems.length"><span>，<button class="lnk bad" @click="goProblem()"><span x-text="problems.length"></span> 項需修正</button></span></template><template x-if="check.busy"><span class="mute">，檢查中…</span></template><br>寫入後重啟才生效，對話不受影響</span></template>
+      <template x-if="!editKeys.length"><span>沒有未寫入的修改<br><span class="mute">只會改動你動過的那幾行</span></span></template>
+    </p>
+    <button class="btn" :disabled="!editKeys.length" @click="dialog='discard'">捨棄</button>
+    <button class="btn primary" :disabled="!editKeys.length || problems.length > 0 || !checked" @click="askWrite()">寫入</button>
+  </div>
+  <div class="act" x-show="tab==='file' && !q.trim()">
+    <p><template x-for="id in [fileId]" :key="id"><span x-text="docs[id].draft !== docs[id].saved ? '有尚未儲存的修改' : '已儲存'"></span></template></p>
+    <button class="btn" :disabled="docs[fileId].draft === docs[fileId].saved" @click="docs[fileId].draft = docs[fileId].saved">還原</button>
+    <button class="btn primary" :disabled="docs[fileId].draft === docs[fileId].saved" @click="saveDoc(fileId)">儲存</button>
+  </div>
+</aside>
+
+<!-- ═════════ 對話框 ═════════ -->
+<dialog class="dlg" x-effect="dialog==='new' ? ($el.open || $el.showModal()) : ($el.open && $el.close())" @cancel.prevent="dialog=null" @click.self="dialog=null" aria-labelledby="t-new">
+  <form method="dialog" @submit.prevent="createSession()">
+    <h2 id="t-new">新對話</h2>
+    <label class="fl"><span>標題</span><input class="in" type="text" x-model="newTitle" placeholder="例如：整理 core/ 的 lint 警告" autocomplete="off"></label>
+    <label class="fl"><span>模型</span>
+      <select class="in" x-model="newModel"><option value="" x-text="'預設（' + defaultModel + '）'"></option><template x-for="m in models" :key="m.id"><option :value="m.id" x-text="m.name + '　' + m.id"></option></template></select></label>
+    <div class="dacts"><button type="button" class="btn" @click="dialog=null">取消</button><button type="submit" class="btn primary">建立</button></div>
+  </form>
+</dialog>
+
+<dialog class="dlg wide" x-effect="dialog==='write' ? ($el.open || $el.showModal()) : ($el.open && $el.close())" @cancel.prevent="dialog=null" @click.self="dialog=null" aria-labelledby="t-write">
+  <h2 id="t-write">寫入 <code x-text="cfg.path"></code></h2>
+  <p class="sub">只動下面這幾行，檔案裡其餘的內容與註解原樣保留。</p>
+  <div class="diff"><template x-for="(l,i) in diff" :key="i"><div class="ln" :class="l.c" x-text="l.t"></div></template></div>
+  <p class="fine">寫入後重啟 daemon 才會生效。重啟不會遺失對話。重啟的方式：在終端機執行 <code>jingclaw stop</code>，再執行 <code>jingclaw</code>。</p>
+  <div class="dacts"><button class="btn" @click="dialog=null">取消</button><button class="btn primary" @click="write()">寫入</button></div>
+</dialog>
+
+<dialog class="dlg" x-effect="dialog==='discard' ? ($el.open || $el.showModal()) : ($el.open && $el.close())" @cancel.prevent="dialog=null" @click.self="dialog=null" aria-labelledby="t-disc">
+  <h2 id="t-disc">捨棄修改</h2>
+  <p class="sub">這 <b x-text="editKeys.length"></b> 項還沒寫入的修改會消失，設定檔不會動。</p>
+  <div class="dacts"><button class="btn" @click="dialog=null">繼續編輯</button><button class="btn danger" @click="discard()">捨棄</button></div>
+</dialog>
+
+<dialog class="dlg" x-effect="dialog==='delsch' ? ($el.open || $el.showModal()) : ($el.open && $el.close())" @cancel.prevent="dialog=null" @click.self="dialog=null" aria-labelledby="t-del">
+  <h2 id="t-del">刪除排程</h2>
+  <p class="sub" x-show="target">「<span x-text="target && cron(target.expression)"></span>　<span x-text="target && target.prompt"></span>」會被刪除，無法復原。</p>
+  <div class="dacts"><button class="btn" @click="dialog=null">取消</button><button class="btn danger" @click="doDelete()">刪除</button></div>
+</dialog>
+
+<div class="toast" role="status" aria-live="polite" x-show="toast" x-text="toast"></div>
+</div>
+</body>
+</html>

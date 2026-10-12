@@ -45,6 +45,8 @@ var servicesForScope = map[Scope]map[string]bool{
 		"jingclaw.control.v1.GatewayIngressService": true,
 		"jingclaw.control.v1.ArtifactService":       true,
 		"jingclaw.control.v1.MemoryService":         true,
+		"jingclaw.control.v1.ConfigService":         true,
+		"jingclaw.control.v1.BrowserService":        true,
 	},
 	ScopeGateway: {
 		"jingclaw.control.v1.GatewayIngressService": true,
@@ -66,6 +68,12 @@ func NewToken(scope Scope) (Token, error) {
 	return Token{Value: base64.RawURLEncoding.EncodeToString(buf), Scope: scope}, nil
 }
 
+// Sessions are credentials that come and go while the daemon runs, such as a
+// browser's. The fixed ones are known at startup and passed in as tokens.
+type Sessions interface {
+	Lookup(value string) (Scope, bool)
+}
+
 // AuthMiddleware rejects requests without a known bearer token, requests whose
 // Host header does not name the loopback address, and requests for a service
 // the presented credential does not cover.
@@ -73,7 +81,11 @@ func NewToken(scope Scope) (Token, error) {
 // The Host check defends against DNS rebinding: an attacker-controlled name
 // can resolve to 127.0.0.1, so the socket alone proves nothing about who is
 // calling.
-func AuthMiddleware(tokens []Token, allowedPort string, next http.Handler) http.Handler {
+//
+// sessions may be nil. A credential has the scope of whichever list it is in,
+// so a browser's is checked against the services it may call exactly as the
+// fixed ones are.
+func AuthMiddleware(tokens []Token, sessions Sessions, allowedPort string, next http.Handler) http.Handler {
 	byValue := make(map[string]Scope, len(tokens))
 	for _, token := range tokens {
 		byValue[token.Value] = token.Scope
@@ -88,6 +100,9 @@ func AuthMiddleware(tokens []Token, allowedPort string, next http.Handler) http.
 		}
 
 		scope, matched := lookupToken(byValue, provided)
+		if !matched && sessions != nil {
+			scope, matched = sessions.Lookup(provided)
+		}
 		if !matched {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

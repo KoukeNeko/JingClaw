@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+import "google/protobuf/timestamp.proto";
+import "jingclaw/control/v1/common.proto";
+
+// BrowserService is how a person lets a browser into the control surface.
+//
+// A browser never holds the operator's own credential. That one is read from a
+// file by programs on this machine, and putting it in a page or in an address
+// would put it in a history, a log and anything that can see a screen. What a
+// browser gets instead is its own: it is handed a code that works once, for a
+// minute, and trades it for a credential of its own that expires.
+//
+// Reachable by the operator's own credential and by nothing else.
+service BrowserService {
+  // CreatePairing makes a code for one browser to trade for a session.
+  //
+  // The code is spent by the first browser to present it, so somebody who
+  // sees the address after it was used has nothing.
+  rpc CreatePairing(CreatePairingRequest) returns (CreatePairingResponse);
+}
+
+message CreatePairingRequest {
+  RequestMeta meta = 1;
+}
+
+message CreatePairingResponse {
+  string code = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}

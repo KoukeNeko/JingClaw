@@ -56,6 +56,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/tool/builtin"
 	memorytool "github.com/KoukeNeko/JingClaw/core/internal/tool/memory"
 	"github.com/KoukeNeko/JingClaw/core/internal/web"
+	"github.com/KoukeNeko/JingClaw/core/internal/webui"
 	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
@@ -523,6 +524,10 @@ func run(args []string) error {
 		return err
 	}
 
+	// What lets a browser in. It is given a credential of its own and never
+	// the one above, which programs on this machine read from a file.
+	browsers := control.NewBrowsers(time.Now)
+
 	listener, err := net.Listen("tcp", cfg.Server.Addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", cfg.Server.Addr, err)
@@ -562,12 +567,21 @@ func run(args []string) error {
 	api.Handle(controlv1connect.NewMemoryServiceHandler(control.NewMemoryServer(store)))
 	api.Handle(controlv1connect.NewChannelServiceHandler(
 		control.NewChannelServer(store, func() string { return id.WithPrefix("bnd") }, time.Now)))
+	api.Handle(controlv1connect.NewBrowserServiceHandler(control.NewBrowserServer(browsers)))
 
-	// Everything sits behind the credential check. There is no unauthenticated
-	// path: the browser console that needed one is gone, and the terminal
-	// client reads its credential from the discovery file like the CLI does.
+	// The instruction files live in the deployment directory, when there is one.
+	var deployment string
+	if dir, found := home.Resolve(); found {
+		deployment = dir.Root
+	}
+	api.Handle(controlv1connect.NewConfigServiceHandler(
+		control.NewConfigServer(configFile, cfg, settingsHeldFromTheFile(flags, cfg), deployment)))
+
+	// Everything that does anything sits behind the credential check. A
+	// browser's credential is checked the same way, against the same list of
+	// what it may reach; it differs only in having been issued to it.
 	guarded := control.AuthMiddleware(
-		[]control.Token{controlToken, gatewayToken}, port, api)
+		[]control.Token{controlToken, gatewayToken}, browsers, port, api)
 
 	root := http.NewServeMux()
 	for _, service := range []string{
@@ -576,9 +590,18 @@ func run(args []string) error {
 		controlv1connect.ChannelServiceName,
 		controlv1connect.GatewayIngressServiceName,
 		controlv1connect.MemoryServiceName,
+		controlv1connect.ConfigServiceName,
+		controlv1connect.BrowserServiceName,
 	} {
 		root.Handle("/"+service+"/", guarded)
 	}
+
+	// The page, and the one place a browser gets in. Neither takes a
+	// credential: the page holds no secrets and can do nothing until it has
+	// one, and a pairing code is the credential. The host check still stands
+	// in front of both, which is what keeps a web page from elsewhere out.
+	root.Handle("/ui/pair", control.RequireLoopbackHost(port, control.PairHandler(browsers)))
+	root.Handle("/ui/", control.RequireLoopbackHost(port, http.StripPrefix("/ui/", webui.Handler())))
 	// h2c so a gRPC client can reach the same endpoint as Connect and
 	// gRPC-Web over plaintext loopback.
 	handler := root
