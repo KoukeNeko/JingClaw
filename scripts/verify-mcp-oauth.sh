@@ -12,6 +12,13 @@
 # while the client was wrong about all four.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -40,8 +47,6 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-
 python3 ../scripts/support/oauth-mcp-server.py > "$WORK/stub.url" 2>"$WORK/stub.err" &
 STUB=$!
 
@@ -53,30 +58,24 @@ while [ ! -s "$WORK/stub.url" ]; do
 done
 ORIGIN=$(cat "$WORK/stub.url")
 
-cat > "$WORK/config.toml" <<EOF
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG="[provider]
+backend = \"fake\"
+fake_model = \"fake-echo\"
 
 [server]
-addr = "127.0.0.1:7811"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
+addr = \"127.0.0.1:7811\"
 
 [[mcp.servers]]
-name = "books"
-url = "$ORIGIN/mcp"
+name = \"books\"
+url = \"$ORIGIN/mcp\"
 oauth = true
-EOF
+"
 
-# 1. Before anybody signs in.
-LISTED=$("$WORK/jingclaw" mcp list --config "$WORK/config.toml" 2>&1)
-printf '%s' "$LISTED" | grep -q 'jingclaw mcp login books' ||
-	fail "listing does not say what to run: $LISTED"
-printf 'ok   a server nobody has signed in to says which command fixes it\n'
-
-# And the daemon says the same thing, rather than reporting a fault.
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+# 1. Before anybody signs in. The daemon says which command fixes it, rather
+#    than reporting a fault.
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 WAITED=0
 while [ ! -f "$WORK/run/daemon.json" ]; do
@@ -89,7 +88,7 @@ grep -q 'needs authorizing' "$WORK/daemon.err" ||
 	fail "the daemon called an unauthorized server broken: $(grep -i books "$WORK/daemon.err")"
 grep -q 'jingclaw mcp login books' "$WORK/daemon.err" ||
 	fail "the daemon did not say what to run: $(grep -i books "$WORK/daemon.err")"
-printf 'ok   and the daemon reports it as needing a person, not as a fault\n'
+printf 'ok   the daemon reports a server nobody has signed in to as needing a person, not as a fault\n'
 
 grep -q '0 of 1 mcp servers' "$WORK/daemon.out" ||
 	fail "the startup line does not say the server is missing: $(grep Tools "$WORK/daemon.out")"
@@ -97,10 +96,15 @@ grep -q 'jingclaw mcp login' "$WORK/daemon.out" ||
 	fail "the line a person reads does not say what to run: $(grep Tools "$WORK/daemon.out")"
 printf 'ok   and does not offer its tools in the meantime\n'
 
-kill "$DAEMON" 2>/dev/null; DAEMON=""
+# The tool servers are kept in the daemon's settings, so listing them and
+# signing in to one both ask the daemon, and it stays up for all of this.
+LISTED=$("$WORK/jingclaw" mcp list 2>&1)
+printf '%s' "$LISTED" | grep -q 'jingclaw mcp login books' ||
+	fail "listing does not say what to run: $LISTED"
+printf 'ok   and listing it says which command fixes that\n'
 
 # 2. Somebody signs in. The browser is this script.
-"$WORK/jingclaw" mcp login books --config "$WORK/config.toml" \
+"$WORK/jingclaw" mcp login books \
 	>"$WORK/login.out" 2>"$WORK/login.err" &
 LOGIN=$!
 
@@ -151,7 +155,10 @@ CHECK
 printf 'ok   and holds the client it was obtained with, not just the token\n'
 
 # 4. The daemon picks it up without being told anything.
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon2.out" 2>"$WORK/daemon2.err" &
+kill "$DAEMON"
+wait "$DAEMON" 2>/dev/null || true
+DAEMON=""
+"$WORK/jingclaw" daemon >"$WORK/daemon2.out" 2>"$WORK/daemon2.err" &
 DAEMON=$!
 WAITED=0
 while [ ! -f "$WORK/run/daemon.json" ]; do
@@ -166,15 +173,13 @@ grep -q 'needs authorizing' "$WORK/daemon2.err" &&
 	fail "the daemon asked for a sign-in that had already happened"
 printf 'ok   the daemon uses it on its next start, with nothing else told to it\n'
 
-LISTED=$("$WORK/jingclaw" mcp list --config "$WORK/config.toml" 2>&1)
+LISTED=$("$WORK/jingclaw" mcp list 2>&1)
 printf '%s' "$LISTED" | grep -q 'signed in' ||
 	fail "listing does not report the sign-in: $LISTED"
 printf 'ok   and says so\n'
 
-kill "$DAEMON" 2>/dev/null; DAEMON=""
-
 # 5. Signing out is a thing somebody asks for, and only that.
-"$WORK/jingclaw" mcp logout books --config "$WORK/config.toml" >/dev/null 2>&1 ||
+"$WORK/jingclaw" mcp logout books >/dev/null 2>&1 ||
 	fail "signing out failed"
 [ -f "$SESSION" ] && fail "the session survived being forgotten"
 printf 'ok   signing out forgets it\n'

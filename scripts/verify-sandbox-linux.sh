@@ -76,17 +76,26 @@ fi
 
 # The package checks above use policies of their own. The daemon's always
 # hides its own directory, which landlock cannot do, so turning the sandbox on
-# has to stop it at startup and say why — not start, and refuse every command.
+# has to leave it with no agent at startup and say why — not start one, and
+# refuse every command. It stays up for the dashboard to correct the setting
+# in, so it is given time to say so and is stopped with the container.
 REFUSED=$(docker run --rm -v "$PWD:/src" -w /src/core \
 	-e JINGCLAW_HOME=/tmp/jingclaw -e JINGCLAW_SANDBOX_ENABLED=true golang:alpine sh -c '
-	timeout 120 go run -buildvcs=false ./cmd/jingclaw daemon 2>&1
-' 2>&1 | tail -3)
+	go build -buildvcs=false -o /tmp/daemon ./cmd/jingclaw || exit 1
+	/tmp/daemon daemon >/tmp/daemon.out 2>&1 &
+	WAITED=0
+	until grep -q "Fix it in the dashboard" /tmp/daemon.out || [ "$WAITED" -gt 600 ]; do
+		WAITED=$((WAITED + 1))
+		sleep 0.2
+	done
+	cat /tmp/daemon.out
+' 2>&1)
 case "$REFUSED" in
-*"[sandbox] enabled"*"cannot hide"*) ;;
-*) fail "turning the sandbox on did not stop the daemon at startup, saying why:
+*"repair mode: no agent is running"*"[sandbox] enabled"*"cannot hide"*) ;;
+*) fail "turning the sandbox on did not leave the daemon with no agent, saying why:
 $REFUSED" ;;
 esac
-printf 'ok   and the daemon refuses to start with it on, rather than refusing every command\n'
+printf 'ok   and the daemon comes up with no agent with it on, rather than refusing every command\n'
 
 # And the daemon says which of those it will actually enforce, rather than
 # only that confinement is on.

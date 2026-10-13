@@ -13,14 +13,19 @@
 # that mismatch, and the check is that the smaller number wins.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones each of this check's daemons is given, and a variable
+# from the caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
@@ -118,13 +123,14 @@ while [ ! -s "$WORK/port" ]; do
 done
 PORT=$(cat "$WORK/port")
 
-# start writes a config for one provider and reports what the daemon settled on.
+# start runs the daemon on the settings it is given and reports what it
+# settled on. Settings are only saved into a database that has none, so each
+# start begins with an empty one.
 start() {
 	NAME=$1
 	rm -rf "$WORK/run" "$WORK/data"
-	mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
-	"$WORK/jingclaw" daemon --config "$WORK/$NAME.toml" >"$WORK/$NAME.out" 2>"$WORK/$NAME.err" &
+	JINGCLAW_CONFIG=$2 "$WORK/jingclaw" daemon >"$WORK/$NAME.out" 2>"$WORK/$NAME.err" &
 	DAEMON=$!
 
 	WAITED=0
@@ -140,33 +146,23 @@ $(cat "$WORK/$NAME.err")"
 	DAEMON=""
 }
 
-cat > "$WORK/ollama.toml" <<EOF
-[provider]
-backend = "ollama"
+OLLAMA="[provider]
+backend = \"ollama\"
 
 [provider.ollama]
-model = "qwen3:8b"
-base_url = "http://127.0.0.1:$PORT"
-keep_alive = "30m"
+model = \"qwen3:8b\"
+base_url = \"http://127.0.0.1:$PORT\"
+keep_alive = \"30m\"
+"
 
-[server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
-
-cat > "$WORK/compat.toml" <<EOF
-[provider]
-backend = "openai_compat"
+COMPAT="[provider]
+backend = \"openai_compat\"
 
 [provider.openai_compat]
-base_url = "http://127.0.0.1:$PORT/v1"
-profile = "vllm"
-name = "stand-in"
-
-[server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+base_url = \"http://127.0.0.1:$PORT/v1\"
+profile = \"vllm\"
+name = \"stand-in\"
+"
 
 check() {
 	NAME=$1
@@ -186,11 +182,11 @@ $(cat "$WORK/$NAME.err")"
 		fail "$NAME: the window's provenance was not recorded: $LINE"
 }
 
-start ollama
+start ollama "$OLLAMA"
 check ollama ollama
 printf 'ok   ollama: the catalogue is read and the loaded context wins\n'
 
-start compat
+start compat "$COMPAT"
 check compat "openai_compat/stand-in"
 printf 'ok   openai_compat: the endpoint is read and the loaded context wins\n'
 
@@ -198,44 +194,78 @@ printf 'ok   openai_compat: the endpoint is read and the loaded context wins\n'
 # and the catalogue being read — because this has never been run against the
 # real service: nobody here has a key for it. What the unit tests cover is the
 # wire format; what this covers is that the daemon can be told to use it.
-cat > "$WORK/anthropic.toml" <<EOF
-[provider]
-backend = "anthropic"
+ANTHROPIC="[provider]
+backend = \"anthropic\"
 
 [provider.anthropic]
-model = "claude-stand-in"
-base_url = "http://127.0.0.1:$PORT/anthropic"
-api_key_file = "anthropic.key"
+model = \"claude-stand-in\"
+base_url = \"http://127.0.0.1:$PORT/anthropic\"
+api_key_file = \"anthropic.key\"
 
 [server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-log_level = "info"
-EOF
+log_level = \"info\"
+"
 # Beside the deployment, which is where a credential is looked for: naming an
 # absolute path here would have it appended to that directory rather than used.
 printf 'not-a-real-key\n' > "$JINGCLAW_HOME/anthropic.key"
 chmod 600 "$JINGCLAW_HOME/anthropic.key"
 
-start anthropic
+start anthropic "$ANTHROPIC"
 grep -q '"model":"claude-stand-in"' "$WORK/anthropic.err" ||
 	fail "anthropic: the configured model did not reach the adapter:
 $(cat "$WORK/anthropic.err")"
 printf 'ok   anthropic: the endpoint is read and the model reaches the adapter\n'
 
-# And no key is refused at startup rather than on a first turn.
-sed 's|api_key_file = .*|api_key_file = "not-there.key"|' "$WORK/anthropic.toml" \
-	> "$WORK/nokey.toml"
-if "$WORK/jingclaw" daemon --config "$WORK/nokey.toml" >"$WORK/nokey.out" 2>&1; then
-	fail "anthropic started with no key"
-fi
-grep -qi "api key" "$WORK/nokey.out" ||
-	fail "the refusal does not say what is missing: $(cat "$WORK/nokey.out")"
+# And no key is refused at startup rather than on a first turn. Refusing is not
+# the daemon exiting any more: it stays up with no agent, so that the setting
+# can be put right, and what is asserted is that it says what is missing and
+# that nothing which could take a turn is there to be asked.
+rm -rf "$WORK/run" "$WORK/data"
+JINGCLAW_CONFIG=$(printf '%s' "$ANTHROPIC" | sed 's|api_key_file = .*|api_key_file = "not-there.key"|') \
+	"$WORK/jingclaw" daemon >"$WORK/nokey.out" 2>&1 &
+DAEMON=$!
+
+WAITED=0
+while [ ! -f "$WORK/run/daemon.json" ]; do
+	WAITED=$((WAITED + 1))
+	[ "$WAITED" -gt 150 ] && fail "anthropic with no key did not come up: $(cat "$WORK/nokey.out")"
+	sleep 0.1
+done
+
+BASE=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["base_url"])' "$WORK/run/daemon.json")
+TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["token"])' "$WORK/run/daemon.json")
+
+STATE=$(curl -s -X POST -H 'content-type: application/json' -H "authorization: Bearer $TOKEN" -d '{}' \
+	"$BASE/jingclaw.control.v1.ConfigService/GetAgentState")
+printf '%s' "$STATE" | python3 -c '
+import json, sys
+
+state = json.load(sys.stdin)
+if state.get("mode") != "repair":
+    print("FAIL: anthropic started with no key: %s" % state, file=sys.stderr)
+    raise SystemExit(1)
+
+problems = state.get("problems") or []
+if not any("api key" in p.get("why", "").lower() for p in problems):
+    print("FAIL: the refusal does not say what is missing: %s" % state, file=sys.stderr)
+    raise SystemExit(1)
+' || exit 1
+
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' \
+	-H "authorization: Bearer $TOKEN" -d '{"title":"no key"}' \
+	"$BASE/jingclaw.control.v1.SessionService/CreateSession")
+[ "$STATUS" = 404 ] ||
+	fail "a daemon with no key answered a request for a session: $STATUS"
+
+kill "$DAEMON" 2>/dev/null
+DAEMON=""
 printf 'ok   anthropic: no key is refused at startup, and says so\n'
 
 # A misconfiguration has to be refused at startup rather than on a first turn.
-sed 's/profile = "vllm"/profile = "vlm"/' "$WORK/compat.toml" > "$WORK/typo.toml"
-if "$WORK/jingclaw" daemon --config "$WORK/typo.toml" >"$WORK/typo.out" 2>&1; then
+# The settings text is checked before it is saved, so this one exits.
+rm -rf "$WORK/run" "$WORK/data"
+if JINGCLAW_CONFIG=$(printf '%s' "$COMPAT" | sed 's/profile = "vllm"/profile = "vlm"/') \
+	"$WORK/jingclaw" daemon >"$WORK/typo.out" 2>&1; then
 	fail "a misspelled profile was accepted"
 fi
 grep -q "profile" "$WORK/typo.out" || fail "the refusal does not name the setting:

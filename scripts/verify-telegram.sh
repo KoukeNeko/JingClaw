@@ -9,14 +9,19 @@
 # run against the real one.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
@@ -44,8 +49,6 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 CHAT_ID=-1001234567890
 USER_ID=77
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-
 # The stub records every call it is given, so the assertions are about what
 # would have gone over the wire rather than about what the adapter believes it
 # sent.
@@ -61,28 +64,27 @@ while ! curl -s -o /dev/null -X POST "http://127.0.0.1:7793/botx/getMe"; do
 done
 : > "$WORK/calls.jsonl"
 
-cat > "$WORK/config.toml" <<EOF
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
-fake_delay = "0s"
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG="[provider]
+backend = \"fake\"
+fake_model = \"fake-echo\"
+fake_delay = \"0s\"
 [server]
-addr = "127.0.0.1:7792"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
+addr = \"127.0.0.1:7792\"
 [gateway]
-platform = "telegram"
+platform = \"telegram\"
 [gateway.telegram]
-account_id = "main"
-api_base = "http://127.0.0.1:7793"
+account_id = \"main\"
+api_base = \"http://127.0.0.1:7793\"
 [[gateway.telegram.channels]]
-channel_ids = ["$CHAT_ID"]
-tenant_id = "$CHAT_ID"
-workspace_id = "default"
-users = ["$USER_ID"]
-EOF
+channel_ids = [\"$CHAT_ID\"]
+tenant_id = \"$CHAT_ID\"
+workspace_id = \"default\"
+users = [\"$USER_ID\"]
+"
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -94,7 +96,7 @@ done
 printf 'ok   the daemon accepts a telegram binding\n'
 
 TELEGRAM_BOT_TOKEN=stub-token \
-	"$WORK/jingclaw" gateway --config "$WORK/config.toml" >"$WORK/gw.out" 2>"$WORK/gw.err" &
+	"$WORK/jingclaw" gateway >"$WORK/gw.out" 2>"$WORK/gw.err" &
 GATEWAY=$!
 
 WAITED=0
@@ -103,7 +105,7 @@ while ! grep -q '"msg":"connected to telegram"' "$WORK/gw.err" 2>/dev/null; do
 	[ "$WAITED" -gt 150 ] && fail "the gateway never connected: $(cat "$WORK/gw.err")"
 	sleep 0.1
 done
-printf 'ok   gatewayd serves telegram when the file says so\n'
+printf 'ok   the gateway serves telegram when the settings say so\n'
 
 # The bot has to know its own name before a mention can match one. A gateway
 # that started without it would sit in a group ignoring everybody.

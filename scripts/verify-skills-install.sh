@@ -12,6 +12,13 @@
 # edited afterwards can be found without diffing anything.
 set -eu
 
+# Nothing inherited may override a setting: every command below reads the
+# environment before it does anything, and a variable from the caller would be
+# one this check did not give it.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -31,17 +38,7 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace" "$WORK/skills"
-
-cat > "$WORK/config.toml" <<EOF
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
-
-[server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+mkdir -p "$WORK/skills"
 
 # A repository holding a skill, and one holding a skill that tries to take
 # what it was not given. The second is what verify-skills.sh proves harmless;

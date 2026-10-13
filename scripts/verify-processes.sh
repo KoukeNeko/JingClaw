@@ -11,14 +11,19 @@
 # check slow and make it fail for reasons that have nothing to do with this.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
@@ -38,13 +43,12 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-
 # The script: start something that keeps running, read what it printed, read
 # again, then answer. Written here rather than driven turn by turn because a
 # scripted provider is only interesting if the whole exchange is one run.
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
@@ -52,7 +56,7 @@ fake_delay = "0s"
 [[provider.fake_script]]
 text = "Starting it."
 tool = "start_process"
-args = '{"program":"sh","args":["-c","echo listening on 3000; (while true; do touch still-running; sleep 0.1; done) & wait"]}'
+args = "{\"program\":\"sh\",\"args\":[\"-c\",\"echo listening on 3000; (while true; do touch still-running; sleep 0.1; done) & wait\"]}"
 
 # The script cannot read the process back: the id is chosen at runtime and a
 # scripted turn is fixed before the daemon starts. Reading is checked in
@@ -63,12 +67,10 @@ text = "It is up."
 
 [server]
 addr = "127.0.0.1:7795"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
 start_daemon() {
-	"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+	"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 	DAEMON=$!
 
 	WAITED=0
@@ -84,10 +86,10 @@ start_daemon() {
 approve_everything() {
 	WAITED=0
 	while [ "$WAITED" -lt 150 ]; do
-		WAITING=$("$WORK/jingclaw" --config "$WORK/config.toml" approvals "$1" 2>/dev/null |
+		WAITING=$("$WORK/jingclaw" approvals "$1" 2>/dev/null |
 			grep -o 'apr_[A-Za-z0-9]*' | head -1 || true)
 		if [ -n "$WAITING" ]; then
-			"$WORK/jingclaw" --config "$WORK/config.toml" approve "$WAITING" >/dev/null 2>&1 || true
+			"$WORK/jingclaw" approve "$WAITING" >/dev/null 2>&1 || true
 		fi
 		WAITED=$((WAITED + 1))
 		sleep 0.2
@@ -96,17 +98,17 @@ approve_everything() {
 
 start_daemon
 
-SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
-"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" --output >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" attach "$SESSION" --output >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 0.3
 
 approve_everything "$SESSION" &
 APPROVER=$!
 
-"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "start the dev server" >/dev/null
+"$WORK/jingclaw" send "$SESSION" "start the dev server" >/dev/null
 
 WAITED=0
 while ! grep -q 'started sh as' "$WORK/events" 2>/dev/null; do
@@ -132,7 +134,7 @@ printf 'ok   and it is still running after the call returned\n'
 # And a person can see it. The three process tools are the model's; until this
 # there was no way to find out what they had left behind, so a server started
 # an hour ago was visible only to the agent that started it.
-RUNNING=$("$WORK/jingclaw" --config "$WORK/config.toml" processes "$SESSION" 2>&1) ||
+RUNNING=$("$WORK/jingclaw" processes "$SESSION" 2>&1) ||
 	fail "asking what is running failed: $RUNNING"
 
 printf '%s' "$RUNNING" | grep -q "$PROCESS" ||

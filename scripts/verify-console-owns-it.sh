@@ -13,6 +13,13 @@
 # "running" to whoever looks next.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
@@ -34,21 +41,19 @@ trap cleanup EXIT
 
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 [server]
 addr = "127.0.0.1:7843"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
 [gateway]
 platform = "telegram"
 [gateway.telegram]
 account_id = "main"
 api_base = "http://127.0.0.1:7844"
-EOF
+'
 
 # Drives the supervisor under a pty and then takes the pty away, which is what
 # closing a terminal window and losing an ssh session both come down to.
@@ -61,7 +66,7 @@ binary = work + "/jingclaw"
 pid, fd = pty.fork()
 if pid == 0:
     os.environ["JINGCLAW_HOME"] = work
-    os.execvp(binary, [binary, "--config", work + "/config.toml"])
+    os.execvp(binary, [binary])
 
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 100, 0, 0))
 

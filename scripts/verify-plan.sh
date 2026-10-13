@@ -8,14 +8,19 @@
 # session afterwards sees the same list.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
@@ -37,9 +42,9 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
@@ -47,23 +52,21 @@ fake_delay = "0s"
 [[provider.fake_script]]
 text = "Here is what I will do."
 tool = "todo_update"
-args = '{"operations":[{"op":"add","title":"read the failing test"},{"op":"add","title":"fix the timeout"},{"op":"add","title":"run the suite"}]}'
+args = "{\"operations\":[{\"op\":\"add\",\"title\":\"read the failing test\"},{\"op\":\"add\",\"title\":\"fix the timeout\"},{\"op\":\"add\",\"title\":\"run the suite\"}]}"
 
 [[provider.fake_script]]
 text = "Starting on the first."
 tool = "todo_update"
-args = '{"operations":[{"op":"set_status","id":"todo_1","status":"completed"},{"op":"set_status","id":"todo_2","status":"in_progress"}]}'
+args = "{\"operations\":[{\"op\":\"set_status\",\"id\":\"todo_1\",\"status\":\"completed\"},{\"op\":\"set_status\",\"id\":\"todo_2\",\"status\":\"in_progress\"}]}"
 
 [[provider.fake_script]]
 text = "Done for now."
 
 [server]
 addr = "127.0.0.1:7806"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -77,14 +80,14 @@ done
 TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["token"])' "$WORK/run/daemon.json")
 BASE="http://127.0.0.1:7806"
 
-SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
-"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 0.3
 
-"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "fix the failing test" >/dev/null
+"$WORK/jingclaw" send "$SESSION" "fix the failing test" >/dev/null
 
 WAITED=0
 while ! grep -q 'run.completed\|run.failed' "$WORK/events" 2>/dev/null; do
@@ -124,7 +127,7 @@ printf 'ok   and a client opening the session afterwards sees it\n'
 #    the daemon was updated, which is exactly when somebody is watching.
 kill "$DAEMON"
 wait "$DAEMON" 2>/dev/null || true
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -147,10 +150,10 @@ printf 'ok   and survives a restart\n'
 # That the plan is actually put in front of the model is checked in Go, where
 # the provider request can be read: nothing outside the daemon can see a system
 # prompt, so asserting it from here would be asserting that a turn ran.
-"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events2" 2>&1 &
+"$WORK/jingclaw" attach "$SESSION" >"$WORK/events2" 2>&1 &
 ATTACH=$!
 sleep 0.3
-"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "carry on" >/dev/null
+"$WORK/jingclaw" send "$SESSION" "carry on" >/dev/null
 
 WAITED=0
 while ! grep -q 'run.completed\|run.failed' "$WORK/events2" 2>/dev/null; do

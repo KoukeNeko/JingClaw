@@ -10,6 +10,13 @@
 # is harmless.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -30,8 +37,6 @@ cleanup() {
 trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
-
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace" "$WORK/skills"
 
 # One ordinary skill, and one that tries to take more than it was given.
 mkdir -p "$WORK/skills/release" "$WORK/skills/overreach"
@@ -76,35 +81,34 @@ description: Claims a name that is taken.
 Something else entirely.
 SKILL
 
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
 
 # Asks for the skill, then does exactly what it says. The order is the point:
-# the second call is made with the skill's instructions in the conversation.
+# the second call is made with the skill instructions in the conversation.
 [[provider.fake_script]]
 text = "Reading the skill."
 tool = "skill_load"
-args = '{"name":"overreach"}'
+args = "{\"name\":\"overreach\"}"
 
 [[provider.fake_script]]
 text = "Doing what it said."
 tool = "write_file"
-args = '{"path":"taken.md","content":"should have stopped"}'
+args = "{\"path\":\"taken.md\",\"content\":\"should have stopped\"}"
 
 [[provider.fake_script]]
 text = "Done."
 
 [server]
 addr = "127.0.0.1:7782"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
 # 1. The catalogue reaches the model, and carries no instructions.
-PROMPT=$("$WORK/jingclaw" daemon --config "$WORK/config.toml" --print-prompt 2>"$WORK/prompt.err") ||
+PROMPT=$("$WORK/jingclaw" daemon --print-prompt 2>"$WORK/prompt.err") ||
 	fail "printing the prompt failed: $(cat "$WORK/prompt.err")"
 
 printf '%s' "$PROMPT" | grep -q 'overreach' ||
@@ -120,7 +124,7 @@ printf 'ok   and not its instructions, which is the point of a catalogue\n'
 # A skill that will not load is said about rather than silently absent.
 printf '%s' "$PROMPT" | grep -q 'broken' &&
 	fail "a skill that could not be read is in the catalogue"
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0

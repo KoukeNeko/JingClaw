@@ -9,6 +9,13 @@
 # mean starting again.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -40,44 +47,43 @@ CHANNEL=900000000000000001
 TENANT=900000000000000002
 PERSON=900000000000000003
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+mkdir -p "$WORK/workspace"
 printf 'timeout := 30\n' > "$WORK/workspace/settings.go"
 
-cat > "$WORK/config.toml" <<EOF
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
-fake_delay = "0s"
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG="[provider]
+backend = \"fake\"
+fake_model = \"fake-echo\"
+fake_delay = \"0s\"
 
 [[provider.fake_script]]
-text = "Looking at it."
-tool = "read_file"
-args = '{"path":"settings.go"}'
+text = \"Looking at it.\"
+tool = \"read_file\"
+args = '{\"path\":\"settings.go\"}'
 
 [[provider.fake_script]]
-text = "Raising it."
-tool = "edit_file"
-args = '{"path":"settings.go","edits":[{"old_text":"timeout := 30","new_text":"timeout := 120"}]}'
+text = \"Raising it.\"
+tool = \"edit_file\"
+args = '{\"path\":\"settings.go\",\"edits\":[{\"old_text\":\"timeout := 30\",\"new_text\":\"timeout := 120\"}]}'
 
 [[provider.fake_script]]
-text = "Done."
+text = \"Done.\"
 
 [server]
-addr = "127.0.0.1:7797"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
+addr = \"127.0.0.1:7797\"
 [gateway]
-platform = "discord"
+platform = \"discord\"
 [gateway.discord]
-account_id = "main"
+account_id = \"main\"
 [[gateway.discord.channels]]
-channel_ids = ["$CHANNEL"]
-tenant_id = "$TENANT"
-workspace_id = "default"
-users = ["$PERSON"]
-EOF
+channel_ids = [\"$CHANNEL\"]
+tenant_id = \"$TENANT\"
+workspace_id = \"default\"
+users = [\"$PERSON\"]
+"
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -114,7 +120,7 @@ printf 'ok   a message from a channel starts a run\n'
 # 1. The same session is there for somebody at the machine, by its own id and
 #    in the list. A conversation only the channel can see is one nobody can
 #    take over.
-LISTED=$("$WORK/jingclaw" --config "$WORK/config.toml" session list)
+LISTED=$("$WORK/jingclaw" session list)
 printf '%s' "$LISTED" | grep -q "$SESSION" ||
 	fail "the channel's session is not in the local list:
 $LISTED"
@@ -142,7 +148,7 @@ printf 'ok   carrying what was said in the channel\n'
 # 3. The approval the channel cannot answer. A request from chat and its
 #    approval from the same chat is one unbroken chain: whoever holds that
 #    account holds both halves.
-LISTED=$("$WORK/jingclaw" --config "$WORK/config.toml" approvals "$SESSION")
+LISTED=$("$WORK/jingclaw" approvals "$SESSION")
 APPROVAL=$(printf '%s' "$LISTED" | grep -o 'apr_[A-Za-z0-9]*' | head -1)
 [ -n "$APPROVAL" ] || fail "nothing is waiting: $LISTED"
 
@@ -152,7 +158,7 @@ $LISTED"
 printf 'ok   what it would change is reviewable at the machine\n'
 
 # 4. Decided from the control plane, and the work goes on.
-"$WORK/jingclaw" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null
+"$WORK/jingclaw" approve "$APPROVAL" >/dev/null
 
 WAITED=0
 while ! grep -q 'timeout := 120' "$WORK/workspace/settings.go" 2>/dev/null; do

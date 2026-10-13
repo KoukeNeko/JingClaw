@@ -11,6 +11,13 @@
 # and the approval a person answers actually line up end to end.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 command -v git >/dev/null 2>&1 || {
@@ -90,33 +97,35 @@ until git ls-remote "git://127.0.0.1:$PORT/repo.git" >/dev/null 2>&1; do
 	sleep 0.1
 done
 
+# This check's home holds the skills; the database and the discovery file are
+# beside it, not in it.
+export JINGCLAW_SERVER_DATA_DIR="$WORK/data"
+export JINGCLAW_SERVER_RUNTIME_DIR="$WORK/run"
+
 # The model, scripted: fetch the skill, then install it, then say it is done.
 # The second call is the one that has to stop for a person.
-cat > "$WORK/config.toml" <<EOF
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
-fake_delay = "0s"
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG="[provider]
+backend = \"fake\"
+fake_model = \"fake-echo\"
+fake_delay = \"0s\"
 
 [[provider.fake_script]]
-text = "Fetching the skill."
-tool = "skill_stage"
-args = '{"source":"$SOURCE"}'
+text = \"Fetching the skill.\"
+tool = \"skill_stage\"
+args = '{\"source\":\"$SOURCE\"}'
 
 [[provider.fake_script]]
-text = "Installing it."
-tool = "skill_activate"
-args = '{"name":"proposed"}'
+text = \"Installing it.\"
+tool = \"skill_activate\"
+args = '{\"name\":\"proposed\"}'
 
 [[provider.fake_script]]
-text = "Installed."
+text = \"Installed.\"
+"
 
-[server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
-
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0

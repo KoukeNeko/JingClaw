@@ -8,14 +8,19 @@
 # finished and never failed.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
@@ -40,20 +45,18 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 # Slow enough that a run is genuinely in flight when the signal arrives.
 fake_delay = "1s"
 [server]
 addr = "127.0.0.1:7804"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -63,17 +66,17 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
 # A held-open stream, which is what a gateway and a console both are. Without
 # one the http server drains instantly and the defect this checks for is
 # invisible.
-"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 0.5
 
-"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "say something back" >/dev/null
+"$WORK/jingclaw" send "$SESSION" "say something back" >/dev/null
 sleep 0.3
 
 STARTED=$(date +%s)

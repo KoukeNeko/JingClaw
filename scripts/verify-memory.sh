@@ -9,14 +9,19 @@
 # and remove everything.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
@@ -36,28 +41,24 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
 
 # Configured but not selected. Each backend keeps its own model, so the
-# switch below is one line and this is still here when it happens.
+# switch below is one variable and this is still here when it happens.
 [provider.gemini]
 model = "gemma-4-31b-it"
 
 [memory]
 enabled = true
-
-[server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
 start() {
-	"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+	"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 	DAEMON=$!
 
 	WAITED=0
@@ -68,16 +69,16 @@ start() {
 	done
 }
 
-agent() { "$WORK/jingclaw" --config "$WORK/config.toml" "$@"; }
+agent() { "$WORK/jingclaw" "$@"; }
 
 start
 
-# 1. Memory is off unless somebody turns it on.
+# 1. Memory is off unless somebody turns it on. Settings are only saved into a
+#    database that has none, so this is a deployment of its own, given the same
+#    text with that one line turned off.
 OFF=$(mktemp -d)
-mkdir -p "$OFF/run" "$OFF/data" "$OFF/ws"
-sed -e "s|$WORK/run|$OFF/run|" -e "s|$WORK/data|$OFF/data|" -e "s|$WORK/workspace|$OFF/ws|" \
-	-e 's|^enabled = true|enabled = false|' "$WORK/config.toml" > "$OFF/config.toml"
-"$WORK/jingclaw" daemon --config "$OFF/config.toml" --print-prompt > "$OFF/prompt" 2>&1 ||
+JINGCLAW_HOME="$OFF" JINGCLAW_CONFIG=$(printf '%s' "$JINGCLAW_CONFIG" | sed 's|^enabled = true|enabled = false|') \
+	"$WORK/jingclaw" daemon --print-prompt > "$OFF/prompt" 2>&1 ||
 	fail "the daemon will not start with memory off"
 grep -q 'remember' "$OFF/prompt" &&
 	fail "the remember tool is offered with memory turned off"
@@ -85,8 +86,8 @@ rm -rf "$OFF"
 printf 'ok   memory is off unless somebody turns it on\n'
 
 # 2. The tools exist when it is on, and remembering is not unattended.
-agent --config "$WORK/config.toml" session create >/dev/null
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" --print-prompt > "$WORK/prompt" 2>&1 || true
+agent session create >/dev/null
+"$WORK/jingclaw" daemon --print-prompt > "$WORK/prompt" 2>&1 || true
 grep -q 'remember' "$WORK/prompt" || fail "the remember tool is missing with memory on"
 grep -q 'recall' "$WORK/prompt" || fail "the recall tool is missing with memory on"
 printf 'ok   the tools are there when it is on\n'
@@ -138,10 +139,10 @@ fi
 kill "$DAEMON"; wait "$DAEMON" 2>/dev/null || true
 DAEMON=""
 
-# One line: the model gemini answers with is already configured above.
-sed -e 's|^backend = "fake"|backend = "gemini"|' \
-	"$WORK/config.toml" > "$WORK/real.toml"
-mv "$WORK/real.toml" "$WORK/config.toml"
+# One variable: the model gemini answers with is already configured above, and
+# the saved settings are not rewritten to change the backend, they are
+# overridden for this start.
+export JINGCLAW_PROVIDER_BACKEND=gemini
 start
 
 # Everything the run asks for is approved, for as long as it keeps asking.

@@ -8,14 +8,19 @@
 # guessing at it.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
@@ -35,11 +40,12 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+mkdir -p "$WORK/workspace"
 printf 'timeout := 30\n' > "$WORK/workspace/settings.go"
 
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
@@ -49,23 +55,21 @@ fake_delay = "0s"
 [[provider.fake_script]]
 text = "Looking at it."
 tool = "read_file"
-args = '{"path":"settings.go"}'
+args = "{\"path\":\"settings.go\"}"
 
 [[provider.fake_script]]
 text = "Raising it."
 tool = "edit_file"
-args = '{"path":"settings.go","edits":[{"old_text":"timeout := 30","new_text":"timeout := 120"}]}'
+args = "{\"path\":\"settings.go\",\"edits\":[{\"old_text\":\"timeout := 30\",\"new_text\":\"timeout := 120\"}]}"
 
 [[provider.fake_script]]
 text = "Done."
 
 [server]
 addr = "127.0.0.1:7796"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -75,14 +79,14 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
-"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 0.3
 
-"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "raise the timeout" >/dev/null
+"$WORK/jingclaw" send "$SESSION" "raise the timeout" >/dev/null
 
 WAITED=0
 while ! grep -q 'approval.requested' "$WORK/events" 2>/dev/null; do
@@ -93,7 +97,7 @@ done
 printf 'ok   an edit stops and asks\n'
 
 # 1. What a person reviewing it is shown.
-LISTED=$("$WORK/jingclaw" --config "$WORK/config.toml" approvals "$SESSION")
+LISTED=$("$WORK/jingclaw" approvals "$SESSION")
 printf '%s' "$LISTED" | grep -q -- '-timeout := 30' ||
 	fail "the review does not show what is being removed:
 $LISTED"
@@ -128,7 +132,7 @@ printf 'ok   alongside the exact arguments, not instead of them\n'
 
 # 4. Approving it does what the review said it would.
 APPROVAL=$(printf '%s' "$LISTED" | grep -o 'apr_[A-Za-z0-9]*' | head -1)
-"$WORK/jingclaw" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null
+"$WORK/jingclaw" approve "$APPROVAL" >/dev/null
 
 WAITED=0
 while ! grep -q 'timeout := 120' "$WORK/workspace/settings.go" 2>/dev/null; do

@@ -2,9 +2,9 @@
 # Proves the image is a deployment and carries none of one.
 #
 # The thing that goes wrong with a containerised agent is not that it fails to
-# start. It is that it starts carrying something it should not — a settings
-# file baked in that silently stops being read the day somebody writes their
-# own, a credential in a layer that anybody who can pull the image can read
+# start. It is that it starts carrying something it should not — settings
+# baked in that the first start would save as though the operator had chosen
+# them, a credential in a layer that anybody who can pull the image can read
 # back — or that it starts as root, or that it comes up without the things a
 # command needs and every tool call fails at once.
 #
@@ -65,17 +65,37 @@ docker run --rm -v "$VOLUME:/var/lib/jingclaw" --entrypoint sh "$IMAGE" -c \
 printf 'ok   the volume is writable by the user the image runs as\n'
 
 # What a first run looks like. An image that needs a credential must say
-# which one and where to put it: an operator whose container exits with
-# nothing to act on has only the log of a process that is already gone.
+# which one and where it is looked for. It no longer exits to do it: the
+# daemon and the dashboard are what the operator puts a missing credential
+# right with, so the supervisor says "chat is off" and the container stays up.
 docker run --rm -v "$VOLUME:/var/lib/jingclaw" --entrypoint sh "$IMAGE" -c \
 	'rm -f /var/lib/jingclaw/discord.token' >/dev/null
 
-FIRST=$(docker run --rm --name "$NAME-first" -v "$VOLUME:/var/lib/jingclaw" "$IMAGE" 2>&1 || true)
+docker run -d --name "$NAME-first" -v "$VOLUME:/var/lib/jingclaw" "$IMAGE" >/dev/null ||
+	fail "the image does not run"
+
+WAITED=0
+until docker logs "$NAME-first" 2>&1 | grep -q 'chat is off'; do
+	WAITED=$((WAITED + 1))
+	[ "$WAITED" -gt 300 ] &&
+		fail "a first run with no credential never said chat is off: $(docker logs "$NAME-first" 2>&1 | tail -20)"
+	sleep 0.2
+done
+
+FIRST=$(docker logs "$NAME-first" 2>&1 | grep 'chat is off')
 printf '%s' "$FIRST" | grep -q "DISCORD_BOT_TOKEN" ||
 	fail "a first run with no credential does not name the one it wants: $FIRST"
-printf '%s' "$FIRST" | grep -q "/var/lib/jingclaw/discord.token" ||
-	fail "it does not say where to put the credential: $FIRST"
-printf 'ok   a first run with nothing set up says what it needs and where\n'
+printf '%s' "$FIRST" | grep -q "gateway.discord.token_file" ||
+	fail "it does not say where the credential is looked for: $FIRST"
+
+# Said and then still there: a supervisor that printed it and went away would
+# pass everything above.
+sleep 1
+[ "$(docker inspect -f '{{.State.Running}}' "$NAME-first")" = "true" ] &&
+	docker exec "$NAME-first" test -f /var/lib/jingclaw/run/daemon.json ||
+	fail "a first run with no credential took the daemon down with the chat: $(docker logs "$NAME-first" 2>&1 | tail -20)"
+docker rm -f "$NAME-first" >/dev/null
+printf 'ok   a first run with nothing set up says what it needs and where, and stays up\n'
 
 # Put it back for the rest.
 docker run --rm -v "$VOLUME:/var/lib/jingclaw" --entrypoint sh "$IMAGE" -c \
@@ -136,15 +156,16 @@ docker exec "$NAME" test -f /etc/ssl/certs/ca-certificates.crt ||
 	fail "no CA certificates, so every model call fails at TLS"
 printf 'ok   with git and CA certificates\n'
 
-# Nothing about a deployment is in the image. A settings file shipped inside
-# becomes the operator's by accident and then stops being read the day they
-# write their own.
+# Nothing about a deployment is in the image. Settings shipped inside would be
+# saved by the first start as though the operator had chosen them, and from
+# then on could not be told apart from what they did choose. The example to
+# start from is printed by the program, not copied from a file.
 docker run --rm --entrypoint sh "$IMAGE" -c \
 	'test ! -e /var/lib/jingclaw/config.toml && test ! -e /var/lib/jingclaw/data' ||
 	fail "the image carries a deployment of its own"
-docker run --rm --entrypoint sh "$IMAGE" -c 'test -f /usr/share/jingclaw/config.example.toml' ||
-	fail "there is nothing to copy a configuration from"
-printf 'ok   the image carries no settings, no database, and an example to start from\n'
+docker run --rm "$IMAGE" daemon --print-config | grep -q '^\[provider\]' ||
+	fail "there is nothing to start a configuration from"
+printf 'ok   the image carries no settings, no database, and can print an example to start from\n'
 
 # The secret is in the volume and nowhere a puller or a passer-by can read it.
 docker inspect "$NAME" | grep -q "$SECRET" &&
@@ -198,41 +219,83 @@ docker exec "$NAME-again" jingclaw session list 2>/dev/null | grep -q "$SESSION"
 	fail "the session from before the container was replaced is gone"
 printf 'ok   the database outlives the container\n'
 
-# The files a deployment brings when a variable is the only way in. Checked
+# The settings a deployment brings when a variable is the only way in. Checked
 # here rather than only in a unit test, because this is the one arrangement
 # where it matters: no shell, no way to put a file in the volume first, and a
 # platform that supplies a configuration and gets a default instead has no
 # symptom other than an agent behaving like nobody configured it.
+#
+# They are saved in the database, so what is checked is what the daemon holds,
+# asked through its API from inside the container, where it listens on a
+# loopback address, with the python3 the image has.
+api() {
+	docker exec "$1" python3 -c '
+import json, sys, urllib.request
+
+found = json.load(open("/var/lib/jingclaw/run/daemon.json"))
+request = urllib.request.Request(
+    found["base_url"] + "/jingclaw.control.v1." + sys.argv[1],
+    data=sys.argv[2].encode(),
+    headers={"content-type": "application/json", "authorization": "Bearer " + found["token"]},
+)
+sys.stdout.write(urllib.request.urlopen(request).read().decode())
+' "$2" "$3"
+}
+
 SEEDED="$VOLUME-seeded"
-docker volume create "$SEEDED" >/dev/null
-docker run -v "$SEEDED:/var/lib/jingclaw" \
-	-e JINGCLAW_CONFIG='[provider]
+SEEDED_CONFIG='[agent]
+max_iterations = 4
+
+[provider]
 backend = "fake"
 fake_model = "fake-echo"
-' \
-	-e JINGCLAW_PERSONA="base64:$(printf '# Who you are\n\nAnswer briefly.\n' | base64 | tr -d '\n')" \
+'
+SEEDED_PERSONA=$(printf '# Who you are\n\nAnswer briefly.\n' | base64 | tr -d '\n')
+docker volume create "$SEEDED" >/dev/null
+docker run -v "$SEEDED:/var/lib/jingclaw" \
+	-e JINGCLAW_CONFIG="$SEEDED_CONFIG" \
+	-e JINGCLAW_PERSONA="base64:$SEEDED_PERSONA" \
 	--name "$NAME-seeded" -d "$IMAGE" daemon >/dev/null
 
 WAITED=0
-while ! docker run --rm -v "$SEEDED:/var/lib/jingclaw" --entrypoint sh "$IMAGE" \
-	-c 'test -f /var/lib/jingclaw/PERSONA.md' 2>/dev/null; do
+while ! docker exec "$NAME-seeded" test -f /var/lib/jingclaw/run/daemon.json 2>/dev/null; do
 	WAITED=$((WAITED + 1))
 	[ "$WAITED" -gt 300 ] &&
-		fail "nothing was written from the environment: $(docker logs "$NAME-seeded" 2>&1 | tail -20)"
+		fail "it never came up on settings from the environment: $(docker logs "$NAME-seeded" 2>&1 | tail -20)"
 	sleep 0.2
 done
+
+SEEN_CONFIG=$(api "$NAME-seeded" ConfigService/GetConfig '{}')
+SEEN_PERSONA=$(api "$NAME-seeded" ConfigService/GetInstructionFile '{"file":"INSTRUCTION_FILE_PERSONA"}')
+
+# The persona is the document that was sent, to the byte. The blank line is the
+# point: a document that arrives base64-encoded arrives whole, and one whose
+# newlines were dropped is a different document.
+printf '%s' "$SEEN_PERSONA" | python3 -c '
+import base64, json, sys
+
+sys.exit(json.load(sys.stdin).get("text", "").encode() != base64.b64decode(sys.argv[1]))
+' "$SEEDED_PERSONA" ||
+	fail "the persona did not survive the trip through the environment: $SEEN_PERSONA"
+
+# The settings are the ones supplied and not the example, and they are what the
+# daemon is running.
+printf '%s' "$SEEN_CONFIG" | python3 -c '
+import json, sys
+
+seen = json.load(sys.stdin)
+sys.exit(seen.get("text") != sys.argv[1] or seen.get("running", {}).get("agent.max_iterations") != 4)
+' "$SEEDED_CONFIG" ||
+	fail "the deployment is running the example rather than the supplied configuration: $SEEN_CONFIG"
+
+# And nothing is written for anyone to edit: the volume holds a database, and a
+# settings file beside it would be a setting that does nothing.
+docker exec "$NAME-seeded" sh -c \
+	'test ! -e config.toml && test ! -e PERSONA.md && test ! -e AGENTS.md && test -f data/jingclaw.db' ||
+	fail "settings from the environment left files in the volume, or no database: $(docker exec "$NAME-seeded" ls -A /var/lib/jingclaw)"
+
 docker rm -f "$NAME-seeded" >/dev/null
-
-SEEN=$(docker run --rm -v "$SEEDED:/var/lib/jingclaw" --entrypoint sh "$IMAGE" -c \
-	'cat /var/lib/jingclaw/PERSONA.md; echo ---; cat /var/lib/jingclaw/config.toml')
 docker volume rm "$SEEDED" >/dev/null 2>&1
-
-# The blank line is the point: a document that arrives base64-encoded arrives
-# whole, and one whose newlines were dropped is a different document.
-printf '%s' "$SEEN" | grep -q '^Answer briefly\.$' ||
-	fail "the persona did not survive the trip through the environment: $SEEN"
-printf '%s' "$SEEN" | grep -q 'fake-echo' ||
-	fail "the deployment is running the example rather than the supplied configuration"
 printf 'ok   a deployment can bring its own settings and persona in variables\n'
 
 # Turning web reading on does not stop the daemon coming up.

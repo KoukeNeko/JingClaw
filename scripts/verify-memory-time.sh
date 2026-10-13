@@ -11,14 +11,19 @@
 # removed: it retired exactly the memories that were not the problem.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
@@ -38,9 +43,9 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
@@ -48,12 +53,12 @@ fake_delay = "0s"
 [[provider.fake_script]]
 text = "Writing that down."
 tool = "remember"
-args = '{"text":"the deploy freeze is on","valid_until":"2099-01-01"}'
+args = "{\"text\":\"the deploy freeze is on\",\"valid_until\":\"2099-01-01\"}"
 
 [[provider.fake_script]]
 text = "And this one."
 tool = "remember"
-args = '{"text":"the release branch is cut on Fridays"}'
+args = "{\"text\":\"the release branch is cut on Fridays\"}"
 
 [[provider.fake_script]]
 text = "Noted."
@@ -62,11 +67,9 @@ text = "Noted."
 enabled = true
 [server]
 addr = "127.0.0.1:7830"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -76,7 +79,7 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-A() { "$WORK/jingclaw" --config "$WORK/config.toml" "$@"; }
+A() { "$WORK/jingclaw" "$@"; }
 
 SESSION=$(A session create | tr -d '\r\n')
 A send "$SESSION" "remember these two things" >/dev/null

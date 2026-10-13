@@ -8,14 +8,19 @@
 # image to a real model and asks a question only the picture answers.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
@@ -34,8 +39,6 @@ cleanup() {
 trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
-
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 
 # Three colour bands, and nothing in the filename or the text says which.
 python3 - "$WORK/bands.png" <<'PY'
@@ -61,19 +64,16 @@ with open(sys.argv[1], "wb") as out:
     out.write(png)
 PY
 
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
 
-# Configured but not selected, so the switch below is one line.
+# Configured but not selected, so the switch below is one variable.
 [provider.gemini]
 model = "gemma-4-31b-it"
-
-[server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
 
 # A room, so a message can arrive the way one from a chat platform does. The
 # ingress refuses a channel it has no binding for, which is the point of the
@@ -86,10 +86,10 @@ account_id = "main"
 channel_ids = ["c1"]
 tenant_id = "t1"
 workspace_id = "default"
-EOF
+'
 
 start() {
-	"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+	"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 	DAEMON=$!
 
 	WAITED=0
@@ -100,7 +100,7 @@ start() {
 	done
 }
 
-agent() { "$WORK/jingclaw" --config "$WORK/config.toml" "$@"; }
+agent() { "$WORK/jingclaw" "$@"; }
 
 start
 
@@ -237,9 +237,9 @@ fi
 kill "$DAEMON"; wait "$DAEMON" 2>/dev/null || true
 DAEMON=""
 
-sed -e 's|^backend = "fake"|backend = "gemini"|' \
-	"$WORK/config.toml" > "$WORK/real.toml"
-mv "$WORK/real.toml" "$WORK/config.toml"
+# The first start saved the settings, so the switch is an override of the one
+# setting that differs and not an edit of a file.
+export JINGCLAW_PROVIDER_BACKEND=gemini
 start
 
 SEEING=$(agent session create | tr -d '\r\n')

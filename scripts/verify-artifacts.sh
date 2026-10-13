@@ -7,6 +7,13 @@
 # and the id got all the way out" — and only a model calls tools.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 
@@ -64,18 +71,19 @@ if ! have_credential; then
 	exit 0
 fi
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+mkdir -p "$WORK/workspace"
 
 # A file with a distinctive line in the middle, so "the excerpt dropped it but
 # the artifact kept it" is something the test can actually check.
 awk 'BEGIN { for (i = 0; i < 4000; i++) print "line-" i "-padding-padding-padding" }' > "$WORK/workspace/big.txt"
 grep -q 'line-2000-padding' "$WORK/workspace/big.txt" || fail "the fixture is wrong"
 
-cat > "$WORK/config.toml" <<EOF
-[agent]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[agent]
 # Room for the model to look around first. Four was enough on one run and not
-# on the next, which made this check about the model's patience rather than
-# about whether the artifact came back.
+# on the next, which made this check about the patience of the model rather
+# than about whether the artifact came back.
 max_iterations = 10
 permission_profile = "local"
 
@@ -89,12 +97,10 @@ model = "gemma-4-31b-it"
 max_command_output = 2000
 
 [server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
 log_level = "info"
-EOF
+'
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -104,11 +110,11 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
-"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+SESSION=$("$WORK/jingclaw" session create | tr -d '\r\n')
+"$WORK/jingclaw" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 
-"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" \
+"$WORK/jingclaw" send "$SESSION" \
 	"Run: /bin/cat big.txt   — then tell me in one sentence how many lines it printed." >/dev/null
 
 # Everything the run asks for is approved, for as long as it keeps asking. An
@@ -119,10 +125,10 @@ WAITED=0
 while [ "$WAITED" -lt 240 ]; do
 	grep -q 'run.completed\|run.failed' "$WORK/events" && break
 
-	APPROVAL=$("$WORK/jingclaw" --config "$WORK/config.toml" approvals "$SESSION" 2>/dev/null |
+	APPROVAL=$("$WORK/jingclaw" approvals "$SESSION" 2>/dev/null |
 		grep -o 'apr_[A-Za-z0-9]*' | head -1 || true)
 	if [ -n "$APPROVAL" ]; then
-		"$WORK/jingclaw" --config "$WORK/config.toml" approve "$APPROVAL" >/dev/null 2>&1 &&
+		"$WORK/jingclaw" approve "$APPROVAL" >/dev/null 2>&1 &&
 			APPROVED=$((APPROVED + 1))
 	fi
 
@@ -162,7 +168,7 @@ grep -o '\[[0-9]* bytes kept as sha256-[0-9a-f]\{64\}\]' "$WORK/events" | sort -
 		CLAIMED=$(printf '%s' "$LINE" | grep -o '[0-9]*' | head -1)
 		KEPT=$(printf '%s' "$LINE" | grep -o 'sha256-[0-9a-f]\{64\}')
 
-		"$WORK/jingclaw" --config "$WORK/config.toml" artifact get "$KEPT" > "$WORK/whole.txt" ||
+		"$WORK/jingclaw" artifact get "$KEPT" > "$WORK/whole.txt" ||
 			fail "fetching $KEPT failed"
 
 		ACTUAL=$(wc -c < "$WORK/whole.txt" | tr -d ' ')
@@ -175,7 +181,7 @@ printf 'ok   every artifact comes back at the size the log recorded\n'
 #    by construction what a 2000-byte excerpt of a 130 KB output cannot show.
 grep -o 'sha256-[0-9a-f]\{64\}' "$WORK/events" | sort -u |
 	while read -r KEPT; do
-		"$WORK/jingclaw" --config "$WORK/config.toml" artifact get "$KEPT" > "$WORK/whole.txt"
+		"$WORK/jingclaw" artifact get "$KEPT" > "$WORK/whole.txt"
 		if grep -q 'line-2000-padding' "$WORK/whole.txt"; then
 			FOUND=1
 			break
@@ -187,7 +193,7 @@ grep -q 'line-2000-padding' "$WORK/whole.txt" ||
 printf 'ok   the middle the excerpt cut is in the artifact\n'
 
 # 4. A window of it.
-"$WORK/jingclaw" --config "$WORK/config.toml" artifact get "$ID" --offset 0 --limit 6 > "$WORK/window.txt"
+"$WORK/jingclaw" artifact get "$ID" --offset 0 --limit 6 > "$WORK/window.txt"
 [ "$(wc -c < "$WORK/window.txt" | tr -d ' ')" = 6 ] ||
 	fail "a six-byte window returned $(wc -c < "$WORK/window.txt") bytes"
 printf 'ok   a window of it can be asked for\n'

@@ -8,14 +8,19 @@
 # some other path to a channel.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
@@ -37,29 +42,27 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 SECRET="the token is in discord.token and must not be repeated"
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<EOF
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
-fake_delay = "0s"
-fake_reasoning = "$SECRET"
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG="[provider]
+backend = \"fake\"
+fake_model = \"fake-echo\"
+fake_delay = \"0s\"
+fake_reasoning = \"$SECRET\"
 [server]
-addr = "127.0.0.1:7794"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
+addr = \"127.0.0.1:7794\"
 [gateway]
-platform = "discord"
+platform = \"discord\"
 [gateway.discord]
-account_id = "main"
+account_id = \"main\"
 [[gateway.discord.consoles]]
-channel_ids = ["900000000000000001"]
-tenant_id = "900000000000000002"
-workspace_id = "default"
-users = ["900000000000000003"]
-EOF
+channel_ids = [\"900000000000000001\"]
+tenant_id = \"900000000000000002\"
+workspace_id = \"default\"
+users = [\"900000000000000003\"]
+"
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -100,7 +103,7 @@ sleep 2
 
 # Attached after the fact rather than before: the session did not exist until
 # the message created it, and attaching replays from the beginning anyway.
-"$WORK/jingclaw" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+"$WORK/jingclaw" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 1
 kill "$ATTACH" 2>/dev/null

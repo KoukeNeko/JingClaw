@@ -20,8 +20,6 @@ WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
@@ -40,19 +38,18 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings come the way a container's do: the first start saves this text in
+# the database, and there is no file. The directories are the deployment's own
+# defaults, so they are not named.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
 [server]
 addr = "127.0.0.1:7791"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -100,6 +97,28 @@ STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
 [ "$STATUS" = 403 ] || fail "the gateway credential reached SessionService: $STATUS"
 printf 'ok   a gateway credential reaches only the ingress\n'
 
+# The same credential is refused the settings, and the operator's is not: a
+# process holding a bot token must not be able to read or rewrite what the
+# agent may run, and the refusal has to be about the credential rather than
+# about the service being gone. What the gateway does get is its own slice.
+for METHOD in ConfigService/GetConfig ConfigService/GetAgentState; do
+	STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+		-H 'content-type: application/json' -H "authorization: Bearer $GATEWAY" -d '{}' \
+		"$BASE/jingclaw.control.v1.$METHOD")
+	[ "$STATUS" = 403 ] || fail "the gateway credential reached $METHOD: $STATUS"
+	STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+		-H 'content-type: application/json' -H "authorization: Bearer $LOCAL" -d '{}' \
+		"$BASE/jingclaw.control.v1.$METHOD")
+	[ "$STATUS" = 200 ] || fail "the operator's credential cannot reach $METHOD: $STATUS"
+done
+SLICE=$(curl -s -X POST -H 'content-type: application/json' -H "authorization: Bearer $GATEWAY" -d '{}' \
+	"$BASE/jingclaw.control.v1.GatewayIngressService/GetGatewaySettings")
+case "$SLICE" in
+	*'"platform"'*) ;;
+	*) fail "the gateway credential could not read its own settings: $SLICE" ;;
+esac
+printf 'ok   and is refused the settings, which only the operator'"'"'s reads\n'
+
 # 4. A unary Connect call is a POST with a JSON body.
 SESSION=$(curl -s -X POST \
 	-H 'content-type: application/json' \
@@ -110,7 +129,7 @@ SESSION=$(curl -s -X POST \
 [ -n "$SESSION" ] || fail "creating a session over JSON produced no id"
 printf 'ok   a unary call works as plain JSON over POST\n'
 
-"$WORK/jingclaw" --config "$WORK/config.toml" send "$SESSION" "hello from the terminal" >/dev/null
+"$WORK/jingclaw" send "$SESSION" "hello from the terminal" >/dev/null
 sleep 1
 
 # 5. A streaming call: the request is enveloped too, and the answer comes back
@@ -144,5 +163,14 @@ grep -q 'hello from the terminal' "$WORK/stream" ||
 	fail "the streamed events do not carry the turn sent from the terminal:
 $(head -c 400 "$WORK/stream")"
 printf 'ok   a streaming call works, and carries what the CLI sent\n'
+
+# 6. Nothing the daemon says holds a credential. Its output is kept by whatever
+#    runs it, and a log that carries the token is a token that outlives the
+#    daemon.
+for SECRET in "$LOCAL" "$GATEWAY"; do
+	grep -qF -- "$SECRET" "$WORK/daemon.out" "$WORK/daemon.err" &&
+		fail "a credential was written to the daemon's output"
+done
+printf 'ok   and no credential is written to the daemon'"'"'s output\n'
 
 printf '\nall checks passed\n'

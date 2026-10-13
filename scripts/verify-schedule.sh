@@ -12,6 +12,13 @@
 # question is harmless.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -31,10 +38,9 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
@@ -44,19 +50,17 @@ fake_delay = "0s"
 [[provider.fake_script]]
 text = "Writing it down."
 tool = "write_file"
-args = '{"path":"taken.md","content":"should have been refused"}'
+args = "{\"path\":\"taken.md\",\"content\":\"should have been refused\"}"
 
 [[provider.fake_script]]
 text = "I could not write that."
 
 [server]
 addr = "127.0.0.1:7821"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
 start_daemon() {
-	"$WORK/jingclaw" daemon --config "$WORK/config.toml" >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
+	"$WORK/jingclaw" daemon >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
 	DAEMON=$!
 
 	WAITED=0
@@ -78,17 +82,16 @@ stop_daemon() {
 start_daemon
 
 # 1. What somebody types is checked while they are still looking at it.
-"$WORK/jingclaw" schedule add "0 9 30 2 *" "never" --config "$WORK/config.toml" >/dev/null 2>&1 &&
+"$WORK/jingclaw" schedule add "0 9 30 2 *" "never" >/dev/null 2>&1 &&
 	fail "a schedule that can never run was accepted"
-"$WORK/jingclaw" schedule add "0 25 * * *" "bad hour" --config "$WORK/config.toml" 2>"$WORK/err.txt" &&
+"$WORK/jingclaw" schedule add "0 25 * * *" "bad hour" 2>"$WORK/err.txt" &&
 	fail "an impossible hour was accepted"
 grep -q 'hour' "$WORK/err.txt" ||
 	fail "the error does not say which field is wrong: $(cat "$WORK/err.txt")"
 printf 'ok   an expression that cannot run is refused, by field\n'
 
 # 2. A schedule due every minute fires, and says it was the schedule acting.
-SCHEDULE=$("$WORK/jingclaw" schedule add "* * * * *" "what changed" \
-	--config "$WORK/config.toml" 2>/dev/null)
+SCHEDULE=$("$WORK/jingclaw" schedule add "* * * * *" "what changed" 2>/dev/null)
 [ -n "$SCHEDULE" ] || fail "nothing was created"
 
 WAITED=0
@@ -204,19 +207,19 @@ print(db.execute(\"select count(*) from runs where origin like '%schedule%'\").f
 printf 'ok   restarting does not run an occasion that was already accounted for\n'
 
 # 5. Pausing and listing.
-"$WORK/jingclaw" schedule pause "$SCHEDULE" --config "$WORK/config.toml" >/dev/null 2>&1 ||
+"$WORK/jingclaw" schedule pause "$SCHEDULE" >/dev/null 2>&1 ||
 	fail "pausing failed"
 
-LISTED=$("$WORK/jingclaw" schedule list --config "$WORK/config.toml" 2>&1)
+LISTED=$("$WORK/jingclaw" schedule list 2>&1)
 printf '%s' "$LISTED" | grep -q "$SCHEDULE" ||
 	fail "a paused schedule vanished from the listing: $LISTED"
 printf '%s' "$LISTED" | grep -q 'paused' ||
 	fail "the listing does not say it is paused: $LISTED"
 printf 'ok   a paused schedule is still listed, and says so\n'
 
-"$WORK/jingclaw" schedule remove "$SCHEDULE" --config "$WORK/config.toml" >/dev/null 2>&1 ||
+"$WORK/jingclaw" schedule remove "$SCHEDULE" >/dev/null 2>&1 ||
 	fail "removing it failed"
-LISTED=$("$WORK/jingclaw" schedule list --config "$WORK/config.toml" 2>&1)
+LISTED=$("$WORK/jingclaw" schedule list 2>&1)
 printf '%s' "$LISTED" | grep -q "$SCHEDULE" &&
 	fail "it survived removal: $LISTED"
 printf 'ok   and removing one forgets it\n'

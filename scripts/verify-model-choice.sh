@@ -9,14 +9,19 @@
 # poor.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
@@ -36,19 +41,17 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
 [server]
 addr = "127.0.0.1:7798"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -58,11 +61,11 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 	sleep 0.1
 done
 
-SESSION=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$WORK/jingclaw" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session"
 
 # 1. What is on offer comes from the provider, with the one in use marked.
-LISTED=$("$WORK/jingclaw" --config "$WORK/config.toml" session model "$SESSION" 2>&1)
+LISTED=$("$WORK/jingclaw" session model "$SESSION" 2>&1)
 printf '%s' "$LISTED" | grep -q 'fake-echo' ||
 	fail "the provider's models were not offered: $LISTED"
 printf '%s' "$LISTED" | grep -q '^\* fake-echo' ||
@@ -85,7 +88,7 @@ printf '%s' "$BEFORE" | grep -q '"current":"fake-echo"' ||
 printf 'ok   a session that never chose uses the daemon default\n'
 
 # 3. Choosing one is recorded on the session, and reported back.
-"$WORK/jingclaw" --config "$WORK/config.toml" session model "$SESSION" a-different-model >/dev/null 2>&1
+"$WORK/jingclaw" session model "$SESSION" a-different-model >/dev/null 2>&1
 AFTER=$(read_model "$SESSION")
 printf '%s' "$AFTER" | grep -q '"current":"a-different-model"' ||
 	fail "the choice was not recorded: $AFTER"
@@ -95,7 +98,7 @@ printf 'ok   choosing one changes that session and not the daemon\n'
 
 # 4. Another session is unaffected. A per-session choice that leaked into every
 #    session would be a configuration change with no way back.
-OTHER=$("$WORK/jingclaw" --config "$WORK/config.toml" session create | tr -d '\r\n')
+OTHER=$("$WORK/jingclaw" session create | tr -d '\r\n')
 OTHER_MODEL=$(read_model "$OTHER")
 printf '%s' "$OTHER_MODEL" | grep -q '"current":"fake-echo"' ||
 	fail "the choice leaked into another session: $OTHER_MODEL"
@@ -105,7 +108,7 @@ printf 'ok   and leaves every other session alone\n'
 #    would be a setting somebody has to make again after every crash.
 kill "$DAEMON"
 wait "$DAEMON" 2>/dev/null || true
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -123,7 +126,7 @@ printf 'ok   and survives a restart\n'
 
 # 6. Setting it back to nothing returns to the default, rather than needing a
 #    separate call nobody would find.
-"$WORK/jingclaw" --config "$WORK/config.toml" session model "$SESSION" "" >/dev/null 2>&1
+"$WORK/jingclaw" session model "$SESSION" "" >/dev/null 2>&1
 CLEARED=$(read_model "$SESSION")
 printf '%s' "$CLEARED" | grep -q '"current":"fake-echo"' ||
 	fail "clearing the choice did not go back to the default: $CLEARED"

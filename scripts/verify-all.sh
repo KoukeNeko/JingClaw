@@ -25,7 +25,7 @@ for CHECK in verify-config.sh verify-api.sh verify-dashboard.sh verify-compactio
 	verify-command-trust.sh verify-skills-install.sh \
 	verify-attach.sh verify-gateway-restart.sh verify-clock.sh \
 	verify-console-owns-it.sh verify-skill-proposal.sh verify-seed-from-environment.sh \
-	verify-working-line.sh \
+	verify-working-line.sh verify-credentials.sh verify-skills-web.sh \
 	verify-parity.sh; do
 	printf '\n=== %s ===\n' "$CHECK"
 	if ! "./$CHECK"; then

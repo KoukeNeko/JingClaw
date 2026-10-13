@@ -11,6 +11,13 @@
 # it fails, and that the same calls from the conversation do not.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -30,15 +37,16 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+mkdir -p "$WORK/workspace"
 printf 'package main\n\nfunc main() {}\n' > "$WORK/workspace/main.go"
 
 # The offline provider answers from where the conversation it was handed has
 # got to, which is what makes this work: the worker starts a conversation of
 # its own, so it starts at the top of the same script. Both of them reach for
 # the same two things, and only one of them is allowed either.
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
@@ -46,32 +54,30 @@ fake_delay = "0s"
 [[provider.fake_script]]
 text = "Handing this over."
 tool = "investigate"
-args = '{"question":"Which Go files are in the workspace?"}'
+args = "{\"question\":\"Which Go files are in the workspace?\"}"
 
 [[provider.fake_script]]
 text = "Writing it down."
 tool = "write_file"
-args = '{"path":"taken.md","content":"should have stopped"}'
+args = "{\"path\":\"taken.md\",\"content\":\"should have stopped\"}"
 
 [[provider.fake_script]]
 text = "There is one Go file: main.go."
 
 [server]
 addr = "127.0.0.1:7793"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
 # Named to the model, or it will not be used. The tools whose collaborator is
 # the runtime are registered before the prompt is assembled precisely so this
 # holds, and the ordering that breaks it is invisible from anywhere else.
-PROMPT=$("$WORK/jingclaw" daemon --config "$WORK/config.toml" --print-prompt 2>"$WORK/prompt.err") ||
+PROMPT=$("$WORK/jingclaw" daemon --print-prompt 2>"$WORK/prompt.err") ||
 	fail "printing the prompt failed: $(cat "$WORK/prompt.err")"
 printf '%s' "$PROMPT" | grep -q 'Tools available:.*investigate' ||
 	fail "the model is never told it can delegate: $(printf '%s' "$PROMPT" | grep -i 'tools available')"
 printf 'ok   the model is told it can delegate\n'
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0

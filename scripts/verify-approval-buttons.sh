@@ -13,14 +13,19 @@
 # itself, the bot token would be an approval.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 go build -o "$WORK/jingclaw" ./cmd/jingclaw
 
@@ -46,39 +51,36 @@ ASKER=900000000000000013
 APPROVER=900000000000000014
 STRANGER=900000000000000015
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-
-cat > "$WORK/config.toml" <<EOF
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
-fake_delay = "0s"
-
-[[provider.fake_script]]
-text = "Writing it."
-tool = "write_file"
-args = '{"path":"notes.md","content":"written"}'
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG="[provider]
+backend = \"fake\"
+fake_model = \"fake-echo\"
+fake_delay = \"0s\"
 
 [[provider.fake_script]]
-text = "Done."
+text = \"Writing it.\"
+tool = \"write_file\"
+args = '{\"path\":\"notes.md\",\"content\":\"written\"}'
+
+[[provider.fake_script]]
+text = \"Done.\"
 
 [server]
-addr = "127.0.0.1:7836"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
+addr = \"127.0.0.1:7836\"
 [gateway]
-platform = "discord"
+platform = \"discord\"
 [gateway.discord]
-account_id = "main"
+account_id = \"main\"
 [[gateway.discord.channels]]
-channel_ids = ["$CHANNEL"]
-tenant_id = "$TENANT"
-workspace_id = "default"
-users = ["$ASKER", "$APPROVER", "$STRANGER"]
-approvers = ["$APPROVER"]
-EOF
+channel_ids = [\"$CHANNEL\"]
+tenant_id = \"$TENANT\"
+workspace_id = \"default\"
+users = [\"$ASKER\", \"$APPROVER\", \"$STRANGER\"]
+approvers = [\"$APPROVER\"]
+"
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0

@@ -13,6 +13,13 @@
 # against, like the rest of that adapter.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -41,7 +48,7 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 CHAT_ID=900000000000000031
 USER_ID=900000000000000032
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+mkdir -p "$WORK/workspace"
 printf 'the notes\n' > "$WORK/workspace/notes.md"
 
 python3 ../scripts/support/telegram-stub.py 7806 "$WORK/calls.jsonl" \
@@ -59,37 +66,36 @@ done
 # Scripted calls, so the run has things to say it is doing. A run that only
 # thinks goes straight from starting to answering, and the lines that name a
 # file and an address are never drawn.
-cat > "$WORK/config.toml" <<EOF
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
-fake_delay = "0s"
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG="[provider]
+backend = \"fake\"
+fake_model = \"fake-echo\"
+fake_delay = \"0s\"
 
 [[provider.fake_script]]
-text = "Looking."
-tool = "read_file"
-args = '{"path":"notes.md"}'
+text = \"Looking.\"
+tool = \"read_file\"
+args = '{\"path\":\"notes.md\"}'
 
 [[provider.fake_script]]
-text = "Nothing much in it."
+text = \"Nothing much in it.\"
 
 [server]
-addr = "127.0.0.1:7805"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
+addr = \"127.0.0.1:7805\"
 [gateway]
-platform = "telegram"
+platform = \"telegram\"
 [gateway.telegram]
-account_id = "main"
-api_base = "http://127.0.0.1:7806"
+account_id = \"main\"
+api_base = \"http://127.0.0.1:7806\"
 [[gateway.telegram.channels]]
-channel_ids = ["$CHAT_ID"]
-tenant_id = "$CHAT_ID"
-workspace_id = "default"
-users = ["$USER_ID"]
-EOF
+channel_ids = [\"$CHAT_ID\"]
+tenant_id = \"$CHAT_ID\"
+workspace_id = \"default\"
+users = [\"$USER_ID\"]
+"
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -100,7 +106,7 @@ while [ ! -f "$WORK/run/daemon.json" ]; do
 done
 
 TELEGRAM_BOT_TOKEN=stub-token \
-	"$WORK/jingclaw" gateway --config "$WORK/config.toml" \
+	"$WORK/jingclaw" gateway \
 	>"$WORK/gw.out" 2>"$WORK/gw.err" &
 GATEWAY=$!
 

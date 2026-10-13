@@ -8,6 +8,13 @@
 # one would be checking something else.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -32,7 +39,7 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
+mkdir -p "$WORK/workspace"
 
 # Large enough that the result is stored rather than sent inline, which is
 # what makes it something `open` can be asked for.
@@ -61,8 +68,10 @@ export OPENED_LOG
 TMPDIR="$WORK/tmp"
 mkdir -p "$TMPDIR"
 export TMPDIR
-cat > "$WORK/config.toml" <<EOF
-[provider]
+
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
@@ -72,23 +81,18 @@ fake_delay = "0s"
 # invented, and they are what the show and open commands are for. One call and
 # not two, because the second would stop for a decision of its own and this
 # check types a fixed list of commands: it cannot name an id it has not seen.
-#
-# No backticks in here: this heredoc interpolates, so a word in backticks
-# would be run as a command while the settings file is being written.
 [[provider.fake_script]]
 text = "Reading the big one."
 tool = "exec_command"
-args = '{"program":"cat","args":["big-output-from-a-command-with-a-long-argument-tail.txt"],"timeout_seconds":45}'
+args = "{\"program\":\"cat\",\"args\":[\"big-output-from-a-command-with-a-long-argument-tail.txt\"],\"timeout_seconds\":45}"
 
 [[provider.fake_script]]
 text = "Done."
 [server]
 addr = "127.0.0.1:7786"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
-EOF
+'
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0

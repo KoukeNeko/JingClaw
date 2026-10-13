@@ -12,6 +12,13 @@
 # else, say something, and see whether an answer comes back.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -42,7 +49,6 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 CHAT_ID=900000000000000021
 USER_ID=900000000000000022
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
 : > "$WORK/pending"
 
 python3 ../scripts/support/telegram-stub.py 7802 "$WORK/calls.jsonl" \
@@ -60,28 +66,26 @@ done
 # No address for the daemon, so it takes whatever port it is given and
 # publishes it. That is the whole situation: a fixed port would let a gateway
 # holding a stale address work by luck.
-cat > "$WORK/config.toml" <<EOF
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
-fake_delay = "0s"
-[server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG="[provider]
+backend = \"fake\"
+fake_model = \"fake-echo\"
+fake_delay = \"0s\"
 [gateway]
-platform = "telegram"
+platform = \"telegram\"
 [gateway.telegram]
-account_id = "main"
-api_base = "http://127.0.0.1:7802"
+account_id = \"main\"
+api_base = \"http://127.0.0.1:7802\"
 [[gateway.telegram.channels]]
-channel_ids = ["$CHAT_ID"]
-tenant_id = "$CHAT_ID"
-workspace_id = "default"
-users = ["$USER_ID"]
-EOF
+channel_ids = [\"$CHAT_ID\"]
+tenant_id = \"$CHAT_ID\"
+workspace_id = \"default\"
+users = [\"$USER_ID\"]
+"
 
 startDaemon() {
-	"$WORK/jingclaw" daemon --config "$WORK/config.toml" \
+	"$WORK/jingclaw" daemon \
 		>>"$WORK/daemon.out" 2>>"$WORK/daemon.err" &
 	DAEMON=$!
 
@@ -116,7 +120,7 @@ startDaemon
 FIRST=$(whereItIs)
 
 TELEGRAM_BOT_TOKEN=stub-token \
-	"$WORK/jingclaw" gateway --config "$WORK/config.toml" \
+	"$WORK/jingclaw" gateway \
 	>"$WORK/gw.out" 2>"$WORK/gw.err" &
 GATEWAY=$!
 

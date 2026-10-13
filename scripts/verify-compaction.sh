@@ -4,6 +4,13 @@
 # an event, and goes on serving turns.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 
@@ -11,8 +18,6 @@ WORK=$(mktemp -d)
 
 # A deployment of this check's own, so it cannot reach the operator's: reading
 # their settings would be bad and writing to their database would be worse.
-# Where the agent may read and write is this directory's workspace, which is
-# why the check has to have one rather than simply having none.
 export JINGCLAW_HOME="$WORK"
 
 BIN="$WORK/jingclaw daemon"
@@ -34,16 +39,16 @@ trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<EOF
-[provider]
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG='[provider]
 backend = "fake"
 fake_model = "fake-echo"
 fake_delay = "0s"
 
 [context]
 # Far below what the fake provider reports, so a handful of turns is enough to
-# go past it. This is the setting under test: the file has to win.
+# go past it. This is the setting under test: it has to win.
 window = 2000
 compact_at = 0.7
 keep_fraction = 0.3
@@ -51,12 +56,10 @@ keep_fraction = 0.3
 keep_after_fold = 0
 
 [server]
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
 log_level = "info"
-EOF
+'
 
-$BIN --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+$BIN >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -70,18 +73,18 @@ grep -q '"context_window":2000' "$WORK/daemon.err" ||
 	fail "the daemon did not take the window from the configuration: $(cat "$WORK/daemon.err")"
 printf 'ok   takes the context window from the configuration\n'
 
-SESSION=$("$CLI" --config "$WORK/config.toml" session create | tr -d '\r\n')
+SESSION=$("$CLI" session create | tr -d '\r\n')
 [ -n "$SESSION" ] || fail "no session id"
 
 BIG=$(head -c 3000 /dev/zero | tr '\0' 'y')
 TURN=1
 while [ "$TURN" -le 5 ]; do
-	"$CLI" --config "$WORK/config.toml" send "$SESSION" "turn $TURN $BIG" >/dev/null
+	"$CLI" send "$SESSION" "turn $TURN $BIG" >/dev/null
 	TURN=$((TURN + 1))
 	sleep 0.4
 done
 
-"$CLI" --config "$WORK/config.toml" attach "$SESSION" >"$WORK/events" 2>&1 &
+"$CLI" attach "$SESSION" >"$WORK/events" 2>&1 &
 ATTACH=$!
 sleep 2
 kill "$ATTACH" 2>/dev/null || true
@@ -97,7 +100,7 @@ grep -q 'folded .* messages' "$WORK/events" ||
 printf 'ok   says how much history was folded away\n'
 
 # Still alive and still answering after all of that.
-"$CLI" --config "$WORK/config.toml" send "$SESSION" "and one more" >/dev/null
+"$CLI" send "$SESSION" "and one more" >/dev/null
 sleep 0.6
 grep -c 'run.failed' "$WORK/daemon.err" >/dev/null 2>&1 &&
 	fail "a run failed during compaction: $(grep run.failed "$WORK/daemon.err")"

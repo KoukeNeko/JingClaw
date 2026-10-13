@@ -9,6 +9,13 @@
 # sees that JSON as the answer, which is ugly and beside the point.
 set -eu
 
+# Nothing inherited may supply a document or override a setting: the settings
+# below are the only ones this check's daemon is given, and a variable from the
+# caller would be another.
+for VARIABLE in $(env | sed -n 's/^\(JINGCLAW_[A-Za-z0-9_]*\)=.*/\1/p'); do
+	unset "$VARIABLE"
+done
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -30,35 +37,33 @@ CHANNEL=900000000000000021
 TENANT=900000000000000022
 PERSON=900000000000000023
 
-mkdir -p "$WORK/run" "$WORK/data" "$WORK/workspace"
-cat > "$WORK/config.toml" <<CONFIG
-[provider]
-backend = "fake"
-fake_model = "fake-echo"
-fake_delay = "0s"
+# The settings reach the first start the way a container's do: the daemon saves
+# this text in its database, and there is no settings file.
+export JINGCLAW_CONFIG="[provider]
+backend = \"fake\"
+fake_model = \"fake-echo\"
+fake_delay = \"0s\"
 
 [[provider.fake_script]]
-text = '[{"claim":"They edit in vim.","quote":"I edit everything in vim","message":1,"about":"person"}]'
+text = '[{\"claim\":\"They edit in vim.\",\"quote\":\"I edit everything in vim\",\"message\":1,\"about\":\"person\"}]'
 
 [server]
-addr = "127.0.0.1:7801"
-runtime_dir = "$WORK/run"
-data_dir = "$WORK/data"
+addr = \"127.0.0.1:7801\"
 [memory]
 enabled = true
 curate = true
 [gateway]
-platform = "discord"
+platform = \"discord\"
 [gateway.discord]
-account_id = "main"
+account_id = \"main\"
 [[gateway.discord.channels]]
-channel_ids = ["$CHANNEL"]
-tenant_id = "$TENANT"
-workspace_id = "default"
-users = ["$PERSON"]
-CONFIG
+channel_ids = [\"$CHANNEL\"]
+tenant_id = \"$TENANT\"
+workspace_id = \"default\"
+users = [\"$PERSON\"]
+"
 
-"$WORK/jingclaw" daemon --config "$WORK/config.toml" >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
+"$WORK/jingclaw" daemon >"$WORK/daemon.out" 2>"$WORK/daemon.err" &
 DAEMON=$!
 
 WAITED=0
@@ -104,7 +109,7 @@ said | grep -q 'completed:.* noted:1' ||
 	fail "the note is not said after the run's account, or the count is off: $(said)"
 printf 'ok   after the account of the run, with the count\n'
 
-LISTED=$("$WORK/jingclaw" --config "$WORK/config.toml" memory list)
+LISTED=$("$WORK/jingclaw" memory list)
 printf '%s' "$LISTED" | grep -q 'vim' ||
 	fail "the note the channel was told about is not in memory:
 $LISTED"
