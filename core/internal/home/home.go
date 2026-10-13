@@ -30,7 +30,11 @@ const DirName = ".jingclaw"
 
 // Names of what lives inside it.
 const (
-	ConfigName    = "config.toml"
+	// ConfigName is the file older versions kept the settings in. Nothing reads
+	// it as settings any more: the first start after an upgrade imports it into
+	// the database and sets it aside.
+	ConfigName = "config.toml"
+
 	WorkspaceName = "workspace"
 	DataName      = "data"
 	RunName       = "run"
@@ -89,9 +93,6 @@ func Create(root string) (Dir, error) {
 	return dir, nil
 }
 
-// ConfigFile is where the configuration lives.
-func (d Dir) ConfigFile() string { return filepath.Join(d.Root, ConfigName) }
-
 // Workspace is the default workspace: what the agent may read and change when
 // nothing else says otherwise.
 //
@@ -108,10 +109,9 @@ func (d Dir) Run() string { return filepath.Join(d.Root, RunName) }
 
 // Skills is where the instruction packs an operator has installed live.
 //
-// Beside AGENTS.md and PERSONA.md rather than in the workspace: they are
-// things the operator put here, and the workspace is what the agent may
-// change. Kept in there, a skill would be a file the agent could rewrite
-// while doing a job.
+// Beside the credential files rather than in the workspace: they are things
+// the operator put here, and the workspace is what the agent may change. Kept
+// in there, a skill would be a file the agent could rewrite while doing a job.
 func (d Dir) Skills() string { return filepath.Join(d.Root, SkillsName) }
 
 // Log is where a deployment that nobody is watching writes what it says.

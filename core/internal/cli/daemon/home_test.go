@@ -3,6 +3,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
@@ -24,14 +25,6 @@ func TestTheDirectoryDecidesEveryPath(t *testing.T) {
 	}
 	if filepath.Dir(database) != dir.Data() {
 		t.Errorf("the database is at %s, want it under %s", database, dir.Data())
-	}
-
-	configFile, err := config.DefaultPath()
-	if err != nil {
-		t.Fatalf("config: %v", err)
-	}
-	if configFile != dir.ConfigFile() {
-		t.Errorf("the configuration is at %s, want %s", configFile, dir.ConfigFile())
 	}
 
 	if got := workspaceRoot(); got != dir.Workspace() {
@@ -124,5 +117,43 @@ func TestAskingWhereThingsAreCreatesNothing(t *testing.T) {
 			names = append(names, entry.Name())
 		}
 		t.Errorf("asking created %s, containing %v", root, names)
+	}
+}
+
+// The settings are not a file, and the answer to where they are says so.
+//
+// A line that named a path would send somebody looking for a file that nothing
+// reads, and one that was missing would read as the program not knowing.
+func TestAskingWhereThingsAreSaysTheSettingsAreInTheDatabase(t *testing.T) {
+	root := filepath.Join(t.TempDir(), home.DirName)
+	t.Setenv(home.EnvVar, root)
+
+	var said strings.Builder
+	if err := reportPaths(&said, config.Defaults()); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+
+	var settings string
+	for _, line := range strings.Split(said.String(), "\n") {
+		if strings.HasPrefix(line, "settings") {
+			settings = line
+		}
+	}
+	if !strings.Contains(settings, "database") {
+		t.Errorf("there is no line saying the settings are in the database:\n%s", said.String())
+	}
+	if strings.Contains(said.String(), "config.toml") {
+		t.Errorf("a file the settings are not in is named:\n%s", said.String())
+	}
+
+	// And the rest is where it was.
+	for _, want := range []string{
+		filepath.Join(root, "data", "jingclaw.db"),
+		filepath.Join(root, "workspace"),
+		filepath.Join(root, "run", "daemon.json"),
+	} {
+		if !strings.Contains(said.String(), want) {
+			t.Errorf("the report does not say %s:\n%s", want, said.String())
+		}
 	}
 }

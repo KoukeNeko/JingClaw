@@ -1,10 +1,12 @@
-// Package config loads the daemon's settings.
+// Package config reads the daemon's settings from their text.
 //
-// Precedence runs defaults → file → environment → flags, so the more specific
-// and more immediate a source is, the more it wins. Everything is decoded into
-// a typed struct at startup rather than being queried by key later: a
-// configuration library reaching into every corner of a program is how a typo
-// in a key name becomes a silent default at runtime.
+// The text itself is not kept here: it is the config document in the daemon's
+// database, and this package turns whatever text it is handed into settings.
+// Precedence runs defaults → saved text → environment → flags, so the more
+// specific and more immediate a source is, the more it wins. Everything is
+// decoded into a typed struct at startup rather than being queried by key
+// later: a configuration library reaching into every corner of a program is
+// how a typo in a key name becomes a silent default at runtime.
 package config
 
 import (
@@ -16,7 +18,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,12 +25,8 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/knadh/koanf/parsers/toml/v2"
 	"github.com/knadh/koanf/providers/env/v2"
-	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/structs"
 	"github.com/knadh/koanf/v2"
-
-	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
-	"github.com/KoukeNeko/JingClaw/core/internal/home"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/openaicompat"
 )
@@ -40,24 +37,25 @@ const (
 	// in a shell.
 	envPrefix = "JINGCLAW_"
 
-	// FileEnvVar carries a whole configuration file, for a deployment whose
-	// only way in is an environment variable.
+	// FileEnvVar carries a whole configuration, for a deployment whose only way
+	// in is an environment variable.
 	//
 	// Some container platforms offer exactly two inputs: a volume and a list
 	// of variables. Individual settings do not survive that trip — the
 	// environment reaches provider.backend and stops, because a name like
-	// api_key_env makes any deeper underscore ambiguous — and a list of
-	// tables like the channel bindings has no spelling as a variable at all.
-	// So the file comes through whole, and is written where the file goes.
+	// api_key_env makes any deeper underscore ambiguous — and a list of tables
+	// like the channel bindings has no spelling as a variable at all. So the
+	// text comes through whole, and a first start saves it as the config
+	// document. Only a first start: the variable arrives again on every
+	// restart, and saving it again would discard what was edited since.
 	FileEnvVar = "JINGCLAW_CONFIG"
 
-	// PersonaEnvVar and InstructionsEnvVar carry the two files that say who
+	// PersonaEnvVar and InstructionsEnvVar carry the other two documents, who
 	// the agent is and how a project wants to be worked on.
 	//
-	// A configuration is not the whole deployment. These are read from the
-	// same directory and are just as unreachable there, and the persona is
-	// the one somebody most wants to set: it is what makes a deployment
-	// theirs rather than a default.
+	// A configuration is not the whole deployment. These are just as
+	// unreachable on such a platform, and the persona is the one somebody most
+	// wants to set: it is what makes a deployment theirs rather than a default.
 	PersonaEnvVar      = "JINGCLAW_PERSONA"
 	InstructionsEnvVar = "JINGCLAW_AGENTS"
 
@@ -88,33 +86,33 @@ type Config struct {
 	Gateway   Gateway   `koanf:"gateway"`
 }
 
-// Agent is who the agent is and what it has been told.
+// Who the agent is and how it works are documents, not settings.
 //
-// None of this is a security control. It shapes how the agent presents itself
-// and what it tries; what it is permitted to do is settled by the policy
-// engine, which does not read any of these fields.
-// Who the agent is and how it works are files in the workspace, not settings.
+// AGENTS and PERSONA are kept in the database beside the settings and read
+// when the daemon starts, in that order. Beside rather than in the workspace:
+// they describe the agent, and the workspace is what the agent may change.
+// There is deliberately no name, persona, instructions or instruction_files
+// setting: each was a second place to say the same thing, and a second place
+// is one somebody edits while the first is what runs.
 //
-// AGENTS.md and PERSONA.md sit beside the settings, are created by --init,
-// and are read on every run in that order. Beside rather than in the
-// workspace: they describe the agent, and the workspace is what the agent may
-// change. There is deliberately no name, persona, instructions or
-// instruction_files setting: each was a second place to say the same thing,
-// and a second place is one somebody edits while the first is what runs.
-//
-// Fixed names rather than configurable ones for the same reason. AGENTS.md is
-// a convention other tools already read, so a project that has one gets it
-// free; PERSONA.md is this deployment's own. A setting naming them could only
-// point at a file that does not exist.
+// These are the names of the files older versions kept them in, as AGENTS.md
+// and PERSONA.md in the deployment directory, which a first start imports and
+// sets aside. AGENTS.md is a convention other tools already read, so a project
+// that has one has it to import; PERSONA.md was this deployment's own.
 const (
 	InstructionsFile = "AGENTS.md"
 	PersonaFile      = "PERSONA.md"
 )
 
-// InstructionFiles are read from the deployment directory when present, in
-// the order returned.
+// InstructionFiles are the files older versions kept the two documents in, in
+// the order they were read.
 func InstructionFiles() []string { return []string{InstructionsFile, PersonaFile} }
 
+// Agent is who the agent is and what it has been told.
+//
+// None of this is a security control. It shapes how the agent presents itself
+// and what it tries; what it is permitted to do is settled by the policy
+// engine, which does not read any of these fields.
 type Agent struct {
 	// MaxIterations bounds the tool loop per run.
 	MaxIterations int `koanf:"max_iterations"`
@@ -333,7 +331,7 @@ type Retry struct {
 //
 // seen carries channel ids already claimed, so the same room appearing in both
 // lists is caught. Silently letting one win would give a channel powers the
-// file appears to deny it, and which of the two won would depend on the order
+// settings appear to deny it, and which of the two won would depend on the order
 // they are checked in.
 func (c Channel) problems(where string, seen map[string]string) []Problem {
 	var problems []Problem
@@ -456,9 +454,9 @@ type Sandbox struct {
 	// gets it without asking finds out when something it relied on stops
 	// working.
 	//
-	// On, it is not advisory: a machine that cannot confine refuses to start.
-	// A sandbox that runs the command anyway is one somebody believes in and
-	// does not have.
+	// On, it is not advisory: a machine that cannot confine runs no agent; the
+	// daemon stays up in repair mode and says why. A sandbox that runs the
+	// command anyway is one somebody believes in and does not have.
 	//
 	// That is every machine but a Mac for now. The deployment's own directory
 	// is always hidden from a command, and Linux's landlock grants access
@@ -769,15 +767,15 @@ type Bindings struct {
 	// Channels are rooms other people can type in. Reading runs unattended;
 	// changes, memory and web pages stop and ask; programs are refused.
 	//
-	// Applied when the daemon starts, so a deployment is described in the file
-	// rather than in commands somebody has to remember running. Declaring a
-	// channel that already exists updates it.
+	// Applied when the daemon starts, so a deployment is described in the
+	// settings rather than in commands somebody has to remember running.
+	// Declaring a channel that already exists updates it.
 	//
-	// Removing one from the file does not unbind it. A daemon started once
-	// with an incomplete file would otherwise take channels away, and a
+	// Removing one from the settings does not unbind it. A daemon started once
+	// with incomplete settings would otherwise take channels away, and a
 	// binding decides who may reach the agent; losing that by accident is
 	// worse than leaving one behind. The startup log names any binding the
-	// file does not, so drift is visible.
+	// settings do not, so drift is visible.
 	Channels []Channel `koanf:"channels"`
 
 	// Consoles are private channels an operator controls, which may answer
@@ -796,7 +794,7 @@ type Bindings struct {
 //
 // Each platform declares its own rather than sharing one list, because a
 // channel id, a guild id, a user id and a role id all belong to one service.
-// One shared list would let a file written for Discord be read by a Telegram
+// One shared list would let a list written for Discord be read by a Telegram
 // daemon, which is the failure the separate sections exist to prevent.
 //
 // A platform this build does not serve returns nothing. Validation reports
@@ -929,9 +927,14 @@ type Server struct {
 	Addr string `koanf:"addr"`
 
 	// DataDir holds the database. Empty means the platform's own location.
+	//
+	// Given by --data-dir or JINGCLAW_SERVER_DATA_DIR and never by the saved
+	// text: the text is in the database, so it cannot say where the database
+	// is. See BootstrapKeys.
 	DataDir string `koanf:"data_dir"`
 
 	// RuntimeDir holds the discovery file clients use to find the daemon.
+	// Given by JINGCLAW_SERVER_RUNTIME_DIR, for the same reason as DataDir.
 	RuntimeDir string `koanf:"runtime_dir"`
 
 	LogLevel string `koanf:"log_level"`
@@ -1048,67 +1051,42 @@ func Defaults() Config {
 	}
 }
 
-// Load reads the configuration.
+// Candidate reads a configuration from the text of the config document: the
+// defaults, then the text, then the environment.
 //
-// A missing file is not an error: running with defaults and no configuration
-// at all has to work, or the first experience of the tool is editing TOML. A
-// file that exists but cannot be parsed is an error, because silently ignoring
-// it would run with settings the operator believes are in force.
-func Load(path string) (Config, string, error) {
-	k := koanf.New(".")
-
-	if err := k.Load(structs.Provider(Defaults(), "koanf"), nil); err != nil {
-		return Config{}, "", fmt.Errorf("config: load defaults: %w", err)
-	}
-
-	resolved := path
-	if resolved == "" {
-		var err error
-		if resolved, err = DefaultPath(); err != nil {
-			return Config{}, "", err
-		}
-	}
-
-	used := ""
-	if err := k.Load(file.Provider(resolved), toml.Parser()); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return Config{}, "", fmt.Errorf("config: read %s: %w", resolved, err)
-		}
-		// An explicitly requested file that is not there is a mistake worth
-		// reporting; the default one simply may not exist yet.
-		if path != "" {
-			return Config{}, "", fmt.Errorf("config: %s does not exist", path)
-		}
-	} else {
-		used = resolved
-	}
-
-	cfg, err := withEnvironment(k)
-	if err != nil {
-		return Config{}, "", err
-	}
-	return cfg, used, nil
-}
-
-// Candidate reads a configuration from the text of a file, the way Load reads
-// the file: the defaults, then the text, then the environment.
+// For starting with that text, and for asking what a text would do before it
+// is saved. The same steps for both and not a second, similar set, so that
+// "this validates" and "this starts" cannot come apart. No text at all is the
+// defaults and the environment, which is all a command that has no settings of
+// its own needs.
 //
-// For asking what a file would do before it is written. The same steps and not
-// a second, similar set, so that "this validates" and "this starts" cannot
-// come apart.
+// The bootstrap keys are not read from the text. They say where the text is
+// kept, so a text that sets one is ignored on that line rather than obeyed: the
+// daemon starts with the same database whatever the saved text says.
 func Candidate(content []byte) (Config, error) {
 	k := koanf.New(".")
 
 	if err := k.Load(structs.Provider(Defaults(), "koanf"), nil); err != nil {
 		return Config{}, fmt.Errorf("config: load defaults: %w", err)
 	}
-	if err := k.Load(fileText(content), toml.Parser()); err != nil {
+
+	// Read apart and merged, so that dropping the bootstrap keys leaves the
+	// defaults under them as they were.
+	text := koanf.New(".")
+	if err := text.Load(fileText(content), toml.Parser()); err != nil {
 		return Config{}, fmt.Errorf("config: read the text: %w", err)
 	}
+	for _, bootstrap := range BootstrapKeys() {
+		text.Delete(bootstrap.Key)
+	}
+	if err := k.Merge(text); err != nil {
+		return Config{}, fmt.Errorf("config: read the text: %w", err)
+	}
+
 	return withEnvironment(k)
 }
 
-// fileText is a file's content handed over without a file.
+// fileText is the text of a config handed to a parser as it is.
 type fileText []byte
 
 func (t fileText) ReadBytes() ([]byte, error) { return t, nil }
@@ -1119,7 +1097,7 @@ func (t fileText) Read() (map[string]any, error) {
 // withEnvironment is the end of loading: what the environment overrides, then
 // the struct.
 func withEnvironment(k *koanf.Koanf) (Config, error) {
-	// JINGCLAW_AGENT_NAME sets agent.name, and so on.
+	// JINGCLAW_PROVIDER_BACKEND sets provider.backend, and so on.
 	if err := k.Load(env.Provider(".", env.Opt{
 		Prefix: envPrefix,
 		TransformFunc: func(key, value string) (string, any) {
@@ -1134,8 +1112,8 @@ func withEnvironment(k *koanf.Koanf) (Config, error) {
 	if err := k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{
 		Tag: "koanf",
 		DecoderConfig: &mapstructure.DecoderConfig{
-			// Durations are written as "2s" rather than nanoseconds, because a
-			// config file is read by people.
+			// Durations are written as "2s" rather than nanoseconds, because the
+			// settings are read by people.
 			DecodeHook:       mapstructure.StringToTimeDurationHookFunc(),
 			Result:           &cfg,
 			WeaklyTypedInput: true,
@@ -1152,7 +1130,7 @@ func withEnvironment(k *koanf.Koanf) (Config, error) {
 //
 // Only a key of the form section.name can come from the environment: the
 // first underscore is the one that becomes a dot, so a deeper key has no
-// spelling. A client showing which settings the file cannot change has to
+// spelling. A client showing which settings the saved text cannot change has to
 // know that, and the rule is here so it is not written a second time.
 func EnvironmentName(key string) (string, bool) {
 	if strings.Count(key, ".") != 1 {
@@ -1189,17 +1167,20 @@ func (e *InvalidError) Error() string {
 // Report renders the problems for a terminal.
 //
 // The one-line Error is for logs. Somebody who has just mistyped a setting is
-// about to open the file, so the report names the file, quotes each value back
-// as they wrote it, and says what to write instead.
-func (e *InvalidError) Report(file string) string {
+// about to go and change it, so the report says where the settings were read
+// from, quotes each value back as they wrote it, and says what to write
+// instead. where is the caller's own words for that — the saved settings, say
+// — and empty when nothing saved was read.
+func (e *InvalidError) Report(where string) string {
 	var b strings.Builder
 
-	if file == "" {
+	if where == "" {
 		// Nothing was read, so the values came from the environment or from
-		// flags; sending the reader to a file would waste their time.
-		b.WriteString("\nConfiguration problem (no configuration file was read)\n\n")
+		// flags; sending the reader to the saved settings would waste their
+		// time.
+		b.WriteString("\nConfiguration problem (no saved settings were read)\n\n")
 	} else {
-		fmt.Fprintf(&b, "\nConfiguration problem in %s\n\n", file)
+		fmt.Fprintf(&b, "\nConfiguration problem in %s\n\n", where)
 	}
 
 	for _, p := range e.Problems {
@@ -1221,13 +1202,13 @@ func (e *InvalidError) Report(file string) string {
 // It lives here so that every command reports the same way; a daemon and a
 // gateway explaining the same mistake differently is how an operator learns to
 // distrust both.
-func Report(w io.Writer, err error, file string) bool {
+func Report(w io.Writer, err error, where string) bool {
 	var invalid *InvalidError
 	if !errors.As(err, &invalid) {
 		return false
 	}
 
-	fmt.Fprint(w, invalid.Report(file))
+	fmt.Fprint(w, invalid.Report(where))
 	return true
 }
 
@@ -1247,6 +1228,8 @@ func (c Config) Validate() error {
 	problems = append(problems, c.choiceProblems()...)
 	problems = append(problems, c.rangeProblems()...)
 	problems = append(problems, c.serverProblems()...)
+	problems = append(problems, c.CredentialFileProblems()...)
+	problems = append(problems, c.CredentialEnvProblems()...)
 
 	if len(problems) == 0 {
 		return nil
@@ -1304,7 +1287,7 @@ func (c Config) choiceProblems() []Problem {
 		})
 	}
 	// Each provider is checked only when it is the one selected. Refusing a
-	// half-filled section for a provider nobody chose would make the file
+	// half-filled section for a provider nobody chose would make the settings
 	// impossible to keep several options in.
 	switch c.Provider.Backend {
 	case "ollama":
@@ -1349,7 +1332,7 @@ func (c Config) choiceProblems() []Problem {
 		}
 	}
 
-	// Only the selected platform's rooms are checked. A file may describe
+	// Only the selected platform's rooms are checked. The settings may describe
 	// both, and the one this daemon is not serving is not its business.
 	bound := c.Gateway.Selected()
 
@@ -1392,7 +1375,7 @@ func (c Config) choiceProblems() []Problem {
 			if parsed, err := url.Parse(server.URL); err != nil ||
 				(parsed.Scheme != "http" && parsed.Scheme != "https") {
 				problems = append(problems, Problem{
-					Key: where + ".url", Value: quote(server.URL),
+					Key: where + ".url", Value: quoteURL(server.URL),
 					Why: "is not an http or https address",
 					Fix: "Give the endpoint the server listens on.",
 				})
@@ -1455,7 +1438,7 @@ func (c Config) serverProblems() []Problem {
 			})
 		case server.Command != "" && server.URL != "":
 			problems = append(problems, Problem{
-				Key: where + ".url", Value: quote(server.URL),
+				Key: where + ".url", Value: quoteURL(server.URL),
 				Why: "is set, and so is command",
 				Fix: "A server is a child process or an endpoint, never both. Remove one.",
 			})
@@ -1486,7 +1469,7 @@ func (c Config) rangeProblems() []Problem {
 	var problems []Problem
 
 	// An explicit slice rather than a map, so two operators fixing the same
-	// file are told about their mistakes in the same order.
+	// settings are told about their mistakes in the same order.
 	positive := []struct {
 		key   string
 		value int64
@@ -1720,69 +1703,24 @@ func quote(value string) string {
 	return strconv.Quote(value)
 }
 
-// EnsureFile writes the example to the default location when nothing is there.
+// quoteURL quotes an address back without what it may carry to authorize a
+// request.
 //
-// The example is entirely commented, so creating it changes no behaviour. It
-// exists so that configuring the agent means editing a file already sitting in
-// front of you with every setting in it, rather than first finding out what to
-// write and where to put it.
-func EnsureFile() (path string, created bool, err error) {
-	path, err = DefaultPath()
-	if err != nil {
-		return "", false, err
+// A password before the host, a token in the query and a path that is itself
+// the secret are all things a tool server's url is given, and a problem is
+// printed, logged and reported to whoever asks a daemon why it has no agent.
+// The scheme and the host are what tell one address from another, and the key
+// already says which setting it is.
+func quoteURL(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return quote("(not shown)")
 	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", false, fmt.Errorf("config: create config directory: %w", err)
-	}
-
-	// O_EXCL rather than a Stat and then a write: two daemons starting
-	// together must not both find the file missing and race to create it, and
-	// an existing file must never be overwritten by a process that is only
-	// trying to be helpful. A deployment that supplied its own configuration
-	// has already had it written by SeedFromEnvironment, so what arrives here
-	// is the example or nothing.
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		return path, false, nil
-	}
-	if err != nil {
-		return "", false, fmt.Errorf("config: create %s: %w", path, err)
-	}
-
-	if _, err := file.WriteString(Example); err != nil {
-		_ = file.Close()
-		return "", false, fmt.Errorf("config: write %s: %w", path, err)
-	}
-	if err := file.Close(); err != nil {
-		return "", false, fmt.Errorf("config: write %s: %w", path, err)
-	}
-
-	// The O_CREATE mode above is only advisory on Windows; lock the file down
-	// explicitly. It holds no secrets today, but it is the file an operator
-	// pastes instructions into, and widening later is harder than starting
-	// narrow.
-	if err := fsperm.Restrict(path); err != nil {
-		return "", false, fmt.Errorf("config: %w", err)
-	}
-
-	return path, true, nil
+	return quote(parsed.Scheme + "://" + parsed.Host)
 }
 
-// DefaultPath is where the configuration lives when none is given.
-//
-// One answer, from one place. The platform-native directory, the XDG
-// convention and an existence check used to decide between them, which meant
-// three rules produced one path and nobody could say which had applied.
-func DefaultPath() (string, error) {
-	dir, found := home.Resolve()
-	if !found {
-		return "", fmt.Errorf("config: %s is set to none, so there is no default", home.EnvVar)
-	}
-	return dir.ConfigFile(), nil
-}
-
-// Example is a starting configuration.
+// Example is a starting configuration: the text a first start saves as the
+// config when nothing else gives one, and what docs/config.example.toml holds.
 //
 // A starter, not a reference. Every setting appears — a setting an operator
 // can only find by reading the source is, in practice, not configurable, and
@@ -1799,20 +1737,25 @@ func DefaultPath() (string, error) {
 // comment is not "is this worth knowing" — nearly all of it is — but "would
 // deleting it make somebody editing this line more likely to get it wrong".
 //
-// Everything is commented out, so copying this file changes nothing until a
-// line is deliberately uncommented. The daemon reports every unusable setting
+// Everything is commented out, so this text changes nothing until a line is
+// deliberately uncommented. The daemon reports every unusable setting
 // at startup by name, value and fix, which is where a wrong value gets
 // explained rather than here.
 const Example = `# JingClaw configuration. Every setting is shown at its default.
+# These settings are a document in the daemon's database, not a file. The
+# dashboard edits them (run: jingclaw dashboard); they are read when the daemon
+# starts, so a saved change takes effect after: jingclaw stop, then jingclaw.
+# A first start saves this text, unless JINGCLAW_CONFIG gives another.
 # Reference: docs/configuration.md
 
 # ── Agent and provider ─────────────────────────────────────────
 
 [agent]
-# Who this agent is and how it works are AGENTS.md and PERSONA.md, beside this
-# file. "jingclaw daemon --init" creates them empty; a container gets them from
-# JINGCLAW_PERSONA and JINGCLAW_AGENTS. They are not settings: a second place
-# to say the same thing is one somebody edits while the first is what runs.
+# Who this agent is and how it works are two more documents, AGENTS and
+# PERSONA, edited in the dashboard beside this one. A first start can take
+# them from JINGCLAW_PERSONA and JINGCLAW_AGENTS. They are not settings: a
+# second place to say the same thing is one somebody edits while the first
+# is what runs.
 
 # Tool calls one turn may make before the run is stopped.
 # max_iterations = 12
@@ -1822,7 +1765,7 @@ const Example = `# JingClaw configuration. Every setting is shown at its default
 # permission_profile = "local"
 
 [provider]
-# "gemini", "ollama" or "openai_compat". Left as it is, an offline stand-in
+# "gemini", "anthropic", "ollama" or "openai_compat". Left as it is, an offline stand-in
 # answers instead of a model, so a fresh install starts and does nothing
 # surprising; set this before expecting real work.
 backend = "fake"
@@ -1841,7 +1784,8 @@ backend = "fake"
 [provider.gemini]
 # model = ""
 # The environment is read first, then the file, which must be mode 600.
-# Neither value ever reaches a log.
+# Neither value ever reaches a log. A credential file setting, here and below,
+# takes a plain name for a file in this deployment's directory and never a path.
 # api_key_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
 # api_key_file = "gemini.key"
 
@@ -1857,12 +1801,15 @@ backend = "fake"
 # Context the server loads the model with. Zero uses whatever it decides,
 # which is routinely far less than the model was trained for.
 # num_ctx = 0
-# "" leaves the model's own setting alone; "true" or "false" overrides it.
+# "" follows the model: asked to think only when it reports being able to.
+# "off", "on", "low", "medium", "high" or "max" overrides that.
 # think = ""
 
 [provider.anthropic]
 # The Messages API. Its own backend rather than a dialect of the one below:
 # the wire format differs in kind, not in detail.
+# Unlike the sections around it, the values shown here are examples and not
+# defaults: there is no default model, and no default variable name.
 # model = "claude-sonnet-4-5"
 # api_key_env = ["ANTHROPIC_API_KEY"]
 # api_key_file = ""
@@ -1895,7 +1842,7 @@ backend = "fake"
 # directory, the deployment's own workspace, and nothing outside it is
 # reachable; stored output goes beside the database. Two ways to say where
 # something is would be two places for them to disagree, and the answer to
-# "which one ran" would depend on which file somebody edited last.
+# "which one ran" would depend on which one somebody edited last.
 
 [artifacts]
 # How large one piece of stored output may be, and how large one image put in
@@ -1910,11 +1857,11 @@ backend = "fake"
 # what a build's dependencies will do, and this is the difference.
 #
 # Off by default because it changes what commands can do. On, it is not
-# advisory: a machine that cannot confine refuses to start rather than
-# running commands unprotected.
+# advisory: a machine that cannot confine runs no agent, and says why, rather
+# than running commands unprotected.
 #
-# macOS only so far. On Linux the daemon refuses to start with this on:
-# landlock cannot hide this deployment's directory from a command.
+# macOS only so far. On Linux there is no agent with this on: landlock cannot
+# hide this deployment's directory from a command.
 # enabled = false
 # Let confined commands open connections. Off suits a build or a test, which
 # is most of what an agent runs.
@@ -2012,11 +1959,11 @@ enabled = false
 # What this server's tools count as to the policy engine.
 # level = "execute"
 # Says the server is behind an authorization server, so somebody signs in once
-# with "jingclaw mcp login <name>". Only for a url server: a command is given
-# its credentials through env or pass_env. The daemon never opens a browser
-# itself — nobody is watching it — so a session that has run out is reported
-# rather than blocking a run on a page no one will see. "jingclaw mcp list"
-# says which servers need one.
+# with "jingclaw mcp login <name>", which needs the daemon running. Only for a
+# url server: a command is given its credentials through env or pass_env.
+# The daemon never opens a browser itself — nobody is watching it — so a
+# session that has run out is reported rather than blocking a run on a page no
+# one will see. "jingclaw mcp list" says which servers need one.
 # oauth = false
 # Keep this server's tools out of the prompt until the model asks for one
 # by name (tool_search, tool_load). For servers with many tools.
@@ -2028,12 +1975,15 @@ enabled = false
 # 127.0.0.1 only. A LAN address exposes the daemon to the network.
 # addr = "127.0.0.1:0"
 # log_level = "info"
-# Empty uses the platform's own locations.
-# data_dir = ""
-# runtime_dir = ""
+# data_dir and runtime_dir cannot be set here: they say where the database
+# and the discovery file are, and these settings are in the database. Give
+# them when the daemon starts: --data-dir or JINGCLAW_SERVER_DATA_DIR, and
+# JINGCLAW_SERVER_RUNTIME_DIR. Without them the deployment's data/ and run/
+# directories are used. A line for either here is ignored.
 
 [gateway]
-# Read by the gateway. The section below matching this is the one that is read.
+# The gateway is given its part of these by the running daemon. The section
+# below matching this is the one it uses.
 platform = "discord"
 # working_interval = "2s"
 # stream_interval = "1.5s"
@@ -2055,7 +2005,7 @@ account_id = "main"
 # max_attachment_bytes = 4194304
 
 # Rooms other people can type in. Applied at startup; removing one does not
-# unbind it, and the startup log names any binding this file does not.
+# unbind it, and the startup log names any binding these settings do not.
 # [[gateway.discord.channels]]
 # channel_ids = ["111111111111111111"]
 # tenant_id = "222222222222222222"
@@ -2114,36 +2064,38 @@ func CheckChannelForTest(channel Channel, where string) []Problem {
 	return channel.problems(where, map[string]string{})
 }
 
-// SeedFromEnvironment writes the deployment's files from variables, where a
-// variable is the only way in, and says which ones it wrote.
-//
-// Never over a file that exists. The variables are set on the service, so
-// they arrive again on every restart; overwriting would discard whatever was
-// edited in the volume, on the restart after somebody edited it.
-func SeedFromEnvironment() (written []string, err error) {
-	dir, found := home.Resolve()
-	if !found {
-		return nil, nil
-	}
+// Seed is one document's text as the environment carries it.
+type Seed struct {
+	// Document is the name the document is kept under: "config", "agents" or
+	// "persona".
+	Document string
+	Text     string
+}
 
-	// Everything is decoded and checked before anything is written. These
-	// files are created once and never replaced, so a run that wrote the
-	// first and then refused the second would leave a deployment holding a
-	// file it cannot correct by fixing the variable it names.
-	type seeded struct {
-		name    string
-		content []byte
-	}
-	var ready []seeded
+// SeedsFromEnvironment decodes the documents the environment carries, where a
+// variable is the only way in, and writes nothing.
+//
+// The caller saves them, and only for a document that has no text yet: the
+// variables are set on the service, so they arrive again on every restart, and
+// saving them over what is there would discard whatever was edited since, on
+// the restart after somebody edited it.
+//
+// All or nothing. Everything is decoded and checked before anything is
+// returned, so a run that refused the second variable cannot leave a
+// deployment holding the first and no way to correct it by fixing the one the
+// error names. The documents come back in the order config, agents, persona;
+// a variable that is unset or blank carries nothing.
+func SeedsFromEnvironment() ([]Seed, error) {
+	var seeds []Seed
 
 	for _, seed := range []struct {
 		variable string
-		name     string
+		document string
 		check    func([]byte) error
 	}{
-		{FileEnvVar, home.ConfigName, parsesAsTOML},
-		{PersonaEnvVar, PersonaFile, nil},
-		{InstructionsEnvVar, InstructionsFile, nil},
+		{FileEnvVar, "config", parsesAsTOML},
+		{InstructionsEnvVar, "agents", nil},
+		{PersonaEnvVar, "persona", nil},
 	} {
 		given, ok := os.LookupEnv(seed.variable)
 		if !ok || strings.TrimSpace(given) == "" {
@@ -2159,22 +2111,12 @@ func SeedFromEnvironment() (written []string, err error) {
 				return nil, fmt.Errorf("config: %s: %w", seed.variable, err)
 			}
 		}
-		ready = append(ready, seeded{seed.name, content})
+		seeds = append(seeds, Seed{Document: seed.document, Text: string(content)})
 	}
-
-	for _, file := range ready {
-		wrote, err := writeIfAbsent(filepath.Join(dir.Root, file.name), file.content)
-		if err != nil {
-			return written, fmt.Errorf("config: %s: %w", file.name, err)
-		}
-		if wrote {
-			written = append(written, file.name)
-		}
-	}
-	return written, nil
+	return seeds, nil
 }
 
-// decodeSeed is the value as the file should hold it.
+// decodeSeed is the value as the document should hold it.
 func decodeSeed(given string) ([]byte, error) {
 	if !strings.HasPrefix(given, encodedPrefix) {
 		return []byte(given), nil
@@ -2189,44 +2131,14 @@ func decodeSeed(given string) ([]byte, error) {
 
 // parsesAsTOML refuses a configuration that could never be read.
 //
-// Checked before anything is written, because the file is created once and
-// never replaced: a broken one is a deployment that cannot start and cannot
-// be fixed by correcting the variable.
+// Checked before anything is saved, so the failure names the variable while
+// somebody is still looking at it, rather than showing up later as a daemon
+// that cannot read the settings it was given. Only that it is TOML here:
+// whether the settings in it would start is checked by the daemon, with Check,
+// just before it saves the text.
 func parsesAsTOML(content []byte) error {
 	if _, err := toml.Parser().Unmarshal(content); err != nil {
 		return fmt.Errorf("does not parse as TOML: %w", err)
 	}
 	return nil
-}
-
-// writeIfAbsent creates a file, or leaves the one that is there.
-// writeIfAbsent writes the file and says whether this call is the one that did.
-func writeIfAbsent(path string, content []byte) (wrote bool, err error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return false, fmt.Errorf("create the directory: %w", err)
-	}
-
-	// O_EXCL rather than a Stat and then a write, so two starting together
-	// cannot both find it missing and race.
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("create %s: %w", path, err)
-	}
-	if _, err := file.Write(content); err != nil {
-		_ = file.Close()
-		return false, fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := file.Close(); err != nil {
-		return false, fmt.Errorf("write %s: %w", path, err)
-	}
-
-	// The mode above is advisory on Windows. These may hold credentials and
-	// they are the files an operator's instructions live in either way.
-	if err := fsperm.Restrict(path); err != nil {
-		return false, err
-	}
-	return true, nil
 }

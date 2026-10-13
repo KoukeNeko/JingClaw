@@ -28,7 +28,7 @@ type Layer struct {
 	Name string
 
 	// Source says where the text came from: built in, the runtime, or the name
-	// of a standing-instruction file.
+	// of a standing-instruction document.
 	Source string
 
 	Text string
@@ -51,10 +51,11 @@ type Environment struct {
 	ToolNames []string
 }
 
-// StandingInstructions is a file of directions the deployment carries.
+// StandingInstructions is a document of directions the deployment carries.
 type StandingInstructions struct {
-	// Path is the file's name, shown to the model so it can say which file
-	// told it something.
+	// Path is the name the model is told the document by, AGENTS.md or
+	// PERSONA.md, so that it can say which one told it something. Neither is a
+	// file any more.
 	Path string
 	Text string
 }
@@ -62,9 +63,9 @@ type StandingInstructions struct {
 // Build assembles the prompt.
 //
 // Nothing an operator wrote arrives through an argument. Who the agent is and
-// how it works come from the standing-instruction files below, which are the
-// only place they are said: a settings-shaped copy of the same thing is one
-// somebody edits while the file is what runs.
+// how it works come from the standing-instruction documents below, which are
+// the only place they are said: a settings-shaped copy of the same thing is one
+// somebody edits while the document is what runs.
 func Build(env Environment, standing []StandingInstructions, skills string) []Layer {
 	layers := []Layer{
 		{Name: "identity", Source: "built-in", Text: identity},

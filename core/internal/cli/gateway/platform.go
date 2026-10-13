@@ -47,8 +47,12 @@ type decider interface {
 	Decide(ctx context.Context, decision gateway.ApprovalDecision) (gateway.DecisionOutcome, error)
 }
 
-// newAdapter builds the platform named in the configuration.
 // newAdapter builds the platform adapter.
+//
+// A platform that is not served, and a credential that cannot be found, are
+// failures of the settings rather than of this process: they come back as
+// notConfigured, which is what lets whatever started the gateway leave it off
+// without treating the whole deployment as broken.
 //
 // The relay is passed twice under two names on purpose: one is the way work
 // gets started, the other the way a decision gets recorded. They are different
@@ -56,9 +60,9 @@ type decider interface {
 func newAdapter(cfg config.Config, into sink, decisions decider, logger *slog.Logger) (adapter, error) {
 	switch cfg.Gateway.Platform {
 	case "discord":
-		token, err := secret.Find(cfg.Gateway.Discord.TokenEnv, cfg.Gateway.Discord.TokenFile)
+		token, err := secret.Find(cfg.Gateway.Discord.TokenEnv, cfg.Gateway.Discord.TokenFile, "gateway.discord.token_file")
 		if err != nil {
-			return nil, err
+			return nil, &notConfigured{fmt.Errorf("the discord bot token: %w", err)}
 		}
 		return discord.New(discord.Config{
 			Token:              token.Reveal(),
@@ -70,9 +74,9 @@ func newAdapter(cfg config.Config, into sink, decisions decider, logger *slog.Lo
 		}, into, decisions), nil
 
 	case "telegram":
-		token, err := secret.Find(cfg.Gateway.Telegram.TokenEnv, cfg.Gateway.Telegram.TokenFile)
+		token, err := secret.Find(cfg.Gateway.Telegram.TokenEnv, cfg.Gateway.Telegram.TokenFile, "gateway.telegram.token_file")
 		if err != nil {
-			return nil, err
+			return nil, &notConfigured{fmt.Errorf("the telegram bot token: %w", err)}
 		}
 		return telegram.New(telegram.Config{
 			Token:          token.Reveal(),
@@ -83,10 +87,12 @@ func newAdapter(cfg config.Config, into sink, decisions decider, logger *slog.Lo
 		}, into), nil
 
 	default:
-		// Validation has already refused an unknown platform, so reaching
-		// here means one was added to the configuration and not to this
-		// switch — which is worth saying plainly rather than starting a
-		// process that serves nothing.
-		return nil, fmt.Errorf("gatewayd: no adapter for platform %q", cfg.Gateway.Platform)
+		// The daemon refused an unknown platform in its settings, so reaching
+		// here means --platform named one, or one was added to the settings
+		// and not to this switch — which is worth saying plainly rather than
+		// starting a process that serves nothing.
+		return nil, &notConfigured{fmt.Errorf(
+			"no adapter for platform %q; the platforms are %s and %s (gateway.platform, or --platform)",
+			cfg.Gateway.Platform, config.PlatformDiscord, config.PlatformTelegram)}
 	}
 }

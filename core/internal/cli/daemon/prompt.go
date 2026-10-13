@@ -1,16 +1,14 @@
 package daemon
 
 import (
-	"fmt"
-	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
 	"log/slog"
-	"os"
-	"path/filepath"
 	goruntime "runtime"
 	"sort"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
+	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
+	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
 	"github.com/KoukeNeko/JingClaw/core/internal/prompt"
 	"github.com/KoukeNeko/JingClaw/core/internal/skill"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
@@ -18,24 +16,34 @@ import (
 )
 
 // buildPrompt assembles what the agent is told, from the environment and the
-// standing-instruction files the deployment carries.
+// two documents that say who it is and how work is done here. It also says
+// which skills the catalogue in it offers, because that is a fact about this
+// prompt and not about the disk: the skills service compares the two.
+//
+// The documents arrive as text, from the snapshot the daemon took when it
+// started, and are not read again here. The hash the control plane calls
+// running is the hash of the same bytes, so "running" means what was put in
+// front of the model and not what happened to be saved when the prompt was
+// built.
+//
+// They go in under the names AGENTS.md and PERSONA.md, which is what the model
+// has always been told they are called, in that order. They are not files any
+// more; the names are only how a line of the prompt says where it came from.
 func buildPrompt(
 	cfg config.Config,
 	ws *workspace.Workspace,
 	tools *tool.Registry,
 	servers *mcp.Manager,
+	agents, persona string,
 	logger *slog.Logger,
-) ([]prompt.Layer, error) {
-	instructions, err := readStandingInstructions()
-	if err != nil {
-		return nil, err
-	}
-
+) ([]prompt.Layer, control.OfferedSkills) {
 	specs := tools.Specs()
 	names := make([]string, 0, len(specs))
 	for _, spec := range specs {
 		names = append(names, spec.Name)
 	}
+
+	catalogue, offered := skillCatalogue(logger)
 
 	return prompt.Build(
 		prompt.Environment{
@@ -45,9 +53,12 @@ func buildPrompt(
 			ToolNames:       names,
 			DeferredServers: deferredServers(servers),
 		},
-		instructions,
-		skillCatalogue(logger),
-	), nil
+		[]prompt.StandingInstructions{
+			{Path: config.InstructionsFile, Text: agents},
+			{Path: config.PersonaFile, Text: persona},
+		},
+		catalogue,
+	), offered
 }
 
 // skillCatalogue lists what an operator has installed, for the prompt.
@@ -59,16 +70,19 @@ func buildPrompt(
 // Failing to read the directory at all is not worth refusing to start over.
 // An agent with no skills is the ordinary case, and one that will not run
 // because a directory is unreadable is worse than one that runs without them.
-func skillCatalogue(logger *slog.Logger) string {
+//
+// The skills it lists are returned with it, as they were read, so that what the
+// model was told can be compared with the disk later.
+func skillCatalogue(logger *slog.Logger) (string, control.OfferedSkills) {
 	dir, found := home.Resolve()
 	if !found {
-		return ""
+		return "", nil
 	}
 
 	installed, rejected, err := skill.Installed(dir.Skills())
 	if err != nil {
 		logger.Warn("could not read the installed skills", "error", err)
-		return ""
+		return "", nil
 	}
 
 	for _, one := range rejected {
@@ -76,49 +90,7 @@ func skillCatalogue(logger *slog.Logger) string {
 			"skill", one.Name, "reason", one.Reason)
 	}
 
-	return skill.Catalogue(installed)
-}
-
-// readStandingInstructions loads instruction files a project carries.
-//
-// A project saying how it wants to be worked on is ordinary and useful, and
-// AGENTS.md is a convention several tools already share. What such a file
-// cannot do is grant permissions: it is read as directions, and the policy
-// engine never sees it.
-// readStandingInstructions reads the files that say who the agent is and how
-// it works.
-//
-// From the deployment directory, not the workspace. They describe the agent
-// rather than the work, and the workspace is what the agent may change: kept
-// in there, the agent's own instructions are a file it can edit while doing a
-// job, and they sit among a project's files as though they were part of it.
-//
-// A missing one is not an error. The pair is created on the first start and
-// either may be emptied or removed by somebody who does not want it.
-func readStandingInstructions() ([]prompt.StandingInstructions, error) {
-	dir, found := home.Resolve()
-	if !found {
-		return nil, nil
-	}
-
-	var carried []prompt.StandingInstructions
-
-	for _, name := range config.InstructionFiles() {
-		content, err := os.ReadFile(filepath.Join(dir.Root, name))
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", name, err)
-		}
-
-		carried = append(carried, prompt.StandingInstructions{
-			Path: name,
-			Text: string(content),
-		})
-	}
-
-	return carried, nil
+	return skill.Catalogue(installed), control.OfferedBy(installed)
 }
 
 // deferredServers is the catalogue line for each server whose tools are kept

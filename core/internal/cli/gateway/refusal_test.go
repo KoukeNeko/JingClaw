@@ -73,6 +73,12 @@ func (r *refusing) WithdrawInbound(
 	return nil, errors.New("not used here")
 }
 
+func (r *refusing) GetGatewaySettings(
+	context.Context, *connect.Request[controlv1.GetGatewaySettingsRequest],
+) (*connect.Response[controlv1.GetGatewaySettingsResponse], error) {
+	return nil, errors.New("not used here")
+}
+
 func relayRefusing(code connect.Code) (*relay, *posted, *refusing) {
 	platform := &posted{}
 	control := &refusing{code: code}

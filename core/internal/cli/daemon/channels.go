@@ -13,12 +13,12 @@ import (
 
 // applyChannels puts the channels the configuration declares into effect.
 //
-// Applied at startup so a deployment is described in the file rather than in
+// Applied at startup so a deployment is described in the settings rather than in
 // commands somebody has to remember running, and idempotent because the store
 // keys a binding by its channel rather than by the id given here.
 //
 // Nothing is removed. A binding decides who may reach the agent, and a daemon
-// started once with an incomplete file would take channels away silently;
+// started once with incomplete settings would take channels away silently;
 // leaving one behind is the lesser failure, and the drift is reported instead.
 func applyChannels(
 	ctx context.Context,
@@ -28,13 +28,13 @@ func applyChannels(
 ) error {
 	platform := gateway.Platform(cfg.Gateway.Platform)
 
-	// Only the section belonging to the platform this daemon serves. A file
-	// may describe both; binding the rooms of the other one would give a
-	// Discord channel id to a Telegram deployment.
+	// Only the section belonging to the platform this daemon serves. The
+	// settings may describe both; binding the rooms of the other one would give
+	// a Discord channel id to a Telegram deployment.
 	bound := cfg.Gateway.Selected()
 
 	// Which list an entry is in decides what it may do, so the profile is not
-	// something the file can misspell.
+	// something the settings can misspell.
 	lists := []struct {
 		key      string
 		profile  string
@@ -94,17 +94,17 @@ func applyChannels(
 	return reportUndeclared(ctx, store, declared, len(declared) > 0, logger)
 }
 
-// reportUndeclared names bindings the file does not, so an operator reading
+// reportUndeclared names bindings the settings do not, so an operator reading
 // the configuration is not reading a partial list of who can reach the agent.
 func reportUndeclared(
 	ctx context.Context,
 	store gateway.Store,
 	declared map[string]bool,
-	fileDeclaresAny bool,
+	settingsDeclareAny bool,
 	logger *slog.Logger,
 ) error {
-	if !fileDeclaresAny {
-		// A file that declares nothing is not claiming to be the whole list,
+	if !settingsDeclareAny {
+		// Settings that declare nothing are not claiming to be the whole list,
 		// so there is no drift to report.
 		return nil
 	}
@@ -122,7 +122,7 @@ func reportUndeclared(
 			"channel_id", binding.ChannelID,
 			"profile", binding.PermissionProfile,
 			"binding_id", binding.ID,
-			"hint", "it stays bound; remove it with: agent bindings remove",
+			"hint", "it stays bound; remove it with: jingclaw bindings remove",
 		)
 	}
 

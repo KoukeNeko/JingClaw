@@ -16,7 +16,6 @@ import (
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
-	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
@@ -25,6 +24,8 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/process"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
+	"github.com/KoukeNeko/JingClaw/core/internal/schedule"
+	"github.com/KoukeNeko/JingClaw/core/internal/skill"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
 
@@ -579,6 +580,12 @@ func (s *Server) SubscribeAllEvents(
 	}
 }
 
+// redacted is an error from the skill package, as a client may be told it: git
+// repeats the addresses it is given, and an address can carry a credential.
+func redacted(err error) error {
+	return errors.New(skill.Redact(err.Error()))
+}
+
 func toConnectError(err error) error {
 	switch {
 	case err == nil:
@@ -595,10 +602,24 @@ func toConnectError(err error) error {
 		// Someone already answered. FailedPrecondition rather than an error
 		// state: the prompt is settled, the client is simply late.
 		return connect.NewError(connect.CodeFailedPrecondition, err)
-	case errors.Is(err, config.ErrChangedUnderneath):
-		// Somebody else wrote the file after this edit read it. Not a fault of
-		// either: the client reads again and decides.
+	case errors.Is(err, storage.ErrDocumentChanged):
+		// Somebody else saved the document after this edit read it. Not a fault
+		// of either: the client reads again and decides.
 		return connect.NewError(connect.CodeFailedPrecondition, err)
+	case errors.Is(err, storage.ErrDocumentVersionNotFound):
+		return connect.NewError(connect.CodeNotFound, err)
+	case errors.Is(err, skill.ErrSource), errors.Is(err, skill.ErrBusy), errors.Is(err, skill.ErrNotStaged),
+		errors.Is(err, skill.ErrStale), errors.Is(err, skill.ErrCollision), errors.Is(err, skill.ErrNotInstalled):
+		// A well-formed request that the state of the repository or of the
+		// skills directory does not allow. ErrSource first: a staged skill that
+		// calls itself something that cannot be a directory is that, and not a
+		// bad request.
+		return connect.NewError(connect.CodeFailedPrecondition, redacted(err))
+	case errors.Is(err, skill.ErrBadName):
+		return connect.NewError(connect.CodeInvalidArgument, redacted(err))
+	case errors.Is(err, schedule.ErrInvalid):
+		// An expression or zone that cannot work is the caller's to correct.
+		return connect.NewError(connect.CodeInvalidArgument, err)
 	case errors.Is(err, runtime.ErrNoAnswer):
 		// The caller sent nothing. InvalidArgument rather than internal: this
 		// is a client to fix, not a daemon.

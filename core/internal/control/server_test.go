@@ -519,3 +519,20 @@ func TestResumingFromKeptHistoryStreamsNormally(t *testing.T) {
 	}
 	t.Error("no events arrived")
 }
+
+// A schedule that cannot work is a request to correct. Answered as an internal
+// error it reads as the daemon failing, and the page logs a 500 for it.
+func TestASchedulePeopleGotWrongIsAnInvalidArgument(t *testing.T) {
+	client := newServer(t, 0)
+
+	for name, request := range map[string]*controlv1.CreateScheduleRequest{
+		"expression": {Expression: "0 25 * * *", Prompt: "check"},
+		"zone":       {Expression: "0 9 * * *", Zone: "Mars/Olympus_Mons", Prompt: "check"},
+		"date":       {Expression: "0 9 30 2 *", Prompt: "check"},
+	} {
+		_, err := client.CreateSchedule(context.Background(), connect.NewRequest(request))
+		if code := connect.CodeOf(err); code != connect.CodeInvalidArgument {
+			t.Errorf("%s: got %v (%v)", name, code, err)
+		}
+	}
+}

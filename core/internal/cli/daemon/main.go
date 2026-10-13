@@ -11,35 +11,24 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
-
-	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
-	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
-	"github.com/KoukeNeko/JingClaw/core/internal/event"
-	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
-	"github.com/KoukeNeko/JingClaw/core/internal/id"
 	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
 	"github.com/KoukeNeko/JingClaw/core/internal/mcp/mcpauth"
-	"github.com/KoukeNeko/JingClaw/core/internal/permission"
-	"github.com/KoukeNeko/JingClaw/core/internal/process"
 	"github.com/KoukeNeko/JingClaw/core/internal/prompt"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/anthropic"
@@ -56,8 +45,6 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/tool/builtin"
 	memorytool "github.com/KoukeNeko/JingClaw/core/internal/tool/memory"
 	"github.com/KoukeNeko/JingClaw/core/internal/web"
-	"github.com/KoukeNeko/JingClaw/core/internal/webui"
-	"github.com/KoukeNeko/JingClaw/core/internal/workspace"
 )
 
 const (
@@ -81,21 +68,28 @@ func Main(args []string) error {
 	return nil
 }
 
-func run(args []string) error {
+func run(args []string) error { return runContext(context.Background(), args) }
+
+// runContext is run, ending when parent does as well as on a signal. For a
+// test, which has no other way to stop a daemon that is serving.
+func runContext(parent context.Context, args []string) error {
+	// Before anything is read, so that a credential file modified after this is
+	// one this process cannot have read.
+	begun := time.Now()
+
 	flags := flag.NewFlagSet("jingclaw daemon", flag.ContinueOnError)
 	var (
-		configPath  = flags.String("config", "", "configuration file; defaults to the one in the config directory")
 		printPrompt = flags.Bool("print-prompt", false, "print the assembled system prompt with its sources and exit")
-		printConfig = flags.Bool("print-config", false, "print an example configuration file and exit")
+		printConfig = flags.Bool("print-config", false, "print the example settings, every one at its default, and exit")
 		listModels  = flags.Bool("list-models", false, "print the provider's available models and exit")
-		initHere    = flags.Bool("init", false, "create a "+home.DirName+" directory here and exit")
+		initHere    = flags.Bool("init", false, "create the deployment directory (~/"+home.DirName+", or where "+home.EnvVar+" names) and exit")
 		printPaths  = flags.Bool("print-paths", false, "print where this deployment keeps things and exit")
 
-		// Every flag below has a setting of the same meaning in the
-		// configuration file, and exists only so one run can differ from it.
-		// They carry no defaults of their own: the file already holds those,
-		// and a second copy here would be one more place for them to disagree.
-		providerName = flags.String("provider", "", "model provider: gemini, ollama, openai_compat, or fake")
+		// Every flag below has a setting of the same meaning in the saved
+		// settings, and exists only so one run can differ from them. They carry
+		// no defaults of their own: the settings already hold those, and a second
+		// copy here would be one more place for them to disagree.
+		providerName = flags.String("provider", "", "model provider: gemini, anthropic, ollama, openai_compat, or fake")
 		model        = flags.String("model", "", "model to use")
 		addr         = flags.String("addr", "", "loopback address to listen on; port 0 picks a free one")
 		dataDir      = flags.String("data-dir", "", "directory for the database")
@@ -116,83 +110,58 @@ func run(args []string) error {
 		return initialise()
 	}
 
-	// Nothing to configure means nothing to read, and an operator asking "where
-	// do I put this?" is a question the program can answer by putting it there.
-	// Only the default location, and only when it is empty: a file the operator
-	// named themselves and that is missing is a mistake, not an invitation.
-	//
-	// Not for --print-paths, which is how somebody asks a machine what a
-	// deployment there would look like. A command whose whole purpose is to
-	// report can be run on a machine to find out where things are; creating
-	// the first of them while answering is not reporting.
-	var createdConfig, seededConfig bool
-	if *configPath == "" && !*printPaths {
-		// The files a deployment carries, from variables, where a variable is
-		// the only way in. Before the example is written, so that a platform
-		// that supplied a configuration gets that one rather than a default
-		// it can then never replace.
-		seeded, err := config.SeedFromEnvironment()
+	// The settings as this run has them: the defaults, then the text, then the
+	// environment, and over all of it the flags. Only a flag the operator
+	// actually typed counts, so an unset flag does not overwrite a configured
+	// value with a default.
+	withFlags := func(text []byte) (config.Config, error) {
+		cfg, err := config.Candidate(text)
 		if err != nil {
-			return err
+			return config.Config{}, err
 		}
-		seededConfig = slices.Contains(seeded, home.ConfigName)
-
-		if _, createdConfig, err = config.EnsureFile(); err != nil {
-			return err
+		applyFlagOverrides(flags, &cfg, providerName, model, dataDir, addr, maxIters)
+		if *devFake {
+			cfg.Provider.Backend = "fake"
 		}
-
-		// And the two files the settings point at. Created rather than
-		// documented, for the same reason the settings are: a file that
-		// exists is a file somebody edits, and one they have to know to
-		// create is one that stays absent. --init did this and nothing else
-		// did, so every deployment that was not started by hand ran without
-		// them. After what the environment supplied, which is never replaced.
-		if dir, found := home.Resolve(); found {
-			if err := writeInstructionFiles(dir.Root); err != nil {
-				return err
-			}
-		}
+		return cfg, nil
 	}
 
-	cfg, configFile, err := config.Load(*configPath)
+	// The settings are in the database, and the database is somewhere the
+	// settings cannot say. So the first thing read is only what the process is
+	// given: no text, which is the defaults and the environment, and the flags.
+	// This is where the database and the discovery file are, and nothing is
+	// created to find that out. A variable that cannot be read is an error here,
+	// before there is anywhere to keep anything.
+	bootstrap, err := withFlags(nil)
 	if err != nil {
 		return err
 	}
 
-	// Flags win over the file, which wins over the defaults it was seeded
-	// with. Only a flag the operator actually typed counts, so an unset flag
-	// does not overwrite a configured value with a default.
-	applyFlagOverrides(flags, &cfg, providerName, model, dataDir, addr, maxIters)
-	if *devFake {
-		cfg.Provider.Backend = "fake"
-	}
-
-	// Settings are checked once, here. Making something configurable is
-	// exactly when it needs validating: a value nobody could previously write
-	// is now one somebody can.
 	if *printPaths {
-		return reportPaths(cfg, configFile)
+		return reportPaths(os.Stdout, bootstrap)
 	}
 
-	if err := cfg.Validate(); err != nil {
-		// Reported here rather than left to main: a mistyped setting is
-		// something a person is about to go and edit, and a JSON log line is
-		// not what they need to do that.
-		if config.Report(os.Stderr, err, configFile) {
-			os.Exit(1)
-		}
+	// Decoded before anything is created, so that a refused start leaves nothing
+	// behind it. Nothing is saved yet.
+	fromEnvironment, err := config.SeedsFromEnvironment()
+	if err != nil {
 		return err
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel()}))
-	slog.SetDefault(logger)
+	discoveryPath, err := discovery.PathIn(bootstrap.Server.RuntimeDir)
+	if err != nil {
+		return err
+	}
 
 	// Signal-aware root context. Everything the daemon owns descends from it,
 	// so one Ctrl+C unwinds the whole tree.
-	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	rootCtx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	dbPath, err := databasePath(cfg.Server.DataDir)
+	// Until the settings are read there is no level to log at.
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	dbPath, err := databasePath(bootstrap.Server.DataDir)
 	if err != nil {
 		return err
 	}
@@ -205,507 +174,119 @@ func run(args []string) error {
 		logger.Warn("the database is somewhere the system clears",
 			"database", dbPath,
 			"under", where,
-			"holds", "sessions, approvals and memories",
-			"fix", "set server.data_dir to somewhere that survives a reboot",
+			"holds", "sessions, approvals, memories and the settings",
+			"fix", "give JINGCLAW_SERVER_DATA_DIR, or --data-dir, somewhere that survives a reboot",
 		)
 	}
 
+	// A database that cannot be opened ends the start. Every other reason not
+	// to run an agent leaves a daemon that can say what it is; without the
+	// database there is nothing to correct the settings in.
 	store, err := sqlite.Open(rootCtx, dbPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = store.Close() }()
 
-	modelProvider, err := buildProvider(rootCtx, cfg)
-	if err != nil {
-		return err
-	}
-
-	if *listModels {
-		return printModels(rootCtx, modelProvider)
-	}
-
-	selected, err := resolveModel(rootCtx, modelProvider, cfg.Provider.Model())
-	if err != nil {
-		return err
-	}
-
-	workspaceDir, err := ensureWorkspace()
-	if err != nil {
-		return err
-	}
-
-	ws, err := workspace.Open(workspaceDir)
-	if err != nil {
-		return err
-	}
-
-	artifacts, err := artifact.Open(artifactDir(dbPath), cfg.Artifacts.MaxBytes)
-	if err != nil {
-		return err
-	}
-
-	// One observer shared by the tools, so a write can tell whether the file it
-	// is about to replace is one the agent actually read, and one lock set so
-	// two writes to the same file cannot interleave.
-	observed := builtin.NewObserver()
-	locks := builtin.NewFileLocks()
-
-	limits := builtin.Limits{
-		ReadLimit:         cfg.Tools.ReadLimit,
-		MaxReadableFile:   cfg.Tools.MaxReadableFile,
-		MaxOverwriteBytes: cfg.Tools.MaxOverwriteBytes,
-		MaxSearchableFile: cfg.Tools.MaxSearchableFile,
-		GlobResults:       cfg.Tools.GlobResults,
-		GrepResults:       cfg.Tools.GrepResults,
-		CommandTimeout:    cfg.Tools.CommandTimeout,
-		MaxCommandTimeout: cfg.Tools.MaxCommandTimeout,
-		MaxCommandOutput:  cfg.Tools.MaxCommandOutput,
-	}
-
-	writeFile := builtin.NewWriteFile(ws, observed, locks)
-	writeFile.Limits = limits
-	editFile := builtin.NewEditFile(ws, observed, locks)
-
-	tools := tool.NewRegistry()
-	confine, err := confinement(cfg, logger)
-	if err != nil {
-		return err
-	}
-
-	tools.MustRegister(
-		&builtin.ReadFile{Workspace: ws, Observer: observed, Limits: limits},
-		&builtin.GlobFiles{Workspace: ws, Limits: limits},
-		&builtin.Grep{Workspace: ws, Limits: limits},
-		writeFile,
-		editFile,
-		builtin.NewApplyPatch(ws, observed, locks),
-		&builtin.ExecCommand{Workspace: ws, Limits: limits, Artifacts: artifacts, Confine: confine},
-		&builtin.ReadArtifact{Artifacts: artifacts, Limits: limits},
-		&builtin.GitStatus{Workspace: ws},
-		&builtin.GitDiff{Workspace: ws, Artifacts: artifacts},
-	)
-
-	// Long-running programs belong to the daemon rather than to a run, which
-	// is the point of them: a run that starts a dev server and then ends must
-	// not take the server with it. Nothing else would end them, so stopping
-	// the daemon does.
-	processes := process.NewManager()
-	processes.BufferBytes = cfg.Process.BufferBytes
-	defer processes.CloseAll()
-
-	tools.MustRegister(
-		&builtin.StartProcess{Workspace: ws, Processes: processes},
-		&builtin.ProcessIO{Processes: processes},
-		&builtin.StopProcess{Processes: processes},
-		&builtin.ListProcesses{Processes: processes},
-	)
-
-	// Where sessions somebody signed in with are kept. Opened even when no
-	// server uses OAuth, because it is a directory and the alternative is a
-	// nil that every path below has to remember.
-	sessions, err := mcpauth.Open(mcpauth.DefaultDir())
-	if err != nil {
-		return err
-	}
-
-	// Tool servers are started before the prompt is assembled, because what
-	// they offer is part of what the agent can do and the prompt says so.
-	//
-	// They are child processes of this daemon, so they are shut down with it;
-	// the defer is registered immediately, before anything else can fail and
-	// leave them running.
-	servers := mcp.Start(rootCtx, mcpServers(cfg, sessions), mcp.Limits{
-		StartTimeout: cfg.MCP.StartTimeout,
-		CallTimeout:  cfg.MCP.CallTimeout,
-		MaxOutput:    cfg.MCP.MaxOutput,
-	}, artifacts, logger)
-	defer func() {
-		if err := servers.Close(); err != nil {
-			logger.Warn("an mcp server did not shut down cleanly", "error", err)
-		}
-	}()
-
-	if err := servers.Register(tools); err != nil {
-		return err
-	}
-
-	// Memory is registered before the prompt is assembled, because what the
-	// agent has been told to remember is part of what it can do.
-	memoryOptions := memorytool.Options{
-		Store:        store,
-		WorkspaceRef: ws.Root(),
-		NewID:        func() string { return id.WithPrefix("mem") },
-		Clock:        time.Now,
-		Log:          logger,
-	}
-	if cfg.Memory.Enabled {
-		embedder, err := buildEmbedder(cfg.Memory.Embedding)
-		if err != nil {
-			return err
-		}
-		if embedder != nil {
-			memoryOptions.Embedder = embedder
-			memoryOptions.MinSimilarity = cfg.Memory.Embedding.MinSimilarity
-			memoryOptions.RecallMinSimilarity = cfg.Memory.Embedding.RecallMinSimilarity
-		}
-
-		// A lookup that matched nothing may be tried once more with other
-		// words, and the model running the session is the one asked for
-		// them: it is already loaded, and it knows what the query was about
-		// in a way a word list never could.
-		if cfg.Memory.ExpandQueries {
-			memoryOptions.Expander = &modelExpander{modelCompleter{
-				provider: modelProvider,
-				model:    selected.ID,
-			}}
-		}
-
-		tools.MustRegister(
-			&memorytool.Remember{Options: memoryOptions},
-			&memorytool.Recall{Options: memoryOptions},
-		)
-	}
-
-	// Reading the web is registered last among the built-ins, and only when an
-	// operator asked for it. A failure to resolve the interpreter is reported
-	// now rather than the first time the model asks for a page: an agent that
-	// advertises a tool it cannot run wastes a turn discovering that.
-	if fetcher, err := webFetcher(cfg); err != nil {
-		return err
-	} else if fetcher != nil {
-		tools.MustRegister(&builtin.WebRead{
-			Fetcher:       fetcher,
-			Artifacts:     artifacts,
-			MaxCharacters: cfg.Web.MaxCharacters,
-		})
-		logger.Info("web reading is on", "backend", fetcher.Describe())
-	}
-
-	// Searching is registered separately, and needs reading to be on: an
-	// agent that can find addresses and not read them has been given the
-	// half of the capability that is no use on its own.
-	if searcher, err := webSearcher(cfg); err != nil {
-		return err
-	} else if searcher != nil {
-		tools.MustRegister(&builtin.WebSearch{
-			Searcher:   searcher,
-			MaxResults: cfg.Web.Search.MaxResults,
-		})
-		logger.Info("web search is on", "backend", searcher.Describe())
-	}
-
-	profile, ok := permission.ProfileByName(cfg.Agent.PermissionProfile)
-	if !ok {
-		return fmt.Errorf("unknown permission profile %q", cfg.Agent.PermissionProfile)
-	}
-	permissions := permission.New(profile)
-
-	// Registered before the prompt is assembled, because the prompt lists the
-	// tools and a tool the model is never told about is one it will not use.
-	// What they need is the runtime, which needs the prompt, so they are given
-	// a handle to it and it is filled in below.
-	later := &theRuntime{}
-	tools.MustRegister(
-		&builtin.TodoUpdate{Planner: later},
-		&builtin.AskUser{},
-		&builtin.Now{},
-		&builtin.SkillLoad{Skills: installedSkills{}, Activations: later},
-		&builtin.SkillStage{Installer: deploymentSkills{}},
-		&builtin.SkillActivate{Installer: deploymentSkills{}},
-		&builtin.ToolSearch{Deferred: tools},
-		&builtin.ToolLoad{Deferred: tools},
-		&builtin.Investigate{Delegator: later},
-	)
-
-	layers, err := buildPrompt(cfg, ws, tools, servers, logger)
-	if err != nil {
-		return err
-	}
-	if *printPrompt {
-		fmt.Print(prompt.Describe(layers))
-		return nil
-	}
-
-	// Settled once, so the figure compaction plans against and the one the
-	// startup line reports cannot drift apart.
-	window, windowSource := contextWindow(cfg, selected)
-
-	hub := event.NewHub()
-
-	// Both halves of the gateway at once: accepting messages without routing
-	// replies back would answer into the void, and the two are built together
-	// so that cannot be half-configured.
-	plane := gateway.NewPlane(store, nil, permissions, artifacts, nil, nil,
-		func() string { return id.WithPrefix("dsp") }, time.Now, logger)
-	plane.Projector.Provider = modelProvider.Name()
-	plane.Projector.Model = selected.ID
-	plane.Projector.WorkingInterval = cfg.Gateway.WorkingInterval
-	plane.Projector.StreamInterval = cfg.Gateway.StreamInterval
-
-	rt := runtime.New(rootCtx, runtime.Options{
-		Store:       store,
-		Hub:         hub,
-		Provider:    modelProvider,
-		Model:       selected.ID,
-		Tools:       tools,
-		Permissions: permissions,
-		Delivery:    plane.Projector,
-		Coalescing: runtime.Coalescing{
-			TextFlushBytes:     cfg.Delivery.TextFlushBytes,
-			TextFlushInterval:  cfg.Delivery.TextFlushInterval,
-			UsageFlushInterval: cfg.Delivery.UsageFlushInterval,
-		},
-		KeepAfterFold: cfg.Context.KeepAfterFold,
-		ContextBudget: runtime.ContextBudget{
-			Window:        window,
-			CompactAt:     cfg.Context.CompactAt,
-			KeepFraction:  cfg.Context.KeepFraction,
-			SummaryTokens: cfg.Context.SummaryTokens,
-		},
-		Attachments:        artifacts,
-		MaxImageBytes:      cfg.Artifacts.MaxImageBytes,
-		SystemPrompt:       prompt.Render(layers),
-		WorkerSystemPrompt: prompt.Render(prompt.KeepForWorker(layers)),
-		SystemPromptFor:    standingDirections(cfg, memoryOptions, logger),
-		Recall:             notesBeforeTurns(cfg, memoryOptions),
-		AfterRun: notesAfterRuns(cfg, memoryOptions, store, &modelCompleter{
-			provider: modelProvider,
-			model:    selected.ID,
-		}, plane.Projector, later),
-		MaxIterations: cfg.Agent.MaxIterations,
-		NewSessionID:  func() string { return id.WithPrefix("ses") },
-		NewRunID:      func() string { return id.WithPrefix("run") },
-		NewMessageID:  func() string { return id.WithPrefix("msg") },
-		NewEventID:    func() string { return id.WithPrefix("evt") },
-		NewApprovalID: func() string { return id.WithPrefix("apr") },
-		NewPlanItemID: planItemIDs(),
-		NewQuestionID: func() string { return id.WithPrefix("qst") },
-		NewScheduleID: func() string { return id.WithPrefix("sch") },
-		Now:           time.Now,
-		Logger:        logger,
-	})
-
-	// The handle the tools were registered against, filled in. Before
-	// anything serves, so no run can reach a tool whose collaborator is still
-	// missing.
-	later.is = rt
-
-	// Runs that were live when this process last stopped have nobody driving
-	// them. Resolving them before serving means clients never see a run that
-	// can no longer make progress.
-	recovered, err := rt.RecoverOrphanedRuns(rootCtx)
-	if err != nil {
-		return err
-	}
-	if recovered > 0 {
-		logger.Warn("resolved runs orphaned by a previous shutdown", "count", recovered)
-	}
-
-	// Schedules are reconciled from here on: once immediately, because a
-	// machine that was asleep ran no timers and has to work out what came due
-	// while it was gone, and then every minute.
-	go watchSchedules(rootCtx, rt, logger)
-
-	// Memories written before there was an embedder, or under another
-	// model, or while it was down, are given vectors in the background:
-	// until then they are found by their words, the way they always were.
-	go embedMissingMemories(rootCtx, memoryOptions, logger)
-
-	controlToken, err := control.NewToken(control.ScopeControl)
-	if err != nil {
-		return err
-	}
-	// A separate, narrower credential for gateway processes. One that could
-	// also execute tools would make a compromised chat library equivalent to a
-	// compromised daemon.
-	gatewayToken, err := control.NewToken(control.ScopeGateway)
-	if err != nil {
-		return err
-	}
-
-	// What lets a browser in. It is given a credential of its own and never
-	// the one above, which programs on this machine read from a file.
-	browsers := control.NewBrowsers(time.Now)
-
-	listener, err := net.Listen("tcp", cfg.Server.Addr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", cfg.Server.Addr, err)
-	}
-
-	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
-	if !ok {
-		_ = listener.Close()
-		return fmt.Errorf("unexpected listener address %T", listener.Addr())
-	}
-	port := fmt.Sprintf("%d", tcpAddr.Port)
-	baseURL := "http://" + net.JoinHostPort("127.0.0.1", port)
-
-	// The runtime does not exist until after the options are built, so the
-	// ingress is completed here rather than taking a half-built runtime.
-	// The channels the file declares are put into effect before anything can
-	// arrive through one.
-	if err := applyChannels(rootCtx, store, cfg, logger); err != nil {
-		return err
-	}
-
-	plane.Ingress.Runtime = rt
-
-	// The console's extra reach is attached alongside, and only here. A
-	// channel bound to the console profile can decide the approvals raised by
-	// its own conversations; every other binding sees the narrow interface
-	// and cannot decide anything.
-	plane.Ingress.Decisions = rt
-	plane.Ingress.Withdrawals = rt
-
-	api := http.NewServeMux()
-	api.Handle(controlv1connect.NewSessionServiceHandler(
-		control.NewServer(rt, store, hub, artifacts, modelProvider, selected.ID, processes)))
-	api.Handle(controlv1connect.NewGatewayIngressServiceHandler(
-		control.NewGatewayServer(plane.Ingress, store, time.Now)))
-	api.Handle(controlv1connect.NewArtifactServiceHandler(control.NewArtifactServer(artifacts)))
-	api.Handle(controlv1connect.NewMemoryServiceHandler(control.NewMemoryServer(store)))
-	api.Handle(controlv1connect.NewChannelServiceHandler(
-		control.NewChannelServer(store, func() string { return id.WithPrefix("bnd") }, time.Now)))
-	api.Handle(controlv1connect.NewBrowserServiceHandler(control.NewBrowserServer(browsers)))
-
-	// The instruction files live in the deployment directory, when there is one.
 	var deployment string
 	if dir, found := home.Resolve(); found {
 		deployment = dir.Root
 	}
-	api.Handle(controlv1connect.NewConfigServiceHandler(
-		control.NewConfigServer(configFile, cfg, settingsHeldFromTheFile(flags, cfg), deployment)))
 
-	// Everything that does anything sits behind the credential check. A
-	// browser's credential is checked the same way, against the same list of
-	// what it may reach; it differs only in having been issued to it.
-	guarded := control.AuthMiddleware(
-		[]control.Token{controlToken, gatewayToken}, browsers, port, api)
+	// The two ways of asking a question of the settings rather than running
+	// them. Nothing is served for either, so there is nothing to repair.
+	asking := *printPrompt || *listModels
 
-	root := http.NewServeMux()
-	for _, service := range []string{
-		controlv1connect.SessionServiceName,
-		controlv1connect.ArtifactServiceName,
-		controlv1connect.ChannelServiceName,
-		controlv1connect.GatewayIngressServiceName,
-		controlv1connect.MemoryServiceName,
-		controlv1connect.ConfigServiceName,
-		controlv1connect.BrowserServiceName,
-	} {
-		root.Handle("/"+service+"/", guarded)
-	}
-
-	// The page, and the one place a browser gets in. Neither takes a
-	// credential: the page holds no secrets and can do nothing until it has
-	// one, and a pairing code is the credential. The host check still stands
-	// in front of both, which is what keeps a web page from elsewhere out.
-	root.Handle("/ui/pair", control.RequireLoopbackHost(port, control.PairHandler(browsers)))
-	root.Handle("/ui/", control.RequireLoopbackHost(port, http.StripPrefix("/ui/", webui.Handler())))
-	// h2c so a gRPC client can reach the same endpoint as Connect and
-	// gRPC-Web over plaintext loopback.
-	handler := root
-	server := &http.Server{
-		Handler:           h2c.NewHandler(handler, &http2.Server{}),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
-	discoveryPath, err := discovery.PathIn(cfg.Server.RuntimeDir)
+	settings, err := ensureDocuments(rootCtx, store, ensureOptions{
+		Deployment: deployment,
+		Env:        fromEnvironment,
+		Places:     placesOf(bootstrap, dbPath, discoveryPath),
+		Asking:     asking,
+	}, logger)
 	if err != nil {
-		_ = listener.Close()
-		return err
-	}
-	if err := discovery.Write(discoveryPath, discovery.File{
-		PID:             os.Getpid(),
-		BaseURL:         baseURL,
-		Token:           controlToken.Value,
-		GatewayToken:    gatewayToken.Value,
-		ProtocolVersion: discovery.ProtocolVersion,
-	}); err != nil {
-		_ = listener.Close()
-		return err
-	}
-	// Only if it still describes this process. A daemon that has been replaced
-	// must not delete its replacement's file on the way out, which would leave
-	// a running daemon no client can find.
-	defer func() {
-		if err := discovery.RemoveIfOwnedBy(discoveryPath, os.Getpid()); err != nil {
-			logger.Warn("could not remove the discovery file", "error", err)
+		// A variable that gives settings no start could use is reported the way
+		// a saved text is: what to write instead, and not a line of text.
+		if config.Report(os.Stderr, err, config.FileEnvVar) {
+			return errors.New(config.FileEnvVar + " cannot be used, so nothing was saved")
 		}
-	}()
-
-	logger.Info("jingclaw daemon listening",
-		"base_url", baseURL,
-		"provider", modelProvider.Name(),
-		"model", selected.ID,
-		"context_window", window,
-		"context_window_from", string(windowSource),
-		"workspace", ws.Root(),
-		"permission_profile", permissions.Profile(),
-		// What this machine will actually enforce, rather than whether it was
-		// asked for. On Linux the two are not the same: the filesystem rules
-		// and the network rules arrived four kernel versions apart.
-		"confinement", describeConfinement(cfg),
-		"config_file", configFile,
-		"database", dbPath,
-		"discovery", discoveryPath,
-	)
-	// Human-facing line on stdout; the structured log goes to stderr.
-	fmt.Printf("JingClaw daemon\nListening: %s\nConfig:    %s\nProvider:  %s\nModel:     %s\nWorkspace: %s\nTools:     %s\nDatabase:  %s\nDiscovery: %s\n",
-		baseURL, describeConfigFile(configFile, createdConfig, seededConfig), modelProvider.Name(), selected.ID,
-		ws.Root(), describeTools(tools, servers, cfg), dbPath, discoveryPath)
-
-	serveErr := make(chan error, 1)
-	go func() { serveErr <- server.Serve(listener) }()
-
-	select {
-	case err := <-serveErr:
 		return err
-	case <-rootCtx.Done():
 	}
 
-	logger.Info("shutting down")
-
-	// Ordered teardown, and each phase gets its own window.
-	//
-	// One shared deadline meant the http drain consumed all of it: a gateway
-	// or a console holds a stream open, that stream is an in-flight request,
-	// and Shutdown waits for it. By the time the runtime was asked to drain
-	// there was no time left, so it was never actually waited for — the
-	// process exited while a run goroutine could still be writing.
-	drainCtx, cancelDrain := context.WithTimeout(context.Background(), httpDrainGrace)
-	err = server.Shutdown(drainCtx)
-	cancelDrain()
-	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-		logger.Warn("http shutdown", "error", err)
+	docs, err := readSnapshot(rootCtx, store)
+	if err != nil {
+		return err
 	}
 
-	// Whatever is left is a stream nobody is going to close. Dropping them is
-	// safe: the log is the truth, and a client reconnects and reads what it
-	// missed from there.
-	_ = server.Close()
-
-	// The one that matters. A run goroutine still writing when the process
-	// exits leaves a log that ends without a terminal event, and a client
-	// reattaching afterwards sees a run that never finished and never failed.
-	runCtx, cancelRun := context.WithTimeout(context.Background(), shutdownGrace)
-	defer cancelRun()
-	if err := rt.Shutdown(runCtx); err != nil {
-		logger.Warn("runtime shutdown", "error", err)
+	// Checked once, here. Making something configurable is exactly when it
+	// needs validating: a value nobody could previously write is now one
+	// somebody can. Text that does not read, or does not pass, leaves the
+	// process with the settings it was given and a reason, where it used to
+	// have nothing and exit.
+	cfg, settingsErr := withFlags([]byte(docs.Config.Text))
+	if settingsErr != nil {
+		cfg = bootstrap
+	} else {
+		settingsErr = cfg.Validate()
 	}
 
-	logger.Info("stopped")
-	return nil
+	logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel()}))
+	slog.SetDefault(logger)
+
+	var (
+		problems []control.AgentProblem
+		built    *agent
+	)
+	if settingsErr != nil {
+		// Reported here as well as carried: a mistyped setting is something a
+		// person is about to go and edit, and a JSON log line is not what they
+		// need to do that.
+		said := config.Report(os.Stderr, settingsErr, savedSettings)
+		if asking {
+			if said {
+				return errors.New("the saved settings cannot be used")
+			}
+			return settingsErr
+		}
+		problems = settingsProblems(settingsErr)
+	} else {
+		built, err = startAgent(rootCtx, agentSpec{
+			cfg: cfg, store: store, dbPath: dbPath, logger: logger,
+			agents: docs.Agents.Text, persona: docs.Persona.Text,
+			listModels: *listModels, printPrompt: *printPrompt,
+		})
+		switch {
+		case err != nil && (asking || rootCtx.Err() != nil):
+			return err
+		case err != nil:
+			// The settings read, and the machine or the provider would not do
+			// what they ask. Still a daemon that can be reached, so that what
+			// is wrong can be seen where the settings are.
+			problems = []control.AgentProblem{startupProblem(err)}
+		case built == nil:
+			return nil
+		default:
+			defer built.close()
+		}
+	}
+
+	return serve(rootCtx, serving{
+		cfg: cfg, logger: logger, store: store,
+		dbPath: dbPath, discoveryPath: discoveryPath, settings: settings,
+		overrides: settingsHeldFromTheSavedText(flags, cfg),
+		started:   docs.hashes(),
+		begun:     begun,
+		candidate: withFlags,
+		problems:  problems,
+		agent:     built,
+	})
 }
 
-// databasePath resolves where state is kept. An explicit --data-dir wins so a
-// test or a second instance can be fully isolated.
 // reportPaths says where this deployment keeps things.
 //
 // Everything that resolves from a directory, a setting or a platform default
 // resolves in one place; a script or an operator asking where the discovery
 // file is should not have to reimplement that and then drift from it.
-func reportPaths(cfg config.Config, configFile string) error {
+func reportPaths(w io.Writer, cfg config.Config) error {
 	database, err := resolveDatabase(cfg.Server.DataDir)
 	if err != nil {
 		return err
@@ -723,22 +304,17 @@ func reportPaths(cfg config.Config, configFile string) error {
 
 	for _, line := range [][2]string{
 		{"home", root},
-		{"config", orNone(configFile)},
+		// Not a file. Said here because this is where somebody looking for the
+		// settings looks, and a line that is not there reads as not knowing.
+		{"settings", "in the database, edited in the dashboard"},
 		{"workspace", workspaceRoot()},
 		{"database", database},
 		{"artifacts", artifactDir(database)},
 		{"discovery", discoveryPath},
 	} {
-		fmt.Printf("%-10s %s\n", line[0], line[1])
+		fmt.Fprintf(w, "%-10s %s\n", line[0], line[1])
 	}
 	return nil
-}
-
-func orNone(path string) string {
-	if path == "" {
-		return "(none)"
-	}
-	return path
 }
 
 // initialise creates this deployment's directory and stops.
@@ -760,69 +336,22 @@ func initialise() error {
 		return err
 	}
 
-	// The configuration goes in with it, so the directory is usable rather
-	// than merely present.
-	if err := os.WriteFile(dir.ConfigFile(), []byte(config.Example), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", dir.ConfigFile(), err)
-	}
-
-	if err := writeInstructionFiles(dir.Root); err != nil {
-		return err
-	}
-
+	// Directories and nothing else. The settings are not files: the first start
+	// saves them in the database, so there is nothing to put here for somebody
+	// to edit, and a file that is not read is one that misleads.
 	fmt.Printf("Created %s\n\n", dir.Root)
-	fmt.Printf("  %-12s the settings, all at their defaults\n", ConfigName())
-	for _, name := range config.InstructionFiles() {
-		fmt.Printf("  %-12s %s\n", name, instructionPurpose[name])
-	}
 	fmt.Printf("  %-12s what the agent may read and change\n", home.WorkspaceName+"/")
-	fmt.Printf("  %-12s the database and stored output\n", home.DataName+"/")
+	fmt.Printf("  %-12s the database, which holds the settings, and stored output\n", home.DataName+"/")
 	fmt.Printf("  %-12s how clients find this daemon\n", home.RunName+"/")
-	fmt.Printf("\nCredentials go in beside them, mode 600.\n")
+	fmt.Printf("\nThe settings are made on the first start, every one at its default, and are\n")
+	fmt.Printf("edited in the dashboard: run jingclaw, then run: jingclaw dashboard\n")
+	fmt.Printf("Credentials go in %s, mode 600.\n", dir.Root)
 	return nil
 }
 
-// instructionPurpose is the one line each starter file says about itself,
-// used both as its own first line and in what --init prints.
-var instructionPurpose = map[string]string{
-	config.InstructionsFile: "how work is done here",
-	config.PersonaFile:      "who this agent is, and what it is for",
-}
-
-// writeInstructionFiles puts the standing-instruction files in the deployment
-// directory.
-//
-// Beside the settings rather than inside the workspace. They describe the
-// agent, and the workspace is what the agent may change: in there, its own
-// instructions are a file it can edit while doing a job, and they sit among a
-// project's files as though they were part of it.
-//
-// Created rather than documented. A file that exists is a file somebody edits;
-// one they have to know to create is one that stays absent. Which is why the
-// daemon does this on every start and not only under --init.
-//
-// Each is a heading and its purpose, and nothing else. Filling them with
-// suggested content would mean every deployment starts with instructions
-// nobody wrote and few will read.
-func writeInstructionFiles(at string) error {
-	for _, name := range config.InstructionFiles() {
-		path := filepath.Join(at, name)
-		if _, err := os.Stat(path); err == nil {
-			continue
-		}
-
-		heading := strings.TrimSuffix(name, filepath.Ext(name))
-		body := fmt.Sprintf("# %s\n\n<!-- %s -->\n", heading, instructionPurpose[name])
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			return fmt.Errorf("write %s: %w", path, err)
-		}
-	}
-	return nil
-}
-
-// ConfigName is the configuration file's name, for the notice above.
-func ConfigName() string { return home.ConfigName }
-
+// databasePath resolves where state is kept and makes the directory for it. An
+// explicit --data-dir wins so a test or a second instance can be fully
+// isolated.
 func databasePath(dataDir string) (string, error) {
 	path, err := resolveDatabase(dataDir)
 	if err != nil {
@@ -975,8 +504,8 @@ func workspaceRoot() string {
 //
 // Somebody has to. It stopped being a setting an operator points at something
 // that already exists, and became a fact about the deployment — so a fresh
-// install has a workspace for the same reason it has a configuration file:
-// because starting created one.
+// install has a workspace for the same reason it has settings: because
+// starting created them.
 //
 // Opening still refuses a path that is not there. That check is about a
 // deployment whose directory was moved or removed while it was not running,
@@ -1047,7 +576,7 @@ func webSearcher(cfg config.Config) (web.Searcher, error) {
 
 	switch cfg.Web.Search.Backend {
 	case "brave":
-		key, err := secret.Find(cfg.Web.Search.KeyEnv, cfg.Web.Search.KeyFile)
+		key, err := secret.Find(cfg.Web.Search.KeyEnv, cfg.Web.Search.KeyFile, "web.search.key_file")
 		if err != nil {
 			return nil, fmt.Errorf("web.search.backend is \"brave\": %w", err)
 		}
@@ -1137,27 +666,6 @@ func contextWindow(cfg config.Config, model provider.ModelInfo) (int64, provider
 	return 0, provider.ContextUnknown
 }
 
-// describeConfigFile says where the settings came from, and whether this run
-// is the one that put the file there.
-func describeConfigFile(path string, created, seeded bool) string {
-	if path == "" {
-		return "(none)"
-	}
-	// Which of the two ways it was created, because they lead somewhere
-	// different. Defaults mean nothing was configured; a file from the
-	// environment means it was, and calling that defaults sends somebody
-	// looking for why their settings were ignored on the one run where they
-	// were first applied. Both come from what this run actually did rather
-	// than from the variable, which stays set on every later run too.
-	switch {
-	case seeded:
-		return path + " (created from " + config.FileEnvVar + ")"
-	case created:
-		return path + " (created, all defaults)"
-	}
-	return path
-}
-
 func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, error) {
 	switch cfg.Provider.Backend {
 	case "fake":
@@ -1184,9 +692,7 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 			return nil, err
 		}
 		if !apiKey.IsSet() {
-			return nil, fmt.Errorf(
-				"no Gemini API key: set %s, or write it with mode 600 to one of: %s",
-				strings.Join(cfg.Provider.Gemini.APIKeyEnv, " or "), strings.Join(keyFiles, ", "))
+			return nil, secret.Absent("Gemini API key", cfg.Provider.Gemini.APIKeyEnv, "provider.gemini.api_key_file", cfg.Provider.Gemini.APIKeyFile)
 		}
 
 		p, err := gemini.New(ctx, gemini.Config{APIKey: apiKey.Reveal()})
@@ -1210,10 +716,7 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 			return nil, err
 		}
 		if !apiKey.IsSet() {
-			return nil, fmt.Errorf(
-				"no Anthropic API key: set %s, or write it with mode 600 to one of: %s",
-				strings.Join(cfg.Provider.Anthropic.APIKeyEnv, " or "),
-				strings.Join(keyFiles, ", "))
+			return nil, secret.Absent("Anthropic API key", cfg.Provider.Anthropic.APIKeyEnv, "provider.anthropic.api_key_file", cfg.Provider.Anthropic.APIKeyFile)
 		}
 
 		p, err := anthropic.New(anthropic.Config{
@@ -1267,7 +770,7 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 
 	default:
 		return nil, fmt.Errorf(
-			"unknown provider %q; use gemini, ollama, openai_compat, or fake", cfg.Provider.Backend)
+			"unknown provider %q; use gemini, anthropic, ollama, openai_compat, or fake", cfg.Provider.Backend)
 	}
 }
 
@@ -1360,7 +863,7 @@ func printModels(ctx context.Context, p provider.Provider) error {
 	return nil
 }
 
-// applyFlagOverrides lets a typed flag win over the file.
+// applyFlagOverrides lets a typed flag win over the saved settings.
 //
 // Only flags the operator actually passed are considered: taking an unset
 // flag's zero value would silently replace a configured setting with a
@@ -1463,7 +966,7 @@ func (deploymentSkills) Staged(name string) (skill.Staged, skill.Skill, error) {
 // turned this on and whose machine cannot provide it should be told while
 // they are still looking, not hours later inside a tool result the model
 // paraphrases.
-func confinement(cfg config.Config, logger *slog.Logger) (*builtin.Confinement, error) {
+func confinement(cfg config.Config, dbPath string, logger *slog.Logger) (*builtin.Confinement, error) {
 	if !cfg.Sandbox.Enabled {
 		return nil, nil
 	}
@@ -1489,10 +992,7 @@ func confinement(cfg config.Config, logger *slog.Logger) (*builtin.Confinement, 
 		return nil, err
 	}
 
-	// The deployment's own directory, always. Its credentials are in there,
-	// and a confined command that could read them would be confined against
-	// writing and not against the thing worth protecting.
-	hidden := append([]string{dir.Root}, expandHomes(cfg.Sandbox.Hidden)...)
+	hidden := hiddenFrom(dir.Root, dbPath, cfg.Sandbox.Hidden)
 
 	policy := sandbox.Policy{
 		Writable:   dirs.Writable(),
@@ -1515,9 +1015,43 @@ func confinement(cfg config.Config, logger *slog.Logger) (*builtin.Confinement, 
 	return &builtin.Confinement{Policy: policy, Environment: dirs.Environment()}, nil
 }
 
+// hiddenFrom is what a confined command is not shown.
+//
+// The deployment's own directory, always. Its credentials are in there, and a
+// confined command that could read them would be confined against writing and
+// not against the thing worth protecting.
+//
+// The database too when it is somewhere else. It holds the settings, which can
+// carry the headers and variables a tool server is given, and when it was in the
+// deployment directory it was hidden with it. The files and not the directory
+// they are in: that one is somebody's, and may hold more than this.
+func hiddenFrom(root, dbPath string, more []string) []string {
+	hidden := []string{root}
+
+	if !isUnder(root, dbPath) {
+		hidden = append(hidden, dbPath, dbPath+"-wal", dbPath+"-shm")
+	}
+	return append(hidden, expandHomes(more)...)
+}
+
+// isUnder says whether path is root or something in it.
+func isUnder(root, path string) bool {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
 // expandHomes turns a leading ~ into the real home directory.
 //
-// Written by hand in a configuration file, "~/.ssh" is what somebody means
+// Written by hand in the settings, "~/.ssh" is what somebody means
 // and what no part of Go expands on their behalf.
 func expandHomes(paths []string) []string {
 	out := make([]string, 0, len(paths))

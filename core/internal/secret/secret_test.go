@@ -178,3 +178,32 @@ func TestNoFileNameIsNoFile(t *testing.T) {
 		t.Error("a named credential resolved to nowhere, so the test proves nothing")
 	}
 }
+
+// The name of a credential file is a setting somebody typed, and the commonest
+// mistake with it is to paste the key there. The message that says nothing was
+// found goes into the log and onto the page, so it must not repeat the name,
+// and it must still say what to set and where.
+func TestAMissingCredentialNamesTheSettingAndNeverTheFile(t *testing.T) {
+	t.Setenv("JINGCLAW_HOME", t.TempDir())
+
+	_, err := secret.Find([]string{"SOME_TOKEN_THAT_IS_NOT_SET"}, "AIzaSyD-FAKEKEY0123456789abcdefghijk", "provider.gemini.api_key_file")
+	if err == nil {
+		t.Fatal("a credential that is nowhere was found")
+	}
+	if strings.Contains(err.Error(), "AIzaSyD") {
+		t.Errorf("the message repeats the file name: %v", err)
+	}
+	for _, want := range []string{"SOME_TOKEN_THAT_IS_NOT_SET", "provider.gemini.api_key_file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the message does not say %q: %v", want, err)
+		}
+	}
+
+	// Nothing to set is not a variable with no name; no file is a file to name.
+	if said := secret.Absent("key", nil, "x.file", "k.key").Error(); strings.Contains(said, "set ") {
+		t.Errorf("the message tells somebody to set nothing: %v", said)
+	}
+	if said := secret.Absent("key", []string{"V"}, "x.file", "").Error(); !strings.Contains(said, "name a file in x.file") {
+		t.Errorf("a setting with no file is not asked for one: %v", said)
+	}
+}

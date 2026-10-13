@@ -81,7 +81,6 @@ func TestEverythingIsInsideIt(t *testing.T) {
 	}
 
 	paths := map[string]string{
-		"config":    dir.ConfigFile(),
 		"workspace": dir.Workspace(),
 		"data":      dir.Data(),
 		"run":       dir.Run(),

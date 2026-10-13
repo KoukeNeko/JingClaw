@@ -16,13 +16,17 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
+	"github.com/KoukeNeko/JingClaw/core/internal/cli/client"
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/console"
+	"github.com/KoukeNeko/JingClaw/core/internal/cli/gateway"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
@@ -40,6 +44,12 @@ const stopGrace = 15 * time.Second
 // stopped on the way out; found already running — a service, or another
 // terminal — they are left alone. Without that rule the second run of this
 // command is two daemons on one database, each of them certain it is the one.
+//
+// Two things leave part of it off without ending it, because what is left is
+// what somebody puts them right with. A daemon that came up with no agent
+// (repair mode) gets no gateway and no console, and the run says why and waits.
+// A gateway that exits because its settings or its token are wrong is said and
+// left off. Anything else a part does by stopping ends the run.
 func Run(ctx context.Context) error {
 	// The hangup as well as the interrupt and the terminate. A terminal that
 	// goes away — a window closed, an ssh session dropped — sends this, and
@@ -90,15 +100,44 @@ func Run(ctx context.Context) error {
 		return err
 	}
 
-	saidByChat := &lastWords{limit: lastWordsKept}
+	// Asked now that the daemon has published itself, because only then is there
+	// anything to ask. One that could not build an agent is up and serving what
+	// is needed to fix that, and a gateway has no agent to reach.
+	repairing := publishedMode() == discovery.ModeRepair
 
-	chat, err := start(ctx, self, "gateway", io.MultiWriter(output, saidByChat))
-	if err != nil {
-		return err
+	// No gateway is started in a repair, and one that is started may switch
+	// itself off by how it exits, below. A nil part and a nil channel are what
+	// "no gateway" looks like to everything that follows.
+	var (
+		chat       *supervised
+		chatEnds   <-chan struct{}
+		saidByChat = &lastWords{limit: lastWordsKept}
+	)
+
+	// Said to whoever is looking. In front of a console that is the console,
+	// which owns the screen: a line printed beside it lands in the middle of
+	// what is being typed. Dropped when it is not read and the buffer is full,
+	// rather than holding up the part that has something to say.
+	notices := make(chan string, 4)
+	tell := func(line string) { fmt.Println(line) }
+	if watching {
+		tell = func(line string) {
+			select {
+			case notices <- line:
+			default:
+			}
+		}
 	}
-	defer terminate(chat)
 
-	chatGone := whenItExits(chat)
+	if !repairing {
+		chat, err = start(ctx, self, "gateway", io.MultiWriter(output, saidByChat))
+		if err != nil {
+			return err
+		}
+		defer terminate(chat)
+
+		chatEnds = whenItEndsTheRun(chat, whenItExits(chat), saidByChat, tell)
+	}
 
 	// Held for as long as this console is. Whatever happens to it — a clean
 	// exit, a hangup, or being killed outright — the other end of this goes
@@ -114,8 +153,12 @@ func Run(ctx context.Context) error {
 		defer func() { _ = lifeline.Close() }()
 	}
 
+	if repairing {
+		return stayWithoutAnAgent(ctx, agentGone, saidByAgent)
+	}
+
 	if watching {
-		return watch(ctx, agentGone, chatGone)
+		return watch(ctx, agentGone, chatEnds, notices)
 	}
 
 	fmt.Println("JingClaw is running. Press Ctrl-C to stop it.")
@@ -125,7 +168,7 @@ func Run(ctx context.Context) error {
 		return nil
 	case <-agentGone:
 		return stopped("daemon", saidByAgent)
-	case <-chatGone:
+	case <-chatEnds:
 		return stopped("gateway", saidByChat)
 	}
 }
@@ -159,7 +202,7 @@ func where() (io.Writer, func(), bool) {
 }
 
 // watch runs the console until it is closed or a part stops.
-func watch(ctx context.Context, agent, chat <-chan struct{}) error {
+func watch(ctx context.Context, agent, chat <-chan struct{}, notices <-chan string) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
@@ -174,7 +217,7 @@ func watch(ctx context.Context, agent, chat <-chan struct{}) error {
 		}
 	}()
 
-	if err := console.Run(ctx, "", howLeavingWorks(false)); err != nil {
+	if err := console.Run(ctx, "", howLeavingWorks(false), notices); err != nil {
 		// The console failing is not the parts failing. They keep running,
 		// and saying so is more use than an error nobody can act on.
 		fmt.Fprintln(os.Stderr, "the console stopped:", err)
@@ -194,6 +237,14 @@ func attach(ctx context.Context) error {
 	fmt.Println("JingClaw is already running; watching it.")
 	sayIfTheBuildDidNotReachIt()
 
+	if publishedMode() == discovery.ModeRepair {
+		// Nothing to draw a console of: it follows an agent's sessions, and
+		// there is none. What there is to see is why.
+		sayWhyThereIsNoAgent(ctx)
+		<-ctx.Done()
+		return nil
+	}
+
 	if !canAttach(term.IsTerminal(int(os.Stdin.Fd()))) {
 		// Nothing to draw on, so there is nothing better to do than wait —
 		// which is what a service wants anyway.
@@ -201,7 +252,7 @@ func attach(ctx context.Context) error {
 		return nil
 	}
 
-	if err := console.Run(ctx, "", howLeavingWorks(true)); err != nil {
+	if err := console.Run(ctx, "", howLeavingWorks(true), nil); err != nil {
 		// The console failing is not the parts failing. They keep running,
 		// and saying so is more use than an error nobody can act on.
 		fmt.Fprintln(os.Stderr, "the console stopped:", err)
@@ -352,11 +403,139 @@ func alreadyRunning() (bool, error) {
 	return alive(file.PID), nil
 }
 
+// publishedMode is what the daemon says it is, in the file it published:
+// discovery.ModeRepair for one running no agent, and nothing for one that is.
+//
+// Nothing as well when the file cannot be read. This is asked after the daemon
+// was seen to have published, and a file gone since is a daemon going, which
+// the part watching for that reports.
+func publishedMode() string {
+	path, err := discovery.Path()
+	if err != nil {
+		return ""
+	}
+	file, err := discovery.Read(path)
+	if err != nil {
+		return ""
+	}
+	return file.Mode
+}
+
+// stayWithoutAnAgent keeps the daemon and its dashboard up until it is asked to
+// stop, when the daemon has no agent and there is therefore nothing to watch
+// and no gateway to start.
+//
+// A daemon that could not build an agent is not this command failing. What it
+// is serving is what somebody needs to put that right, and ending the run
+// would take it away. Why is said once, and then the run waits. A daemon that
+// goes away still ends it.
+func stayWithoutAnAgent(ctx context.Context, agentGone <-chan struct{}, said *lastWords) error {
+	sayWhyThereIsNoAgent(ctx)
+	fmt.Println("JingClaw is running without an agent. Press Ctrl-C to stop it.")
+
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-agentGone:
+		return stopped("daemon", said)
+	}
+}
+
+// sayWhyThereIsNoAgent asks the daemon why, and says what it answered.
+func sayWhyThereIsNoAgent(ctx context.Context) {
+	asking, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	state, err := client.AgentState(asking, "")
+	fmt.Println(agentNotRunning(state, err))
+}
+
+// agentNotRunning is the one line that says there is no agent, why, and what to
+// run about it.
+//
+// The first problem and how many more there are, not all of them: a line in a
+// terminal is not the place to read a list, and the dashboard it points at is
+// where each is shown with its fix. Not being able to ask is said in its place,
+// because the pointer to the dashboard is the part that still helps.
+func agentNotRunning(state *controlv1.GetAgentStateResponse, asked error) string {
+	const pointer = " — run: jingclaw dashboard"
+
+	if asked != nil {
+		return fmt.Sprintf("agent not running (could not ask the daemon why: %v)%s", asked, pointer)
+	}
+
+	problems := state.GetProblems()
+	if len(problems) == 0 {
+		return "agent not running" + pointer
+	}
+
+	more := ""
+	if extra := len(problems) - 1; extra > 0 {
+		more = fmt.Sprintf(" (and %d more)", extra)
+	}
+	return fmt.Sprintf("agent not running: %s%s%s", client.ProblemLine(problems[0]), more, pointer)
+}
+
+// whenItEndsTheRun is closed when the gateway has gone in a way that ends the
+// run, and says why when it has gone in one that does not.
+//
+// Exiting with gateway.ExitConfiguration does not. That is a gateway that cannot
+// start for a reason in the settings or the credential — the token is not
+// there, the platform is not one it serves — and the daemon and the dashboard
+// are what somebody puts that right with. Ending the run would take them away
+// over a missing file, so it is said and the run goes on without chat.
+// Any other exit is a fault and ends the run, as it always has.
+func whenItEndsTheRun(
+	chat *supervised, gone <-chan struct{}, said *lastWords, tell func(string),
+) <-chan struct{} {
+	ends := make(chan struct{})
+	go func() {
+		<-gone
+		if chatEndsTheRun(chat.exitCode()) {
+			close(ends)
+			return
+		}
+		tell("chat is off: " + reasonOf(said) +
+			" (put that right, then restart: jingclaw stop, then jingclaw)")
+	}()
+	return ends
+}
+
+// chatEndsTheRun says whether a gateway that exited with this status ends the
+// run. Only a configuration status does not.
+func chatEndsTheRun(status int) bool { return status != gateway.ExitConfiguration }
+
+// reasonOf is what a gateway said it was stopping for: the message after the
+// last "error: " it printed, or all it said if it printed none.
+//
+// Quoted without that prefix because it is put after one of this program's own.
+func reasonOf(said *lastWords) string {
+	all := said.String()
+	lines := strings.Split(all, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if reason, found := strings.CutPrefix(strings.TrimSpace(lines[i]), "error: "); found {
+			return reason
+		}
+	}
+	if all == "" {
+		return "the gateway exited and said nothing about why"
+	}
+	return all
+}
+
 // supervised is a started part and the group that contains its tree, so that
 // stopping the part takes with it whatever the part started.
 type supervised struct {
 	command *exec.Cmd
 	group   *procGroup
+}
+
+// exitCode is the status the part ended with, once whenItExits has closed.
+func (s *supervised) exitCode() int {
+	if s.command.ProcessState == nil {
+		return -1
+	}
+	return s.command.ProcessState.ExitCode()
 }
 
 func start(ctx context.Context, self, part string, output io.Writer) (*supervised, error) {
@@ -529,8 +708,19 @@ func status() error {
 		return nil
 	}
 
-	fmt.Printf("running\npid       %d\nlistening %s\n", file.PID, file.BaseURL)
+	fmt.Printf("running\npid       %d\nlistening %s\nmode      %s\n",
+		file.PID, file.BaseURL, describeMode(file.Mode))
 	return nil
+}
+
+// describeMode is the mode a daemon published, in words. The absence of one is
+// a daemon running an agent, which is every daemon there was before there was
+// a mode to publish.
+func describeMode(mode string) string {
+	if mode == discovery.ModeRepair {
+		return "repair — no agent is running; run: jingclaw dashboard"
+	}
+	return "running"
 }
 
 func stopRunning() error {

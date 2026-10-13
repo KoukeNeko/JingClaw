@@ -1,0 +1,304 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+import "google/protobuf/timestamp.proto";
+import "jingclaw/control/v1/common.proto";
+
+// SkillService is how a person brings skills in, looks at them, and takes them
+// out.
+//
+// A skill is a directory of instructions in the deployment's skills directory.
+// It is text that goes in front of the model for every session and every user
+// of the deployment, so a skill comes in in two acts. Staging fetches one
+// exact commit of a repository into a place that steers nothing. Activating
+// moves it into the skills directory, and only for the tree digest the person
+// deciding was shown: a skill staged again, or edited on disk, between the
+// review and the click is refused, and so is replacing a skill that is already
+// there unless the call says that is meant.
+//
+// The model is told what skills exist once, when the daemon starts. Nothing
+// here changes what a running agent was told, so every reply that could change
+// the answer says whether a restart is needed for the catalogue to match the
+// disk (restart_required), and each skill says whether the running agent was
+// told about it (in_catalogue).
+//
+// Everything that comes from a repository or a skill's own files is the
+// author's words, returned as they are: names, descriptions, versions, file
+// names, file text, and what git said when a fetch failed. A page that shows
+// them must treat them as text and never as markup or as an instruction. The
+// one thing taken out is a credential in a repository address.
+//
+// Errors. INVALID_ARGUMENT is a request that is wrong whatever the state: a
+// source that is not git:<url>#<40-character commit>[:path] (a branch, a tag, a
+// short hash, a local path, an unencrypted address, an address with a
+// credential in it), a name that could not be a skill's directory, a missing
+// digest. FAILED_PRECONDITION is a request the state does not allow: the
+// source could not be fetched or holds no usable skill, another skill is being
+// fetched, nothing is staged under the name, the digest is not the staged
+// skill's, a skill of that name is already there, no skill of that name is
+// installed. Anything else is INTERNAL.
+//
+// Served by a daemon with an agent and not by one in repair mode. Reachable by
+// the operator's own credential and by nothing else.
+service SkillService {
+  // ListSkills says what is installed, what could not be read, what the record
+  // says is gone, and what is staged and waiting. A deployment with no skills
+  // directory has none of them and is not an error.
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+
+  // StageSkill fetches the source into the staging area and returns what
+  // arrived. It installs nothing and changes nothing the model is told.
+  //
+  // Staging again under a name replaces what was staged under it. Only one
+  // fetch runs at a time: a second is refused with FAILED_PRECONDITION and not
+  // made to wait. The fetch can take minutes and ends when the call does.
+  rpc StageSkill(StageSkillRequest) returns (StageSkillResponse);
+
+  // GetStagedSkill is a staged skill laid out for a decision: the exact bytes
+  // of its SKILL.md, every file in it, and the one file chosen, if any.
+  // FAILED_PRECONDITION when nothing is staged under the name.
+  rpc GetStagedSkill(GetStagedSkillRequest) returns (GetStagedSkillResponse);
+
+  // ActivateSkill installs a staged skill, if it is the one that was reviewed.
+  //
+  // FAILED_PRECONDITION when tree_digest is not the digest of what is staged or
+  // what is staged is no longer what was staged, when a skill of that name is
+  // already in the skills directory and replace is not set, and when nothing is
+  // staged. The skill is recorded as installed from its source. It is offered to
+  // the model from the next start.
+  rpc ActivateSkill(ActivateSkillRequest) returns (ActivateSkillResponse);
+
+  // DiscardStagedSkill throws away a staged skill. FAILED_PRECONDITION when
+  // nothing is staged under the name.
+  rpc DiscardStagedSkill(DiscardStagedSkillRequest) returns (DiscardStagedSkillResponse);
+
+  // RemoveSkill deletes an installed skill's directory, and forgets that it
+  // was installed. Only a directory in the skills directory is a skill: a
+  // file, a link and the record of installs are refused. The model is told
+  // about it until the next start.
+  rpc RemoveSkill(RemoveSkillRequest) returns (RemoveSkillResponse);
+}
+
+// SkillSource is where a skill was fetched from.
+message SkillSource {
+  // The address git was given, with any credential in it taken out.
+  string repository = 1;
+
+  // The exact commit, all 40 characters.
+  string commit = 2;
+
+  // The directory in the repository that holds SKILL.md. Empty when the
+  // repository itself is the skill.
+  string path = 3;
+}
+
+// SkillDrift is how an installed skill differs from the record of installing
+// it. A recorded skill that is no longer there is not an installed skill at
+// all, and is listed as missing.
+enum SkillDrift {
+  SKILL_DRIFT_UNSPECIFIED = 0;
+
+  // As installed. Also a skill placed by hand, which has no record to differ
+  // from.
+  SKILL_DRIFT_NONE = 1;
+
+  // SKILL.md is not the file that was installed.
+  SKILL_DRIFT_EDITED = 2;
+
+  // SKILL.md is, and something else in the directory is not: a file beside it
+  // was changed, added, removed or replaced by a link. A skill can read the
+  // files beside its instructions, so this is a different skill under the same
+  // SKILL.md.
+  SKILL_DRIFT_TREE_EDITED = 3;
+}
+
+// InstalledSkill is a skill in the skills directory that can be read.
+message InstalledSkill {
+  // What the skill calls itself, which is what the model asks for it by.
+  string name = 1;
+
+  // The directory it is in, directly inside the skills directory. For a skill
+  // this service installed it is the name. RemoveSkill takes this.
+  string directory = 2;
+
+  string description = 3;
+  string version = 4;
+
+  // The hash of SKILL.md and of the whole directory as they are on disk now.
+  // tree_digest is empty when the directory holds something that is not a plain
+  // file and so has no digest.
+  string digest = 5;
+  string tree_digest = 6;
+
+  // Where it was fetched from. Unset when placed_by_hand.
+  SkillSource source = 7;
+
+  // True when nothing records it as installed from anywhere: somebody put it
+  // there.
+  bool placed_by_hand = 8;
+
+  // When it was installed, and the digests it was installed with. Unset or empty
+  // when placed_by_hand.
+  google.protobuf.Timestamp installed_at = 9;
+  string recorded_digest = 10;
+  string recorded_tree_digest = 11;
+
+  // How it differs from what was installed.
+  SkillDrift drift = 12;
+
+  // Whether the running agent was told about this skill, under this description.
+  // A skill installed since the daemon started, or whose description was edited,
+  // is not.
+  bool in_catalogue = 13;
+}
+
+// RejectedSkill is a directory in the skills directory that looks like a skill
+// and cannot be read. The model is not told about it.
+message RejectedSkill {
+  string directory = 1;
+  string reason = 2;
+}
+
+// MissingSkill is a skill the record says was installed and that is no longer
+// among the ones that can be read: its directory is gone, or what is there has
+// stopped being a skill.
+message MissingSkill {
+  string name = 1;
+  SkillSource source = 2;
+  google.protobuf.Timestamp installed_at = 3;
+}
+
+// StagedSkill is a fetched skill that is not installed and steers nothing.
+message StagedSkill {
+  // What the staged SKILL.md calls itself, which is what it will be installed
+  // under and what the calls below take.
+  string name = 1;
+  string description = 2;
+  string version = 3;
+  SkillSource source = 4;
+
+  // The hash of SKILL.md and of the whole directory, as they were when it was
+  // staged. ActivateSkill takes tree_digest.
+  string digest = 5;
+  string tree_digest = 6;
+
+  // The size of every file in the directory together.
+  int64 size_bytes = 7;
+
+  // Whether something is already in the skills directory under this name,
+  // installed or placed by hand, which activating would replace.
+  bool replaces = 8;
+}
+
+message ListSkillsRequest {}
+
+message ListSkillsResponse {
+  repeated InstalledSkill installed = 1;
+  repeated RejectedSkill rejected = 2;
+  repeated MissingSkill missing = 3;
+  repeated StagedSkill staged = 4;
+
+  // Whether a start now would tell the model something other than what the
+  // running agent was told: a skill installed, removed or described differently
+  // since the daemon started.
+  bool restart_required = 5;
+}
+
+message StageSkillRequest {
+  RequestMeta meta = 1;
+
+  // git:<url>#<40-character commit>[:path], for example
+  // git:https://github.com/someone/skills#a1b2c3d4e5f60718293a4b5c6d7e8f9012345678:release
+  string source = 2;
+}
+
+message StageSkillResponse {
+  StagedSkill staged = 1;
+}
+
+message GetStagedSkillRequest {
+  string name = 1;
+
+  // One of the paths in files, to be returned as text. Unset returns no file.
+  // INVALID_ARGUMENT for a path that is not in the skill or is not text.
+  string file_path = 2;
+}
+
+// StagedSkillFile is a file in a staged skill.
+message StagedSkillFile {
+  // Relative to the skill's directory, with slashes.
+  string path = 1;
+  int64 size = 2;
+
+  // The hash of the file's bytes, in hex.
+  string sha256 = 3;
+
+  // Whether the file is UTF-8 with no NUL in it, which is what file_path can
+  // return as text.
+  bool is_text = 4;
+}
+
+message GetStagedSkillResponse {
+  StagedSkill staged = 1;
+
+  // The bytes of SKILL.md as they are on disk, which are the bytes the digest
+  // in staged was made of, unless tree_matches is false.
+  bytes skill_md = 2;
+  int32 skill_md_lines = 3;
+
+  // Every file in the skill, in the order the tree digest takes them.
+  repeated StagedSkillFile files = 4;
+
+  // Whether the staged directory hashes to staged.tree_digest now. False means
+  // it was changed after it was staged, and activating it will be refused.
+  bool tree_matches = 5;
+
+  // The file asked for, and its text: at most 1 MiB of it, cut at a character.
+  // Unset when no file was asked for.
+  string file_path = 6;
+  string file_text = 7;
+  bool file_truncated = 8;
+
+  // SKILL.md of what is in the skills directory under this name now, at most
+  // 1 MiB of it, so that a page can show what activating would change. Empty
+  // when nothing is there, and when what is there has no SKILL.md that can be
+  // read; staged.replaces says which.
+  bytes installed_skill_md = 9;
+  bool installed_skill_md_truncated = 10;
+}
+
+message ActivateSkillRequest {
+  RequestMeta meta = 1;
+  string name = 2;
+
+  // The tree_digest of the staged skill the person was shown. Required.
+  string tree_digest = 3;
+
+  // Allows replacing a skill that is already in the skills directory. Unset, a
+  // skill of the same name is a failed precondition.
+  bool replace = 4;
+}
+
+message ActivateSkillResponse {
+  InstalledSkill installed = 1;
+  bool restart_required = 2;
+}
+
+message DiscardStagedSkillRequest {
+  RequestMeta meta = 1;
+  string name = 2;
+}
+
+message DiscardStagedSkillResponse {}
+
+message RemoveSkillRequest {
+  RequestMeta meta = 1;
+
+  // The directory of the skill, as ListSkills gives it.
+  string name = 2;
+}
+
+message RemoveSkillResponse {
+  bool restart_required = 1;
+}

@@ -487,6 +487,47 @@ message DeliverDecisionResponse {
   DecisionOutcome outcome = 1;
 }
 
+message GetGatewaySettingsRequest {}
+
+// The part of the settings a gateway process needs, taken from what the daemon
+// is running.
+//
+// Only what an adapter needs to connect and to shape what it sends. The names
+// of the variables and the file a token is read from are here, because the
+// gateway reads the token itself; a token's value never is. Which channels are
+// bound and who may speak or approve in them are the daemon's to decide and are
+// not here at all.
+message GetGatewaySettingsResponse {
+  // "discord" or "telegram".
+  string platform = 1;
+  string log_level = 2;
+  GatewayDiscordSettings discord = 3;
+  GatewayTelegramSettings telegram = 4;
+}
+
+message GatewayDiscordSettings {
+  string account_id = 1;
+
+  // Variables the token may be in, tried in order, and the file name under the
+  // deployment directory where it may be instead.
+  repeated string token_env = 2;
+  string token_file = 3;
+
+  int64 max_messages = 4;
+  int64 max_attachment_bytes = 5;
+  bool tables_as_images = 6;
+}
+
+message GatewayTelegramSettings {
+  string account_id = 1;
+  repeated string token_env = 2;
+  string token_file = 3;
+  int64 max_upload_bytes = 4;
+
+  // Empty is Telegram itself.
+  string api_base = 5;
+}
+
 // What became of a press. Deliberately coarse: the caller reports this to the
 // person who pressed, and a refusal must not tell somebody who may not decide
 // here whether the approval they named exists.
@@ -624,6 +665,11 @@ service GatewayIngressService {
   // whether that person sent it and whether it is still waiting. Not a
   // trigger on DeliverInbound: taking a message back is not a message.
   rpc WithdrawInbound(WithdrawInboundRequest) returns (WithdrawInboundResponse);
+
+  // GetGatewaySettings is how a gateway process learns its slice of the
+  // settings. It reads no file: the daemon is the only thing that reads the
+  // settings, and answers with what it is running.
+  rpc GetGatewaySettings(GetGatewaySettingsRequest) returns (GetGatewaySettingsResponse);
 }
 
 // Binding management, spoken by an operator's control client rather than by a

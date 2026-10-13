@@ -15,6 +15,10 @@ import (
 // recognize it should refuse to talk rather than guess.
 const ProtocolVersion = "jingclaw.control.v1"
 
+// ModeRepair is the Mode of a daemon that could not build an agent and is
+// serving only what is needed to fix the settings.
+const ModeRepair = "repair"
+
 // Discovery is what the daemon writes on startup so local clients can find it.
 // The daemon listens on an ephemeral port, so this file — not a well-known
 // port — is the rendezvous point.
@@ -28,6 +32,12 @@ type File struct {
 	// that handing it out never hands out the full control credential.
 	GatewayToken    string `json:"gateway_token,omitempty"`
 	ProtocolVersion string `json:"protocol_version"`
+
+	// Mode is ModeRepair for a daemon that is running no agent, and absent for
+	// one that is. A file written before there was a mode has none, which is
+	// the daemon it always described. A repair daemon carries no gateway token:
+	// there is no ingress for a gateway to reach.
+	Mode string `json:"mode,omitempty"`
 }
 
 // discoveryFile is what the file is called wherever it is put.
@@ -47,9 +57,17 @@ func PathIn(dir string) (string, error) {
 }
 
 // Path returns the location of the discovery file.
+//
+// The daemon puts it where server.runtime_dir says, and that setting is given
+// as JINGCLAW_SERVER_RUNTIME_DIR now that the saved settings cannot hold it. The
+// supervisor, status and stop find the daemon through here and have no settings
+// to ask, so they read the variable the daemon was told, ahead of the older one,
+// as the daemon does.
 func Path() (string, error) {
-	if dir := os.Getenv("JINGCLAW_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, discoveryFile), nil
+	for _, variable := range []string{"JINGCLAW_SERVER_RUNTIME_DIR", "JINGCLAW_RUNTIME_DIR"} {
+		if dir := os.Getenv(variable); dir != "" {
+			return filepath.Join(dir, discoveryFile), nil
+		}
 	}
 
 	// The deployment decides this on every platform: a client and the daemon

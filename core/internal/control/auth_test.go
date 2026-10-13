@@ -157,6 +157,115 @@ func TestGatewayCredentialCannotReachToolExecutingServices(t *testing.T) {
 			wantStatus: http.StatusForbidden,
 		},
 		{
+			// The one way a gateway learns its settings, now that it reads no
+			// file. It is a method on the ingress, so the credential that
+			// reaches the ingress reaches it.
+			name:       "gateway reads its own slice of the settings",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.GatewayIngressService/GetGatewaySettings",
+			wantStatus: http.StatusOK,
+		},
+		{
+			// The saved text holds the whole configuration, MCP headers and
+			// all. Only the slice above is the gateway's.
+			name:       "gateway cannot read the saved settings",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ConfigService/GetConfig",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot save a whole replacement of the settings",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ConfigService/ReplaceConfigText",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot read what the settings used to say",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ConfigService/GetDocumentVersion",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot ask whether the daemon is in repair",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ConfigService/GetAgentState",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			// A gateway runs a chat library that talks to the internet. What it
+			// would learn from the credential status is which keys this machine
+			// has and which are missing, and what it could do with the writes is
+			// replace the key the daemon sends to its provider.
+			name:       "gateway cannot see which credentials there are",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.CredentialService/ListCredentials",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot save a credential",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.CredentialService/PutCredential",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot delete a credential",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.CredentialService/DeleteCredential",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot change the mode of a credential file",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.CredentialService/RestrictCredentialFile",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			// What it would learn from the listing is which instructions steer
+			// the agent and where they came from, and what it could do with the
+			// rest is put its own into them.
+			name:       "gateway cannot see which skills there are",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.SkillService/ListSkills",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot fetch a skill",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.SkillService/StageSkill",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot read a staged skill",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.SkillService/GetStagedSkill",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot install a skill",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.SkillService/ActivateSkill",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot throw away a staged skill",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.SkillService/DiscardStagedSkill",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot remove a skill",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.SkillService/RemoveSkill",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			// Pairing a browser is how somebody gets the operator's powers.
+			name:       "gateway cannot pair a browser",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.BrowserService/CreatePairing",
+			wantStatus: http.StatusForbidden,
+		},
+		{
 			name:       "control reaches everything",
 			token:      controlValue,
 			path:       "/jingclaw.control.v1.SessionService/SendTurn",
@@ -166,6 +275,30 @@ func TestGatewayCredentialCannotReachToolExecutingServices(t *testing.T) {
 			name:       "control reaches the settings",
 			token:      controlValue,
 			path:       "/jingclaw.control.v1.ConfigService/GetConfig",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "control reaches the repair state",
+			token:      controlValue,
+			path:       "/jingclaw.control.v1.ConfigService/GetAgentState",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "control reaches the credentials",
+			token:      controlValue,
+			path:       "/jingclaw.control.v1.CredentialService/PutCredential",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "control reaches the skills",
+			token:      controlValue,
+			path:       "/jingclaw.control.v1.SkillService/ActivateSkill",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "control reaches pairing",
+			token:      controlValue,
+			path:       "/jingclaw.control.v1.BrowserService/CreatePairing",
 			wantStatus: http.StatusOK,
 		},
 		{

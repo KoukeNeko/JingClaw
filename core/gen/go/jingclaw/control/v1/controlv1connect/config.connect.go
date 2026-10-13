@@ -41,35 +41,68 @@ const (
 	// ConfigServiceWriteConfigProcedure is the fully-qualified name of the ConfigService's WriteConfig
 	// RPC.
 	ConfigServiceWriteConfigProcedure = "/jingclaw.control.v1.ConfigService/WriteConfig"
+	// ConfigServiceReplaceConfigTextProcedure is the fully-qualified name of the ConfigService's
+	// ReplaceConfigText RPC.
+	ConfigServiceReplaceConfigTextProcedure = "/jingclaw.control.v1.ConfigService/ReplaceConfigText"
 	// ConfigServiceGetInstructionFileProcedure is the fully-qualified name of the ConfigService's
 	// GetInstructionFile RPC.
 	ConfigServiceGetInstructionFileProcedure = "/jingclaw.control.v1.ConfigService/GetInstructionFile"
 	// ConfigServicePutInstructionFileProcedure is the fully-qualified name of the ConfigService's
 	// PutInstructionFile RPC.
 	ConfigServicePutInstructionFileProcedure = "/jingclaw.control.v1.ConfigService/PutInstructionFile"
+	// ConfigServiceListDocumentVersionsProcedure is the fully-qualified name of the ConfigService's
+	// ListDocumentVersions RPC.
+	ConfigServiceListDocumentVersionsProcedure = "/jingclaw.control.v1.ConfigService/ListDocumentVersions"
+	// ConfigServiceGetDocumentVersionProcedure is the fully-qualified name of the ConfigService's
+	// GetDocumentVersion RPC.
+	ConfigServiceGetDocumentVersionProcedure = "/jingclaw.control.v1.ConfigService/GetDocumentVersion"
+	// ConfigServiceGetAgentStateProcedure is the fully-qualified name of the ConfigService's
+	// GetAgentState RPC.
+	ConfigServiceGetAgentStateProcedure = "/jingclaw.control.v1.ConfigService/GetAgentState"
 )
 
 // ConfigServiceClient is a client for the jingclaw.control.v1.ConfigService service.
 type ConfigServiceClient interface {
-	// GetConfig is what the file says, what is running, and which settings the
-	// file cannot change.
+	// GetConfig is what is saved, what is running, and which settings the saved
+	// text cannot change.
+	//
+	// It answers for text that does not parse too: text and parse_error are set
+	// and file is empty, so the page that has to repair it can show it.
 	GetConfig(context.Context, *connect.Request[v1.GetConfigRequest]) (*connect.Response[v1.GetConfigResponse], error)
 	// CheckConfig says what an edit would do, and writes nothing.
 	//
-	// The check is the one the daemon runs when it starts, so "this is fine"
-	// and "this will start" are the same statement.
+	// The check is the one the daemon runs on the settings when it starts, so
+	// "this is fine" means the settings are valid. It does not mean the daemon
+	// will start an agent: a missing key, a model the provider does not serve or
+	// the sandbox on a machine that cannot hold it are found at start, and the
+	// daemon then comes up in repair mode.
 	CheckConfig(context.Context, *connect.Request[v1.CheckConfigRequest]) (*connect.Response[v1.CheckConfigResponse], error)
-	// WriteConfig applies edits to the file, or refuses and says why.
+	// WriteConfig applies edits to the saved text, or refuses and says why.
 	//
-	// A file that is not the one the edit started from is refused with
+	// Saved text that is not the one the edit started from is refused with
 	// FAILED_PRECONDITION: somebody else changed it, and writing over theirs
 	// would discard it unseen.
 	WriteConfig(context.Context, *connect.Request[v1.WriteConfigRequest]) (*connect.Response[v1.WriteConfigResponse], error)
-	// GetInstructionFile and PutInstructionFile are the two files that say who
-	// the agent is and how it works. They are files, not settings, and are read
-	// again on every run, so a change to one needs no restart.
+	// ReplaceConfigText saves whole text in place of the config, after the same
+	// check CheckConfig runs. Text that would not start is refused with its
+	// problems and never saved.
+	//
+	// It is how a config that edits cannot be applied to — one that does not
+	// parse — gets fixed.
+	ReplaceConfigText(context.Context, *connect.Request[v1.ReplaceConfigTextRequest]) (*connect.Response[v1.ReplaceConfigTextResponse], error)
+	// GetInstructionFile and PutInstructionFile are the two documents that say
+	// who the agent is and how it works. They are read when the daemon starts,
+	// not on every run, so a change to one waits for a restart like any other.
 	GetInstructionFile(context.Context, *connect.Request[v1.GetInstructionFileRequest]) (*connect.Response[v1.GetInstructionFileResponse], error)
 	PutInstructionFile(context.Context, *connect.Request[v1.PutInstructionFileRequest]) (*connect.Response[v1.PutInstructionFileResponse], error)
+	// ListDocumentVersions and GetDocumentVersion read back what a document said
+	// before: the last twenty saves of each, newest first. Restoring one is
+	// saving its text again.
+	ListDocumentVersions(context.Context, *connect.Request[v1.ListDocumentVersionsRequest]) (*connect.Response[v1.ListDocumentVersionsResponse], error)
+	GetDocumentVersion(context.Context, *connect.Request[v1.GetDocumentVersionRequest]) (*connect.Response[v1.GetDocumentVersionResponse], error)
+	// GetAgentState says whether the daemon is running an agent, and if it is
+	// not, why. A page asks this before anything else.
+	GetAgentState(context.Context, *connect.Request[v1.GetAgentStateRequest]) (*connect.Response[v1.GetAgentStateResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the jingclaw.control.v1.ConfigService service. By
@@ -101,6 +134,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("WriteConfig")),
 			connect.WithClientOptions(opts...),
 		),
+		replaceConfigText: connect.NewClient[v1.ReplaceConfigTextRequest, v1.ReplaceConfigTextResponse](
+			httpClient,
+			baseURL+ConfigServiceReplaceConfigTextProcedure,
+			connect.WithSchema(configServiceMethods.ByName("ReplaceConfigText")),
+			connect.WithClientOptions(opts...),
+		),
 		getInstructionFile: connect.NewClient[v1.GetInstructionFileRequest, v1.GetInstructionFileResponse](
 			httpClient,
 			baseURL+ConfigServiceGetInstructionFileProcedure,
@@ -113,16 +152,38 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("PutInstructionFile")),
 			connect.WithClientOptions(opts...),
 		),
+		listDocumentVersions: connect.NewClient[v1.ListDocumentVersionsRequest, v1.ListDocumentVersionsResponse](
+			httpClient,
+			baseURL+ConfigServiceListDocumentVersionsProcedure,
+			connect.WithSchema(configServiceMethods.ByName("ListDocumentVersions")),
+			connect.WithClientOptions(opts...),
+		),
+		getDocumentVersion: connect.NewClient[v1.GetDocumentVersionRequest, v1.GetDocumentVersionResponse](
+			httpClient,
+			baseURL+ConfigServiceGetDocumentVersionProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetDocumentVersion")),
+			connect.WithClientOptions(opts...),
+		),
+		getAgentState: connect.NewClient[v1.GetAgentStateRequest, v1.GetAgentStateResponse](
+			httpClient,
+			baseURL+ConfigServiceGetAgentStateProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetAgentState")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // configServiceClient implements ConfigServiceClient.
 type configServiceClient struct {
-	getConfig          *connect.Client[v1.GetConfigRequest, v1.GetConfigResponse]
-	checkConfig        *connect.Client[v1.CheckConfigRequest, v1.CheckConfigResponse]
-	writeConfig        *connect.Client[v1.WriteConfigRequest, v1.WriteConfigResponse]
-	getInstructionFile *connect.Client[v1.GetInstructionFileRequest, v1.GetInstructionFileResponse]
-	putInstructionFile *connect.Client[v1.PutInstructionFileRequest, v1.PutInstructionFileResponse]
+	getConfig            *connect.Client[v1.GetConfigRequest, v1.GetConfigResponse]
+	checkConfig          *connect.Client[v1.CheckConfigRequest, v1.CheckConfigResponse]
+	writeConfig          *connect.Client[v1.WriteConfigRequest, v1.WriteConfigResponse]
+	replaceConfigText    *connect.Client[v1.ReplaceConfigTextRequest, v1.ReplaceConfigTextResponse]
+	getInstructionFile   *connect.Client[v1.GetInstructionFileRequest, v1.GetInstructionFileResponse]
+	putInstructionFile   *connect.Client[v1.PutInstructionFileRequest, v1.PutInstructionFileResponse]
+	listDocumentVersions *connect.Client[v1.ListDocumentVersionsRequest, v1.ListDocumentVersionsResponse]
+	getDocumentVersion   *connect.Client[v1.GetDocumentVersionRequest, v1.GetDocumentVersionResponse]
+	getAgentState        *connect.Client[v1.GetAgentStateRequest, v1.GetAgentStateResponse]
 }
 
 // GetConfig calls jingclaw.control.v1.ConfigService.GetConfig.
@@ -140,6 +201,11 @@ func (c *configServiceClient) WriteConfig(ctx context.Context, req *connect.Requ
 	return c.writeConfig.CallUnary(ctx, req)
 }
 
+// ReplaceConfigText calls jingclaw.control.v1.ConfigService.ReplaceConfigText.
+func (c *configServiceClient) ReplaceConfigText(ctx context.Context, req *connect.Request[v1.ReplaceConfigTextRequest]) (*connect.Response[v1.ReplaceConfigTextResponse], error) {
+	return c.replaceConfigText.CallUnary(ctx, req)
+}
+
 // GetInstructionFile calls jingclaw.control.v1.ConfigService.GetInstructionFile.
 func (c *configServiceClient) GetInstructionFile(ctx context.Context, req *connect.Request[v1.GetInstructionFileRequest]) (*connect.Response[v1.GetInstructionFileResponse], error) {
 	return c.getInstructionFile.CallUnary(ctx, req)
@@ -150,27 +216,63 @@ func (c *configServiceClient) PutInstructionFile(ctx context.Context, req *conne
 	return c.putInstructionFile.CallUnary(ctx, req)
 }
 
+// ListDocumentVersions calls jingclaw.control.v1.ConfigService.ListDocumentVersions.
+func (c *configServiceClient) ListDocumentVersions(ctx context.Context, req *connect.Request[v1.ListDocumentVersionsRequest]) (*connect.Response[v1.ListDocumentVersionsResponse], error) {
+	return c.listDocumentVersions.CallUnary(ctx, req)
+}
+
+// GetDocumentVersion calls jingclaw.control.v1.ConfigService.GetDocumentVersion.
+func (c *configServiceClient) GetDocumentVersion(ctx context.Context, req *connect.Request[v1.GetDocumentVersionRequest]) (*connect.Response[v1.GetDocumentVersionResponse], error) {
+	return c.getDocumentVersion.CallUnary(ctx, req)
+}
+
+// GetAgentState calls jingclaw.control.v1.ConfigService.GetAgentState.
+func (c *configServiceClient) GetAgentState(ctx context.Context, req *connect.Request[v1.GetAgentStateRequest]) (*connect.Response[v1.GetAgentStateResponse], error) {
+	return c.getAgentState.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the jingclaw.control.v1.ConfigService service.
 type ConfigServiceHandler interface {
-	// GetConfig is what the file says, what is running, and which settings the
-	// file cannot change.
+	// GetConfig is what is saved, what is running, and which settings the saved
+	// text cannot change.
+	//
+	// It answers for text that does not parse too: text and parse_error are set
+	// and file is empty, so the page that has to repair it can show it.
 	GetConfig(context.Context, *connect.Request[v1.GetConfigRequest]) (*connect.Response[v1.GetConfigResponse], error)
 	// CheckConfig says what an edit would do, and writes nothing.
 	//
-	// The check is the one the daemon runs when it starts, so "this is fine"
-	// and "this will start" are the same statement.
+	// The check is the one the daemon runs on the settings when it starts, so
+	// "this is fine" means the settings are valid. It does not mean the daemon
+	// will start an agent: a missing key, a model the provider does not serve or
+	// the sandbox on a machine that cannot hold it are found at start, and the
+	// daemon then comes up in repair mode.
 	CheckConfig(context.Context, *connect.Request[v1.CheckConfigRequest]) (*connect.Response[v1.CheckConfigResponse], error)
-	// WriteConfig applies edits to the file, or refuses and says why.
+	// WriteConfig applies edits to the saved text, or refuses and says why.
 	//
-	// A file that is not the one the edit started from is refused with
+	// Saved text that is not the one the edit started from is refused with
 	// FAILED_PRECONDITION: somebody else changed it, and writing over theirs
 	// would discard it unseen.
 	WriteConfig(context.Context, *connect.Request[v1.WriteConfigRequest]) (*connect.Response[v1.WriteConfigResponse], error)
-	// GetInstructionFile and PutInstructionFile are the two files that say who
-	// the agent is and how it works. They are files, not settings, and are read
-	// again on every run, so a change to one needs no restart.
+	// ReplaceConfigText saves whole text in place of the config, after the same
+	// check CheckConfig runs. Text that would not start is refused with its
+	// problems and never saved.
+	//
+	// It is how a config that edits cannot be applied to — one that does not
+	// parse — gets fixed.
+	ReplaceConfigText(context.Context, *connect.Request[v1.ReplaceConfigTextRequest]) (*connect.Response[v1.ReplaceConfigTextResponse], error)
+	// GetInstructionFile and PutInstructionFile are the two documents that say
+	// who the agent is and how it works. They are read when the daemon starts,
+	// not on every run, so a change to one waits for a restart like any other.
 	GetInstructionFile(context.Context, *connect.Request[v1.GetInstructionFileRequest]) (*connect.Response[v1.GetInstructionFileResponse], error)
 	PutInstructionFile(context.Context, *connect.Request[v1.PutInstructionFileRequest]) (*connect.Response[v1.PutInstructionFileResponse], error)
+	// ListDocumentVersions and GetDocumentVersion read back what a document said
+	// before: the last twenty saves of each, newest first. Restoring one is
+	// saving its text again.
+	ListDocumentVersions(context.Context, *connect.Request[v1.ListDocumentVersionsRequest]) (*connect.Response[v1.ListDocumentVersionsResponse], error)
+	GetDocumentVersion(context.Context, *connect.Request[v1.GetDocumentVersionRequest]) (*connect.Response[v1.GetDocumentVersionResponse], error)
+	// GetAgentState says whether the daemon is running an agent, and if it is
+	// not, why. A page asks this before anything else.
+	GetAgentState(context.Context, *connect.Request[v1.GetAgentStateRequest]) (*connect.Response[v1.GetAgentStateResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -198,6 +300,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("WriteConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceReplaceConfigTextHandler := connect.NewUnaryHandler(
+		ConfigServiceReplaceConfigTextProcedure,
+		svc.ReplaceConfigText,
+		connect.WithSchema(configServiceMethods.ByName("ReplaceConfigText")),
+		connect.WithHandlerOptions(opts...),
+	)
 	configServiceGetInstructionFileHandler := connect.NewUnaryHandler(
 		ConfigServiceGetInstructionFileProcedure,
 		svc.GetInstructionFile,
@@ -210,6 +318,24 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("PutInstructionFile")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceListDocumentVersionsHandler := connect.NewUnaryHandler(
+		ConfigServiceListDocumentVersionsProcedure,
+		svc.ListDocumentVersions,
+		connect.WithSchema(configServiceMethods.ByName("ListDocumentVersions")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceGetDocumentVersionHandler := connect.NewUnaryHandler(
+		ConfigServiceGetDocumentVersionProcedure,
+		svc.GetDocumentVersion,
+		connect.WithSchema(configServiceMethods.ByName("GetDocumentVersion")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceGetAgentStateHandler := connect.NewUnaryHandler(
+		ConfigServiceGetAgentStateProcedure,
+		svc.GetAgentState,
+		connect.WithSchema(configServiceMethods.ByName("GetAgentState")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -218,10 +344,18 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceCheckConfigHandler.ServeHTTP(w, r)
 		case ConfigServiceWriteConfigProcedure:
 			configServiceWriteConfigHandler.ServeHTTP(w, r)
+		case ConfigServiceReplaceConfigTextProcedure:
+			configServiceReplaceConfigTextHandler.ServeHTTP(w, r)
 		case ConfigServiceGetInstructionFileProcedure:
 			configServiceGetInstructionFileHandler.ServeHTTP(w, r)
 		case ConfigServicePutInstructionFileProcedure:
 			configServicePutInstructionFileHandler.ServeHTTP(w, r)
+		case ConfigServiceListDocumentVersionsProcedure:
+			configServiceListDocumentVersionsHandler.ServeHTTP(w, r)
+		case ConfigServiceGetDocumentVersionProcedure:
+			configServiceGetDocumentVersionHandler.ServeHTTP(w, r)
+		case ConfigServiceGetAgentStateProcedure:
+			configServiceGetAgentStateHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -243,10 +377,26 @@ func (UnimplementedConfigServiceHandler) WriteConfig(context.Context, *connect.R
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConfigService.WriteConfig is not implemented"))
 }
 
+func (UnimplementedConfigServiceHandler) ReplaceConfigText(context.Context, *connect.Request[v1.ReplaceConfigTextRequest]) (*connect.Response[v1.ReplaceConfigTextResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConfigService.ReplaceConfigText is not implemented"))
+}
+
 func (UnimplementedConfigServiceHandler) GetInstructionFile(context.Context, *connect.Request[v1.GetInstructionFileRequest]) (*connect.Response[v1.GetInstructionFileResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConfigService.GetInstructionFile is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) PutInstructionFile(context.Context, *connect.Request[v1.PutInstructionFileRequest]) (*connect.Response[v1.PutInstructionFileResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConfigService.PutInstructionFile is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) ListDocumentVersions(context.Context, *connect.Request[v1.ListDocumentVersionsRequest]) (*connect.Response[v1.ListDocumentVersionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConfigService.ListDocumentVersions is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) GetDocumentVersion(context.Context, *connect.Request[v1.GetDocumentVersionRequest]) (*connect.Response[v1.GetDocumentVersionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConfigService.GetDocumentVersion is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) GetAgentState(context.Context, *connect.Request[v1.GetAgentStateRequest]) (*connect.Response[v1.GetAgentStateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConfigService.GetAgentState is not implemented"))
 }

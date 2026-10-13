@@ -39,8 +39,8 @@ func said(texts []string, want string) bool {
 }
 
 // The first thing a console channel is used for, somebody is told what it is.
-// A boundary that lives only in a configuration file on a machine nobody in
-// the room is sitting at is one everybody will assume the shape of instead.
+// A boundary that lives only in the settings of a machine nobody in the room is
+// sitting at is one everybody will assume the shape of instead.
 func TestAConsoleChannelSaysWhatItIsTheFirstTimeItIsUsed(t *testing.T) {
 	h := newHarness(t, 0)
 	h.bind(t, "console", "user_1")

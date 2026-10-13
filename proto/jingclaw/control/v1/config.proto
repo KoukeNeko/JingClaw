@@ -3,62 +3,115 @@ syntax = "proto3";
 package jingclaw.control.v1;
 
 import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
 import "jingclaw/control/v1/common.proto";
 
-// ConfigService is how a person reads and changes the daemon's settings
-// without opening the file.
+// ConfigService is how a person reads and changes the daemon's settings from
+// the dashboard.
 //
-// The file stays the source of truth. Nothing here keeps a second copy: an
-// edit is applied to the text of config.toml and nothing else in it moves —
-// not the comments, not the order, not a setting this version has never heard
-// of. A change takes effect when the daemon next starts, because that is when
-// settings are read and checked; this says so rather than pretending.
+// The settings are three documents kept in the daemon's database: config (the
+// TOML), agents (AGENTS.md) and persona (PERSONA.md). The dashboard is the only
+// editor; there is no file to open. Each is stored as the text it was given,
+// and an edit to the config is applied to that text, so nothing else in it
+// moves — not the comments, not the order, not a setting this version has never
+// heard of. A save that changes a document keeps the version it replaces, so an
+// earlier one can be read back and restored.
+//
+// A change takes effect when the daemon next starts, because that is when
+// settings are read and checked. Each reply says whether what is saved is what
+// is running (pending_restart); this says so rather than pretending.
 //
 // Reachable by the operator's own credential and by nothing else. These are
 // the settings that decide what the agent may run.
 service ConfigService {
-  // GetConfig is what the file says, what is running, and which settings the
-  // file cannot change.
+  // GetConfig is what is saved, what is running, and which settings the saved
+  // text cannot change.
+  //
+  // It answers for text that does not parse too: text and parse_error are set
+  // and file is empty, so the page that has to repair it can show it.
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
 
   // CheckConfig says what an edit would do, and writes nothing.
   //
-  // The check is the one the daemon runs when it starts, so "this is fine"
-  // and "this will start" are the same statement.
+  // The check is the one the daemon runs on the settings when it starts, so
+  // "this is fine" means the settings are valid. It does not mean the daemon
+  // will start an agent: a missing key, a model the provider does not serve or
+  // the sandbox on a machine that cannot hold it are found at start, and the
+  // daemon then comes up in repair mode.
   rpc CheckConfig(CheckConfigRequest) returns (CheckConfigResponse);
 
-  // WriteConfig applies edits to the file, or refuses and says why.
+  // WriteConfig applies edits to the saved text, or refuses and says why.
   //
-  // A file that is not the one the edit started from is refused with
+  // Saved text that is not the one the edit started from is refused with
   // FAILED_PRECONDITION: somebody else changed it, and writing over theirs
   // would discard it unseen.
   rpc WriteConfig(WriteConfigRequest) returns (WriteConfigResponse);
 
-  // GetInstructionFile and PutInstructionFile are the two files that say who
-  // the agent is and how it works. They are files, not settings, and are read
-  // again on every run, so a change to one needs no restart.
+  // ReplaceConfigText saves whole text in place of the config, after the same
+  // check CheckConfig runs. Text that would not start is refused with its
+  // problems and never saved.
+  //
+  // It is how a config that edits cannot be applied to — one that does not
+  // parse — gets fixed.
+  rpc ReplaceConfigText(ReplaceConfigTextRequest) returns (ReplaceConfigTextResponse);
+
+  // GetInstructionFile and PutInstructionFile are the two documents that say
+  // who the agent is and how it works. They are read when the daemon starts,
+  // not on every run, so a change to one waits for a restart like any other.
   rpc GetInstructionFile(GetInstructionFileRequest) returns (GetInstructionFileResponse);
   rpc PutInstructionFile(PutInstructionFileRequest) returns (PutInstructionFileResponse);
+
+  // ListDocumentVersions and GetDocumentVersion read back what a document said
+  // before: the last twenty saves of each, newest first. Restoring one is
+  // saving its text again.
+  rpc ListDocumentVersions(ListDocumentVersionsRequest) returns (ListDocumentVersionsResponse);
+  rpc GetDocumentVersion(GetDocumentVersionRequest) returns (GetDocumentVersionResponse);
+
+  // GetAgentState says whether the daemon is running an agent, and if it is
+  // not, why. A page asks this before anything else.
+  rpc GetAgentState(GetAgentStateRequest) returns (GetAgentStateResponse);
 }
 
 message GetConfigRequest {}
 
 message GetConfigResponse {
-  // Where the file is, and a name for exactly what is in it. An edit says which
-  // version it started from by sending this back.
+  // Empty. There is no file; the settings are kept in the database. Kept so
+  // that a client written against the file still decodes the reply.
   string path = 1;
+
+  // A name for exactly what is saved. An edit says which version it started
+  // from by sending this back. Empty for a config that was never written or
+  // was cleared.
   string hash = 2;
 
-  // The settings the file sets, by dotted key such as provider.retry.base_delay.
-  // A setting the file does not mention is not here: it has its default.
+  // The settings the saved text sets, by dotted key such as
+  // provider.retry.base_delay. A setting the text does not mention is not
+  // here: it has its default. Empty when the text does not parse.
   google.protobuf.Struct file = 3;
 
-  // Every setting as this process is using it. Compared with the file, it says
-  // what is written but not yet in effect.
+  // Every setting as this process is using it. Compared with the saved text, it
+  // says what is saved but not yet in effect.
   google.protobuf.Struct running = 4;
 
-  // Settings the file cannot change, because something wins over it.
+  // Settings the saved text cannot change, because something wins over it.
   repeated ConfigOverride overrides = 5;
+
+  // The saved text, exactly as it was given. Nothing in it is redacted: the
+  // headers and env values given to a tool server (mcp.servers) are here, and in
+  // file and running, for whoever holds the control credential.
+  string text = 6;
+
+  // Why the saved text cannot be read as settings, empty when it can. The
+  // daemon starts in repair mode on such a config and this is the reason.
+  string parse_error = 7;
+
+  // The hash of the config this process started from. Different from hash
+  // means a change is saved that is not running yet.
+  string running_hash = 8;
+  bool pending_restart = 9;
+
+  // How many times the config has been saved, from 1; zero if never.
+  int64 version = 10;
 }
 
 message ConfigOverride {
@@ -78,7 +131,7 @@ message ConfigEdit {
   // The value in the form GetConfig reports it. Ignored when remove is set.
   google.protobuf.Value value = 2;
 
-  // Write the setting back as the commented-out default, so the file says
+  // Write the setting back as the commented-out default, so the text says
   // nothing about it.
   bool remove = 3;
 }
@@ -90,6 +143,12 @@ message ConfigProblem {
   string value = 2;
   string why = 3;
   string fix = 4;
+
+  // Where the problem was found: "settings" for a saved setting that will not
+  // do, "startup" for something else that kept the agent from being built.
+  // Set by GetAgentState only; the problems a check or a write reports are all
+  // about settings and leave it empty.
+  string source = 5;
 }
 
 // ConfigDiffLine is one line of what a write changes. kind is "context" for a
@@ -118,14 +177,42 @@ message WriteConfigRequest {
 }
 
 message WriteConfigResponse {
-  // False when the edit was refused; problems then says why, and the file is
+  // False when the edit was refused; problems then says why, and the config is
   // as it was.
   bool written = 1;
 
-  // The file as it is now.
+  // The config as it is now.
   string hash = 2;
   repeated ConfigProblem problems = 3;
   repeated string changed_keys = 4;
+
+  // Whether what is saved now differs from what is running, and which save
+  // this is.
+  bool pending_restart = 5;
+  int64 version = 6;
+}
+
+message ReplaceConfigTextRequest {
+  RequestMeta meta = 1;
+
+  // The text to save, whole.
+  string text = 2;
+
+  // The hash from the GetConfig this replacement started from, for the same
+  // reason as WriteConfig's.
+  string hash = 3;
+}
+
+message ReplaceConfigTextResponse {
+  // False when the text was refused; problems then says why, and the config is
+  // as it was.
+  bool written = 1;
+
+  // The config as it is now.
+  string hash = 2;
+  repeated ConfigProblem problems = 3;
+  bool pending_restart = 4;
+  int64 version = 5;
 }
 
 enum InstructionFile {
@@ -139,9 +226,16 @@ message GetInstructionFileRequest {
 }
 
 message GetInstructionFileResponse {
+  // Empty. There is no file.
   string path = 1;
   string text = 2;
   string hash = 3;
+
+  // The hash of the document this process started from, and whether what is
+  // saved differs from it.
+  string running_hash = 4;
+  bool pending_restart = 5;
+  int64 version = 6;
 }
 
 message PutInstructionFileRequest {
@@ -156,4 +250,61 @@ message PutInstructionFileRequest {
 
 message PutInstructionFileResponse {
   string hash = 1;
+  bool pending_restart = 2;
+  int64 version = 3;
+}
+
+// SettingsDocument is one of the three documents the settings are kept in.
+enum SettingsDocument {
+  SETTINGS_DOCUMENT_UNSPECIFIED = 0;
+  SETTINGS_DOCUMENT_CONFIG = 1;
+  SETTINGS_DOCUMENT_AGENTS = 2;
+  SETTINGS_DOCUMENT_PERSONA = 3;
+}
+
+// DocumentVersion is one save of a document, without its text.
+message DocumentVersion {
+  int64 version = 1;
+  string hash = 2;
+
+  // Where the text came from: "web" for an edit in the dashboard, "file" for
+  // one imported from the file an older version kept, "env" for one given by
+  // an environment variable, "default" for the example config.
+  string source = 3;
+  google.protobuf.Timestamp saved_at = 4;
+}
+
+message ListDocumentVersionsRequest {
+  SettingsDocument document = 1;
+}
+
+message ListDocumentVersionsResponse {
+  // Newest first. The first is the current one.
+  repeated DocumentVersion versions = 1;
+}
+
+message GetDocumentVersionRequest {
+  SettingsDocument document = 1;
+  int64 version = 2;
+}
+
+message GetDocumentVersionResponse {
+  DocumentVersion info = 1;
+
+  // The text as it was saved, a secret in it included. A value taken out of a
+  // document stays readable here until twenty later saves have pushed its
+  // version out; nothing forgets one sooner.
+  string text = 2;
+}
+
+message GetAgentStateRequest {}
+
+message GetAgentStateResponse {
+  // "running" when the daemon built an agent, "repair" when it did not and is
+  // serving only what is needed to fix the settings.
+  string mode = 1;
+
+  // Why there is no agent. Empty when one is running.
+  repeated ConfigProblem problems = 2;
+  google.protobuf.Timestamp started_at = 3;
 }

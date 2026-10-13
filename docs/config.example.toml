@@ -1,13 +1,18 @@
 # JingClaw configuration. Every setting is shown at its default.
+# These settings are a document in the daemon's database, not a file. The
+# dashboard edits them (run: jingclaw dashboard); they are read when the daemon
+# starts, so a saved change takes effect after: jingclaw stop, then jingclaw.
+# A first start saves this text, unless JINGCLAW_CONFIG gives another.
 # Reference: docs/configuration.md
 
 # ── Agent and provider ─────────────────────────────────────────
 
 [agent]
-# Who this agent is and how it works are AGENTS.md and PERSONA.md, beside this
-# file. "jingclaw daemon --init" creates them empty; a container gets them from
-# JINGCLAW_PERSONA and JINGCLAW_AGENTS. They are not settings: a second place
-# to say the same thing is one somebody edits while the first is what runs.
+# Who this agent is and how it works are two more documents, AGENTS and
+# PERSONA, edited in the dashboard beside this one. A first start can take
+# them from JINGCLAW_PERSONA and JINGCLAW_AGENTS. They are not settings: a
+# second place to say the same thing is one somebody edits while the first
+# is what runs.
 
 # Tool calls one turn may make before the run is stopped.
 # max_iterations = 12
@@ -17,7 +22,7 @@
 # permission_profile = "local"
 
 [provider]
-# "gemini", "ollama" or "openai_compat". Left as it is, an offline stand-in
+# "gemini", "anthropic", "ollama" or "openai_compat". Left as it is, an offline stand-in
 # answers instead of a model, so a fresh install starts and does nothing
 # surprising; set this before expecting real work.
 backend = "fake"
@@ -36,7 +41,8 @@ backend = "fake"
 [provider.gemini]
 # model = ""
 # The environment is read first, then the file, which must be mode 600.
-# Neither value ever reaches a log.
+# Neither value ever reaches a log. A credential file setting, here and below,
+# takes a plain name for a file in this deployment's directory and never a path.
 # api_key_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
 # api_key_file = "gemini.key"
 
@@ -52,12 +58,15 @@ backend = "fake"
 # Context the server loads the model with. Zero uses whatever it decides,
 # which is routinely far less than the model was trained for.
 # num_ctx = 0
-# "" leaves the model's own setting alone; "true" or "false" overrides it.
+# "" follows the model: asked to think only when it reports being able to.
+# "off", "on", "low", "medium", "high" or "max" overrides that.
 # think = ""
 
 [provider.anthropic]
 # The Messages API. Its own backend rather than a dialect of the one below:
 # the wire format differs in kind, not in detail.
+# Unlike the sections around it, the values shown here are examples and not
+# defaults: there is no default model, and no default variable name.
 # model = "claude-sonnet-4-5"
 # api_key_env = ["ANTHROPIC_API_KEY"]
 # api_key_file = ""
@@ -90,7 +99,7 @@ backend = "fake"
 # directory, the deployment's own workspace, and nothing outside it is
 # reachable; stored output goes beside the database. Two ways to say where
 # something is would be two places for them to disagree, and the answer to
-# "which one ran" would depend on which file somebody edited last.
+# "which one ran" would depend on which one somebody edited last.
 
 [artifacts]
 # How large one piece of stored output may be, and how large one image put in
@@ -105,11 +114,11 @@ backend = "fake"
 # what a build's dependencies will do, and this is the difference.
 #
 # Off by default because it changes what commands can do. On, it is not
-# advisory: a machine that cannot confine refuses to start rather than
-# running commands unprotected.
+# advisory: a machine that cannot confine runs no agent, and says why, rather
+# than running commands unprotected.
 #
-# macOS only so far. On Linux the daemon refuses to start with this on:
-# landlock cannot hide this deployment's directory from a command.
+# macOS only so far. On Linux there is no agent with this on: landlock cannot
+# hide this deployment's directory from a command.
 # enabled = false
 # Let confined commands open connections. Off suits a build or a test, which
 # is most of what an agent runs.
@@ -207,11 +216,11 @@ enabled = false
 # What this server's tools count as to the policy engine.
 # level = "execute"
 # Says the server is behind an authorization server, so somebody signs in once
-# with "jingclaw mcp login <name>". Only for a url server: a command is given
-# its credentials through env or pass_env. The daemon never opens a browser
-# itself — nobody is watching it — so a session that has run out is reported
-# rather than blocking a run on a page no one will see. "jingclaw mcp list"
-# says which servers need one.
+# with "jingclaw mcp login <name>", which needs the daemon running. Only for a
+# url server: a command is given its credentials through env or pass_env.
+# The daemon never opens a browser itself — nobody is watching it — so a
+# session that has run out is reported rather than blocking a run on a page no
+# one will see. "jingclaw mcp list" says which servers need one.
 # oauth = false
 # Keep this server's tools out of the prompt until the model asks for one
 # by name (tool_search, tool_load). For servers with many tools.
@@ -223,12 +232,15 @@ enabled = false
 # 127.0.0.1 only. A LAN address exposes the daemon to the network.
 # addr = "127.0.0.1:0"
 # log_level = "info"
-# Empty uses the platform's own locations.
-# data_dir = ""
-# runtime_dir = ""
+# data_dir and runtime_dir cannot be set here: they say where the database
+# and the discovery file are, and these settings are in the database. Give
+# them when the daemon starts: --data-dir or JINGCLAW_SERVER_DATA_DIR, and
+# JINGCLAW_SERVER_RUNTIME_DIR. Without them the deployment's data/ and run/
+# directories are used. A line for either here is ignored.
 
 [gateway]
-# Read by the gateway. The section below matching this is the one that is read.
+# The gateway is given its part of these by the running daemon. The section
+# below matching this is the one it uses.
 platform = "discord"
 # working_interval = "2s"
 # stream_interval = "1.5s"
@@ -250,7 +262,7 @@ account_id = "main"
 # max_attachment_bytes = 4194304
 
 # Rooms other people can type in. Applied at startup; removing one does not
-# unbind it, and the startup log names any binding this file does not.
+# unbind it, and the startup log names any binding these settings do not.
 # [[gateway.discord.channels]]
 # channel_ids = ["111111111111111111"]
 # tenant_id = "222222222222222222"

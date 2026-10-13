@@ -6,12 +6,15 @@
 package secret
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
+	"strings"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
-	"strings"
 )
 
 // Value wraps a credential so that printing it by accident is hard. Its String
@@ -63,9 +66,26 @@ type LoadOptions struct {
 // an error here: the caller decides whether the feature it unlocks is
 // required.
 func Load(opts LoadOptions) (Value, error) {
+	found, raw, err := resolve(opts)
+	if err != nil {
+		return Value{}, err
+	}
+	if found.Source == SourceNone {
+		return Value{}, nil
+	}
+	return New(raw), nil
+}
+
+// resolve is the whole of Load's decision, and the one place it is made.
+//
+// Inspect asks the same question and keeps only the verdict. Two copies of the
+// order the environment and the files are looked in, and of what counts as a
+// credential, would eventually disagree, and a status that says a key will be
+// used when the daemon refuses it is worse than none.
+func resolve(opts LoadOptions) (found Verdict, raw string, err error) {
 	for _, name := range opts.EnvVars {
-		if raw := os.Getenv(name); strings.TrimSpace(raw) != "" {
-			return New(raw), nil
+		if given := os.Getenv(name); strings.TrimSpace(given) != "" {
+			return Verdict{Source: SourceEnvironment, EnvVar: name}, given, nil
 		}
 	}
 
@@ -74,11 +94,20 @@ func Load(opts LoadOptions) (Value, error) {
 			continue
 		}
 
-		if _, err := os.Stat(path); err != nil {
+		info, err := os.Stat(path)
+		if err != nil {
 			if os.IsNotExist(err) {
+				found.File = FileAbsent
 				continue
 			}
-			return Value{}, fmt.Errorf("secret: stat %s: %w", path, err)
+			return blocked(found, FileUnreadable, why(err)), "", fmt.Errorf("secret: stat %s: %w", path, err)
+		}
+		found.ModifiedAt = info.ModTime()
+
+		// Before anything is read: opening a pipe for reading waits for a writer,
+		// and a directory is not a credential however its mode reads.
+		if !info.Mode().IsRegular() {
+			return blocked(found, FileNotRegular, ""), "", fmt.Errorf("secret: %s is not a regular file", path)
 		}
 
 		// A credential readable by other local accounts is a credential to
@@ -87,36 +116,77 @@ func Load(opts LoadOptions) (Value, error) {
 		// candidate would hide the exposure.
 		ownerOnly, exposure, err := fsperm.EnsureOwnerOnly(path)
 		if err != nil {
-			return Value{}, fmt.Errorf("secret: check %s: %w", path, err)
+			return blocked(found, FileUnreadable, why(err)), "", fmt.Errorf("secret: check %s: %w", path, err)
 		}
 		if !ownerOnly {
-			return Value{}, fmt.Errorf(
+			return blocked(found, FileWrongMode, exposure), "", fmt.Errorf(
 				"secret: %s %s; it must be readable only by its owner (chmod 600)",
 				path, exposure)
 		}
 
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return Value{}, fmt.Errorf("secret: read %s: %w", path, err)
+		// Never more than the largest file a credential can be kept in, which is
+		// also what the calls that replace or delete one accept. Without a bound a
+		// file of any size at a credential's name was read whole, by the daemon at
+		// start and by every status request after it.
+		content, err := readBounded(path)
+		if errors.Is(err, errTooLarge) {
+			return blocked(found, FileUnreadable, fmt.Sprintf("is larger than %d bytes, so it is not a credential file", MaxFileBytes)),
+				"", fmt.Errorf("secret: %s is larger than %d bytes, so it is not a credential file", path, MaxFileBytes)
 		}
-		if strings.TrimSpace(string(raw)) == "" {
+		if err != nil {
+			return blocked(found, FileUnreadable, why(err)), "", fmt.Errorf("secret: read %s: %w", path, err)
+		}
+		if strings.TrimSpace(string(content)) == "" {
+			found.File = FileEmpty
 			continue
 		}
 
-		return New(string(raw)), nil
+		found.Source, found.File = SourceFile, FilePresent
+		return found, string(content), nil
 	}
 
-	return Value{}, nil
+	return found, "", nil
 }
 
-// DefaultFiles returns the conventional locations for a named credential, in
-// search order.
-//
-// The platform-native config directory comes first. On macOS that is
-// ~/Library/Application Support, but developer tools there commonly follow the
-// XDG convention instead, and a headless macOS build box is usually set up
-// that way, so ~/.config is also accepted. On Linux os.UserConfigDir already
-// resolves to ~/.config and the two collapse into one entry.
+var errTooLarge = errors.New("larger than a credential file")
+
+// readBounded is a file's content, or errTooLarge when it holds more than
+// MaxFileBytes. At most one byte more than that is ever read.
+func readBounded(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	content, err := io.ReadAll(io.LimitReader(file, MaxFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > MaxFileBytes {
+		return nil, errTooLarge
+	}
+	return content, nil
+}
+
+// blocked is the verdict for a file Load refuses.
+func blocked(found Verdict, state FileState, detail string) Verdict {
+	found.Source, found.File, found.Detail = SourceBlocked, state, detail
+	return found
+}
+
+// why is what the system said, without the path it said it about.
+func why(err error) string {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err.Error()
+	}
+	return "could not be read"
+}
+
+// DefaultFiles returns where a named credential file is looked for, in search
+// order: the deployment's own directory, and nowhere else. It is empty for no
+// name, or when there is no deployment directory.
 func DefaultFiles(name string) ([]string, error) {
 	// No name is no file, not the directory the files live in. A backend that
 	// needs no credential leaves this empty, and joining "" onto each location
@@ -140,17 +210,36 @@ func DefaultFiles(name string) ([]string, error) {
 	return files, nil
 }
 
+// Absent is the refusal for a credential that is nowhere: the variables to
+// set, and the setting that names the file to put it in.
+//
+// The setting is named and not the file. The name of a credential file is
+// something typed, the commonest mistake with it is to paste the key there, and
+// this message goes into a log and onto the page.
+func Absent(what string, envVars []string, setting, fileName string) error {
+	var ways []string
+	if len(envVars) > 0 {
+		ways = append(ways, "set "+strings.Join(envVars, " or "))
+	}
+	if fileName == "" {
+		ways = append(ways, "name a file in "+setting+" and write it there with mode 600")
+	} else {
+		ways = append(ways, "write it with mode 600 to the file that "+setting+" names")
+	}
+	return fmt.Errorf("no %s: %s", what, strings.Join(ways, ", or "))
+}
+
 // Find is the whole of "where does this credential come from".
 //
 // The environment first, then the files DefaultFiles names — and a clear
-// refusal naming both when there is nothing, because "no token" with no
-// indication of where one should go is a message somebody has to read the
-// source to act on.
+// refusal saying where one can go when there is nothing, because "no token"
+// with no indication of where one should go is a message somebody has to read
+// the source to act on. setting is the one that names the file.
 //
 // Here rather than in each command that needs one. There are three now, and
 // three copies of this would eventually disagree about which places are
 // looked in.
-func Find(envVars []string, fileName string) (Value, error) {
+func Find(envVars []string, fileName, setting string) (Value, error) {
 	files, err := DefaultFiles(fileName)
 	if err != nil {
 		return Value{}, err
@@ -161,9 +250,7 @@ func Find(envVars []string, fileName string) (Value, error) {
 		return Value{}, err
 	}
 	if !found.IsSet() {
-		return Value{}, fmt.Errorf(
-			"no credential: set %s, or write it with mode 600 to one of: %v",
-			strings.Join(envVars, " or "), files)
+		return Value{}, Absent("credential", envVars, setting, fileName)
 	}
 
 	return found, nil

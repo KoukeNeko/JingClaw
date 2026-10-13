@@ -4,8 +4,13 @@
 package architecture_test
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -188,6 +193,77 @@ func TestTheSandboxCompilesEverywhereItClaimsTo(t *testing.T) {
 			t.Errorf("what uses the sandbox does not build for %s/%s;\n"+
 				"a backend is missing one of Available, Wrap or LooksConfined:\n%s",
 				target.os, target.arch, out)
+		}
+	}
+}
+
+// The settings and the two instruction documents are rows in the store, saved
+// whole with a version history of their own. They are not events, and nothing
+// that runs for the agent may be able to change the text that decides what it
+// may do.
+//
+// Two places write them: a save through the control plane, which is the
+// dashboard, and the daemon's start, which gives a document with no row its
+// first text. go list says what a package imports and not what it calls, and
+// the runtime imports the store as well, so this looks for the calls.
+func TestOnlyTheControlPlaneAndStartupWriteTheSettings(t *testing.T) {
+	allowed := map[string]bool{
+		"internal/control":             true,
+		"internal/cli/daemon":          true,
+		"internal/storage/storagetest": true, // the contract both stores are held to
+	}
+	writes := map[string]bool{"PutDocument": true, "SeedDocuments": true}
+
+	module, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found := map[string]bool{}
+	for _, root := range []string{filepath.Join(module, "internal"), filepath.Join(module, "cmd")} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+			if err != nil {
+				return err
+			}
+			ast.Inspect(file, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if selector, ok := call.Fun.(*ast.SelectorExpr); ok && writes[selector.Sel.Name] {
+					dir, err := filepath.Rel(module, filepath.Dir(path))
+					if err != nil {
+						t.Fatal(err)
+					}
+					found[filepath.ToSlash(dir)] = true
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("read the source under %s: %v", root, err)
+		}
+	}
+
+	for dir := range found {
+		if !allowed[dir] {
+			t.Errorf("%s writes a settings document;\n"+
+				"only the control plane and the daemon's start do, so that a save is a person's decision "+
+				"and not something a run, a tool or a client can do", dir)
+		}
+	}
+
+	// A test that finds no writer asserts nothing, which is what it would see if
+	// the methods were renamed.
+	for _, dir := range []string{"internal/control", "internal/cli/daemon"} {
+		if !found[dir] {
+			t.Errorf("%s no longer calls PutDocument or SeedDocuments;\n"+
+				"if the settings are written some other way now, this test is asserting nothing about it", dir)
 		}
 	}
 }

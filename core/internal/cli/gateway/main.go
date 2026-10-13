@@ -35,39 +35,79 @@ import (
 
 const clientName = "jingclaw-gateway"
 
+// settingsTimeout is how long the daemon gets to say what the settings are.
+const settingsTimeout = 10 * time.Second
+
+// ExitConfiguration is the status the gateway exits with when it cannot start
+// for a reason that is in the settings or the credential, rather than a fault.
+//
+// Its own status because the two want different answers from whatever started
+// it. A fault may be gone on the next try; a missing token is there on every
+// one until somebody writes it down, and the supervisor, which keeps the daemon
+// and the dashboard up for exactly that somebody, has to be able to tell them
+// apart. 78 is EX_CONFIG.
+const ExitConfiguration = 78
+
+// notConfigured is a failure to start that is put right by changing a setting
+// or a credential, and that the message already says how.
+type notConfigured struct{ err error }
+
+func (e *notConfigured) Error() string { return e.err.Error() }
+func (e *notConfigured) Unwrap() error { return e.err }
+
 // Main runs the gateway. Args are the arguments after the subcommand name.
 func Main(args []string) error {
-	if err := run(args); err != nil && !errors.Is(err, context.Canceled) {
-		return err
+	err := run(args)
+
+	var unusable *notConfigured
+	switch {
+	case err == nil, errors.Is(err, context.Canceled):
+		return nil
+	case errors.As(err, &unusable):
+		// Said here, in the form the program's own main would have said it,
+		// because that one can only exit with 1.
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(ExitConfiguration)
 	}
-	return nil
+	return err
 }
 
 func run(args []string) error {
 	flags := flag.NewFlagSet("jingclaw gateway", flag.ContinueOnError)
 	var (
-		configPath = flags.String("config", "", "configuration file; defaults to the one in the config directory")
-		platform   = flags.String("platform", "", "messaging platform to serve; overrides the configuration")
-		accountID  = flags.String("account", "", "bot account name within JingClaw; overrides the configuration")
+		platform  = flags.String("platform", "", "messaging platform to serve; overrides the daemon's settings")
+		accountID = flags.String("account", "", "bot account name within JingClaw; overrides the daemon's settings")
 	)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
-	// The gateway reads the same file as the daemon, so a deployment is
-	// described in one place rather than in two that can disagree.
-	cfg, configFile, err := config.Load(*configPath)
+	// The gateway reads no settings of its own. Where the daemon is can only be
+	// said by the environment, since it is what finds the settings; everything
+	// else comes from the daemon, so a deployment is described in one place and
+	// there is not a second copy that can disagree.
+	bootstrap, err := config.Candidate(nil)
+	if err != nil {
+		return &notConfigured{err}
+	}
+
+	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	client, err := dialAgent(bootstrap.Server.RuntimeDir)
 	if err != nil {
 		return err
 	}
-	if err := cfg.Validate(); err != nil {
-		// The same report the daemon gives. One mistake explained two ways by
-		// two processes is how an operator learns to distrust both.
-		if config.Report(os.Stderr, err, configFile) {
-			os.Exit(1)
-		}
-		return err
+
+	// Bounded because this is the gate: a daemon that is up and does not answer
+	// would otherwise leave a process that has said nothing and is doing nothing.
+	asking, cancel := context.WithTimeout(rootCtx, settingsTimeout)
+	told, err := client.GetGatewaySettings(asking, connect.NewRequest(&controlv1.GetGatewaySettingsRequest{}))
+	cancel()
+	if err != nil {
+		return fmt.Errorf("ask the daemon for the gateway settings: %w", err)
 	}
+	cfg := settingsFromProto(told.Msg)
 
 	flags.Visit(func(f *flag.Flag) {
 		switch f.Name {
@@ -78,16 +118,9 @@ func run(args []string) error {
 		}
 	})
 
+	// After the settings, because the level is one of them.
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel()}))
 	slog.SetDefault(logger)
-
-	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	client, err := dialAgent(cfg.Server.RuntimeDir)
-	if err != nil {
-		return err
-	}
 
 	relay := &relay{
 		client:    client,
@@ -103,8 +136,8 @@ func run(args []string) error {
 
 	logger.Info("gateway starting",
 		"platform", cfg.Gateway.Platform, "account_id", cfg.Gateway.Selected().AccountID)
-	fmt.Printf("JingClaw gateway\nConfig:   %s\nPlatform: %s\nAccount:  %s\n",
-		configFile, cfg.Gateway.Platform, cfg.Gateway.Selected().AccountID)
+	fmt.Printf("JingClaw gateway\nSettings: from the running daemon\nPlatform: %s\nAccount:  %s\n",
+		cfg.Gateway.Platform, cfg.Gateway.Selected().AccountID)
 
 	group, ctx := errgroup.WithContext(rootCtx)
 
@@ -353,8 +386,16 @@ func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient,
 	if err != nil {
 		return nil, fmt.Errorf("%w (is jingclaw running?)", err)
 	}
+	if found.Mode == discovery.ModeRepair {
+		// Not a fault in the gateway or in the daemon: the daemon is up and is
+		// running no agent because its settings need fixing, which is what this
+		// is told about. The ingress it would reach is not there.
+		return nil, &notConfigured{errors.New(
+			"the daemon is running no agent, so there is nothing for a gateway to reach; " +
+				"fix what is wrong in the dashboard (run: jingclaw dashboard), then restart: jingclaw stop, then jingclaw")}
+	}
 	if found.GatewayToken == "" {
-		return nil, errors.New("agentd did not publish a gateway credential")
+		return nil, errors.New("the daemon did not publish a gateway credential")
 	}
 
 	httpClient := &http.Client{

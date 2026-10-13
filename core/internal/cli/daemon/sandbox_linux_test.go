@@ -29,7 +29,7 @@ func TestEnablingTheSandboxOnLinuxIsRefusedAtStartup(t *testing.T) {
 
 	cfg := config.Config{Sandbox: config.Sandbox{Enabled: true, Network: true}}
 
-	confine, err := confinement(cfg, slog.New(slog.DiscardHandler))
+	confine, err := confinement(cfg, filepath.Join(root, home.DataName, "jingclaw.db"), slog.New(slog.DiscardHandler))
 	if err == nil {
 		t.Fatalf("the daemon started with a sandbox that refuses every command: %+v", confine)
 	}
@@ -37,4 +37,22 @@ func TestEnablingTheSandboxOnLinuxIsRefusedAtStartup(t *testing.T) {
 		t.Errorf("the refusal does not say which setting: %v", err)
 	}
 	t.Logf("ok   the daemon refuses to start: %v", err)
+}
+
+// The same refusal, seen from outside: the daemon is not gone, it is up
+// without an agent and says which setting asked for what this machine cannot
+// give. It used to be the last line before an exit.
+func TestEnablingTheSandboxOnLinuxStartsARepairDaemonThatNamesTheSetting(t *testing.T) {
+	root := isolate(t)
+	t.Setenv(config.FileEnvVar, "[sandbox]\nenabled = true\nnetwork = true\n")
+
+	d := start(t, root)
+
+	state := d.state()
+	if state.Mode != "repair" || len(state.Problems) != 1 {
+		t.Fatalf("state is %+v", state)
+	}
+	if reason := state.Problems[0]; reason.Source != "startup" || !strings.Contains(reason.Why, "[sandbox]") {
+		t.Errorf("the reason is %+v, want the refusal that names the setting", reason)
+	}
 }

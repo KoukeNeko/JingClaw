@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -31,12 +32,27 @@ type Source struct {
 }
 
 // String is the form somebody types, so an error can quote it back.
+//
+// With any credential in the address taken out, because the one thing this is
+// for is being put in front of somebody: an error, an approval, a listing.
+// ParseSource refuses an address that has one, so for a source it parsed this
+// is the address exactly, except for the login of an ssh address. That is let
+// through because it is how every ssh remote is written, and is redacted all the
+// same because it cannot be told from a token put in its place; the address
+// recorded for the install has it, and this does not.
 func (s Source) String() string {
-	said := "git:" + s.Repository + "#" + s.Commit
+	said := "git:" + Redact(s.Repository) + "#" + s.Commit
 	if s.Path != "" {
 		said += ":" + s.Path
 	}
 	return said
+}
+
+// OverSSH is whether the repository is fetched over ssh, which is with the keys,
+// the configuration and the known hosts of whoever runs the daemon.
+func (s Source) OverSSH() bool {
+	parsed, err := url.Parse(s.Repository)
+	return err == nil && parsed.Scheme == "ssh"
 }
 
 // fullCommit is what a revision has to look like.
@@ -46,9 +62,34 @@ func (s Source) String() string {
 // lock file into a lie. Git itself has moved this way for the same reason.
 var fullCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
+// credentialedAddress is the user-info part of every address in a piece of
+// text that has one: a scheme, then whatever precedes the last @ before the
+// path.
+var credentialedAddress = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^\s/?#'"<>]*@`)
+
+// Redact takes the credentials out of every address in a piece of text.
+//
+// For anything that leaves for a client: a source recorded before addresses
+// with credentials were refused, a line git printed, what somebody typed. It
+// works on text and finds all of them, which web.RedactAddress — one address,
+// the first — does not; the text it is given here is an error or a git
+// transcript, and either can say an address more than once.
+//
+// Everything before the @ goes, the user name with the password: a token is as
+// often passed as a user name as in the password's place. That includes the
+// login of an ssh address, which ParseSource lets stay: a login is not told
+// apart from a token put where one goes, so none is repeated.
+func Redact(text string) string {
+	return credentialedAddress.ReplaceAllString(text, "${1}[redacted]@")
+}
+
 // ParseSource reads the one form, and says what is wrong with anything else.
+//
+// Nothing it says repeats a credential from the text it was given, whichever
+// way the text is wrong.
 func ParseSource(text string) (Source, error) {
 	text = strings.TrimSpace(text)
+	shown := Redact(text)
 
 	// The prefix and the git:// scheme are the same four characters, so
 	// stripping one from the other would leave "//host/path" with no scheme
@@ -64,7 +105,7 @@ func ParseSource(text string) (Source, error) {
 			"skill: %q is not a source; the one form is "+
 				"git:<url>#<commit>[:<path>], as in "+
 				"git:https://github.com/someone/skills#<40-character commit>:release",
-			text)
+			shown)
 	}
 
 	// The path is after the commit, so the last colon of a URL — the one in
@@ -73,7 +114,7 @@ func ParseSource(text string) (Source, error) {
 	if !found {
 		return Source{}, fmt.Errorf(
 			"skill: %q names no commit; add #<commit> so what is installed can be "+
-				"said exactly afterwards", text)
+				"said exactly afterwards", shown)
 	}
 
 	commit, path, _ := strings.Cut(revision, ":")
@@ -85,7 +126,7 @@ func ParseSource(text string) (Source, error) {
 	}
 
 	if source.Repository == "" {
-		return Source{}, fmt.Errorf("skill: %q names no repository", text)
+		return Source{}, fmt.Errorf("skill: %q names no repository", shown)
 	}
 	if !fullCommit.MatchString(source.Commit) {
 		return Source{}, fmt.Errorf(
@@ -111,32 +152,61 @@ func ParseSource(text string) (Source, error) {
 // but the useful place to say no to the obvious ones. A local path is refused
 // because installing from one records a source nobody else can resolve, which
 // defeats the point of writing it down.
+//
+// An address with a credential in it is refused too, for what happens to it
+// afterwards: the address is written to installed.json and the staging record,
+// quoted in errors and shown on an approval, and a password in any of those is
+// a password in a file anybody who can read the skills directory can read. The
+// one thing allowed before the @ is the user name of an ssh address, which is
+// how every ssh remote is written and is not a secret.
 func checkRepository(address string) error {
+	shown := Redact(address)
+
 	// A leading dash is read by git as an option rather than an address.
 	if strings.HasPrefix(address, "-") {
-		return fmt.Errorf("skill: %q starts with a dash, which git reads as an option", address)
+		return fmt.Errorf("skill: %q starts with a dash, which git reads as an option", shown)
 	}
 
 	parsed, err := url.Parse(address)
 	if err != nil {
-		return fmt.Errorf("skill: %q is not an address git can be given: %w", address, err)
+		return fmt.Errorf("skill: %q is not an address git can be given: %s", shown, Redact(err.Error()))
 	}
 
 	switch parsed.Scheme {
 	case "https", "ssh", "git":
+		// Neither of these quotes the address back: what is wrong with it is where
+		// a credential is put.
+		if parsed.Host == "" || parsed.Opaque != "" {
+			return errors.New("skill: the address is not written as scheme://host/path. Text that is " +
+				"not is read by git as something else, such as a path or an scp-style ssh address, " +
+				"and can hold a credential that this cannot find to refuse")
+		}
+		if parsed.RawQuery != "" {
+			return errors.New("skill: the address has a query string, which is where a token is " +
+				"put and is not part of any repository's address; take it off, and give git the " +
+				"credential some other way, such as an ssh key")
+		}
+		if parsed.User != nil {
+			if _, hasPassword := parsed.User.Password(); hasPassword || parsed.Scheme != "ssh" {
+				return fmt.Errorf(
+					"skill: %q has a credential in the address; it would be written into the "+
+						"record of what was installed. Give git the credential some other way, "+
+						"such as an ssh key", shown)
+			}
+		}
 		return nil
 	case "http":
 		return fmt.Errorf(
 			"skill: %q is not encrypted; what comes back becomes instructions this "+
 				"agent reads, and anybody between here and there could write them",
-			address)
+			shown)
 	case "file", "":
 		return fmt.Errorf(
 			"skill: %q is a path on this machine; a source has to be somewhere the "+
 				"install can be repeated from, or there is no point recording it",
-			address)
+			shown)
 	default:
 		return fmt.Errorf("skill: %q uses %q, which is not a way to reach a repository",
-			address, parsed.Scheme)
+			shown, parsed.Scheme)
 	}
 }

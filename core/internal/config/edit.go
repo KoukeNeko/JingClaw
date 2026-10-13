@@ -2,7 +2,10 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -17,8 +20,55 @@ import (
 	"github.com/pelletier/go-toml/v2/unstable"
 )
 
-// Edit is one change to the configuration file: give a setting a value, or
-// take it back to its default.
+// Hash names the text of a document, so whoever edits it can say which version
+// they started from.
+func Hash(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
+
+// Preview applies edits to the text of the config and says what the result
+// would do: what changes, and what, if anything, is wrong with it.
+//
+// Nothing is saved. The problems are the ones the daemon would report on
+// starting with this text, because they come from the same check.
+func Preview(src []byte, edits []Edit) (Patched, []Problem, error) {
+	patched, err := Patch(src, edits)
+	if err != nil {
+		return Patched{}, nil, err
+	}
+
+	problems, err := Check(patched.Text)
+	if err != nil {
+		return Patched{}, nil, err
+	}
+	return patched, problems, nil
+}
+
+// Check says what is wrong with a text as a whole config, and nothing is when
+// it would start.
+//
+// The check the daemon runs on the saved text when it starts: the same reading
+// of it, over the same environment, and the same Validate. An error is a text
+// that cannot be read as settings at all; problems are settings in it that will
+// not do. The bootstrap keys are not part of it — a line for one is ignored
+// when the text is read, not refused — so a save that wants to refuse them asks
+// BootstrapProblems as well.
+func Check(content []byte) ([]Problem, error) {
+	candidate, err := Candidate(content)
+	if err != nil {
+		return nil, err
+	}
+
+	var invalid *InvalidError
+	if err := candidate.Validate(); errors.As(err, &invalid) {
+		return invalid.Problems, nil
+	}
+	return nil, nil
+}
+
+// Edit is one change to the config text: give a setting a value, or take it
+// back to its default.
 type Edit struct {
 	Key string
 
@@ -27,7 +77,7 @@ type Edit struct {
 	Value any
 
 	// Remove writes the setting back as the commented-out default the example
-	// started it as. The file then says nothing about it, which is what a
+	// started it as. The text then says nothing about it, which is what a
 	// setting nobody has changed looks like.
 	Remove bool
 }
@@ -40,7 +90,7 @@ type Change struct {
 	Added   []string
 }
 
-// Patched is the file after its edits.
+// Patched is the text after its edits.
 type Patched struct {
 	Text    []byte
 	Changes []Change
@@ -53,7 +103,7 @@ type DiffLine struct {
 	Text string
 }
 
-// Diff lays the changes out grouped by section, the way the file is read.
+// Diff lays the changes out grouped by section, the way the text is read.
 func (p Patched) Diff() []DiffLine {
 	var out []DiffLine
 	last := "\x00"
@@ -72,10 +122,9 @@ func (p Patched) Diff() []DiffLine {
 	return out
 }
 
-// Patch applies edits to the text of a configuration file and touches nothing
-// else in it.
+// Patch applies edits to the text of the config and touches nothing else in it.
 //
-// The file is the operator's. It carries their comments, the order they put
+// The text is the operator's. It carries their comments, the order they put
 // things in, and settings this version may not know about, and none of that
 // survives being read into a struct and written back out. So an edit is made
 // on the text: the line that sets the key is replaced, the commented-out
@@ -119,16 +168,16 @@ func Patch(src []byte, edits []Edit) (Patched, error) {
 	return Patched{Text: text, Changes: changes}, nil
 }
 
-// ── the file as lines of settings ──────────────────────────────────────
+// ── the text as lines of settings ──────────────────────────────────────
 
 type node struct {
 	kind unstable.Kind
 	// path is the section's name for a heading, and the section plus the key
-	// for a setting, so a file written with dotted keys is found the same way
-	// as one written with sections.
+	// for a setting, so text written with dotted keys is found the same way
+	// as text written with sections.
 	path string
-	// written is the key as the file spells it, relative to the section the
-	// line is in: "retry.base_delay" in a file that uses dotted keys.
+	// written is the key as the text spells it, relative to the section the
+	// line is in: "retry.base_delay" in text that uses dotted keys.
 	written string
 	// start is the offset of the line it begins on, and end the offset past
 	// its last line. The blank and comment lines that follow a setting belong
@@ -261,8 +310,8 @@ func editValue(text []byte, edit Edit, setting Setting) ([]byte, Change, error) 
 		prefix = "# "
 	}
 
-	// It is set already: replace what sets it, spelled the way the file spells
-	// it. A file that writes retry.base_delay under [provider] keeps writing it
+	// It is set already: replace what sets it, spelled the way the text spells
+	// it. Text that writes retry.base_delay under [provider] keeps writing it
 	// that way; the short name there would be a different setting.
 	for _, n := range nodes {
 		if n.kind == unstable.KeyValue && n.path == edit.Key {
@@ -273,7 +322,7 @@ func editValue(text []byte, edit Edit, setting Setting) ([]byte, Change, error) 
 		}
 	}
 
-	// Nothing to take back: the file already says nothing about it.
+	// Nothing to take back: the text already says nothing about it.
 	if edit.Remove {
 		return text, Change{Table: table}, nil
 	}
@@ -287,7 +336,7 @@ func editValue(text []byte, edit Edit, setting Setting) ([]byte, Change, error) 
 	}
 
 	// The example lists every setting commented out. Turning that line on
-	// keeps the setting where somebody reading the file expects it.
+	// keeps the setting where somebody reading the text expects it.
 	placeholder := regexp.MustCompile(`^[ \t]*#[ \t]*` + regexp.QuoteMeta(leaf) + `[ \t]*=`)
 	for offset := section.start; offset < section.stop; {
 		next := bytes.IndexByte(text[offset:], '\n')
@@ -344,7 +393,7 @@ func sectionOf(nodes []node, table string, size int) (span, bool) {
 }
 
 // insertLine puts text at an offset, after finishing the line before it when
-// that one is the last in a file with no final newline.
+// that one is the last in text with no final newline.
 func insertLine(text []byte, at int, with string) []byte {
 	if at > 0 && text[at-1] != '\n' {
 		with = "\n" + with
@@ -375,7 +424,7 @@ func splice(text []byte, from, to int, with string) []byte {
 // editList replaces a whole list.
 //
 // A list of tables is several blocks, not one line, and editing one element in
-// place would mean working out which block is which when the file may have
+// place would mean working out which block is which when the text may have
 // reordered or commented them. So the list is written as a unit: the blocks it
 // has are taken out, and the new ones go where the first of them was.
 func editList(text []byte, edit Edit, setting Setting) ([]byte, Change, error) {
@@ -614,7 +663,7 @@ func bareKey(name string) string {
 }
 
 // tomlString writes a TOML basic string. Go's own quoting is not it: it has
-// escapes TOML does not (\a, \v, \x), and a file that does not parse is worse
+// escapes TOML does not (\a, \v, \x), and text that does not parse is worse
 // than the value it was trying to carry.
 func tomlString(s string) string {
 	var out strings.Builder
@@ -652,12 +701,12 @@ func tomlString(s string) string {
 func nothingElseChanged(before, after []byte, edits []Edit, known map[string]Setting) error {
 	was, err := settingsInFile(before, known)
 	if err != nil {
-		// A file that did not parse could not have been patched either.
-		return fmt.Errorf("config: the file does not parse as TOML: %w", err)
+		// Text that did not parse could not have been patched either.
+		return fmt.Errorf("config: the text does not parse as TOML: %w", err)
 	}
 	now, err := settingsInFile(after, known)
 	if err != nil {
-		return fmt.Errorf("config: the edit left a file that does not parse as TOML: %w", err)
+		return fmt.Errorf("config: the edit left text that does not parse as TOML: %w", err)
 	}
 
 	edited := make(map[string]Edit, len(edits))
@@ -670,7 +719,7 @@ func nothingElseChanged(before, after []byte, edits []Edit, known map[string]Set
 			continue
 		}
 		if !sameValue(value, now[key]) {
-			return fmt.Errorf("config: editing the file changed %s as well, which was not asked for", key)
+			return fmt.Errorf("config: editing the text changed %s as well, which was not asked for", key)
 		}
 	}
 	for key := range now {
@@ -678,7 +727,7 @@ func nothingElseChanged(before, after []byte, edits []Edit, known map[string]Set
 			continue
 		}
 		if _, existed := was[key]; !existed {
-			return fmt.Errorf("config: editing the file added %s, which was not asked for", key)
+			return fmt.Errorf("config: editing the text added %s, which was not asked for", key)
 		}
 	}
 
@@ -693,7 +742,7 @@ func nothingElseChanged(before, after []byte, edits []Edit, known map[string]Set
 		if known[key].Kind == KindList {
 			want = withoutEmpty(want)
 
-			// An empty list and a file that does not mention it say the same.
+			// An empty list and text that does not mention it say the same.
 			if list, _ := want.([]any); len(list) == 0 {
 				if _, stays := now[key]; stays {
 					return fmt.Errorf("config: %s is still set after being emptied", key)
@@ -708,7 +757,7 @@ func nothingElseChanged(before, after []byte, edits []Edit, known map[string]Set
 	return nil
 }
 
-// settingsInFile reads the keys a file sets, by dotted name.
+// settingsInFile reads the keys a text sets, by dotted name.
 func settingsInFile(content []byte, known map[string]Setting) (map[string]any, error) {
 	tree, err := toml.Parser().Unmarshal(content)
 	if err != nil {
@@ -762,7 +811,7 @@ func withoutEmpty(v any) any {
 	return out
 }
 
-// sameValue compares two values as JSON does, so an integer read from the file
+// sameValue compares two values as JSON does, so an integer read from the text
 // and the number a client sent are the same number.
 func sameValue(a, b any) bool {
 	return reflect.DeepEqual(viaJSON(a), viaJSON(b))

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Kind is how a setting is written in the file.
+// Kind is how a setting is written in the text.
 type Kind string
 
 const (
@@ -142,10 +142,10 @@ func plainValue(v reflect.Value) (Kind, any) {
 	panic("config: no plain form for " + v.Type().String())
 }
 
-// formatDuration writes a duration the way a configuration file does.
+// formatDuration writes a duration the way the settings text does.
 //
 // Go prints two minutes as "2m0s". Nobody writes that, and a client comparing
-// what the file says with what is running would see two different values for
+// what the text says with what is running would see two different values for
 // one.
 func formatDuration(d time.Duration) string {
 	text := d.String()
@@ -158,13 +158,14 @@ func formatDuration(d time.Duration) string {
 	return text
 }
 
-// FileSettings reads which settings a file sets, by dotted key, written the
+// FileSettings reads which settings a text sets, by dotted key, written the
 // way Flatten writes them.
 //
-// The same form, so that what a file says and what is running can be compared
+// The same form, so that what the text says and what is running can be compared
 // without "120s" and "2m" looking like two different values. Keys the program
 // does not know are left out: they change nothing, and offering them for
-// editing would be offering a setting that is not there.
+// editing would be offering a setting that is not there. So are the bootstrap
+// keys, which a text may carry but is never read for.
 func FileSettings(content []byte) (map[string]any, error) {
 	known := make(map[string]Setting)
 	for _, setting := range Settings() {
@@ -179,7 +180,7 @@ func FileSettings(content []byte) (map[string]any, error) {
 	out := make(map[string]any, len(found))
 	for key, value := range found {
 		setting, ok := known[key]
-		if !ok {
+		if !ok || isBootstrap(key) {
 			continue
 		}
 
@@ -196,7 +197,7 @@ func FileSettings(content []byte) (map[string]any, error) {
 // EnvironmentOverrides says which settings a variable in this environment
 // overrides, and which variable it is.
 //
-// These are the ones the file cannot change: whatever the file says, the
+// These are the ones the saved text cannot change: whatever the text says, the
 // variable wins, and a client that offered to edit them would be offering an
 // edit that does nothing.
 func EnvironmentOverrides(lookup func(string) (string, bool)) map[string]string {

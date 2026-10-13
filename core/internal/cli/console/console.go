@@ -52,7 +52,12 @@ const (
 //
 // runtimeDir is where the daemon publishes itself. The console is a client
 // like any other and finds it the same way.
-func Run(ctx context.Context, runtimeDir string, leaving Leaving) error {
+//
+// notices are lines from whatever started the console that its owner has to
+// see, drawn above the input line as they arrive. They go through here because
+// the console owns the terminal: a line printed beside it lands in the middle
+// of what is being typed. Nil is allowed, and then there are none.
+func Run(ctx context.Context, runtimeDir string, leaving Leaving, notices <-chan string) error {
 	daemon, artifacts, err := client.DialForConsole(runtimeDir)
 	if err != nil {
 		return err
@@ -106,10 +111,33 @@ func Run(ctx context.Context, runtimeDir string, leaving Leaving) error {
 	screen.Log("JingClaw. Type help for what you can do here, " + session.leavingMeans() + ".")
 	screen.Prompt()
 
+	if notices != nil {
+		running.Add(1)
+		go func() {
+			defer running.Done()
+			session.announce(ctx, notices)
+		}()
+	}
+
 	err = session.read(ctx)
 	stop()
 	running.Wait()
 	return err
+}
+
+// announce draws each notice until the context ends.
+func (s *session) announce(ctx context.Context, notices <-chan string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case line, open := <-notices:
+			if !open {
+				return
+			}
+			s.screen.Log(line)
+		}
+	}
 }
 
 // rawMode puts the terminal into raw mode and returns how to undo it.
@@ -498,7 +526,7 @@ func Commands() []*cobra.Command {
 			"One scrolling log of every session and one line to type at.\n" +
 			"Leaving the console does not stop anything.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return Run(cmd.Context(), runtimeDir, LeavesItRunning)
+			return Run(cmd.Context(), runtimeDir, LeavesItRunning, nil)
 		},
 	}
 	command.Flags().StringVar(&runtimeDir, "runtime-dir", "",

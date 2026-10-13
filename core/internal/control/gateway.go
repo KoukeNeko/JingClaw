@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
+	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
 )
@@ -21,14 +22,57 @@ import (
 type GatewayServer struct {
 	ingress *gateway.Ingress
 	store   gateway.Store
+	running config.Config
 	now     func() time.Time
 }
 
-func NewGatewayServer(ingress *gateway.Ingress, store gateway.Store, now func() time.Time) *GatewayServer {
+// NewGatewayServer serves the ingress. running is the configuration this
+// daemon started with, which is where a gateway's slice of the settings comes
+// from: the gateway reads no file, and what it is told is what is running, not
+// whatever has been saved since.
+func NewGatewayServer(
+	ingress *gateway.Ingress, store gateway.Store, running config.Config, now func() time.Time,
+) *GatewayServer {
 	if now == nil {
 		now = time.Now
 	}
-	return &GatewayServer{ingress: ingress, store: store, now: now}
+	return &GatewayServer{ingress: ingress, store: store, running: running, now: now}
+}
+
+// GetGatewaySettings is the part of the running settings a gateway process
+// needs to connect to its platform and to shape what it sends.
+//
+// Built field by field and not by passing the section along, so that a setting
+// added to the gateway section later is not handed to a process holding
+// somebody else's bot token until somebody decides it should be. What is here
+// are the names of the variables and the file a token is read from, which are
+// not secret; the token is not here, and neither are the channels, who may
+// speak in them or who may approve, which the daemon alone decides.
+func (s *GatewayServer) GetGatewaySettings(
+	_ context.Context,
+	_ *connect.Request[controlv1.GetGatewaySettingsRequest],
+) (*connect.Response[controlv1.GetGatewaySettingsResponse], error) {
+	section := s.running.Gateway
+
+	return connect.NewResponse(&controlv1.GetGatewaySettingsResponse{
+		Platform: section.Platform,
+		LogLevel: s.running.Server.LogLevel,
+		Discord: &controlv1.GatewayDiscordSettings{
+			AccountId:          section.Discord.AccountID,
+			TokenEnv:           section.Discord.TokenEnv,
+			TokenFile:          section.Discord.TokenFile,
+			MaxMessages:        int64(section.Discord.MaxMessages),
+			MaxAttachmentBytes: int64(section.Discord.MaxAttachmentBytes),
+			TablesAsImages:     section.Discord.TablesAsImages,
+		},
+		Telegram: &controlv1.GatewayTelegramSettings{
+			AccountId:      section.Telegram.AccountID,
+			TokenEnv:       section.Telegram.TokenEnv,
+			TokenFile:      section.Telegram.TokenFile,
+			MaxUploadBytes: int64(section.Telegram.MaxUploadBytes),
+			ApiBase:        section.Telegram.APIBase,
+		},
+	}), nil
 }
 
 func (s *GatewayServer) DeliverInbound(

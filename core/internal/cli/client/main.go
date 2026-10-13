@@ -33,30 +33,28 @@ import (
 
 const clientName = "jingclaw-cli"
 
-// runtimeDir is where the daemon publishes itself, taken from the same
-// configuration file the daemon reads. It is process-wide state, which a
-// larger CLI would thread through a context instead; here every command needs
-// exactly this one value and nothing else from the file.
+// runtimeDir is where the daemon publishes itself, taken from the defaults and
+// the environment, which is the only place it can be told: it says where the
+// settings are kept, so it cannot be one of them. It is process-wide state,
+// which a larger CLI would thread through a context instead; here every
+// command needs exactly this one value and nothing else from the settings.
 var runtimeDir string
 
-// AddTo gives a parent command everything a client needs: the subcommands,
-// the --config flag they share, and the step that reads it before any of them
-// runs.
+// AddTo gives a parent command everything a client needs: the subcommands, and
+// the step that works out where the daemon is before any of them runs.
 //
-// All three together, because they are one thing. A parent that adopted the
-// commands without the flag would offer every one of them and have none of
+// Both together, because they are one thing. A parent that adopted the
+// commands without the step would offer every one of them and have none of
 // them able to find a daemon that was told to publish itself somewhere else.
 //
-// The read-the-config step goes on each adopted command rather than on the
-// parent. Cobra runs the nearest one it finds walking up from whatever was
-// invoked, so a step left on a shared parent also runs for that parent's other
-// children — and the daemon, which is one of them, would then have its
-// configuration read twice: once here from the default location, before its
-// own --config was ever looked at.
+// The step goes on each adopted command rather than on the parent. Cobra runs
+// the nearest one it finds walking up from whatever was invoked, so a step
+// left on a shared parent would also run for that parent's other children —
+// and the daemon, which is one of them, would then be refused over a variable
+// it never reads, when all it was asked to do was print the example settings.
 func AddTo(parent *cobra.Command) {
 	client := newRootCommand()
 
-	parent.PersistentFlags().AddFlagSet(client.PersistentFlags())
 	adopted := client.Commands()
 	for _, command := range adopted {
 		command.PersistentPreRunE = client.PersistentPreRunE
@@ -65,23 +63,23 @@ func AddTo(parent *cobra.Command) {
 }
 
 func newRootCommand() *cobra.Command {
-	var configPath string
-
 	root := &cobra.Command{
 		Use:           "agent",
 		Short:         "Control the JingClaw agent daemon",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// The daemon can be told to publish itself somewhere other than the
-		// platform default, and a client that does not read the same file
+		// platform default, and a client that did not look in the same place
 		// would then be unable to find it.
 		//
-		// Only the location is taken. Validate is deliberately not called: the
+		// Only the location is taken, and only from the defaults and the
+		// environment: the saved settings are in the daemon's database, which a
+		// client has no business opening. Validate is deliberately not called: the
 		// checks it makes are about running a daemon, and refusing to let an
 		// operator interrupt a run because some unrelated setting is out of
 		// range would be its own kind of failure.
 		PersistentPreRunE: func(*cobra.Command, []string) error {
-			cfg, _, err := config.Load(configPath)
+			cfg, err := config.Candidate(nil)
 			if err != nil {
 				return err
 			}
@@ -90,14 +88,11 @@ func newRootCommand() *cobra.Command {
 		},
 	}
 
-	root.PersistentFlags().StringVar(&configPath, "config", "",
-		"configuration file; defaults to the one in the config directory")
-
 	root.AddCommand(newSessionCommand(), newSendCommand(), newAttachCommand(), newInterruptCommand(),
 		newApprovalsCommand(), newApproveCommand(), newDenyCommand(), newBindingsCommand(),
 		newArtifactCommand(), newMemoryCommand(),
 		newQuestionsCommand(), newAnswerCommand(), newProcessesCommand(),
-		newMCPCommand(&configPath), newScheduleCommand(), newSkillsCommand(), newDashboardCommand())
+		newMCPCommand(), newScheduleCommand(), newSkillsCommand(), newDashboardCommand())
 	return root
 }
 
@@ -963,6 +958,16 @@ func DialForConsole(where string) (
 	}
 	return controlv1connect.NewSessionServiceClient(httpClient, baseURL),
 		controlv1connect.NewArtifactServiceClient(httpClient, baseURL), nil
+}
+
+// dialConfig returns a client for the settings, which the control credential
+// reaches and the gateway's does not.
+func dialConfig() (controlv1connect.ConfigServiceClient, error) {
+	httpClient, baseURL, err := authenticated()
+	if err != nil {
+		return nil, err
+	}
+	return controlv1connect.NewConfigServiceClient(httpClient, baseURL), nil
 }
 
 func dialArtifacts() (controlv1connect.ArtifactServiceClient, error) {

@@ -228,8 +228,8 @@ func (i *Ingress) sessionFor(ctx context.Context, message InboundMessage, bindin
 	}
 
 	// Said where the rule applies, the first time somebody uses the channel.
-	// A boundary that lives only in a configuration file is one everybody in
-	// the room will assume the shape of instead.
+	// A boundary that lives only in the settings is one everybody in the room
+	// will assume the shape of instead.
 	if binding.PermissionProfile == ConsoleProfileName {
 		if err := i.say(ctx, message, session, consoleMOTD(binding)); err != nil {
 			// Not fatal: failing to post an explanation is no reason to

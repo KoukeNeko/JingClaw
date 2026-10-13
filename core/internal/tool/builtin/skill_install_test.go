@@ -3,6 +3,8 @@ package builtin_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -117,6 +119,63 @@ func TestStagingRefusesAnUnparseableSource(t *testing.T) {
 	}
 }
 
+// An ssh address is fetched with the keys, the configuration and the known hosts
+// of the account the daemon runs as. Staging is allowed without asking where an
+// operator is present, so a run is not given that; the address is fine to the
+// parser, because a person may stage one.
+func TestStagingDoesNotFetchOverSSHOnTheAgentsOwnAccount(t *testing.T) {
+	installer := &fakeInstaller{}
+	stage := &builtin.SkillStage{Installer: installer}
+
+	source := "git:ssh://git@example.com/x/y.git#0123456789abcdef0123456789abcdef01234567"
+	if _, err := skill.ParseSource(source); err != nil {
+		t.Fatalf("the parser refuses an ssh address: %v", err)
+	}
+
+	result, err := stage.Execute(context.Background(), mkCall(t, map[string]string{"source": source}))
+	if err != nil {
+		t.Fatalf("execute returned an error rather than a refusal: %v", err)
+	}
+	if !result.IsError || !strings.Contains(result.Content, "ssh") {
+		t.Errorf("an ssh address was not refused, or not said why: %+v", result)
+	}
+	if installer.stagedSource.Repository != "" {
+		t.Errorf("it fetched %q", installer.stagedSource.Repository)
+	}
+
+	// And an address that is not ssh still goes through.
+	over := "git:https://example.com/x/y#0123456789abcdef0123456789abcdef01234567"
+	if result, _ := stage.Execute(context.Background(), mkCall(t, map[string]string{"source": over})); result.IsError {
+		t.Errorf("an https address was refused: %+v", result)
+	}
+}
+
+// Activating a skill puts it over the one of the same name that is there, and
+// does not ask. The person deciding is told, the way the dashboard's review is.
+func TestActivatePreviewSaysWhenItWouldReplaceASkill(t *testing.T) {
+	skills := t.TempDir()
+	staged := skill.Staged{
+		Name:   "release",
+		Source: skill.Source{Repository: "https://github.com/x/y", Commit: "0123456789abcdef"},
+		Dir:    filepath.Join(skills, ".staged", "release"),
+	}
+	activate := &builtin.SkillActivate{Installer: &fakeInstaller{
+		readStaged: staged, readSkill: skill.Skill{Name: "release", Body: "Tag it."},
+	}}
+	call := mustJSON(t, map[string]string{"name": "release"})
+
+	if preview := activate.Preview(call); strings.Contains(preview, "replaces") {
+		t.Errorf("nothing is there, and the preview says it replaces something:\n%s", preview)
+	}
+
+	if err := os.Mkdir(filepath.Join(skills, "release"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if preview := activate.Preview(call); !strings.Contains(preview, "replaces") || !strings.Contains(preview, "removed") {
+		t.Errorf("a skill is there, and the preview does not say it is replaced:\n%s", preview)
+	}
+}
+
 // The activate preview is the whole point: a person deciding sees where the
 // skill came from, an exact commit, a digest of the whole directory, its size,
 // and the instructions themselves — with it said plainly that this becomes
@@ -151,6 +210,24 @@ func TestActivatePreviewShowsTheRealThing(t *testing.T) {
 		if !strings.Contains(preview, want) {
 			t.Errorf("the preview does not show %q:\n%s", want, preview)
 		}
+	}
+}
+
+// What a person is shown is not a place to repeat a password that an older
+// version let into the address of a skill that is still waiting.
+func TestActivatePreviewDoesNotRepeatACredentialInTheAddress(t *testing.T) {
+	installer := &fakeInstaller{
+		readStaged: skill.Staged{
+			Name:   "release",
+			Source: skill.Source{Repository: "https://user:hunter2@github.com/x/y", Commit: "0123456789abcdef"},
+		},
+		readSkill: skill.Skill{Name: "release", Body: "Tag it."},
+	}
+
+	preview := (&builtin.SkillActivate{Installer: installer}).Preview(mustJSON(t, map[string]string{"name": "release"}))
+
+	if strings.Contains(preview, "hunter2") || !strings.Contains(preview, "github.com/x/y") {
+		t.Errorf("the preview shows the address as:\n%s", preview)
 	}
 }
 

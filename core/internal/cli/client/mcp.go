@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"sort"
 
+	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
 
+	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/mcp"
 	"github.com/KoukeNeko/JingClaw/core/internal/mcp/mcpauth"
@@ -15,25 +17,27 @@ import (
 
 // newMCPCommand is signing in to tool servers, and nothing else.
 //
-// Local: it does not talk to the daemon. What it does is put somebody in
-// front of a consent screen and leave a session on disk, and the daemon reads
-// that the next time it connects. Going through the daemon would mean asking
-// a background process to open a browser, which is the thing this exists to
+// Local, except for one question: which servers there are. That is a setting,
+// settings are in the daemon's database, and the daemon is what answers for
+// them. What it does with the answer is put somebody in front of a consent
+// screen and leave a session on disk, and the daemon reads that the next time
+// it connects. Going through the daemon for that would mean asking a
+// background process to open a browser, which is the thing this exists to
 // avoid.
-func newMCPCommand(configPath *string) *cobra.Command {
+func newMCPCommand() *cobra.Command {
 	mcpCmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "Sign in to tool servers",
 	}
 	mcpCmd.AddCommand(
-		newMCPLoginCommand(configPath),
-		newMCPListCommand(configPath),
-		newMCPLogoutCommand(configPath),
+		newMCPLoginCommand(),
+		newMCPListCommand(),
+		newMCPLogoutCommand(),
 	)
 	return mcpCmd
 }
 
-func newMCPLoginCommand(configPath *string) *cobra.Command {
+func newMCPLoginCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "login <server>",
 		Short: "Authorize this deployment against a tool server",
@@ -43,7 +47,7 @@ func newMCPLoginCommand(configPath *string) *cobra.Command {
 			"blocking a run on a page no one will open.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			server, _, err := serverNamed(*configPath, args[0])
+			server, _, err := serverNamed(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
@@ -73,17 +77,17 @@ func newMCPLoginCommand(configPath *string) *cobra.Command {
 	}
 }
 
-func newMCPListCommand(configPath *string) *cobra.Command {
+func newMCPListCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "Show tool servers and whether they are signed in",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, _, err := config.Load(*configPath)
+			servers, err := configuredServers(cmd.Context())
 			if err != nil {
 				return err
 			}
-			if len(cfg.MCP.Servers) == 0 {
+			if len(servers) == 0 {
 				fmt.Fprintln(cmd.ErrOrStderr(), "no tool servers are configured")
 				return nil
 			}
@@ -93,7 +97,7 @@ func newMCPListCommand(configPath *string) *cobra.Command {
 				return err
 			}
 
-			for _, configured := range cfg.MCP.Servers {
+			for _, configured := range servers {
 				fmt.Printf("%-20s %s\n", configured.Name,
 					describeAuth(cmd.Context(), sessions, configured))
 			}
@@ -130,15 +134,15 @@ func describeAuth(ctx context.Context, sessions *mcpauth.Store, configured confi
 	}
 }
 
-func newMCPLogoutCommand(configPath *string) *cobra.Command {
+func newMCPLogoutCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout <server>",
 		Short: "Forget a tool server's stored session",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// The configuration is read so a typo is reported rather than
+			// The servers are asked for so a typo is reported rather than
 			// silently forgetting nothing.
-			if _, _, err := serverNamed(*configPath, args[0]); err != nil {
+			if _, _, err := serverNamed(cmd.Context(), args[0]); err != nil {
 				return err
 			}
 
@@ -156,14 +160,53 @@ func newMCPLogoutCommand(configPath *string) *cobra.Command {
 	}
 }
 
+// needsTheDaemon is what is said when the daemon cannot be asked, in front of
+// the reason it could not be.
+const needsTheDaemon = "the tool servers are kept in the daemon's settings, so it has to be running; " +
+	"start it first with: jingclaw"
+
+// configuredServers asks the running daemon which tool servers are saved.
+//
+// The saved settings, not what the daemon is running: signing in to a server
+// that was added a minute ago is the point of adding it, and the daemon picks
+// the session up when it next connects. A daemon that is not running has
+// nobody to ask, and the error says that rather than leaving a missing
+// discovery file to be decoded by whoever reads it.
+func configuredServers(ctx context.Context) ([]config.MCPServer, error) {
+	settings, err := dialConfig()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", needsTheDaemon, err)
+	}
+
+	saved, err := settings.GetConfig(ctx, connect.NewRequest(&controlv1.GetConfigRequest{}))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", needsTheDaemon, err)
+	}
+	if reason := saved.Msg.GetParseError(); reason != "" {
+		// The daemon answers for text it cannot read, so that the page that
+		// repairs it can show it. There is nothing to list from it.
+		return nil, fmt.Errorf(
+			"the saved settings cannot be read, so there is no list of tool servers: %s\nfix them in the dashboard: run jingclaw dashboard",
+			reason)
+	}
+
+	// The same reading the daemon does at start, so what is listed here is what
+	// it will connect to.
+	cfg, err := config.Candidate([]byte(saved.Msg.GetText()))
+	if err != nil {
+		return nil, err
+	}
+	return cfg.MCP.Servers, nil
+}
+
 // serverNamed finds one configured server, with the session store attached.
-func serverNamed(configPath, name string) (mcp.ServerConfig, *mcpauth.Store, error) {
-	cfg, _, err := config.Load(configPath)
+func serverNamed(ctx context.Context, name string) (mcp.ServerConfig, *mcpauth.Store, error) {
+	servers, err := configuredServers(ctx)
 	if err != nil {
 		return mcp.ServerConfig{}, nil, err
 	}
 
-	for _, configured := range cfg.MCP.Servers {
+	for _, configured := range servers {
 		if configured.Name != name {
 			continue
 		}
@@ -189,8 +232,8 @@ func serverNamed(configPath, name string) (mcp.ServerConfig, *mcpauth.Store, err
 
 	// The names that do exist, because the commonest reason to be here is a
 	// typo and the fix is on screen.
-	names := make([]string, 0, len(cfg.MCP.Servers))
-	for _, configured := range cfg.MCP.Servers {
+	names := make([]string, 0, len(servers))
+	for _, configured := range servers {
 		names = append(names, configured.Name)
 	}
 	sort.Strings(names)

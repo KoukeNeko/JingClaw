@@ -139,27 +139,79 @@ func (l Lock) Entry(name string) (Locked, bool) {
 	return Locked{}, false
 }
 
-// Changed is every installed skill whose file is no longer what was recorded.
+// Drift is how an installed skill differs from the record of installing it.
+type Drift string
+
+const (
+	// DriftNone is a skill that is what was recorded. It is also what a skill
+	// placed by hand is, because there is nothing to compare it with.
+	DriftNone Drift = "NONE"
+
+	// DriftEdited is a SKILL.md that is not the one that was installed.
+	DriftEdited Drift = "EDITED"
+
+	// DriftTreeEdited is a SKILL.md that is the one that was installed, in a
+	// directory that is not: a file beside it was changed, added, removed, or
+	// replaced by something that is not a plain file. A skill can read the
+	// files beside its instructions, so this is a different skill wearing the
+	// same SKILL.md.
+	DriftTreeEdited Drift = "TREE_EDITED"
+
+	// DriftMissing is a recorded skill that is no longer among the installed
+	// ones: its directory is gone, or what is there no longer reads as a skill.
+	DriftMissing Drift = "MISSING"
+)
+
+// Drifts says, for every skill the record has, how it differs from the record.
 //
 // Asked rather than assumed, because the alternative is a lock file that
 // describes an intention. A skill edited in place since it was installed is
 // not a problem by itself — somebody may have meant to — but it is something
 // they should be able to find out without diffing anything.
-func Changed(root string, lock Lock, installed []Skill) []string {
-	found := make(map[string]string, len(installed))
+//
+// The tree is hashed from the skill's own directory, which Installed fills in.
+// A record from before trees were hashed has no tree digest, and nothing is
+// said about the tree of such a skill; one whose tree cannot be hashed at all
+// is called edited, because it cannot be shown to be what was installed.
+func Drifts(lock Lock, installed []Skill) map[string]Drift {
+	found := make(map[string]Skill, len(installed))
 	for _, one := range installed {
-		found[one.Name] = one.Digest
+		found[one.Name] = one
 	}
 
-	var changed []string
+	drifts := make(map[string]Drift, len(lock.Skills))
 	for _, recorded := range lock.Skills {
-		digest, present := found[recorded.Name]
-		if !present {
-			changed = append(changed, recorded.Name+" (installed, and no longer there)")
-			continue
+		one, present := found[recorded.Name]
+		switch {
+		case !present:
+			drifts[recorded.Name] = DriftMissing
+		case one.Digest != recorded.Digest:
+			drifts[recorded.Name] = DriftEdited
+		case recorded.TreeDigest != "":
+			if tree, _, err := TreeDigest(one.Dir); err != nil || tree != recorded.TreeDigest {
+				drifts[recorded.Name] = DriftTreeEdited
+				continue
+			}
+			drifts[recorded.Name] = DriftNone
+		default:
+			drifts[recorded.Name] = DriftNone
 		}
-		if digest != recorded.Digest {
-			changed = append(changed, recorded.Name+" (edited since it was installed)")
+	}
+	return drifts
+}
+
+// Changed is every installed skill that is no longer what was recorded, said in
+// words for a person reading a listing.
+func Changed(root string, lock Lock, installed []Skill) []string {
+	var changed []string
+	for name, drift := range Drifts(lock, installed) {
+		switch drift {
+		case DriftMissing:
+			changed = append(changed, name+" (installed, and no longer there)")
+		case DriftEdited:
+			changed = append(changed, name+" (edited since it was installed)")
+		case DriftTreeEdited:
+			changed = append(changed, name+" (a file beside SKILL.md was changed since it was installed)")
 		}
 	}
 	sort.Strings(changed)

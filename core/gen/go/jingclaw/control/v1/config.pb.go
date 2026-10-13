@@ -10,6 +10,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -71,6 +72,59 @@ func (InstructionFile) EnumDescriptor() ([]byte, []int) {
 	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{0}
 }
 
+// SettingsDocument is one of the three documents the settings are kept in.
+type SettingsDocument int32
+
+const (
+	SettingsDocument_SETTINGS_DOCUMENT_UNSPECIFIED SettingsDocument = 0
+	SettingsDocument_SETTINGS_DOCUMENT_CONFIG      SettingsDocument = 1
+	SettingsDocument_SETTINGS_DOCUMENT_AGENTS      SettingsDocument = 2
+	SettingsDocument_SETTINGS_DOCUMENT_PERSONA     SettingsDocument = 3
+)
+
+// Enum value maps for SettingsDocument.
+var (
+	SettingsDocument_name = map[int32]string{
+		0: "SETTINGS_DOCUMENT_UNSPECIFIED",
+		1: "SETTINGS_DOCUMENT_CONFIG",
+		2: "SETTINGS_DOCUMENT_AGENTS",
+		3: "SETTINGS_DOCUMENT_PERSONA",
+	}
+	SettingsDocument_value = map[string]int32{
+		"SETTINGS_DOCUMENT_UNSPECIFIED": 0,
+		"SETTINGS_DOCUMENT_CONFIG":      1,
+		"SETTINGS_DOCUMENT_AGENTS":      2,
+		"SETTINGS_DOCUMENT_PERSONA":     3,
+	}
+)
+
+func (x SettingsDocument) Enum() *SettingsDocument {
+	p := new(SettingsDocument)
+	*p = x
+	return p
+}
+
+func (x SettingsDocument) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SettingsDocument) Descriptor() protoreflect.EnumDescriptor {
+	return file_jingclaw_control_v1_config_proto_enumTypes[1].Descriptor()
+}
+
+func (SettingsDocument) Type() protoreflect.EnumType {
+	return &file_jingclaw_control_v1_config_proto_enumTypes[1]
+}
+
+func (x SettingsDocument) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SettingsDocument.Descriptor instead.
+func (SettingsDocument) EnumDescriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{1}
+}
+
 type GetConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -109,18 +163,35 @@ func (*GetConfigRequest) Descriptor() ([]byte, []int) {
 
 type GetConfigResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Where the file is, and a name for exactly what is in it. An edit says which
-	// version it started from by sending this back.
+	// Empty. There is no file; the settings are kept in the database. Kept so
+	// that a client written against the file still decodes the reply.
 	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// A name for exactly what is saved. An edit says which version it started
+	// from by sending this back. Empty for a config that was never written or
+	// was cleared.
 	Hash string `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`
-	// The settings the file sets, by dotted key such as provider.retry.base_delay.
-	// A setting the file does not mention is not here: it has its default.
+	// The settings the saved text sets, by dotted key such as
+	// provider.retry.base_delay. A setting the text does not mention is not
+	// here: it has its default. Empty when the text does not parse.
 	File *structpb.Struct `protobuf:"bytes,3,opt,name=file,proto3" json:"file,omitempty"`
-	// Every setting as this process is using it. Compared with the file, it says
-	// what is written but not yet in effect.
+	// Every setting as this process is using it. Compared with the saved text, it
+	// says what is saved but not yet in effect.
 	Running *structpb.Struct `protobuf:"bytes,4,opt,name=running,proto3" json:"running,omitempty"`
-	// Settings the file cannot change, because something wins over it.
-	Overrides     []*ConfigOverride `protobuf:"bytes,5,rep,name=overrides,proto3" json:"overrides,omitempty"`
+	// Settings the saved text cannot change, because something wins over it.
+	Overrides []*ConfigOverride `protobuf:"bytes,5,rep,name=overrides,proto3" json:"overrides,omitempty"`
+	// The saved text, exactly as it was given. Nothing in it is redacted: the
+	// headers and env values given to a tool server (mcp.servers) are here, and in
+	// file and running, for whoever holds the control credential.
+	Text string `protobuf:"bytes,6,opt,name=text,proto3" json:"text,omitempty"`
+	// Why the saved text cannot be read as settings, empty when it can. The
+	// daemon starts in repair mode on such a config and this is the reason.
+	ParseError string `protobuf:"bytes,7,opt,name=parse_error,json=parseError,proto3" json:"parse_error,omitempty"`
+	// The hash of the config this process started from. Different from hash
+	// means a change is saved that is not running yet.
+	RunningHash    string `protobuf:"bytes,8,opt,name=running_hash,json=runningHash,proto3" json:"running_hash,omitempty"`
+	PendingRestart bool   `protobuf:"varint,9,opt,name=pending_restart,json=pendingRestart,proto3" json:"pending_restart,omitempty"`
+	// How many times the config has been saved, from 1; zero if never.
+	Version       int64 `protobuf:"varint,10,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -188,6 +259,41 @@ func (x *GetConfigResponse) GetOverrides() []*ConfigOverride {
 		return x.Overrides
 	}
 	return nil
+}
+
+func (x *GetConfigResponse) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *GetConfigResponse) GetParseError() string {
+	if x != nil {
+		return x.ParseError
+	}
+	return ""
+}
+
+func (x *GetConfigResponse) GetRunningHash() string {
+	if x != nil {
+		return x.RunningHash
+	}
+	return ""
+}
+
+func (x *GetConfigResponse) GetPendingRestart() bool {
+	if x != nil {
+		return x.PendingRestart
+	}
+	return false
+}
+
+func (x *GetConfigResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
 }
 
 type ConfigOverride struct {
@@ -258,7 +364,7 @@ type ConfigEdit struct {
 	Key   string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	// The value in the form GetConfig reports it. Ignored when remove is set.
 	Value *structpb.Value `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	// Write the setting back as the commented-out default, so the file says
+	// Write the setting back as the commented-out default, so the text says
 	// nothing about it.
 	Remove        bool `protobuf:"varint,3,opt,name=remove,proto3" json:"remove,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -319,11 +425,16 @@ func (x *ConfigEdit) GetRemove() bool {
 // ConfigProblem is one setting that will not do, as the daemon would report it
 // on starting.
 type ConfigProblem struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	Why           string                 `protobuf:"bytes,3,opt,name=why,proto3" json:"why,omitempty"`
-	Fix           string                 `protobuf:"bytes,4,opt,name=fix,proto3" json:"fix,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Key   string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Why   string                 `protobuf:"bytes,3,opt,name=why,proto3" json:"why,omitempty"`
+	Fix   string                 `protobuf:"bytes,4,opt,name=fix,proto3" json:"fix,omitempty"`
+	// Where the problem was found: "settings" for a saved setting that will not
+	// do, "startup" for something else that kept the agent from being built.
+	// Set by GetAgentState only; the problems a check or a write reports are all
+	// about settings and leave it empty.
+	Source        string `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -382,6 +493,13 @@ func (x *ConfigProblem) GetWhy() string {
 func (x *ConfigProblem) GetFix() string {
 	if x != nil {
 		return x.Fix
+	}
+	return ""
+}
+
+func (x *ConfigProblem) GetSource() string {
+	if x != nil {
+		return x.Source
 	}
 	return ""
 }
@@ -607,15 +725,19 @@ func (x *WriteConfigRequest) GetEdits() []*ConfigEdit {
 
 type WriteConfigResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// False when the edit was refused; problems then says why, and the file is
+	// False when the edit was refused; problems then says why, and the config is
 	// as it was.
 	Written bool `protobuf:"varint,1,opt,name=written,proto3" json:"written,omitempty"`
-	// The file as it is now.
-	Hash          string           `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`
-	Problems      []*ConfigProblem `protobuf:"bytes,3,rep,name=problems,proto3" json:"problems,omitempty"`
-	ChangedKeys   []string         `protobuf:"bytes,4,rep,name=changed_keys,json=changedKeys,proto3" json:"changed_keys,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// The config as it is now.
+	Hash        string           `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`
+	Problems    []*ConfigProblem `protobuf:"bytes,3,rep,name=problems,proto3" json:"problems,omitempty"`
+	ChangedKeys []string         `protobuf:"bytes,4,rep,name=changed_keys,json=changedKeys,proto3" json:"changed_keys,omitempty"`
+	// Whether what is saved now differs from what is running, and which save
+	// this is.
+	PendingRestart bool  `protobuf:"varint,5,opt,name=pending_restart,json=pendingRestart,proto3" json:"pending_restart,omitempty"`
+	Version        int64 `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *WriteConfigResponse) Reset() {
@@ -676,6 +798,162 @@ func (x *WriteConfigResponse) GetChangedKeys() []string {
 	return nil
 }
 
+func (x *WriteConfigResponse) GetPendingRestart() bool {
+	if x != nil {
+		return x.PendingRestart
+	}
+	return false
+}
+
+func (x *WriteConfigResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+type ReplaceConfigTextRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Meta  *RequestMeta           `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
+	// The text to save, whole.
+	Text string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	// The hash from the GetConfig this replacement started from, for the same
+	// reason as WriteConfig's.
+	Hash          string `protobuf:"bytes,3,opt,name=hash,proto3" json:"hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplaceConfigTextRequest) Reset() {
+	*x = ReplaceConfigTextRequest{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplaceConfigTextRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplaceConfigTextRequest) ProtoMessage() {}
+
+func (x *ReplaceConfigTextRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplaceConfigTextRequest.ProtoReflect.Descriptor instead.
+func (*ReplaceConfigTextRequest) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ReplaceConfigTextRequest) GetMeta() *RequestMeta {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
+func (x *ReplaceConfigTextRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *ReplaceConfigTextRequest) GetHash() string {
+	if x != nil {
+		return x.Hash
+	}
+	return ""
+}
+
+type ReplaceConfigTextResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// False when the text was refused; problems then says why, and the config is
+	// as it was.
+	Written bool `protobuf:"varint,1,opt,name=written,proto3" json:"written,omitempty"`
+	// The config as it is now.
+	Hash           string           `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`
+	Problems       []*ConfigProblem `protobuf:"bytes,3,rep,name=problems,proto3" json:"problems,omitempty"`
+	PendingRestart bool             `protobuf:"varint,4,opt,name=pending_restart,json=pendingRestart,proto3" json:"pending_restart,omitempty"`
+	Version        int64            `protobuf:"varint,5,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ReplaceConfigTextResponse) Reset() {
+	*x = ReplaceConfigTextResponse{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplaceConfigTextResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplaceConfigTextResponse) ProtoMessage() {}
+
+func (x *ReplaceConfigTextResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplaceConfigTextResponse.ProtoReflect.Descriptor instead.
+func (*ReplaceConfigTextResponse) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ReplaceConfigTextResponse) GetWritten() bool {
+	if x != nil {
+		return x.Written
+	}
+	return false
+}
+
+func (x *ReplaceConfigTextResponse) GetHash() string {
+	if x != nil {
+		return x.Hash
+	}
+	return ""
+}
+
+func (x *ReplaceConfigTextResponse) GetProblems() []*ConfigProblem {
+	if x != nil {
+		return x.Problems
+	}
+	return nil
+}
+
+func (x *ReplaceConfigTextResponse) GetPendingRestart() bool {
+	if x != nil {
+		return x.PendingRestart
+	}
+	return false
+}
+
+func (x *ReplaceConfigTextResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
 type GetInstructionFileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	File          InstructionFile        `protobuf:"varint,1,opt,name=file,proto3,enum=jingclaw.control.v1.InstructionFile" json:"file,omitempty"`
@@ -685,7 +963,7 @@ type GetInstructionFileRequest struct {
 
 func (x *GetInstructionFileRequest) Reset() {
 	*x = GetInstructionFileRequest{}
-	mi := &file_jingclaw_control_v1_config_proto_msgTypes[10]
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -697,7 +975,7 @@ func (x *GetInstructionFileRequest) String() string {
 func (*GetInstructionFileRequest) ProtoMessage() {}
 
 func (x *GetInstructionFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_config_proto_msgTypes[10]
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -710,7 +988,7 @@ func (x *GetInstructionFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInstructionFileRequest.ProtoReflect.Descriptor instead.
 func (*GetInstructionFileRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{10}
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetInstructionFileRequest) GetFile() InstructionFile {
@@ -721,17 +999,23 @@ func (x *GetInstructionFileRequest) GetFile() InstructionFile {
 }
 
 type GetInstructionFileResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
-	Hash          string                 `protobuf:"bytes,3,opt,name=hash,proto3" json:"hash,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Empty. There is no file.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Text string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	Hash string `protobuf:"bytes,3,opt,name=hash,proto3" json:"hash,omitempty"`
+	// The hash of the document this process started from, and whether what is
+	// saved differs from it.
+	RunningHash    string `protobuf:"bytes,4,opt,name=running_hash,json=runningHash,proto3" json:"running_hash,omitempty"`
+	PendingRestart bool   `protobuf:"varint,5,opt,name=pending_restart,json=pendingRestart,proto3" json:"pending_restart,omitempty"`
+	Version        int64  `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetInstructionFileResponse) Reset() {
 	*x = GetInstructionFileResponse{}
-	mi := &file_jingclaw_control_v1_config_proto_msgTypes[11]
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -743,7 +1027,7 @@ func (x *GetInstructionFileResponse) String() string {
 func (*GetInstructionFileResponse) ProtoMessage() {}
 
 func (x *GetInstructionFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_config_proto_msgTypes[11]
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -756,7 +1040,7 @@ func (x *GetInstructionFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInstructionFileResponse.ProtoReflect.Descriptor instead.
 func (*GetInstructionFileResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{11}
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetInstructionFileResponse) GetPath() string {
@@ -780,6 +1064,27 @@ func (x *GetInstructionFileResponse) GetHash() string {
 	return ""
 }
 
+func (x *GetInstructionFileResponse) GetRunningHash() string {
+	if x != nil {
+		return x.RunningHash
+	}
+	return ""
+}
+
+func (x *GetInstructionFileResponse) GetPendingRestart() bool {
+	if x != nil {
+		return x.PendingRestart
+	}
+	return false
+}
+
+func (x *GetInstructionFileResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
 type PutInstructionFileRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Meta  *RequestMeta           `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
@@ -794,7 +1099,7 @@ type PutInstructionFileRequest struct {
 
 func (x *PutInstructionFileRequest) Reset() {
 	*x = PutInstructionFileRequest{}
-	mi := &file_jingclaw_control_v1_config_proto_msgTypes[12]
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -806,7 +1111,7 @@ func (x *PutInstructionFileRequest) String() string {
 func (*PutInstructionFileRequest) ProtoMessage() {}
 
 func (x *PutInstructionFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_config_proto_msgTypes[12]
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -819,7 +1124,7 @@ func (x *PutInstructionFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutInstructionFileRequest.ProtoReflect.Descriptor instead.
 func (*PutInstructionFileRequest) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{12}
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PutInstructionFileRequest) GetMeta() *RequestMeta {
@@ -851,15 +1156,17 @@ func (x *PutInstructionFileRequest) GetHash() string {
 }
 
 type PutInstructionFileResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Hash          string                 `protobuf:"bytes,1,opt,name=hash,proto3" json:"hash,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Hash           string                 `protobuf:"bytes,1,opt,name=hash,proto3" json:"hash,omitempty"`
+	PendingRestart bool                   `protobuf:"varint,2,opt,name=pending_restart,json=pendingRestart,proto3" json:"pending_restart,omitempty"`
+	Version        int64                  `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PutInstructionFileResponse) Reset() {
 	*x = PutInstructionFileResponse{}
-	mi := &file_jingclaw_control_v1_config_proto_msgTypes[13]
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -871,7 +1178,7 @@ func (x *PutInstructionFileResponse) String() string {
 func (*PutInstructionFileResponse) ProtoMessage() {}
 
 func (x *PutInstructionFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jingclaw_control_v1_config_proto_msgTypes[13]
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -884,7 +1191,7 @@ func (x *PutInstructionFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutInstructionFileResponse.ProtoReflect.Descriptor instead.
 func (*PutInstructionFileResponse) Descriptor() ([]byte, []int) {
-	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{13}
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *PutInstructionFileResponse) GetHash() string {
@@ -894,18 +1201,406 @@ func (x *PutInstructionFileResponse) GetHash() string {
 	return ""
 }
 
+func (x *PutInstructionFileResponse) GetPendingRestart() bool {
+	if x != nil {
+		return x.PendingRestart
+	}
+	return false
+}
+
+func (x *PutInstructionFileResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+// DocumentVersion is one save of a document, without its text.
+type DocumentVersion struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Version int64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	Hash    string                 `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`
+	// Where the text came from: "web" for an edit in the dashboard, "file" for
+	// one imported from the file an older version kept, "env" for one given by
+	// an environment variable, "default" for the example config.
+	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
+	SavedAt       *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=saved_at,json=savedAt,proto3" json:"saved_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DocumentVersion) Reset() {
+	*x = DocumentVersion{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DocumentVersion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DocumentVersion) ProtoMessage() {}
+
+func (x *DocumentVersion) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DocumentVersion.ProtoReflect.Descriptor instead.
+func (*DocumentVersion) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *DocumentVersion) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *DocumentVersion) GetHash() string {
+	if x != nil {
+		return x.Hash
+	}
+	return ""
+}
+
+func (x *DocumentVersion) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *DocumentVersion) GetSavedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SavedAt
+	}
+	return nil
+}
+
+type ListDocumentVersionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Document      SettingsDocument       `protobuf:"varint,1,opt,name=document,proto3,enum=jingclaw.control.v1.SettingsDocument" json:"document,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDocumentVersionsRequest) Reset() {
+	*x = ListDocumentVersionsRequest{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDocumentVersionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDocumentVersionsRequest) ProtoMessage() {}
+
+func (x *ListDocumentVersionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDocumentVersionsRequest.ProtoReflect.Descriptor instead.
+func (*ListDocumentVersionsRequest) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ListDocumentVersionsRequest) GetDocument() SettingsDocument {
+	if x != nil {
+		return x.Document
+	}
+	return SettingsDocument_SETTINGS_DOCUMENT_UNSPECIFIED
+}
+
+type ListDocumentVersionsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Newest first. The first is the current one.
+	Versions      []*DocumentVersion `protobuf:"bytes,1,rep,name=versions,proto3" json:"versions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDocumentVersionsResponse) Reset() {
+	*x = ListDocumentVersionsResponse{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDocumentVersionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDocumentVersionsResponse) ProtoMessage() {}
+
+func (x *ListDocumentVersionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDocumentVersionsResponse.ProtoReflect.Descriptor instead.
+func (*ListDocumentVersionsResponse) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ListDocumentVersionsResponse) GetVersions() []*DocumentVersion {
+	if x != nil {
+		return x.Versions
+	}
+	return nil
+}
+
+type GetDocumentVersionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Document      SettingsDocument       `protobuf:"varint,1,opt,name=document,proto3,enum=jingclaw.control.v1.SettingsDocument" json:"document,omitempty"`
+	Version       int64                  `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDocumentVersionRequest) Reset() {
+	*x = GetDocumentVersionRequest{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDocumentVersionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDocumentVersionRequest) ProtoMessage() {}
+
+func (x *GetDocumentVersionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDocumentVersionRequest.ProtoReflect.Descriptor instead.
+func (*GetDocumentVersionRequest) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *GetDocumentVersionRequest) GetDocument() SettingsDocument {
+	if x != nil {
+		return x.Document
+	}
+	return SettingsDocument_SETTINGS_DOCUMENT_UNSPECIFIED
+}
+
+func (x *GetDocumentVersionRequest) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+type GetDocumentVersionResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Info  *DocumentVersion       `protobuf:"bytes,1,opt,name=info,proto3" json:"info,omitempty"`
+	// The text as it was saved, a secret in it included. A value taken out of a
+	// document stays readable here until twenty later saves have pushed its
+	// version out; nothing forgets one sooner.
+	Text          string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDocumentVersionResponse) Reset() {
+	*x = GetDocumentVersionResponse{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDocumentVersionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDocumentVersionResponse) ProtoMessage() {}
+
+func (x *GetDocumentVersionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDocumentVersionResponse.ProtoReflect.Descriptor instead.
+func (*GetDocumentVersionResponse) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *GetDocumentVersionResponse) GetInfo() *DocumentVersion {
+	if x != nil {
+		return x.Info
+	}
+	return nil
+}
+
+func (x *GetDocumentVersionResponse) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type GetAgentStateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAgentStateRequest) Reset() {
+	*x = GetAgentStateRequest{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAgentStateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAgentStateRequest) ProtoMessage() {}
+
+func (x *GetAgentStateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAgentStateRequest.ProtoReflect.Descriptor instead.
+func (*GetAgentStateRequest) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{21}
+}
+
+type GetAgentStateResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// "running" when the daemon built an agent, "repair" when it did not and is
+	// serving only what is needed to fix the settings.
+	Mode string `protobuf:"bytes,1,opt,name=mode,proto3" json:"mode,omitempty"`
+	// Why there is no agent. Empty when one is running.
+	Problems      []*ConfigProblem       `protobuf:"bytes,2,rep,name=problems,proto3" json:"problems,omitempty"`
+	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAgentStateResponse) Reset() {
+	*x = GetAgentStateResponse{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAgentStateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAgentStateResponse) ProtoMessage() {}
+
+func (x *GetAgentStateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAgentStateResponse.ProtoReflect.Descriptor instead.
+func (*GetAgentStateResponse) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *GetAgentStateResponse) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *GetAgentStateResponse) GetProblems() []*ConfigProblem {
+	if x != nil {
+		return x.Problems
+	}
+	return nil
+}
+
+func (x *GetAgentStateResponse) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
 var File_jingclaw_control_v1_config_proto protoreflect.FileDescriptor
 
 const file_jingclaw_control_v1_config_proto_rawDesc = "" +
 	"\n" +
-	" jingclaw/control/v1/config.proto\x12\x13jingclaw.control.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a jingclaw/control/v1/common.proto\"\x12\n" +
-	"\x10GetConfigRequest\"\xde\x01\n" +
+	" jingclaw/control/v1/config.proto\x12\x13jingclaw.control.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a jingclaw/control/v1/common.proto\"\x12\n" +
+	"\x10GetConfigRequest\"\xf9\x02\n" +
 	"\x11GetConfigResponse\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12+\n" +
 	"\x04file\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x04file\x121\n" +
 	"\arunning\x18\x04 \x01(\v2\x17.google.protobuf.StructR\arunning\x12A\n" +
-	"\toverrides\x18\x05 \x03(\v2#.jingclaw.control.v1.ConfigOverrideR\toverrides\"N\n" +
+	"\toverrides\x18\x05 \x03(\v2#.jingclaw.control.v1.ConfigOverrideR\toverrides\x12\x12\n" +
+	"\x04text\x18\x06 \x01(\tR\x04text\x12\x1f\n" +
+	"\vparse_error\x18\a \x01(\tR\n" +
+	"parseError\x12!\n" +
+	"\frunning_hash\x18\b \x01(\tR\vrunningHash\x12'\n" +
+	"\x0fpending_restart\x18\t \x01(\bR\x0ependingRestart\x12\x18\n" +
+	"\aversion\x18\n" +
+	" \x01(\x03R\aversion\"N\n" +
 	"\x0eConfigOverride\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x12\x12\n" +
@@ -914,12 +1609,13 @@ const file_jingclaw_control_v1_config_proto_rawDesc = "" +
 	"ConfigEdit\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value\x12\x16\n" +
-	"\x06remove\x18\x03 \x01(\bR\x06remove\"[\n" +
+	"\x06remove\x18\x03 \x01(\bR\x06remove\"s\n" +
 	"\rConfigProblem\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x10\n" +
 	"\x03why\x18\x03 \x01(\tR\x03why\x12\x10\n" +
-	"\x03fix\x18\x04 \x01(\tR\x03fix\"8\n" +
+	"\x03fix\x18\x04 \x01(\tR\x03fix\x12\x16\n" +
+	"\x06source\x18\x05 \x01(\tR\x06source\"8\n" +
 	"\x0eConfigDiffLine\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\"\x81\x01\n" +
@@ -932,35 +1628,82 @@ const file_jingclaw_control_v1_config_proto_rawDesc = "" +
 	"\x12WriteConfigRequest\x124\n" +
 	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x125\n" +
-	"\x05edits\x18\x03 \x03(\v2\x1f.jingclaw.control.v1.ConfigEditR\x05edits\"\xa6\x01\n" +
+	"\x05edits\x18\x03 \x03(\v2\x1f.jingclaw.control.v1.ConfigEditR\x05edits\"\xe9\x01\n" +
 	"\x13WriteConfigResponse\x12\x18\n" +
 	"\awritten\x18\x01 \x01(\bR\awritten\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12>\n" +
 	"\bproblems\x18\x03 \x03(\v2\".jingclaw.control.v1.ConfigProblemR\bproblems\x12!\n" +
-	"\fchanged_keys\x18\x04 \x03(\tR\vchangedKeys\"U\n" +
+	"\fchanged_keys\x18\x04 \x03(\tR\vchangedKeys\x12'\n" +
+	"\x0fpending_restart\x18\x05 \x01(\bR\x0ependingRestart\x12\x18\n" +
+	"\aversion\x18\x06 \x01(\x03R\aversion\"x\n" +
+	"\x18ReplaceConfigTextRequest\x124\n" +
+	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\x12\x12\n" +
+	"\x04hash\x18\x03 \x01(\tR\x04hash\"\xcc\x01\n" +
+	"\x19ReplaceConfigTextResponse\x12\x18\n" +
+	"\awritten\x18\x01 \x01(\bR\awritten\x12\x12\n" +
+	"\x04hash\x18\x02 \x01(\tR\x04hash\x12>\n" +
+	"\bproblems\x18\x03 \x03(\v2\".jingclaw.control.v1.ConfigProblemR\bproblems\x12'\n" +
+	"\x0fpending_restart\x18\x04 \x01(\bR\x0ependingRestart\x12\x18\n" +
+	"\aversion\x18\x05 \x01(\x03R\aversion\"U\n" +
 	"\x19GetInstructionFileRequest\x128\n" +
-	"\x04file\x18\x01 \x01(\x0e2$.jingclaw.control.v1.InstructionFileR\x04file\"X\n" +
+	"\x04file\x18\x01 \x01(\x0e2$.jingclaw.control.v1.InstructionFileR\x04file\"\xbe\x01\n" +
 	"\x1aGetInstructionFileResponse\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x12\n" +
-	"\x04hash\x18\x03 \x01(\tR\x04hash\"\xb3\x01\n" +
+	"\x04hash\x18\x03 \x01(\tR\x04hash\x12!\n" +
+	"\frunning_hash\x18\x04 \x01(\tR\vrunningHash\x12'\n" +
+	"\x0fpending_restart\x18\x05 \x01(\bR\x0ependingRestart\x12\x18\n" +
+	"\aversion\x18\x06 \x01(\x03R\aversion\"\xb3\x01\n" +
 	"\x19PutInstructionFileRequest\x124\n" +
 	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x128\n" +
 	"\x04file\x18\x02 \x01(\x0e2$.jingclaw.control.v1.InstructionFileR\x04file\x12\x12\n" +
 	"\x04text\x18\x03 \x01(\tR\x04text\x12\x12\n" +
-	"\x04hash\x18\x04 \x01(\tR\x04hash\"0\n" +
+	"\x04hash\x18\x04 \x01(\tR\x04hash\"s\n" +
 	"\x1aPutInstructionFileResponse\x12\x12\n" +
-	"\x04hash\x18\x01 \x01(\tR\x04hash*n\n" +
+	"\x04hash\x18\x01 \x01(\tR\x04hash\x12'\n" +
+	"\x0fpending_restart\x18\x02 \x01(\bR\x0ependingRestart\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\x03R\aversion\"\x8e\x01\n" +
+	"\x0fDocumentVersion\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\x03R\aversion\x12\x12\n" +
+	"\x04hash\x18\x02 \x01(\tR\x04hash\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x125\n" +
+	"\bsaved_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\asavedAt\"`\n" +
+	"\x1bListDocumentVersionsRequest\x12A\n" +
+	"\bdocument\x18\x01 \x01(\x0e2%.jingclaw.control.v1.SettingsDocumentR\bdocument\"`\n" +
+	"\x1cListDocumentVersionsResponse\x12@\n" +
+	"\bversions\x18\x01 \x03(\v2$.jingclaw.control.v1.DocumentVersionR\bversions\"x\n" +
+	"\x19GetDocumentVersionRequest\x12A\n" +
+	"\bdocument\x18\x01 \x01(\x0e2%.jingclaw.control.v1.SettingsDocumentR\bdocument\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\x03R\aversion\"j\n" +
+	"\x1aGetDocumentVersionResponse\x128\n" +
+	"\x04info\x18\x01 \x01(\v2$.jingclaw.control.v1.DocumentVersionR\x04info\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"\x16\n" +
+	"\x14GetAgentStateRequest\"\xa6\x01\n" +
+	"\x15GetAgentStateResponse\x12\x12\n" +
+	"\x04mode\x18\x01 \x01(\tR\x04mode\x12>\n" +
+	"\bproblems\x18\x02 \x03(\v2\".jingclaw.control.v1.ConfigProblemR\bproblems\x129\n" +
+	"\n" +
+	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt*n\n" +
 	"\x0fInstructionFile\x12 \n" +
 	"\x1cINSTRUCTION_FILE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18INSTRUCTION_FILE_PERSONA\x10\x01\x12\x1b\n" +
-	"\x17INSTRUCTION_FILE_AGENTS\x10\x022\x9d\x04\n" +
+	"\x17INSTRUCTION_FILE_AGENTS\x10\x02*\x90\x01\n" +
+	"\x10SettingsDocument\x12!\n" +
+	"\x1dSETTINGS_DOCUMENT_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18SETTINGS_DOCUMENT_CONFIG\x10\x01\x12\x1c\n" +
+	"\x18SETTINGS_DOCUMENT_AGENTS\x10\x02\x12\x1d\n" +
+	"\x19SETTINGS_DOCUMENT_PERSONA\x10\x032\xed\a\n" +
 	"\rConfigService\x12Z\n" +
 	"\tGetConfig\x12%.jingclaw.control.v1.GetConfigRequest\x1a&.jingclaw.control.v1.GetConfigResponse\x12`\n" +
 	"\vCheckConfig\x12'.jingclaw.control.v1.CheckConfigRequest\x1a(.jingclaw.control.v1.CheckConfigResponse\x12`\n" +
-	"\vWriteConfig\x12'.jingclaw.control.v1.WriteConfigRequest\x1a(.jingclaw.control.v1.WriteConfigResponse\x12u\n" +
+	"\vWriteConfig\x12'.jingclaw.control.v1.WriteConfigRequest\x1a(.jingclaw.control.v1.WriteConfigResponse\x12r\n" +
+	"\x11ReplaceConfigText\x12-.jingclaw.control.v1.ReplaceConfigTextRequest\x1a..jingclaw.control.v1.ReplaceConfigTextResponse\x12u\n" +
 	"\x12GetInstructionFile\x12..jingclaw.control.v1.GetInstructionFileRequest\x1a/.jingclaw.control.v1.GetInstructionFileResponse\x12u\n" +
-	"\x12PutInstructionFile\x12..jingclaw.control.v1.PutInstructionFileRequest\x1a/.jingclaw.control.v1.PutInstructionFileResponseB\xdd\x01\n" +
+	"\x12PutInstructionFile\x12..jingclaw.control.v1.PutInstructionFileRequest\x1a/.jingclaw.control.v1.PutInstructionFileResponse\x12{\n" +
+	"\x14ListDocumentVersions\x120.jingclaw.control.v1.ListDocumentVersionsRequest\x1a1.jingclaw.control.v1.ListDocumentVersionsResponse\x12u\n" +
+	"\x12GetDocumentVersion\x12..jingclaw.control.v1.GetDocumentVersionRequest\x1a/.jingclaw.control.v1.GetDocumentVersionResponse\x12f\n" +
+	"\rGetAgentState\x12).jingclaw.control.v1.GetAgentStateRequest\x1a*.jingclaw.control.v1.GetAgentStateResponseB\xdd\x01\n" +
 	"\x17com.jingclaw.control.v1B\vConfigProtoP\x01ZGgithub.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1;controlv1\xa2\x02\x03JCX\xaa\x02\x13Jingclaw.Control.V1\xca\x02\x13Jingclaw\\Control\\V1\xe2\x02\x1fJingclaw\\Control\\V1\\GPBMetadata\xea\x02\x15Jingclaw::Control::V1b\x06proto3"
 
 var (
@@ -975,58 +1718,86 @@ func file_jingclaw_control_v1_config_proto_rawDescGZIP() []byte {
 	return file_jingclaw_control_v1_config_proto_rawDescData
 }
 
-var file_jingclaw_control_v1_config_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_jingclaw_control_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_jingclaw_control_v1_config_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_jingclaw_control_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_jingclaw_control_v1_config_proto_goTypes = []any{
-	(InstructionFile)(0),               // 0: jingclaw.control.v1.InstructionFile
-	(*GetConfigRequest)(nil),           // 1: jingclaw.control.v1.GetConfigRequest
-	(*GetConfigResponse)(nil),          // 2: jingclaw.control.v1.GetConfigResponse
-	(*ConfigOverride)(nil),             // 3: jingclaw.control.v1.ConfigOverride
-	(*ConfigEdit)(nil),                 // 4: jingclaw.control.v1.ConfigEdit
-	(*ConfigProblem)(nil),              // 5: jingclaw.control.v1.ConfigProblem
-	(*ConfigDiffLine)(nil),             // 6: jingclaw.control.v1.ConfigDiffLine
-	(*CheckConfigRequest)(nil),         // 7: jingclaw.control.v1.CheckConfigRequest
-	(*CheckConfigResponse)(nil),        // 8: jingclaw.control.v1.CheckConfigResponse
-	(*WriteConfigRequest)(nil),         // 9: jingclaw.control.v1.WriteConfigRequest
-	(*WriteConfigResponse)(nil),        // 10: jingclaw.control.v1.WriteConfigResponse
-	(*GetInstructionFileRequest)(nil),  // 11: jingclaw.control.v1.GetInstructionFileRequest
-	(*GetInstructionFileResponse)(nil), // 12: jingclaw.control.v1.GetInstructionFileResponse
-	(*PutInstructionFileRequest)(nil),  // 13: jingclaw.control.v1.PutInstructionFileRequest
-	(*PutInstructionFileResponse)(nil), // 14: jingclaw.control.v1.PutInstructionFileResponse
-	(*structpb.Struct)(nil),            // 15: google.protobuf.Struct
-	(*structpb.Value)(nil),             // 16: google.protobuf.Value
-	(*RequestMeta)(nil),                // 17: jingclaw.control.v1.RequestMeta
+	(InstructionFile)(0),                 // 0: jingclaw.control.v1.InstructionFile
+	(SettingsDocument)(0),                // 1: jingclaw.control.v1.SettingsDocument
+	(*GetConfigRequest)(nil),             // 2: jingclaw.control.v1.GetConfigRequest
+	(*GetConfigResponse)(nil),            // 3: jingclaw.control.v1.GetConfigResponse
+	(*ConfigOverride)(nil),               // 4: jingclaw.control.v1.ConfigOverride
+	(*ConfigEdit)(nil),                   // 5: jingclaw.control.v1.ConfigEdit
+	(*ConfigProblem)(nil),                // 6: jingclaw.control.v1.ConfigProblem
+	(*ConfigDiffLine)(nil),               // 7: jingclaw.control.v1.ConfigDiffLine
+	(*CheckConfigRequest)(nil),           // 8: jingclaw.control.v1.CheckConfigRequest
+	(*CheckConfigResponse)(nil),          // 9: jingclaw.control.v1.CheckConfigResponse
+	(*WriteConfigRequest)(nil),           // 10: jingclaw.control.v1.WriteConfigRequest
+	(*WriteConfigResponse)(nil),          // 11: jingclaw.control.v1.WriteConfigResponse
+	(*ReplaceConfigTextRequest)(nil),     // 12: jingclaw.control.v1.ReplaceConfigTextRequest
+	(*ReplaceConfigTextResponse)(nil),    // 13: jingclaw.control.v1.ReplaceConfigTextResponse
+	(*GetInstructionFileRequest)(nil),    // 14: jingclaw.control.v1.GetInstructionFileRequest
+	(*GetInstructionFileResponse)(nil),   // 15: jingclaw.control.v1.GetInstructionFileResponse
+	(*PutInstructionFileRequest)(nil),    // 16: jingclaw.control.v1.PutInstructionFileRequest
+	(*PutInstructionFileResponse)(nil),   // 17: jingclaw.control.v1.PutInstructionFileResponse
+	(*DocumentVersion)(nil),              // 18: jingclaw.control.v1.DocumentVersion
+	(*ListDocumentVersionsRequest)(nil),  // 19: jingclaw.control.v1.ListDocumentVersionsRequest
+	(*ListDocumentVersionsResponse)(nil), // 20: jingclaw.control.v1.ListDocumentVersionsResponse
+	(*GetDocumentVersionRequest)(nil),    // 21: jingclaw.control.v1.GetDocumentVersionRequest
+	(*GetDocumentVersionResponse)(nil),   // 22: jingclaw.control.v1.GetDocumentVersionResponse
+	(*GetAgentStateRequest)(nil),         // 23: jingclaw.control.v1.GetAgentStateRequest
+	(*GetAgentStateResponse)(nil),        // 24: jingclaw.control.v1.GetAgentStateResponse
+	(*structpb.Struct)(nil),              // 25: google.protobuf.Struct
+	(*structpb.Value)(nil),               // 26: google.protobuf.Value
+	(*RequestMeta)(nil),                  // 27: jingclaw.control.v1.RequestMeta
+	(*timestamppb.Timestamp)(nil),        // 28: google.protobuf.Timestamp
 }
 var file_jingclaw_control_v1_config_proto_depIdxs = []int32{
-	15, // 0: jingclaw.control.v1.GetConfigResponse.file:type_name -> google.protobuf.Struct
-	15, // 1: jingclaw.control.v1.GetConfigResponse.running:type_name -> google.protobuf.Struct
-	3,  // 2: jingclaw.control.v1.GetConfigResponse.overrides:type_name -> jingclaw.control.v1.ConfigOverride
-	16, // 3: jingclaw.control.v1.ConfigEdit.value:type_name -> google.protobuf.Value
-	17, // 4: jingclaw.control.v1.CheckConfigRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	4,  // 5: jingclaw.control.v1.CheckConfigRequest.edits:type_name -> jingclaw.control.v1.ConfigEdit
-	5,  // 6: jingclaw.control.v1.CheckConfigResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
-	6,  // 7: jingclaw.control.v1.CheckConfigResponse.diff:type_name -> jingclaw.control.v1.ConfigDiffLine
-	17, // 8: jingclaw.control.v1.WriteConfigRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	4,  // 9: jingclaw.control.v1.WriteConfigRequest.edits:type_name -> jingclaw.control.v1.ConfigEdit
-	5,  // 10: jingclaw.control.v1.WriteConfigResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
-	0,  // 11: jingclaw.control.v1.GetInstructionFileRequest.file:type_name -> jingclaw.control.v1.InstructionFile
-	17, // 12: jingclaw.control.v1.PutInstructionFileRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	0,  // 13: jingclaw.control.v1.PutInstructionFileRequest.file:type_name -> jingclaw.control.v1.InstructionFile
-	1,  // 14: jingclaw.control.v1.ConfigService.GetConfig:input_type -> jingclaw.control.v1.GetConfigRequest
-	7,  // 15: jingclaw.control.v1.ConfigService.CheckConfig:input_type -> jingclaw.control.v1.CheckConfigRequest
-	9,  // 16: jingclaw.control.v1.ConfigService.WriteConfig:input_type -> jingclaw.control.v1.WriteConfigRequest
-	11, // 17: jingclaw.control.v1.ConfigService.GetInstructionFile:input_type -> jingclaw.control.v1.GetInstructionFileRequest
-	13, // 18: jingclaw.control.v1.ConfigService.PutInstructionFile:input_type -> jingclaw.control.v1.PutInstructionFileRequest
-	2,  // 19: jingclaw.control.v1.ConfigService.GetConfig:output_type -> jingclaw.control.v1.GetConfigResponse
-	8,  // 20: jingclaw.control.v1.ConfigService.CheckConfig:output_type -> jingclaw.control.v1.CheckConfigResponse
-	10, // 21: jingclaw.control.v1.ConfigService.WriteConfig:output_type -> jingclaw.control.v1.WriteConfigResponse
-	12, // 22: jingclaw.control.v1.ConfigService.GetInstructionFile:output_type -> jingclaw.control.v1.GetInstructionFileResponse
-	14, // 23: jingclaw.control.v1.ConfigService.PutInstructionFile:output_type -> jingclaw.control.v1.PutInstructionFileResponse
-	19, // [19:24] is the sub-list for method output_type
-	14, // [14:19] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	25, // 0: jingclaw.control.v1.GetConfigResponse.file:type_name -> google.protobuf.Struct
+	25, // 1: jingclaw.control.v1.GetConfigResponse.running:type_name -> google.protobuf.Struct
+	4,  // 2: jingclaw.control.v1.GetConfigResponse.overrides:type_name -> jingclaw.control.v1.ConfigOverride
+	26, // 3: jingclaw.control.v1.ConfigEdit.value:type_name -> google.protobuf.Value
+	27, // 4: jingclaw.control.v1.CheckConfigRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	5,  // 5: jingclaw.control.v1.CheckConfigRequest.edits:type_name -> jingclaw.control.v1.ConfigEdit
+	6,  // 6: jingclaw.control.v1.CheckConfigResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
+	7,  // 7: jingclaw.control.v1.CheckConfigResponse.diff:type_name -> jingclaw.control.v1.ConfigDiffLine
+	27, // 8: jingclaw.control.v1.WriteConfigRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	5,  // 9: jingclaw.control.v1.WriteConfigRequest.edits:type_name -> jingclaw.control.v1.ConfigEdit
+	6,  // 10: jingclaw.control.v1.WriteConfigResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
+	27, // 11: jingclaw.control.v1.ReplaceConfigTextRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	6,  // 12: jingclaw.control.v1.ReplaceConfigTextResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
+	0,  // 13: jingclaw.control.v1.GetInstructionFileRequest.file:type_name -> jingclaw.control.v1.InstructionFile
+	27, // 14: jingclaw.control.v1.PutInstructionFileRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	0,  // 15: jingclaw.control.v1.PutInstructionFileRequest.file:type_name -> jingclaw.control.v1.InstructionFile
+	28, // 16: jingclaw.control.v1.DocumentVersion.saved_at:type_name -> google.protobuf.Timestamp
+	1,  // 17: jingclaw.control.v1.ListDocumentVersionsRequest.document:type_name -> jingclaw.control.v1.SettingsDocument
+	18, // 18: jingclaw.control.v1.ListDocumentVersionsResponse.versions:type_name -> jingclaw.control.v1.DocumentVersion
+	1,  // 19: jingclaw.control.v1.GetDocumentVersionRequest.document:type_name -> jingclaw.control.v1.SettingsDocument
+	18, // 20: jingclaw.control.v1.GetDocumentVersionResponse.info:type_name -> jingclaw.control.v1.DocumentVersion
+	6,  // 21: jingclaw.control.v1.GetAgentStateResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
+	28, // 22: jingclaw.control.v1.GetAgentStateResponse.started_at:type_name -> google.protobuf.Timestamp
+	2,  // 23: jingclaw.control.v1.ConfigService.GetConfig:input_type -> jingclaw.control.v1.GetConfigRequest
+	8,  // 24: jingclaw.control.v1.ConfigService.CheckConfig:input_type -> jingclaw.control.v1.CheckConfigRequest
+	10, // 25: jingclaw.control.v1.ConfigService.WriteConfig:input_type -> jingclaw.control.v1.WriteConfigRequest
+	12, // 26: jingclaw.control.v1.ConfigService.ReplaceConfigText:input_type -> jingclaw.control.v1.ReplaceConfigTextRequest
+	14, // 27: jingclaw.control.v1.ConfigService.GetInstructionFile:input_type -> jingclaw.control.v1.GetInstructionFileRequest
+	16, // 28: jingclaw.control.v1.ConfigService.PutInstructionFile:input_type -> jingclaw.control.v1.PutInstructionFileRequest
+	19, // 29: jingclaw.control.v1.ConfigService.ListDocumentVersions:input_type -> jingclaw.control.v1.ListDocumentVersionsRequest
+	21, // 30: jingclaw.control.v1.ConfigService.GetDocumentVersion:input_type -> jingclaw.control.v1.GetDocumentVersionRequest
+	23, // 31: jingclaw.control.v1.ConfigService.GetAgentState:input_type -> jingclaw.control.v1.GetAgentStateRequest
+	3,  // 32: jingclaw.control.v1.ConfigService.GetConfig:output_type -> jingclaw.control.v1.GetConfigResponse
+	9,  // 33: jingclaw.control.v1.ConfigService.CheckConfig:output_type -> jingclaw.control.v1.CheckConfigResponse
+	11, // 34: jingclaw.control.v1.ConfigService.WriteConfig:output_type -> jingclaw.control.v1.WriteConfigResponse
+	13, // 35: jingclaw.control.v1.ConfigService.ReplaceConfigText:output_type -> jingclaw.control.v1.ReplaceConfigTextResponse
+	15, // 36: jingclaw.control.v1.ConfigService.GetInstructionFile:output_type -> jingclaw.control.v1.GetInstructionFileResponse
+	17, // 37: jingclaw.control.v1.ConfigService.PutInstructionFile:output_type -> jingclaw.control.v1.PutInstructionFileResponse
+	20, // 38: jingclaw.control.v1.ConfigService.ListDocumentVersions:output_type -> jingclaw.control.v1.ListDocumentVersionsResponse
+	22, // 39: jingclaw.control.v1.ConfigService.GetDocumentVersion:output_type -> jingclaw.control.v1.GetDocumentVersionResponse
+	24, // 40: jingclaw.control.v1.ConfigService.GetAgentState:output_type -> jingclaw.control.v1.GetAgentStateResponse
+	32, // [32:41] is the sub-list for method output_type
+	23, // [23:32] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_config_proto_init() }
@@ -1040,8 +1811,8 @@ func file_jingclaw_control_v1_config_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jingclaw_control_v1_config_proto_rawDesc), len(file_jingclaw_control_v1_config_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   14,
+			NumEnums:      2,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

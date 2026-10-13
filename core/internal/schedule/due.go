@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -107,11 +108,19 @@ func zoneOf(schedule domain.Schedule) (*time.Location, error) {
 
 	zone, err := time.LoadLocation(schedule.Zone)
 	if err != nil {
-		return nil, fmt.Errorf("schedule: %s names the zone %q, which this machine does not have: %w",
-			schedule.ID, schedule.Zone, err)
+		return nil, fmt.Errorf("schedule: the zone %q is not one this machine has: %w", schedule.Zone, err)
 	}
 	return zone, nil
 }
+
+// ErrInvalid marks a schedule that could never run. What the person wrote is
+// at fault, so it is a request to correct and not a failure of the daemon.
+var ErrInvalid = errors.New("schedule: could never run")
+
+// invalid carries the reason in its own words and answers to ErrInvalid too.
+type invalid struct{ error }
+
+func (e invalid) Unwrap() []error { return []error{e.error, ErrInvalid} }
 
 // Validate says whether a schedule could ever run, before it is stored.
 //
@@ -119,6 +128,13 @@ func zoneOf(schedule domain.Schedule) (*time.Location, error) {
 // A zone this machine does not have, or an expression naming the thirtieth of
 // February, is a thing to be told about now.
 func Validate(schedule domain.Schedule) error {
+	if err := check(schedule); err != nil {
+		return invalid{err}
+	}
+	return nil
+}
+
+func check(schedule domain.Schedule) error {
 	expression, err := Parse(schedule.Expression)
 	if err != nil {
 		return err

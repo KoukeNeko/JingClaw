@@ -1,11 +1,7 @@
 package config_test
 
 import (
-	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -361,21 +357,19 @@ func TestADiffIsGroupedBySection(t *testing.T) {
 	}
 }
 
-// Candidate is Load without a file. If the two could disagree, "this
-// validates" would mean nothing about whether it starts.
-func TestCandidateReadsTheWayLoadDoes(t *testing.T) {
-	path := writeConfig(t, config.Example)
+// What a patch produces is read by the daemon as Candidate reads it, and the
+// answer is the same whether the text was patched or typed. If the two could
+// disagree, "this validates" would mean nothing about whether it starts.
+func TestAPatchedTextReadsTheSameAsTheSameTextTyped(t *testing.T) {
+	patched := patch(t, config.Example, config.Edit{Key: "agent.max_iterations", Value: float64(20)})
 
-	loaded, _, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	candidate, err := config.Candidate([]byte(config.Example))
+	typed, err := config.Candidate([]byte(strings.Replace(
+		config.Example, "# max_iterations = 12", "max_iterations = 20", 1)))
 	if err != nil {
 		t.Fatalf("candidate: %v", err)
 	}
-	if !reflect.DeepEqual(loaded, candidate) {
-		t.Error("the same text reads differently as a file and as text")
+	if !reflect.DeepEqual(candidate(t, patched), typed) {
+		t.Error("the same text reads differently when it was patched and when it was written")
 	}
 }
 
@@ -432,129 +426,5 @@ func TestEnvironmentNameOnlyForKeysTheEnvironmentCanReach(t *testing.T) {
 	}
 	if _, ok := config.EnvironmentName("provider.anthropic.model"); ok {
 		t.Error("a key three deep has no spelling as a variable")
-	}
-}
-
-// ── writing the file ───────────────────────────────────────────────────
-
-func read(t *testing.T, path string) string {
-	t.Helper()
-
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	return string(got)
-}
-
-func TestReplaceWritesWholeAndKeepsTheOldOne(t *testing.T) {
-	path := writeConfig(t, "first\n")
-
-	if err := config.Replace(path, []byte("second\n"), config.Hash([]byte("first\n"))); err != nil {
-		t.Fatalf("replace: %v", err)
-	}
-
-	if got := read(t, path); got != "second\n" {
-		t.Errorf("the file is %q", got)
-	}
-	if got := read(t, path+".bak.1"); got != "first\n" {
-		t.Errorf("the backup is %q", got)
-	}
-
-	entries, _ := os.ReadDir(filepath.Dir(path))
-	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), ".tmp") {
-			t.Errorf("the staging file %s was left behind", entry.Name())
-		}
-	}
-
-	if runtime.GOOS != "windows" {
-		info, err := os.Stat(path)
-		if err != nil || info.Mode().Perm() != 0o600 {
-			t.Errorf("the file's mode is %v", info.Mode())
-		}
-	}
-}
-
-// A few earlier versions, newest first, and no more than that.
-func TestReplaceKeepsAFewBackups(t *testing.T) {
-	path := writeConfig(t, "v1\n")
-
-	previous := "v1\n"
-	for _, next := range []string{"v2\n", "v3\n", "v4\n", "v5\n"} {
-		if err := config.Replace(path, []byte(next), config.Hash([]byte(previous))); err != nil {
-			t.Fatalf("replace: %v", err)
-		}
-		previous = next
-	}
-
-	for n, want := range map[string]string{".bak.1": "v4\n", ".bak.2": "v3\n", ".bak.3": "v2\n"} {
-		if got := read(t, path+n); got != want {
-			t.Errorf("%s is %q, want %q", n, got, want)
-		}
-	}
-	if _, err := os.Stat(path + ".bak.4"); err == nil {
-		t.Error("a fourth backup was kept")
-	}
-}
-
-// Somebody else's edit is not ours to discard.
-func TestReplaceRefusesAFileThatChangedAfterItWasRead(t *testing.T) {
-	path := writeConfig(t, "mine\n")
-	started := config.Hash([]byte("mine\n"))
-
-	if err := os.WriteFile(path, []byte("theirs\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	err := config.Replace(path, []byte("overwritten\n"), started)
-	if !errors.Is(err, config.ErrChangedUnderneath) {
-		t.Fatalf("got %v", err)
-	}
-	if got := read(t, path); got != "theirs\n" {
-		t.Errorf("their edit was lost: %q", got)
-	}
-}
-
-func TestReplaceCreatesAFileThatDoesNotExistWhenNoneWasExpected(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "deeper", "config.toml")
-
-	if err := config.Replace(path, []byte("new\n"), ""); err != nil {
-		t.Fatalf("replace: %v", err)
-	}
-	if got := read(t, path); got != "new\n" {
-		t.Errorf("the file is %q", got)
-	}
-	if _, err := os.Stat(path + ".bak.1"); err == nil {
-		t.Error("a backup was made of nothing")
-	}
-
-	absent := filepath.Join(t.TempDir(), "config.toml")
-	if err := config.Replace(absent, []byte("x\n"), config.Hash([]byte("was here\n"))); !errors.Is(err, config.ErrChangedUnderneath) {
-		t.Errorf("a file that has vanished since it was read was written over: %v", err)
-	}
-}
-
-// A configuration kept as a link is replaced where it points.
-func TestReplaceWritesThroughALink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("links need privileges on Windows")
-	}
-
-	real := writeConfig(t, "real\n")
-	link := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.Symlink(real, link); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := config.Replace(link, []byte("changed\n"), config.Hash([]byte("real\n"))); err != nil {
-		t.Fatalf("replace: %v", err)
-	}
-
-	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
-		t.Error("the link was replaced by a regular file")
-	}
-	if got := read(t, real); got != "changed\n" {
-		t.Errorf("the target is %q", got)
 	}
 }

@@ -8,13 +8,13 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 )
 
-// settingsHeldFromTheFile are the settings something else is deciding for this
-// run: a variable in the environment, or a flag.
+// settingsHeldFromTheSavedText are the settings something else is deciding for
+// this run: a variable in the environment, or a flag.
 //
-// Whatever the file says about them, the answer is already given. A client
+// Whatever the saved text says about them, the answer is already given. A client
 // that offered to edit one would be offering a change that does nothing and
 // looks as though it worked, so it is told which they are.
-func settingsHeldFromTheFile(flags *flag.FlagSet, cfg config.Config) []control.ConfigOverride {
+func settingsHeldFromTheSavedText(flags *flag.FlagSet, cfg config.Config) []control.ConfigOverride {
 	held := make(map[string]control.ConfigOverride)
 
 	for key, name := range config.EnvironmentOverrides(os.LookupEnv) {

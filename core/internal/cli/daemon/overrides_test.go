@@ -21,13 +21,13 @@ func overridesBy(t *testing.T, args []string, cfg config.Config) map[string]stri
 	}
 
 	got := make(map[string]string)
-	for _, held := range settingsHeldFromTheFile(flags, cfg) {
+	for _, held := range settingsHeldFromTheSavedText(flags, cfg) {
 		got[held.Key] = held.Source + ":" + held.Name
 	}
 	return got
 }
 
-// A setting the file cannot decide has to be said, or the page offers an edit
+// A setting the saved text cannot decide has to be said, or the page offers an edit
 // that does nothing.
 func TestSettingsTheEnvironmentAndFlagsDecideAreReported(t *testing.T) {
 	t.Setenv("JINGCLAW_PROVIDER_BACKEND", "anthropic")

@@ -89,6 +89,15 @@ func (t *SkillStage) Execute(ctx context.Context, call tool.Call) (tool.Result, 
 		return refusal(err.Error()), nil
 	}
 
+	// Staging asks for no approval where an operator is present, and an ssh
+	// address is fetched with the operator's own keys, which is not something to
+	// let a run use unasked. The operator can stage one from the dashboard or
+	// the command line.
+	if source.OverSSH() {
+		return refusal("skill_stage fetches over https or git only. An ssh address is fetched " +
+			"with the keys of the account this runs as, so a person has to stage one."), nil
+	}
+
 	staged, err := t.Installer.Stage(ctx, source)
 	if err != nil {
 		return refusal(err.Error()), nil
@@ -201,7 +210,14 @@ func (t *SkillActivate) Preview(arguments json.RawMessage) string {
 
 	var out strings.Builder
 	fmt.Fprintf(&out, "Install the skill %q as standing instructions.\n\n", staged.Name)
-	fmt.Fprintf(&out, "  from        %s\n", staged.Source.Repository)
+	// Activating does not ask, and the skill that is there now is gone afterwards.
+	if staged.Replaces() {
+		fmt.Fprintf(&out, "  replaces    the skill already installed as %q, installed or placed by hand, "+
+			"which is removed\n", staged.Name)
+	}
+	// A staged record from before addresses with a credential were refused can
+	// still hold one, and this is shown in chat.
+	fmt.Fprintf(&out, "  from        %s\n", skill.Redact(staged.Source.Repository))
 	if staged.Source.Path != "" {
 		fmt.Fprintf(&out, "  path        %s\n", staged.Source.Path)
 	}

@@ -52,6 +52,9 @@ const (
 	// GatewayIngressServiceWithdrawInboundProcedure is the fully-qualified name of the
 	// GatewayIngressService's WithdrawInbound RPC.
 	GatewayIngressServiceWithdrawInboundProcedure = "/jingclaw.control.v1.GatewayIngressService/WithdrawInbound"
+	// GatewayIngressServiceGetGatewaySettingsProcedure is the fully-qualified name of the
+	// GatewayIngressService's GetGatewaySettings RPC.
+	GatewayIngressServiceGetGatewaySettingsProcedure = "/jingclaw.control.v1.GatewayIngressService/GetGatewaySettings"
 	// ChannelServiceListBindingsProcedure is the fully-qualified name of the ChannelService's
 	// ListBindings RPC.
 	ChannelServiceListBindingsProcedure = "/jingclaw.control.v1.ChannelService/ListBindings"
@@ -136,6 +139,10 @@ type GatewayIngressServiceClient interface {
 	// whether that person sent it and whether it is still waiting. Not a
 	// trigger on DeliverInbound: taking a message back is not a message.
 	WithdrawInbound(context.Context, *connect.Request[v1.WithdrawInboundRequest]) (*connect.Response[v1.WithdrawInboundResponse], error)
+	// GetGatewaySettings is how a gateway process learns its slice of the
+	// settings. It reads no file: the daemon is the only thing that reads the
+	// settings, and answers with what it is running.
+	GetGatewaySettings(context.Context, *connect.Request[v1.GetGatewaySettingsRequest]) (*connect.Response[v1.GetGatewaySettingsResponse], error)
 }
 
 // NewGatewayIngressServiceClient constructs a client for the
@@ -179,6 +186,12 @@ func NewGatewayIngressServiceClient(httpClient connect.HTTPClient, baseURL strin
 			connect.WithSchema(gatewayIngressServiceMethods.ByName("WithdrawInbound")),
 			connect.WithClientOptions(opts...),
 		),
+		getGatewaySettings: connect.NewClient[v1.GetGatewaySettingsRequest, v1.GetGatewaySettingsResponse](
+			httpClient,
+			baseURL+GatewayIngressServiceGetGatewaySettingsProcedure,
+			connect.WithSchema(gatewayIngressServiceMethods.ByName("GetGatewaySettings")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -189,6 +202,7 @@ type gatewayIngressServiceClient struct {
 	acknowledgeDispatch *connect.Client[v1.AcknowledgeDispatchRequest, v1.AcknowledgeDispatchResponse]
 	deliverDecision     *connect.Client[v1.DeliverDecisionRequest, v1.DeliverDecisionResponse]
 	withdrawInbound     *connect.Client[v1.WithdrawInboundRequest, v1.WithdrawInboundResponse]
+	getGatewaySettings  *connect.Client[v1.GetGatewaySettingsRequest, v1.GetGatewaySettingsResponse]
 }
 
 // DeliverInbound calls jingclaw.control.v1.GatewayIngressService.DeliverInbound.
@@ -216,6 +230,11 @@ func (c *gatewayIngressServiceClient) WithdrawInbound(ctx context.Context, req *
 	return c.withdrawInbound.CallUnary(ctx, req)
 }
 
+// GetGatewaySettings calls jingclaw.control.v1.GatewayIngressService.GetGatewaySettings.
+func (c *gatewayIngressServiceClient) GetGatewaySettings(ctx context.Context, req *connect.Request[v1.GetGatewaySettingsRequest]) (*connect.Response[v1.GetGatewaySettingsResponse], error) {
+	return c.getGatewaySettings.CallUnary(ctx, req)
+}
+
 // GatewayIngressServiceHandler is an implementation of the
 // jingclaw.control.v1.GatewayIngressService service.
 type GatewayIngressServiceHandler interface {
@@ -234,6 +253,10 @@ type GatewayIngressServiceHandler interface {
 	// whether that person sent it and whether it is still waiting. Not a
 	// trigger on DeliverInbound: taking a message back is not a message.
 	WithdrawInbound(context.Context, *connect.Request[v1.WithdrawInboundRequest]) (*connect.Response[v1.WithdrawInboundResponse], error)
+	// GetGatewaySettings is how a gateway process learns its slice of the
+	// settings. It reads no file: the daemon is the only thing that reads the
+	// settings, and answers with what it is running.
+	GetGatewaySettings(context.Context, *connect.Request[v1.GetGatewaySettingsRequest]) (*connect.Response[v1.GetGatewaySettingsResponse], error)
 }
 
 // NewGatewayIngressServiceHandler builds an HTTP handler from the service implementation. It
@@ -273,6 +296,12 @@ func NewGatewayIngressServiceHandler(svc GatewayIngressServiceHandler, opts ...c
 		connect.WithSchema(gatewayIngressServiceMethods.ByName("WithdrawInbound")),
 		connect.WithHandlerOptions(opts...),
 	)
+	gatewayIngressServiceGetGatewaySettingsHandler := connect.NewUnaryHandler(
+		GatewayIngressServiceGetGatewaySettingsProcedure,
+		svc.GetGatewaySettings,
+		connect.WithSchema(gatewayIngressServiceMethods.ByName("GetGatewaySettings")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.GatewayIngressService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case GatewayIngressServiceDeliverInboundProcedure:
@@ -285,6 +314,8 @@ func NewGatewayIngressServiceHandler(svc GatewayIngressServiceHandler, opts ...c
 			gatewayIngressServiceDeliverDecisionHandler.ServeHTTP(w, r)
 		case GatewayIngressServiceWithdrawInboundProcedure:
 			gatewayIngressServiceWithdrawInboundHandler.ServeHTTP(w, r)
+		case GatewayIngressServiceGetGatewaySettingsProcedure:
+			gatewayIngressServiceGetGatewaySettingsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -312,6 +343,10 @@ func (UnimplementedGatewayIngressServiceHandler) DeliverDecision(context.Context
 
 func (UnimplementedGatewayIngressServiceHandler) WithdrawInbound(context.Context, *connect.Request[v1.WithdrawInboundRequest]) (*connect.Response[v1.WithdrawInboundResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.GatewayIngressService.WithdrawInbound is not implemented"))
+}
+
+func (UnimplementedGatewayIngressServiceHandler) GetGatewaySettings(context.Context, *connect.Request[v1.GetGatewaySettingsRequest]) (*connect.Response[v1.GetGatewaySettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.GatewayIngressService.GetGatewaySettings is not implemented"))
 }
 
 // ChannelServiceClient is a client for the jingclaw.control.v1.ChannelService service.

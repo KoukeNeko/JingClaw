@@ -1,6 +1,6 @@
 """Fetch one page with CloakBrowser and print what it says as JSON.
 
-This runs as a child process of agentd, one process per fetch. It is written
+This runs as a child process of the daemon, one process per fetch. It is written
 to be boring: read a request on stdin, print one JSON object on stdout, exit.
 Anything it cannot do is an error object rather than a partial answer, because
 a caller that cannot tell a blank page from a failed fetch will report the

@@ -36,8 +36,9 @@ func consolesWith(channels ...config.Channel) config.Config {
 	return cfg
 }
 
-// A channel in the file becomes a binding, with the profile the file gave it.
-func TestAChannelInTheFileBecomesABinding(t *testing.T) {
+// A channel in the settings becomes a binding, with the profile the settings
+// gave it.
+func TestAChannelInTheSettingsBecomesABinding(t *testing.T) {
 	store := openStore(t)
 
 	cfg := consolesWith(config.Channel{
@@ -108,10 +109,10 @@ func TestApplyingTwiceUpdatesRatherThanDuplicates(t *testing.T) {
 	}
 }
 
-// A channel dropped from the file stays bound. A daemon started once with an
-// incomplete file would otherwise take away the thing that decides who can
+// A channel dropped from the settings stays bound. A daemon started once with
+// incomplete settings would otherwise take away the thing that decides who can
 // reach the agent.
-func TestAChannelRemovedFromTheFileStaysBound(t *testing.T) {
+func TestAChannelRemovedFromTheSettingsStaysBound(t *testing.T) {
 	store := openStore(t)
 	ctx := context.Background()
 	quiet := slog.New(slog.DiscardHandler)
@@ -137,13 +138,13 @@ func TestAChannelRemovedFromTheFileStaysBound(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	if len(bindings) != 2 {
-		t.Fatalf("a channel dropped from the file was unbound: %d remain", len(bindings))
+		t.Fatalf("a channel dropped from the settings was unbound: %d remain", len(bindings))
 	}
 }
 
-// A file that declares nothing is not claiming to be the whole list, so a
+// Settings that declare nothing are not claiming to be the whole list, so a
 // deployment bound entirely by hand is not nagged about every channel.
-func TestAFileThatDeclaresNothingIsNotAClaim(t *testing.T) {
+func TestSettingsThatDeclareNothingAreNotAClaim(t *testing.T) {
 	store := openStore(t)
 	ctx := context.Background()
 

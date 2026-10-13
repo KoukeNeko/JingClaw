@@ -1,6 +1,8 @@
 package schedule
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,5 +178,26 @@ func TestValidateRefusesWhatWillNeverRun(t *testing.T) {
 
 	if err := Validate(hourly(t)); err != nil {
 		t.Errorf("an ordinary schedule was refused: %v", err)
+	}
+}
+
+// TestWhatWillNeverRunIsTheCallersToCorrect is how the control API knows to
+// answer "invalid argument" and not "the daemon failed", and the zone's name,
+// not an id nobody has seen, is what the message points at.
+func TestWhatWillNeverRunIsTheCallersToCorrect(t *testing.T) {
+	badExpression, badZone, never := hourly(t), hourly(t), hourly(t)
+	badExpression.Expression = "0 25 * * *"
+	badZone.Zone = "Mars/Olympus_Mons"
+	never.Expression = "0 9 30 2 *"
+
+	for name, one := range map[string]domain.Schedule{"expression": badExpression, "zone": badZone, "date": never} {
+		err := Validate(one)
+		if !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+
+	if err := Validate(badZone); err == nil || strings.Contains(err.Error(), string(badZone.ID)) {
+		t.Errorf("the zone's message names the schedule's id: %v", err)
 	}
 }

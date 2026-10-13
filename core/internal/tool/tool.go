@@ -79,7 +79,7 @@ func (l Level) String() string {
 	}
 }
 
-// LevelByName resolves the name a configuration file uses.
+// LevelByName resolves the name the settings use.
 //
 // The names are the ones String produces, so what an operator writes and what
 // a log prints are the same word.

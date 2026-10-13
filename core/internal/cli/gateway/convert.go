@@ -7,12 +7,48 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
+	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/gateway"
 )
 
 // Translation between the wire types and the gateway vocabulary lives here so
 // the adapter never sees protobuf and the RPC layer never sees Discord.
+
+// settingsFromProto is what the daemon told this process, as the configuration
+// the rest of it is written against.
+//
+// A config.Config and not a type of its own, so that newAdapter, Selected and
+// LogLevel read what they always read. Only the fields the daemon sends are
+// filled in: the rest of a Config is the daemon's business, and a gateway that
+// found a value there would be looking at a default it had no way to know was
+// not the setting.
+func settingsFromProto(settings *controlv1.GetGatewaySettingsResponse) config.Config {
+	discord := settings.GetDiscord()
+	telegram := settings.GetTelegram()
+
+	var cfg config.Config
+	cfg.Server.LogLevel = settings.GetLogLevel()
+	cfg.Gateway = config.Gateway{
+		Platform: settings.GetPlatform(),
+		Discord: config.Discord{
+			AccountID:          discord.GetAccountId(),
+			TokenEnv:           discord.GetTokenEnv(),
+			TokenFile:          discord.GetTokenFile(),
+			MaxMessages:        int(discord.GetMaxMessages()),
+			MaxAttachmentBytes: int(discord.GetMaxAttachmentBytes()),
+			TablesAsImages:     discord.GetTablesAsImages(),
+		},
+		Telegram: config.Telegram{
+			AccountID:      telegram.GetAccountId(),
+			TokenEnv:       telegram.GetTokenEnv(),
+			TokenFile:      telegram.GetTokenFile(),
+			MaxUploadBytes: int(telegram.GetMaxUploadBytes()),
+			APIBase:        telegram.GetApiBase(),
+		},
+	}
+	return cfg
+}
 
 func inboundToProto(message gateway.InboundMessage) *controlv1.InboundMessage {
 	claims := make([]*controlv1.PrincipalClaim, 0, len(message.Principal.Claims))

@@ -2,8 +2,6 @@ package config_test
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,55 +10,44 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 )
 
-func writeConfig(t *testing.T, contents string) string {
+// candidate reads text the way the daemon reads the saved config.
+func candidateOf(t *testing.T, text string) config.Config {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
+	cfg, err := config.Candidate([]byte(text))
+	if err != nil {
+		t.Fatalf("candidate: %v", err)
 	}
-	return path
+	return cfg
 }
 
 // Running with no configuration at all has to work, or the first experience of
-// the tool is editing TOML.
-func TestMissingDefaultFileIsNotAnError(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-
-	cfg, used, err := config.Load("")
+// the tool is editing TOML. No text is what a command that has no settings of
+// its own, such as the one that only needs to know where the daemon is, asks
+// for.
+func TestNoTextIsTheDefaults(t *testing.T) {
+	cfg, err := config.Candidate(nil)
 	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if used != "" {
-		t.Errorf("reported reading %q when there was no file", used)
+		t.Fatalf("candidate: %v", err)
 	}
 	if cfg.Agent.MaxIterations != config.Defaults().Agent.MaxIterations {
 		t.Errorf("defaults were not applied: %+v", cfg.Agent)
 	}
-}
-
-// A file the operator explicitly named and that is not there is a mistake,
-// not something to shrug at: they believe those settings are in force.
-func TestExplicitMissingFileIsAnError(t *testing.T) {
-	_, _, err := config.Load(filepath.Join(t.TempDir(), "absent.toml"))
-	if err == nil {
-		t.Fatal("a config file that does not exist was accepted")
+	if !reflect.DeepEqual(cfg, candidateOf(t, "")) {
+		t.Error("no text and empty text read differently")
 	}
 }
 
-// Silently ignoring a broken file would run with settings nobody chose while
+// Silently ignoring broken text would run with settings nobody chose while
 // the operator believes theirs are active.
-func TestUnparseableFileIsAnError(t *testing.T) {
-	path := writeConfig(t, "[agent\nname = broken")
-
-	if _, _, err := config.Load(path); err == nil {
-		t.Fatal("a malformed config file was accepted")
+func TestUnparseableTextIsAnError(t *testing.T) {
+	if _, err := config.Candidate([]byte("[agent\nname = broken")); err == nil {
+		t.Fatal("malformed config text was accepted")
 	}
 }
 
-func TestFileOverridesDefaults(t *testing.T) {
-	path := writeConfig(t, `
+func TestTextOverridesDefaults(t *testing.T) {
+	cfg := candidateOf(t, `
 [agent]
 max_iterations = 3
 
@@ -71,14 +58,6 @@ backend = "gemini"
 model = "gemma-4-31b-it"
 `)
 
-	cfg, used, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if used != path {
-		t.Errorf("reported reading %q, want %q", used, path)
-	}
-
 	if cfg.Agent.MaxIterations != 3 {
 		t.Errorf("max_iterations is %d", cfg.Agent.MaxIterations)
 	}
@@ -86,7 +65,7 @@ model = "gemma-4-31b-it"
 		t.Errorf("model is %q", cfg.Provider.Model())
 	}
 
-	// Anything the file did not mention keeps its default.
+	// Anything the text did not mention keeps its default.
 	if len(config.InstructionFiles()) == 0 {
 		t.Error("instruction_files lost its default")
 	}
@@ -95,30 +74,22 @@ model = "gemma-4-31b-it"
 	}
 }
 
-// The environment sits between the file and flags, so a shell or a service
-// definition can override a checked-in file without editing it.
-func TestEnvironmentOverridesFile(t *testing.T) {
-	path := writeConfig(t, "[agent]\nmax_iterations = 3\n")
+// The environment sits between the saved text and flags, so a shell or a
+// service definition can override what is saved without editing it.
+func TestEnvironmentOverridesText(t *testing.T) {
 	t.Setenv("JINGCLAW_AGENT_MAX_ITERATIONS", "9")
 
-	cfg, _, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
+	cfg := candidateOf(t, "[agent]\nmax_iterations = 3\n")
 	if cfg.Agent.MaxIterations != 9 {
 		t.Errorf("max_iterations is %d, want the environment value", cfg.Agent.MaxIterations)
 	}
 }
 
 // The example has to be valid, or the first thing an operator copies fails to
-// parse.
+// parse. It is also the config a first start saves when nothing else was given,
+// so reading it must be reading nothing at all.
 func TestExampleParsesAndChangesNothing(t *testing.T) {
-	path := writeConfig(t, config.Example)
-
-	cfg, _, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("the example config does not parse: %v", err)
-	}
+	cfg := candidateOf(t, config.Example)
 
 	defaults := config.Defaults()
 	if cfg.Agent.MaxIterations != defaults.Agent.MaxIterations ||
@@ -126,6 +97,12 @@ func TestExampleParsesAndChangesNothing(t *testing.T) {
 		t.Errorf("the example changes behaviour despite being fully commented:\n%+v", cfg)
 	}
 
+	// Compared against reading empty text rather than against Defaults, so that
+	// the two go through the same decoding and the test is about the settings
+	// rather than about how a missing list decodes.
+	if empty := candidateOf(t, "# nothing at all\n"); !reflect.DeepEqual(cfg, empty) {
+		t.Errorf("the example changes behaviour despite being fully commented:\n got %+v\nwant %+v", cfg, empty)
+	}
 }
 
 // Every setting has to appear in the example, or an operator can only discover
@@ -205,29 +182,20 @@ func TestDefaultsAreValid(t *testing.T) {
 // The example is what an operator starts from, so its uncommented state must
 // also pass.
 func TestExampleIsValid(t *testing.T) {
-	cfg, _, err := config.Load(writeConfig(t, config.Example))
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if err := cfg.Validate(); err != nil {
+	if err := candidateOf(t, config.Example).Validate(); err != nil {
 		t.Fatalf("the example does not validate: %v", err)
 	}
 }
 
 // Durations are written the way people write them, not in nanoseconds.
 func TestDurationsAreReadAsText(t *testing.T) {
-	path := writeConfig(t, `
+	cfg := candidateOf(t, `
 [tools]
 command_timeout = "45s"
 
 [provider.retry]
 base_delay = "1500ms"
 `)
-
-	cfg, _, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
 	if cfg.Tools.CommandTimeout != 45*time.Second {
 		t.Errorf("command_timeout is %s, want 45s", cfg.Tools.CommandTimeout)
 	}
@@ -350,20 +318,21 @@ func TestValidateReportsEveryProblemTogether(t *testing.T) {
 	}
 }
 
-// The report is read by somebody who is about to open the file, so it has to
-// say which file, which line, and what to write instead.
-func TestReportNamesTheFileAndEachSetting(t *testing.T) {
+// The report is read by somebody who is about to go and change a setting, so it
+// has to say where the settings were read from, which setting, and what to write
+// instead.
+func TestReportNamesWhereTheSettingsWereReadAndEachSetting(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Server.Addr = "0.0.0.0:8080"
 	cfg.Provider.Backend = "openai"
 
 	var out strings.Builder
-	if !config.Report(&out, cfg.Validate(), "/etc/jingclaw/config.toml") {
+	if !config.Report(&out, cfg.Validate(), "the saved settings") {
 		t.Fatal("Report did not recognise a configuration problem")
 	}
 
 	for _, want := range []string{
-		"/etc/jingclaw/config.toml", // which file
+		"the saved settings", // where they were read from
 		`server.addr = "0.0.0.0:8080"`,
 		"loopback",
 		`provider.backend = "openai"`,
@@ -585,5 +554,50 @@ func TestAChannelNamingNobodyIsAccepted(t *testing.T) {
 			t.Errorf("a channel deferring to its room was refused: %s — %s",
 				problem.Key, problem.Why)
 		}
+	}
+}
+
+// A url can carry what authorizes a request: a password before the host, a token
+// in the query, a path that is itself the secret. A problem quotes the value back
+// so that it can be found, and the quote goes to a terminal, a log, the status of
+// a daemon that has no agent and a dashboard.
+func TestAProblemWithAServersUrlDoesNotQuoteWhatTheUrlCarries(t *testing.T) {
+	const secrets = "SECRETPASSWORD SECRETPATH SECRETQUERY SECRETFRAGMENT"
+
+	for name, server := range map[string]config.MCPServer{
+		"a command and a url": {Name: "a", Command: "run", URL: "https://user:SECRETPASSWORD@mcp.example.com/SECRETPATH?token=SECRETQUERY#SECRETFRAGMENT"},
+		"not an http address": {Name: "b", URL: "ftp://user:SECRETPASSWORD@mcp.example.com/SECRETPATH?token=SECRETQUERY#SECRETFRAGMENT"},
+		"not an address":      {Name: "c", URL: "mcp.example.com/SECRETPATH?token=SECRETQUERY"},
+	} {
+		cfg := config.Defaults()
+		cfg.MCP.Servers = []config.MCPServer{server}
+
+		var invalid *config.InvalidError
+		if err := cfg.Validate(); !errors.As(err, &invalid) {
+			t.Fatalf("%s: validate returned %v", name, err)
+		}
+
+		var said []string
+		for _, problem := range invalid.Problems {
+			said = append(said, problem.Key, problem.Value, problem.Why, problem.Fix)
+		}
+		everything := strings.Join(said, "\n") + "\n" + invalid.Error() + "\n" + invalid.Report("the saved settings")
+
+		for _, secret := range strings.Fields(secrets) {
+			if strings.Contains(everything, secret) {
+				t.Errorf("%s: the problems quote %s:\n%s", name, secret, everything)
+			}
+		}
+		if !strings.Contains(everything, ".url") {
+			t.Errorf("%s: the problems no longer say which setting:\n%s", name, everything)
+		}
+	}
+
+	// The scheme and the host are what tell one address from another, and are kept.
+	cfg := config.Defaults()
+	cfg.MCP.Servers = []config.MCPServer{{Name: "b", URL: "ftp://user:SECRETPASSWORD@mcp.example.com/p"}}
+	var invalid *config.InvalidError
+	if err := cfg.Validate(); !errors.As(err, &invalid) || !strings.Contains(invalid.Error(), "ftp://mcp.example.com") {
+		t.Errorf("the problem does not say which scheme and host: %v", err)
 	}
 }

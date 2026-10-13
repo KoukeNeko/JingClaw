@@ -438,9 +438,9 @@ func (i *Ingress) say(
 
 // consoleMOTD says what this channel can and cannot do.
 //
-// Posted where the rule applies rather than left in a configuration file on a
-// machine nobody in the channel is sitting at. A boundary somebody has to go
-// and look up is one they will assume the shape of instead.
+// Posted where the rule applies rather than left in the settings of a machine
+// nobody in the channel is sitting at. A boundary somebody has to go and look
+// up is one they will assume the shape of instead.
 func consoleMOTD(binding Binding) string {
 	var out strings.Builder
 

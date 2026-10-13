@@ -5,17 +5,23 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/KoukeNeko/JingClaw/core/internal/home"
 )
 
-// The client subcommands read the configuration before they run, so they can
-// find a daemon that was told to publish itself somewhere other than the
-// default. That step must not reach the daemon, which is told where its
-// configuration is by a flag of its own and may be running on a machine with
-// no default location at all.
-func TestTheDaemonDoesNotInheritTheClientsConfigStep(t *testing.T) {
-	t.Setenv(home.EnvVar, home.None)
+// The client subcommands work out where the daemon is before they run, from the
+// defaults and the environment, and a variable that cannot be read stops them.
+// That step must not reach the daemon, which reads the environment itself, in
+// its own order, and may be asked only to print the example settings by someone
+// whose environment is no use to a client.
+func TestTheDaemonDoesNotInheritTheClientsEnvironmentStep(t *testing.T) {
+	t.Setenv("JINGCLAW_AGENT_MAX_ITERATIONS", "not-a-number")
+
+	// The precondition: the step does fail on this environment, so the daemon
+	// getting past it below is the daemon not running the step.
+	asClient := root()
+	asClient.SetArgs([]string{"session", "list"})
+	if err := asClient.Execute(); err == nil || !strings.Contains(err.Error(), "max_iterations") {
+		t.Fatalf("a client command was not stopped by an environment it cannot read: %v", err)
+	}
 
 	command := root()
 	command.SetArgs([]string{"daemon", "--print-config"})

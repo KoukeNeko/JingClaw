@@ -60,17 +60,11 @@ func newSkillsInstallCommand() *cobra.Command {
 				return err
 			}
 
+			// Recorded in installed.json by the install itself, under the same
+			// lock as everything else that changes it.
 			installer := &skill.Installer{Root: root}
 			locked, err := installer.Install(cmd.Context(), source)
 			if err != nil {
-				return err
-			}
-
-			lock, err := skill.ReadLock(root)
-			if err != nil {
-				return err
-			}
-			if err := skill.WriteLock(root, lock.Record(locked)); err != nil {
 				return err
 			}
 
@@ -177,19 +171,10 @@ func newSkillsRemoveCommand() *cobra.Command {
 				return err
 			}
 
+			// Forgets the record of it too, in the same step.
 			installer := &skill.Installer{Root: root}
 			if err := installer.Remove(args[0]); err != nil {
 				return err
-			}
-
-			lock, err := skill.ReadLock(root)
-			if err != nil {
-				return err
-			}
-			if lock, forgotten := lock.Forget(args[0]); forgotten {
-				if err := skill.WriteLock(root, lock); err != nil {
-					return err
-				}
 			}
 
 			fmt.Fprintf(cmd.ErrOrStderr(),
