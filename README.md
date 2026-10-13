@@ -41,22 +41,26 @@ daemon and the chat gateway together, and gives you a console to watch them
 from. Run it again from another terminal and it says so rather than starting a
 second one.
 
-The first run has no model and no chat account yet, so it tells you what it
-wants and where to put it. Set those in `~/.jingclaw/config.toml`, start it
-again, and talk to it in Discord.
+The first run has no model and no chat account yet. It starts with an offline
+stand-in where the model goes, and says that chat is off until there is a bot
+token. The settings are not a file you edit: they live in the daemon's database,
+and the dashboard is where you change them. Run `jingclaw dashboard`, choose a
+provider and give it a key and a bot token there, restart it (`jingclaw stop`,
+then `jingclaw`), and talk to it in Discord.
 
 ```bash
 jingclaw status      # running, and where
 jingclaw stop        # stop the one that is running
-jingclaw dashboard   # open the dashboard: what is waiting on you, and the settings
+jingclaw dashboard   # open the dashboard: what is waiting on you, the settings, keys and skills
 ```
 
 Prefer a container? [`docs/container.md`](docs/container.md) — the image is on
 GHCR for amd64 and arm64, and carries no settings, no database and no
 credentials of its own. On a platform whose only inputs are a volume and some
 variables, `JINGCLAW_CONFIG`, `JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` each
-carry a whole file in. [`compose.yaml`](compose.yaml) runs it with an Ollama
-beside it.
+carry a whole document in, saved on the first start only; the dashboard cannot
+be reached from inside a container yet. [`compose.yaml`](compose.yaml) runs it
+with an Ollama beside it.
 
 ## What it does
 

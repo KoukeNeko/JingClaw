@@ -8,8 +8,18 @@ docker run -d --name jingclaw -v jingclaw:/var/lib/jingclaw \
   ghcr.io/koukeneko/jingclaw
 ```
 
-The first run against an empty volume comes up, says which credential it
-wants and where to put it, and stops. That message is the setup instructions.
+The first run against an empty volume comes up with every setting at its
+default, says which credential the chat platform wants and where to put it, and
+carries on without chat:
+
+```
+chat is off: the discord bot token: no credential: set DISCORD_BOT_TOKEN, or write it with mode 600 to the file that gateway.discord.token_file names (put that right, then restart: jingclaw stop, then jingclaw)
+```
+
+That message is the setup instructions. The container stays up: the daemon is
+running and only the chat connection is off. In a container, "restart" is
+restarting the container. At the defaults the provider is an offline stand-in
+that echoes, so this proves the container and does nothing else.
 
 ## What lives where
 
@@ -18,9 +28,11 @@ at `/var/lib/jingclaw`, which is what `JINGCLAW_HOME` points at:
 
 | | |
 |---|---|
-| `config.toml` | settings; optional, defaults work |
-| `data/` | the event log, which is the source of truth |
+| `data/jingclaw.db` | the database: the settings, the event log (which is the source of truth), memory, schedules and channel bindings |
+| `data/artifacts/` | stored output, beside the database |
 | `workspace/` | what the agent may read and write |
+| `skills/` | installed skills |
+| `mcp-auth/` | sign-ins to tool servers that use OAuth |
 | `run/daemon.json` | written at start, regenerated, never yours to edit |
 | `*.token`, `*.key` | credentials, mode 600 |
 
@@ -29,18 +41,46 @@ no settings, no database, no workspace and no credentials. There is nothing in
 it that identifies whose deployment it is, which is what makes it safe to
 publish.
 
-`config.example.toml` is at `/usr/share/jingclaw/config.example.toml`. Copy it
-into the volume to start from:
+The settings are not files, in the volume or anywhere. They are three documents
+in the database, `config`, `persona` and `agents`, and the dashboard is the
+only editor. The daemon reads them once, when it starts. A container cannot
+reach the dashboard yet ([below](#the-dashboard)), so a container's settings
+arrive in environment variables, on its first start, and the rest of this page
+is about that.
+
+There is no example file in the image either. The example is the binary's own
+text — it is what a first start saves when nothing else is given — and it
+prints it:
 
 ```
-docker run --rm -v jingclaw:/var/lib/jingclaw --entrypoint sh \
-  ghcr.io/koukeneko/jingclaw \
-  -c 'cp /usr/share/jingclaw/config.example.toml /var/lib/jingclaw/config.toml'
+docker run --rm ghcr.io/koukeneko/jingclaw daemon --print-config > config.toml
 ```
 
-There is deliberately no `config.toml` in the image. One shipped inside
-becomes the operator's by accident, and then quietly stops being read the day
-they write their own.
+The same text is [`config.example.toml`](config.example.toml) in this
+repository. Edit it and give it to the first start as `JINGCLAW_CONFIG`.
+
+There are deliberately no settings in the image. Ones shipped inside would be
+saved by the first start as though the operator had chosen them, and from then
+on could not be told apart from what they did choose.
+
+### A volume from an older image
+
+An older image kept the settings in the volume as `config.toml`, `PERSONA.md`
+and `AGENTS.md`. The first start of this one imports each of them into the
+database and renames it `<name>.imported`; it never deletes one. The start says
+so:
+
+```
+Settings:  database (imported from config.toml)
+```
+
+A file that is there wins over a `JINGCLAW_CONFIG`, `JINGCLAW_PERSONA` or
+`JINGCLAW_AGENTS` for the same document, which is what the existence of the
+file always did. After that, nothing reads the files again; the renamed copy is
+there to be kept or deleted by you. A `config.toml` that sets `server.data_dir`
+or `server.runtime_dir` to somewhere other than where this process keeps them
+is not imported: the start stops and says which variable to give, because
+starting would open a different, empty database.
 
 ## Credentials
 
@@ -54,8 +94,9 @@ docker run --rm -v jingclaw:/var/lib/jingclaw --entrypoint sh \
   -c 'umask 077 && cat > /var/lib/jingclaw/discord.token'
 ```
 
-The names come from the configuration: `token_file` for a gateway,
-`api_key_file` for a provider. Mode 600 is expected and checked.
+The names come from the settings: `gateway.discord.token_file` for a gateway,
+`provider.gemini.api_key_file` for a provider, each a plain file name in the
+top of the volume and never a path. Mode 600 is expected and checked.
 
 **An environment variable** — for a one-off run:
 
@@ -95,6 +136,9 @@ model = "gemma4"
 base_url = "http://host.docker.internal:11434"
 ```
 
+Like every seed, `JINGCLAW_CONFIG` is saved on the first start only; against a
+volume that already has settings it changes nothing.
+
 On Docker Desktop that name resolves and reaches the host, including an
 Ollama listening only on `127.0.0.1` — the desktop VM proxies it, so nothing
 on the host has to be opened up.
@@ -120,11 +164,15 @@ docker compose exec ollama ollama pull gemma4
 ```
 
 The pull is a separate step because models are gigabytes and the image
-carries none. Until it has been done, the daemon says so by name and stops:
+carries none. Until it has been done, the daemon comes up without an agent and
+says so by name:
 
 ```
-error: provider ollama does not serve model "gemma4"; run --list-models to see the options
+Why there is no agent:
+  - provider ollama does not serve model "gemma4"; run --list-models to see the options
 ```
+
+Pull the model, then restart the container: `docker compose restart jingclaw`.
 
 A `:cloud` model needs `ollama signin`, which wants a browser, so those are
 easier on the host than in a container.
@@ -138,7 +186,7 @@ which is why it is not on by default.
 `web.enabled = true` works in this image. Its base is `python:3-slim`, so
 python3 is already on PATH, and the `cloakbrowser` package is installed into
 it — which is what the daemon checks for at startup. A container that cannot
-import it refuses to start, and that is a wall rather than a missing package
+import it runs no agent, and that is a wall rather than a missing package
 when there is nowhere to install anything.
 
 Reading is still off by default. What the image changes is what happens when
@@ -227,11 +275,11 @@ Out of step, everything appears to work: the daemon writes its database into
 the container's own filesystem, the volume sits empty, and the sessions are
 gone when the container is replaced.
 
-**`JINGCLAW_CONFIG` carries the whole configuration file.** Individual
-settings do not survive the trip through an environment: the variables reach
+**`JINGCLAW_CONFIG` carries the whole settings text.** Individual settings do
+not survive the trip through an environment: the variables reach
 `provider.backend` and stop, because a name like `api_key_env` makes any
 deeper underscore ambiguous, and a list of tables like the channel bindings
-has no spelling as a variable at all. So the file goes in whole:
+has no spelling as a variable at all. So the text goes in whole:
 
 ```
 JINGCLAW_CONFIG=[provider]
@@ -252,35 +300,45 @@ tenant_id = "…"
 workspace_id = "default"
 ```
 
-It is written to `$JINGCLAW_HOME/config.toml` on first start, with the same
-permissions a file written by hand would get, and **only if there is not one
-already**. The variable arrives again on every restart; overwriting would
-discard whatever was edited in the volume, on the restart after somebody
-edited it. To change the configuration, change the variable and delete the
-file, or edit the file and leave the variable alone.
+It is saved as the `config` document in the database on the first start, and
+**only if there is none already**. The variable arrives again on every restart;
+saving it again would discard whatever was changed since, on the restart after
+somebody changed it. So changing the variable afterwards changes nothing, and
+neither does removing it.
 
-TOML that will not parse is refused and nothing is written — not the
-configuration and not the other two files either. They are created once and
-never replaced, so a run that wrote one and then refused the next would leave
-a deployment holding a file that fixing the variable can no longer change.
+Text that will not parse, or that parses and would not pass the checks the
+daemon makes when it starts, is refused with the problems named and nothing is
+saved — not the configuration and not the other two documents either. They are
+created once and never replaced, so a run that saved one and then refused the
+next would leave a deployment holding a document that fixing the variable can
+no longer change.
+
+**Changing a setting later** is what the dashboard is for, and a container
+cannot reach it yet. From outside, two things work:
+
+- A variable named for one setting, `JINGCLAW_<SECTION>_<KEY>` — for example
+  `JINGCLAW_PROVIDER_BACKEND` or `JINGCLAW_MEMORY_ENABLED` — is read on every
+  start and wins over the saved text. It reaches the settings that have a
+  section and a key and nothing deeper, for the reason above.
+- Anything else means a new volume with the new text in `JINGCLAW_CONFIG`. That
+  starts an empty database too: the sessions, memory and schedules of the old
+  one do not come with it.
 
 The startup line says which happened:
 
 ```
-Config:  /var/lib/jingclaw/config.toml (created from JINGCLAW_CONFIG)
-Config:  /var/lib/jingclaw/config.toml (created, all defaults)
-Config:  /var/lib/jingclaw/config.toml
+Settings:  database (created from JINGCLAW_CONFIG)
+Settings:  database (created, all defaults)
+Settings:  database (3 documents)
 ```
 
-**`JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` carry the other two files.** The
-configuration is not the only thing a deployment has to bring. `PERSONA.md`
-says who the agent is and `AGENTS.md` says how the project works, and both are
-read from the same directory, so on a platform whose only inputs are a volume
-and some variables they are as unreachable as the configuration was. Every
-start writes them as empty headings when they are absent, so a container
-without these variables comes up with two files to edit rather than none — but
-editing a file inside a container means finding a way in, and the variables
-are the way in that does not need one.
+**`JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` carry the other two documents.** The
+configuration is not the only thing a deployment has to bring. `persona` says
+who the agent is and `agents` says how the project works, and on a platform
+whose only inputs are a volume and some variables they are as unreachable as
+the configuration was: they are written in the dashboard. A deployment started
+without these variables has neither. Nothing is made in their place, and the
+agent runs without that text.
 
 ```
 JINGCLAW_PERSONA=# Who you are
@@ -288,15 +346,15 @@ JINGCLAW_PERSONA=# Who you are
 Answer briefly. Say when you are unsure.
 ```
 
-They follow the same rule as `JINGCLAW_CONFIG`: written on first start, never
-written over one that is already there, `0600`. Nothing validates their
-contents, because a persona has no shape to be wrong.
+They follow the same rule as `JINGCLAW_CONFIG`: saved on first start, never
+saved over one that is already there. Nothing validates their contents,
+because a persona has no shape to be wrong.
 
 | Variable | Becomes | Checked as |
 |---|---|---|
-| `JINGCLAW_CONFIG` | `config.toml` | TOML |
-| `JINGCLAW_PERSONA` | `PERSONA.md` | — |
-| `JINGCLAW_AGENTS` | `AGENTS.md` | — |
+| `JINGCLAW_CONFIG` | the `config` document | TOML, and the daemon's own checks |
+| `JINGCLAW_PERSONA` | the `persona` document | — |
+| `JINGCLAW_AGENTS` | the `agents` document | — |
 
 **A whole document through a single-line form: `base64:`.** Some platforms
 give you one input box per variable and drop the newlines, and a persona
@@ -310,9 +368,9 @@ printf '%s' "$(cat PERSONA.md)" | base64 | tr -d '\n'   # paste with base64: in 
 The prefix is required rather than guessed. Short markdown is often valid
 base64 by accident, so a value that merely looks encoded is written as it
 reads. A value that announces `base64:` and then does not decode is refused
-and the daemon does not start — the alternative is a persona file full of
-line noise that nobody notices for a week. All three variables take the
-prefix, and `JINGCLAW_CONFIG` is checked as TOML after decoding.
+and the daemon does not start — the alternative is a persona full of line
+noise that nobody notices for a week. All three variables take the prefix,
+and `JINGCLAW_CONFIG` is checked as TOML after decoding.
 
 ### The whole thing, assembled
 
@@ -348,7 +406,7 @@ done
 ```
 
 Paste each line's value, `base64:` prefix included, into the box for that
-file's variable. A box that does take newlines needs none of this — the
+document's variable. A box that does take newlines needs none of this — the
 prefix is what says a value is encoded, so an unencoded one is simply used as
 it reads.
 
@@ -359,18 +417,21 @@ docker logs jingclaw | head -12
 ```
 
 ```
-Config:  /var/lib/jingclaw/config.toml (created from JINGCLAW_CONFIG)
+Settings:  database (created from JINGCLAW_CONFIG)
 ```
 
 `(created, all defaults)` on that line means the variable did not arrive, and
-the deployment is running on an empty example. `(created from …)` appears
-once, on the run that wrote the file; every later start shows the path alone,
-because by then the file is whatever is in the volume.
+the deployment is running on the example. `(created from …)` appears once, on
+the run that saved the document; every later start shows how many documents
+there are, because by then they are whatever is in the database.
 
 **Credentials stay variables.** `DISCORD_BOT_TOKEN`, `GEMINI_API_KEY` and the
-rest are read from the environment by name, so they need not go in the file at
-all — which is the better arrangement here, because the file is in the volume
-and the volume is a backup away from somewhere else.
+rest are read from the environment by name, so they need not go in the
+settings at all — which is the better arrangement here. The settings are in the
+database in the volume, with their last twenty versions, and the volume is a
+backup away from somewhere else. A header or an environment value typed into
+`mcp.servers` is in that text as typed; `pass_env` names a variable instead and
+keeps the value out of it.
 
 ### It is a worker, not a web service
 
@@ -420,7 +481,30 @@ The model name is the deployment's, not the machine's, so the same
 configuration works on a laptop pointed at a local daemon and on a platform
 pointed at the hosted one.
 
-### Two settings on the platform, not in the file
+### The dashboard
+
+The dashboard is a page the daemon serves on the address of its API, and inside
+the container that is loopback. `docker exec jingclaw jingclaw dashboard`
+prints a link, and only something inside the container could open it: a port
+published with `-p` does not reach a loopback address, the port is a free one
+chosen at each start (`server.addr` defaults to port 0), and `server.addr` is
+refused unless it is on loopback. There is no supported way to reach it from the
+host yet.
+
+So the dashboard's work is done another way in a container:
+
+- **Settings and the two instruction documents** are seeded through the
+  environment, on the first start, as above.
+- **Credentials** are variables, or files written into the volume as above.
+- **Reasons the agent did not start** are in `docker logs`, and
+  `docker exec jingclaw jingclaw status` shows `repair` as the mode. The daemon
+  says "Fix it in the dashboard"; in a container that advice cannot be followed.
+  Most of what causes it is the environment — a missing credential, a model
+  the provider does not have, a sandbox the machine cannot provide — and is put
+  right there, followed by restarting the container. A saved setting that is
+  itself the cause can be overridden with a variable named for it, as above.
+
+### Two settings on the platform, not in the settings
 
 **Do not let it scale to zero.** JingClaw holds a socket open to the chat
 platform and a run in progress is a run in memory as well as in the log.
@@ -444,6 +528,45 @@ Running as root instead would avoid this and is not offered. The agent runs
 commands somebody approved, which is a different thing from commands somebody
 wrote, and root in a container is one careless flag away from root on the
 host.
+
+## Backing up
+
+Everything is in the volume, and the database in it is SQLite in
+write-ahead-log mode. While the daemon runs, recent commits can be in
+`data/jingclaw.db-wal` and not yet in `data/jingclaw.db`, so a copy of
+`jingclaw.db` alone from a running container can leave them out or catch the
+file between two states. There are two ways to do it that are right.
+
+**Stopped.** `docker stop` the container and copy the whole volume. Nothing is
+writing, and the `-wal` and `-shm` files beside the database, if there are any,
+go with it. Copy them together or not at all.
+
+**Running.** Ask SQLite for the copy. It takes a consistent one while the
+daemon writes, and the image has python3, which has SQLite's backup built in:
+
+```
+docker exec jingclaw sh -c 'umask 077 && python3 -c "
+import sqlite3
+live = sqlite3.connect(\"/var/lib/jingclaw/data/jingclaw.db\")
+live.backup(sqlite3.connect(\"/tmp/jingclaw-backup.db\"))
+"'
+docker cp jingclaw:/tmp/jingclaw-backup.db .
+docker exec jingclaw rm /tmp/jingclaw-backup.db
+```
+
+That is the database only. Stored output is in `data/artifacts/`, and the
+workspace, skills, `mcp-auth/` and the credential files are not in the database
+at all.
+
+**To restore** a database copy, stop the container and put the copy in place as
+`data/jingclaw.db` with no `-wal` or `-shm` file beside it, owned by uid 10001
+and mode 600. SQLite replays a write-ahead log it finds beside a database, and
+one left by the database being replaced does not belong to the copy.
+
+Treat a copy like the credentials. It holds every conversation, and the
+settings with their last twenty versions each: a secret typed into an MCP
+server's headers or environment is in every version saved while it was there,
+until twenty later saves push those out.
 
 ## Stopping it
 
@@ -478,16 +601,37 @@ services:
     stop_grace_period: 30s
 ```
 
+**What that gets you today is less than it says.** The signal reaches the
+supervisor, and the supervisor started its parts on the context that signal
+cancels, which kills them at once rather than waiting for them. Seen on this
+image: the daemon is gone within milliseconds of `docker stop`, with no
+shutdown line in `docker logs`, and `run/daemon.json` is left in the volume.
+SQLite recovers its write-ahead log the next time the database is opened, and
+a process that is killed, as against a machine that loses power, loses nothing
+it had committed.
+
+The leftover file is the problem, as far as it was traced. A container's process
+ids repeat from one start to the next, so the file can name the new daemon's own
+id before the new daemon has written its own, and the supervisor appears to
+take that for the daemon being up: it starts the gateway against the old port,
+and the run ends with the gateway's "connection refused". Two of three new
+containers started on a volume stopped that way failed like this here, and a
+stopped container started again with `docker start` came up. Removing
+`run/daemon.json` from the volume while no container is running cleared it once.
+This is a known hole, in [`STATUS.md`](STATUS.md#not-done).
+
 ## The sandbox
 
 Off by default, in the image as everywhere else, and left off here.
 
 Turning it on (`[sandbox] enabled = true`) does not work in the image: the
-daemon refuses to start and says so. The sandbox always hides the deployment's
-own directory from a command, and Landlock — all Linux has — grants access
-rather than removing it, so it cannot do that. A sandbox somebody believes in
-and does not have is worse than none, so this is a refusal at startup rather
-than commands that run unconfined. See [`configuration.md`](configuration.md#sandbox).
+daemon comes up without an agent and says so. The sandbox always hides the
+deployment's own directory from a command, and Landlock — all Linux has —
+grants access rather than removing it, so it cannot do that. A sandbox somebody
+believes in and does not have is worse than none, so no agent runs, rather than
+commands that run unconfined. `JINGCLAW_SANDBOX_ENABLED=false` brings the agent
+back without touching the saved settings. See
+[`configuration.md`](configuration.md#sandbox).
 
 ## What this is not
 

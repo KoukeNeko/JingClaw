@@ -25,6 +25,9 @@ jingclaw daemon --provider=gemini --model=gemma-4-31b-it
 jingclaw gateway
 ```
 
+The gateway reads no settings of its own: it asks the running daemon for the
+part it needs, so the daemon goes first.
+
 `~/.jingclaw/workspace` is the only directory tools can reach. Paths are
 resolved and symlink-checked against it before any I/O, so neither traversal
 nor a symlink pointing elsewhere gets out.
@@ -41,15 +44,15 @@ jingclaw deny <approval-id>
 The pause is durable. A run waiting for an answer survives a daemon restart and
 can be answered hours later, by a client that never saw the original prompt.
 
-The key comes from `GEMINI_API_KEY`, or a mode-600 file at
-`gemini.key` under the config directory. `--list-models` prints what the
-provider actually serves; a `--model` it does not serve fails at startup
+The key comes from `GEMINI_API_KEY`, or a mode-600 file named `gemini.key` in
+`~/.jingclaw`, which the dashboard can write. `--list-models` prints what the
+provider actually serves; a `--model` it does not serve is reported at startup
 rather than on the first message.
 
 It binds an ephemeral port on loopback and writes a `0600` discovery file
-holding the address and a bearer token; the CLI finds it from there. State
-lives in `jingclaw.db` under the user config directory, or wherever
-`--data-dir` points.
+holding the address and a bearer token; the CLI finds it from there. State,
+the settings included, lives in `jingclaw.db` under `data/` in `~/.jingclaw`, or
+wherever `--data-dir` points.
 
 Then create a session and follow it:
 
@@ -99,9 +102,6 @@ The daemon owns the run, so detaching does not stop it. Reattach with
 is dense within a session and a client that asks for something older than what
 is kept is told to resync rather than handed a conversation missing its middle.
 
-A console — one scrolling log across every session with a command line at the
-bottom, the shape a game server has — is the next thing being built.
-
 ## The dashboard
 
 ```bash
@@ -110,8 +110,11 @@ jingclaw dashboard
 
 Opens a page in your browser, served by the daemon on the same loopback
 address as everything else. It shows what is waiting on you and lets you
-approve, refuse or answer it; lists sessions and their runs; and edits the
-settings and the two instruction files without opening them.
+approve, refuse or answer it; lists sessions and their runs; and is where the
+settings are edited. They are not files: they are three documents in the
+daemon's database, `config`, `persona` and `agents`, and this page is the only
+editor. The page is written in Traditional Chinese, and every setting shows its
+key (`provider.backend`) beside its name.
 
 It is not a second client at parity with the terminal, and it does not carry a
 conversation: that stays in the chat channel. An earlier web console was
@@ -124,20 +127,106 @@ The link `jingclaw dashboard` prints works once, for a minute. A browser is not
 given the credential the command line uses; it trades the link for one of its
 own, kept only in that tab, which ends when the daemon stops or after twelve
 hours. Run the command again to let another browser in, or the same one after a
-restart.
+restart. It cannot be reached from inside a container yet: the daemon listens
+on loopback there and nothing publishes that, so a container's settings come in
+through `JINGCLAW_CONFIG`, `JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` on its first
+start, and [`container.md`](container.md) says how.
 
-Editing settings changes the file, and only the lines you changed: comments,
-order and settings this version does not know are left as they are, and the
-file it replaced is kept beside it as `config.toml.bak.1`, with two older ones
-behind it. The daemon reads settings when it starts, so a change takes effect
-after a restart — `jingclaw stop`, then `jingclaw`. The page says which
-settings are written but not yet in effect, and which the file cannot change
-because an environment variable or a flag decides them. The two instruction
-files are read again on every run and need no restart.
+### Settings
 
-A change that would stop the daemon starting is refused with the daemon's own
-explanation, by the same check it runs at startup. A file edited somewhere else
-after the page read it is not written over.
+Each section of `config` is a form, and a save writes only the lines you
+changed: comments, order and settings this version does not know are left as
+they are. A setting that an environment variable or a flag decides is shown as
+locked, with what decides it, because a change to the saved text would do
+nothing. `server.data_dir` and `server.runtime_dir` are not offered at all: they
+say where the database is, so they are given when the daemon starts
+(`--data-dir`, `JINGCLAW_SERVER_DATA_DIR`, `JINGCLAW_SERVER_RUNTIME_DIR`).
+
+The two instruction documents, `persona` (who the agent is) and `agents` (how
+this project is worked on), are plain text with an editor each, and the whole of
+`config` is there too under advanced, as the raw text that is stored. A change
+that fails the daemon's own check of the settings, the one it runs at startup,
+is refused with its explanation. That check is of the settings alone: a missing
+key, a missing package or the sandbox on a machine that cannot hold it show only
+when the daemon starts (see Repair mode, below). A document saved from
+somewhere else while you were editing it is not written over unseen: the page
+says so and loads the newer text, and the version you replace stays in the
+history.
+
+### Saved, not running yet
+
+The daemon reads all three documents once, when it starts. A saved change shows
+as saved and not running yet, across the top of the page and next to the
+document, until the daemon is restarted: `jingclaw stop`, then `jingclaw`. The
+page compares what is saved with what the running process started from, so the
+mark is there for as long as it is true. A restart ends the browser's access to
+the dashboard as well; run `jingclaw dashboard` again.
+
+### Versions
+
+Every save that changes a document is kept, and the last 20 of each can be read
+in full. The history page shows when each was saved and where it came from, how it
+differs from what is saved now, and restores it, which is a new save and so goes
+through the same check. Taking a secret out of the current text does not take
+it out of the old ones: a key typed into an MCP server's headers or environment
+is in every version saved while it was there, until 20 later saves push those
+out. Put a key in `pass_env`, or in a credential file, and it is in none of
+them.
+
+### Repair mode
+
+If the saved settings cannot be used, or the agent cannot be built from them
+and the environment (a key that is missing, a model the provider does not
+serve, a text that does not read), the daemon does not exit. It stays up
+without an agent and serves only what is needed to put that right, so the page
+opens on a list of what is wrong, each with its fix and a way to the setting or
+key it is about. Conversations, approvals and schedules are not there; nothing
+is running to serve them. The terminal says so too: `jingclaw` prints `agent not
+running`, `jingclaw status` shows the mode, and `jingclaw dashboard` lists the
+problems before it prints the link. A setting that a variable or a flag decides
+is fixed there, not on the page. Fix it, then `jingclaw stop` and `jingclaw`:
+there is no restart from the page.
+
+### Keys
+
+A credential comes from an environment variable that a setting lists or, when
+there is none, from a file in `~/.jingclaw` that a setting names (`gemini.key`,
+`discord.token`). Under each such file setting the page says where the key would
+come from, what is in the way (a file that others can read is refused, not used),
+and lets you set or replace it, remove it, or tighten its mode. A key is typed
+into a password field and written to the file readable by its owner alone; it is
+never shown again, and nothing the daemon returns carries a key, its length, a
+prefix or a hash. A write replaces the file with no backup. Like the settings, a
+key is read when its process starts, so a changed one is saved and not running
+yet.
+
+### Skills
+
+A skill is a directory in `~/.jingclaw/skills`. The page adds one from a git
+source written `git:<url>#<40-hex commit>[:path]`: a commit, because a branch or
+a tag is a name somebody else can move. The fetch goes to a staging area and
+installs nothing. You then read the whole of SKILL.md, every file, where it came
+from and, if it replaces one, how it differs from the installed one, and only
+then activate it, against the digest of what you were shown, so a skill that
+changed after it was staged cannot be activated. Installed skills can be removed,
+and the list says which were placed by hand and which have been edited since.
+`jingclaw skills` installs, lists and removes them from a terminal too. A skill
+grants nothing: what it tells the agent to do goes through the same checks and
+approvals as anything else.
+
+### Memory, channels and schedules
+
+The memory page lists what the agent believes and where each belief came from,
+and forgets one. The channels page lists which channels may reach the agent and
+who may talk to it there, and adds or removes a binding; both take effect at
+once. A channel the settings declare is bound again at every start, so removing
+it here lasts only until the next one. Who may approve cannot be set from the
+page: that is `approvers` in `gateway.discord.channels`. A new schedule is a
+time (five cron fields, or `@hourly`, `@daily`, `@weekly`, `@monthly`), what to
+do, a time zone, and whether firings missed while the daemon was down run once or
+not at all. It runs with nobody watching, so it can read and search and cannot
+write, run commands or remember, and its answer stays in its own conversation.
+Schedules can be paused, resumed and deleted.
 
 ## Who is talking
 
@@ -413,7 +502,17 @@ invents collisions between tools that differ only in the part that was cut off.
 
 **Nothing is inherited that was not named.** The daemon's environment holds
 your provider credentials. A server gets `PATH` and the like, whatever `env`
-sets literally, and whatever `pass_env` names — nothing else.
+sets literally, and whatever `pass_env` names — nothing else. What `env` and
+`headers` set literally is kept in the saved settings as typed, and in their
+older versions; `pass_env` keeps a secret out of them.
+
+A server behind an authorization server (`oauth = true`, which only a url server
+can be) is signed in to once from a terminal, with `jingclaw mcp login <name>`.
+`jingclaw mcp list` says which servers still need it and `jingclaw mcp logout
+<name>` forgets a session. All three ask the running daemon which servers are
+saved, so it has to be running. The daemon never opens a browser itself, since
+nobody is watching it, and a session that has run out is reported rather than
+left to block a run.
 
 A server that will not start is logged and skipped rather than taken as a
 reason to refuse to run, and the banner says how many of how many answered: a

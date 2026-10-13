@@ -62,7 +62,7 @@
 
 - 沒有互動、響應式、動效；首屏之外的區段（`tools`、`sandbox`、`mcp.servers`、`gateway.channels` 等）沒有設計。
 - 只在 1440×900 的 Chrome（Linux，Noto CJK 字型）看過。macOS 上會換成 PingFang／Songti／SF Mono，字寬會有差異。
-- `docs/roadmap.md` 仍寫「web client 不做」，選定方向後要改。
+- `docs/roadmap.md` 仍寫「web client 不做」，選定方向後要改。（第 02 輪已改：儀表板是例外，不是對等的用戶端。）
 - 標竿的截圖是第三方公開示範站的畫面，只作拆解參考，沒有放進版本庫。
 
 
@@ -70,20 +70,20 @@
 
 ## 第 02 輪：做成真的
 
-選定「值班台」，然後做成 daemon 內建的頁面。程式在 `core/internal/webui/`，用 `jingclaw dashboard` 進入。這一輪不是原型：頁面、設定服務、配對、寫入設定檔都是真的，跑在真的 daemon 上。第 01 輪留下的這個資料夾只剩設計紀錄：三個方向的首屏。
+選定「值班台」，然後做成 daemon 內建的頁面。程式在 `core/internal/webui/`，用 `jingclaw dashboard` 進入。這一輪不是原型：頁面、設定服務、配對、存設定都是真的，跑在真的 daemon 上。第 01 輪留下的這個資料夾只剩設計紀錄：三個方向的首屏。這一輪當時把設定寫進 `config.toml`；之後設定搬進了資料庫，下面談到設定檔和備份檔的地方已經改成現在的樣子，變化列在最後一節。
 
 ### 做了什麼
 
-- **頁面：** 對話看板（等你處理、狀態燈、近 24 小時時間軸、模型切換、中斷、排程）、單一對話（執行紀錄、它的排程）、設定抽屜（13 個區段、145 個鍵、人格與指示兩個檔案、搜尋）。無建置，Alpine 加上一支 API 小檔。
+- **頁面：** 對話看板（等你處理、狀態燈、近 24 小時時間軸、模型切換、中斷、排程）、單一對話（執行紀錄、它的排程）、設定抽屜（13 個區段、145 個鍵、人格與指示兩份文件、搜尋）。無建置，Alpine 加上一支 API 小檔。
 - **設定服務：** `ConfigService`（讀、檢查、寫、讀寫兩個指示檔）。檢查用的就是 daemon 啟動時那一套，所以「這樣可以」和「這樣能啟動」是同一句話。
-- **寫入：** 只改被指定的那幾行，註解、順序、這版不認得的設定都原樣保留。寫完之後再比對一次「沒有被要求的設定都沒變」。原子替換，舊檔留成 `config.toml.bak.1`（共三份），檔案在你開啟之後被改過就拒絕。
+- **寫入：** 只改被指定的那幾行，註解、順序、這版不認得的設定都原樣保留。寫完之後再比對一次「沒有被要求的設定都沒變」。改的是資料庫裡那份設定文字；有改動的儲存會留下一個版本（每份文件留最近 20 版，取代了當時 `config.toml.bak.1` 起共三份的備份檔），文字在你開啟之後被別處存過就拒絕。
 - **進入：** `jingclaw dashboard` 給一次性、一分鐘的連結。瀏覽器拿它換自己的憑證，不會拿到操作者的憑證；碼放在網址片段，讀完就從網址上拿掉。憑證只放在那個分頁、daemon 停止或十二小時後失效。
 - **架構檔：** `schema.js` 是 JSON，`webui_test.go` 對照 `config.Settings()` 驗證：缺 0、多 0、預設值不符 0，每個選項都被 daemon 接受。我故意弄壞三處確認測試會抓到。
 
 ### 驗證過
 
-- 單元測試：設定寫入器（含點分隔鍵、缺少的區段、資料表陣列、特殊字元、沒有結尾換行）、原子寫入與備份輪替、伺服器、配對（一次性、逾時、上限）、頁面標頭與內嵌檔案、覆寫判斷。
-- `scripts/verify-dashboard.sh`：真的 daemon，連結不含憑證、配對碼只能用一次、換了主機名稱就進不來、閘道憑證碰不到設定、寫入只改該改的行並留備份、舊版本的寫入被拒、daemon 重啟後瀏覽器憑證失效。已加進 `verify-all.sh`。
+- 單元測試：設定寫入器（含點分隔鍵、缺少的區段、資料表陣列、特殊字元、沒有結尾換行）、比對寫入與版本保留、伺服器、配對（一次性、逾時、上限）、頁面標頭與內嵌檔案、覆寫判斷。
+- `scripts/verify-dashboard.sh`：真的 daemon，連結不含憑證、配對碼只能用一次、換了主機名稱就進不來、閘道憑證碰不到設定、寫入只改該改的行並留下舊版本、舊版本的寫入被拒、daemon 重啟後瀏覽器憑證失效。已加進 `verify-all.sh`。
 - 真的 Chrome 對著種了資料的 daemon 操作過：核准、回答選擇題、daemon 的驗證訊息出現在欄位上、寫入並對照檔案。
 
 ### 與第 01 輪不同的決定
@@ -97,22 +97,22 @@
 ### 已知限制
 
 - 看板只追蹤最近更新的 30 段對話；更舊的對話如果停在等你，不會出現。
-- 沒有網頁對話、建立排程、通道綁定、記憶管理，也沒有對話改名、刪除、封存（沒有 RPC）。
+- 沒有網頁對話，也沒有對話改名、刪除、封存（沒有 RPC）。建立排程、通道綁定、記憶管理，第 02 輪當時沒有，現在頁面有了。
 - 頁面用 Alpine，需要 `'unsafe-eval'` 的 CSP。一旦有任何地方把 agent 或使用者寫的文字當成標記放進頁面，就等於讓它在管理介面裡執行程式碼。目前所有這類文字都用 `x-text`；改用 Alpine 的 CSP 版本需要重寫模板。
-- `GetConfig` 會把設定檔的內容整份給瀏覽器，包括 `mcp.servers` 的 `headers` 與 `env`（授權標頭常寫在那裡）。操作者本來就能讀這個檔，但它會出現在頁面的記憶體裡。要遮蔽的話，寫回時要有防止把遮蔽字樣寫進檔案的保護（OpenClaw 就有）。
+- `GetConfig` 會把儲存的設定文字整份給瀏覽器，包括 `mcp.servers` 的 `headers` 與 `env`（授權標頭常寫在那裡）。它出現在頁面的記憶體裡，也留在版本紀錄裡：從現在的文字拿掉，舊版本還在，要等之後 20 次儲存把它擠出去。要遮蔽的話，寫回時要有防止把遮蔽字樣存進文字的保護（OpenClaw 就有）。金鑰放在 `pass_env` 或憑證檔，就不在文字裡。
 - 瀏覽器憑證只在記憶體，daemon 重啟就失效，要再跑一次 `jingclaw dashboard`。
 
 ### 這一路核實過、但沒有修改的程式碼問題
 
 以下我都在程式碼裡看過。
 
-- **Linux 上開 `sandbox.enabled` 會擋掉所有 `exec_command`。** `daemon/main.go` 一律把部署目錄放進不可讀名單，而 Landlock 無法隱藏目錄，只要名單非空就拒絕（`sandbox/landlock_linux.go`）。範例設定寫「macOS only so far」，其實 Linux 有實作，只是目前跑不起來。
+- **Linux 上開 `sandbox.enabled` 會擋掉所有 `exec_command`。** `daemon/main.go` 一律把部署目錄放進不可讀名單，而 Landlock 無法隱藏目錄，只要名單非空就拒絕（`sandbox/landlock_linux.go`）。範例設定寫「macOS only so far」，其實 Linux 有實作，只是目前跑不起來。（後來 60940bb 改成啟動時就拒絕；設定改放資料庫之後，拒絕的結果是沒有 agent 的修復模式，儀表板與設定仍然可用。）
 - **頻道的 `users` 與 `roles` 都留空，實際是對所有進得了頻道的人開放**（`gateway.OpenToTheRoom`，範例設定也這樣寫）。**已修正，行為本身沒有改。** 當時 `config.go` 的 `Channel` 結構註解（`Both empty means nobody`）與 `docs/configuration.md`（`Both empty permits nobody`）寫的是相反的；範例與實作一致、說明文字錯了，這是安全相關的落差。現在這兩處，加上 `Binding` 欄位註解、`docs/roadmap.md`，以及 `jingclaw bindings` 的說明、警告與列表輸出，都已改成與實作一致。
 - `provider.anthropic.api_key_env` 預設是空的；範例設定把 `["ANTHROPIC_API_KEY"]` 當預設寫出來。選 `anthropic` 後端而沒填，環境變數不會被讀。
 - `ollama.think` 範例註解寫可以用 `"true"`／`"false"`，但驗證只接受 `off`、`on`、`low`…`max`。
 - `mcp.servers[].level`：`tool` 套件有 `network_read`，設定的驗證不收。
 - `web.max_links = 0`：驗證訊息說「0 代表不列連結」，實作把 0 當成預設 50。
-- `docs/configuration.md` 還在講已經不存在的 `[model]`、`agent.name`、`agent.persona`。
+- `docs/configuration.md` 還在講已經不存在的 `[model]`、`agent.name`、`agent.persona`。（已改。）
 
 以下由子代理讀程式碼得出，**我沒有逐項核實**，要動之前請再確認：Telegram 轉接層把聊天 id 同時當 `tenant_id` 與 `channel_id`，所以綁定時兩者要填一樣；Telegram 目前沒有核准按鈕，所以 `approvers` 對它沒作用；`consoles` 的 `approvers` 不會被看；`tools.max_command_timeout` 超過時是壓回上限而不是拒絕；`context.keep_after_fold` 壓縮後會刪除舊事件，和 `docs/using-it.md` 的「Nothing is deleted」不同。
 
@@ -123,4 +123,21 @@
 - 重啟：要有監督者的重啟協議，網頁才能提供「寫入並重啟」。
 - 中文的驗證訊息與核准「影響」：目前是 daemon 的英文原文，要翻譯得先讓 `Problem` 帶可翻譯的代碼。
 - 網頁對話、遠端存取（Tailscale 之類，需要信任代理的驗證模式）。
-- 修掉 Linux 沙盒擋掉所有指令的問題（見上面）。
+- 修掉 Linux 沙盒擋掉所有指令的問題（見上面）。60940bb 把它改成啟動時拒絕，讓 Linux 真的能用沙盒還沒做。
+- 在容器裡用儀表板：daemon 只聽容器內的 loopback，容器外的瀏覽器碰不到。容器目前靠 `JINGCLAW_CONFIG`、`JINGCLAW_PERSONA`、`JINGCLAW_AGENTS` 在第一次啟動時種下設定，見 `docs/container.md`。
+
+---
+
+## 之後：設定搬進資料庫（2026-10-14）
+
+第 02 輪寫的設定檔和備份檔，現在都不成立。留著上面的紀錄，是因為它記的是當時做了什麼；現在的樣子是：
+
+- **設定是資料庫裡的三份文件。** `config`、`agents`、`persona` 各是一份帶版本的文字，儀表板是唯一的編輯處。`config.toml`、`AGENTS.md`、`PERSONA.md` 不再是檔案；舊版留下的在第一次啟動時匯入，並改名成 `<名稱>.imported`，不會刪。容器靠 `JINGCLAW_CONFIG`、`JINGCLAW_PERSONA`、`JINGCLAW_AGENTS` 在第一次啟動時種下，之後不會被覆蓋。
+- **只在啟動時讀。** 儲存之後，頁面把那份文件標成「已儲存 · 待重啟」，比對的是儲存的文字和執行中的程序啟動時讀到的文字。重啟是在終端機執行 `jingclaw stop`，再執行 `jingclaw`；重啟後這個瀏覽器的連線失效，要再執行 `jingclaw dashboard`。指示檔「每次執行重新讀」的說法本來就是錯的，已經全部改掉。
+- **版本紀錄。** 每份文件留最近 20 版，可以讀、可以還原；還原是一次新的、要過同一套檢查的儲存。
+- **`server.data_dir` 與 `server.runtime_dir` 不再是設定。** 它們說的是資料庫和探索檔在哪裡，設定在資料庫裡，所以只能在啟動時給：`--data-dir`、`JINGCLAW_SERVER_DATA_DIR`、`JINGCLAW_SERVER_RUNTIME_DIR`。文字裡寫了也會被忽略，頁面不讓你存。
+- **修復模式。** 設定讀不進來，或 agent 建不起來（金鑰不見了、供應端沒有那個模型、機器給不了沙盒），daemon 不再結束。它只提供修好這件事要用的服務，頁面一開始就列出哪裡錯了；沒有重啟鍵，一樣要 `jingclaw stop` 再 `jingclaw`。
+- **金鑰檔與技能還是檔案，但在頁面上管理。** 金鑰只寫不讀，沒有任何回應帶著值、長度、開頭或雜湊。技能先取得、完整看過，再按著看過的摘要安裝。
+- **頁面多了** 金鑰、技能、建立排程、記憶、通道綁定。
+
+沒做的：重啟、不重啟就生效、遮蔽 `mcp.servers` 的 `headers` 與 `env`、在容器裡進得了儀表板。上面第 02 輪的瀏覽器實測是設定檔還在的時候做的；設定搬進資料庫之後，這份筆記沒有記錄任何一次在真的瀏覽器上的實測。

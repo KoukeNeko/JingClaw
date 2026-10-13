@@ -42,20 +42,22 @@ jingclaw
 gateway，並給你一個 console 看著它們。在另一個終端機再跑一次，它會說已經有
 一個在跑，而不是再開第二個。
 
-第一次執行還沒有模型、也還沒有聊天帳號，所以它會告訴你它要什麼、該放哪裡。
-把那些寫進 `~/.jingclaw/config.toml`，再啟動一次，就可以在 Discord 跟它說話。
+第一次執行還沒有模型、也還沒有聊天帳號。它會先用一個離線的替身代替模型，並說明在
+有 bot token 之前聊天是關著的。設定不是讓你編輯的檔案：它們存在 daemon 的資料庫裡，
+要改就到儀表板。執行 `jingclaw dashboard`，在那裡選好 provider、填入金鑰和 bot
+token，重啟一次（`jingclaw stop`，再 `jingclaw`），就可以在 Discord 跟它說話。
 
 ```bash
 jingclaw status      # 有沒有在跑，跑在哪
 jingclaw stop        # 停掉正在跑的那個
-jingclaw dashboard   # 開啟儀表板：有什麼在等你，以及設定
+jingclaw dashboard   # 開啟儀表板：有什麼在等你，以及設定、金鑰和技能
 ```
 
 想用容器？看 [`docs/container.md`](docs/container.md)——image 放在 GHCR，
 amd64 和 arm64 都有，而且裡面沒有設定、沒有資料庫、也沒有任何憑證。如果平台
 只給你一個掛載的 volume 和一串環境變數，`JINGCLAW_CONFIG`、`JINGCLAW_PERSONA`
-和 `JINGCLAW_AGENTS` 各帶一整份檔案進去。[`compose.yaml`](compose.yaml)
-則是連 Ollama 一起跑起來的整套。
+和 `JINGCLAW_AGENTS` 各帶一整份文件進去，只在第一次啟動時存下；容器裡目前還連不到
+儀表板。[`compose.yaml`](compose.yaml) 則是連 Ollama 一起跑起來的整套。
 
 ## 它做什麼
 

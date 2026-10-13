@@ -1,10 +1,11 @@
 # JingClaw as an image.
 #
 # The image is the program. A volume mounted at JINGCLAW_HOME is the
-# deployment: settings, the event log, the workspace, and any credentials
-# kept as files. Nothing about a deployment is baked in here — a settings
-# file shipped inside becomes the operator's by accident, and then quietly
-# stops being read the day they write their own.
+# deployment: the database, which holds the settings and the event log, the
+# workspace, and any credentials kept as files. Nothing about a deployment is
+# baked in here — settings shipped inside would be saved by the first start as
+# though the operator had chosen them, and from then on could not be told
+# apart from what they did choose.
 
 FROM golang:1.26-bookworm AS build
 
@@ -78,11 +79,10 @@ RUN useradd --system --uid 10001 --create-home --home-dir /home/jingclaw \
 # What reading a page needs, and the largest thing in this image by far.
 #
 # web.enabled is off by default and this changes nothing about that. What it
-# changes is what happens when somebody turns it on: the daemon refuses to
-# start without an interpreter that can import the package, which in a
-# container is a wall rather than a missing package — an image carries what it
-# carries, and the operator reading "cannot import cloakbrowser" has nowhere
-# to install it.
+# changes is what happens when somebody turns it on: the daemon builds no agent
+# without an interpreter that can import the package, which in a container is a
+# wall rather than a missing package — an image carries what it carries, and
+# the operator reading "cannot import cloakbrowser" has nowhere to install it.
 #
 # System-wide, because this base's python is under /usr/local and carries no
 # externally-managed marker, so pip installs into the python that is already
@@ -97,7 +97,6 @@ RUN pip install --no-cache-dir cloakbrowser \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /out/jingclaw /usr/local/bin/jingclaw
-COPY docs/config.example.toml /usr/share/jingclaw/config.example.toml
 
 # The browser cloakbrowser drives is NOT in this image, and must not be.
 #

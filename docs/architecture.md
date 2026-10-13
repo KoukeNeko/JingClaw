@@ -72,6 +72,18 @@ These are load-bearing. Breaking one is a design change, not a refactor.
 13. **Credentials never reach a log.** They load from an environment variable or
    a mode-600 file into a type whose `String`, `Format` and `MarshalJSON` all
    redact.
+14. **Settings are documents, not events.** The settings and the two
+   instruction documents (`config`, `agents`, `persona`) are three versioned
+   rows in the store, each kept as the text it was given, with its last twenty
+   versions. They are read once, when the daemon starts, so a saved change is
+   not running until the next start. Only `internal/control`, for a save a
+   client asks for, and the daemon's start, which gives a document that has no
+   row its first text, write them. A run, a tool or an adapter does not: what
+   decides what the agent may do is not something the agent's own work can
+   change.
 
-`internal/architecture` asserts rules 3–4 mechanically: the CLI cannot import
-the runtime, and the runtime cannot import generated protobuf.
+`internal/architecture` asserts rules 3–4 and 14 mechanically: the CLI cannot
+import the runtime, the runtime cannot import generated protobuf, and the only
+code that calls `PutDocument` or `SeedDocuments` is the control plane, the
+daemon's start and the store's own contract tests. Rule 14 is asked of the
+calls and not of the imports, because the runtime imports the store as well.

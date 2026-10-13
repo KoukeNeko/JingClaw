@@ -1,6 +1,6 @@
 # Where JingClaw is
 
-Updated 2026-09-02.
+Updated 2026-10-14.
 
 ## Done
 
@@ -781,6 +781,75 @@ search by words. `TestRealRecallWithEmbeddings`, against that model: 17 of
 17 right first when asked and 11 of 17 unasked, against 7 by words alone, and
 no unrelated turn given a note.
 
+**2026-10-14 — the settings are documents in the database, and the dashboard
+is their only editor.** This supersedes what the entries above say about
+`config.toml`, `AGENTS.md`, `PERSONA.md`, `--config` and files "meant to be
+edited"; they were true when written and are not now. The three are rows of a
+`documents` table (migration 0020), each kept as the text it was given, with its
+last twenty versions (`document_versions`) replacing the `.bak.1`–`.bak.3`
+ring, and the database file is created mode 600, because it now holds the
+settings, MCP header and environment values among them. `--config`,
+`config.EnsureFile`, the stub `AGENTS.md` and `PERSONA.md` every start used to
+write, and the settings file's backups are gone. That the instruction files are read on every run, as the
+entry on identity has it, was already wrong: they were read when the daemon
+started. All three documents are read once, then, and a saved change shows as
+saved and not running yet — the hash of the saved text against the hash of the
+text the process started from — until `jingclaw stop` and `jingclaw`. A restart
+also ends the browser's access to the dashboard.
+
+`JINGCLAW_CONFIG`, `JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` keep their meaning
+and their rule, with a row where there was a file: whole documents, an optional
+`base64:` prefix, all or nothing, applied to a document that has no row and
+never over one that has. A document somebody emptied is an empty row, not a
+missing one, so a seed does not bring back what they removed. A `config.toml`,
+`AGENTS.md` or `PERSONA.md` from an older version is imported once by the first
+start, wins over the variable as its existence always did, and is renamed
+`<name>.imported` and never deleted; an old `config.toml` that sets
+`server.data_dir` or `server.runtime_dir` to somewhere this process is not
+using stops the start and says which variable to give, because starting would
+open a different, empty database. Those two keys are no longer settings, since
+the settings are in the database: `--data-dir`, `JINGCLAW_SERVER_DATA_DIR` and
+`JINGCLAW_SERVER_RUNTIME_DIR` give them, a line for either in the text is
+ignored, and the dashboard refuses to save one.
+
+When the saved settings cannot be used, or the agent cannot be built from them
+and the environment — a key that is missing, a model the provider does not
+serve, a sandbox the machine cannot provide — the daemon no longer exits. It
+runs in repair mode: the same credentials and host check, on a loopback listener
+whatever `server.addr` says, serving the settings, the credentials and the
+pairing of a browser and nothing that runs an agent, and answering 404 for the
+rest. The discovery file says `mode: repair`,
+`jingclaw status` shows it, `jingclaw dashboard` lists what is wrong, and the
+supervisor starts no gateway and no console. A database that will not open is
+still fatal. This replaces the "refuses to start" of the entry on the sandbox
+below. The gateway no longer reads a file either: it asks the running
+daemon for its part (`GetGatewaySettings`, gateway scope), and one that cannot
+start for a reason in the settings or a credential exits 78, which the
+supervisor reports as `chat is off: …` and carries on. The client commands read
+no saved settings; `jingclaw mcp list`, `login` and `logout` read the tool
+servers from the running daemon, so it has to be running.
+
+Credential files and skills stay files. The dashboard writes the first and
+never shows one back — no reply carries a value, a length, a prefix or a hash —
+and stages the second, shows it whole and installs it against the digest it
+showed. The dashboard also creates schedules, lists and forgets memory, and
+manages channel bindings, which the terminal already could. The verify scripts
+seed their daemons with `JINGCLAW_CONFIG` and take no settings file;
+`verify-credentials.sh` and `verify-skills-web.sh` are new, `verify-container.sh`
+reads the settings back through the control plane, and the assertions that the
+removed behaviour used to hold — a daemon with no key exits, a sandbox it cannot
+provide exits — are now that the daemon is in repair mode and answers 404 for
+the session service.
+
+What is deliberately not here: a restart from the page (there is no restart
+protocol; a person runs `jingclaw stop` and `jingclaw`); reloading settings
+without one; hiding `mcp.servers` headers and environment values in the text
+the dashboard shows, which is whole, and in the twenty versions kept; and
+reaching the dashboard from inside a container, where the daemon is on loopback,
+so a container's settings come in through the three variables on its first
+start. What a skill fetch writes to disk before its limits are checked is not
+bounded, and cancelling one kills git and not what git started.
+
 ## Not done
 
 **Built but nothing uses it**
@@ -872,6 +941,21 @@ no unrelated turn given a note.
   is no tool call to attribute it to. OpenClaw documents the same limit —
   "the current runtime does not propagate content origin within an owner
   turn" — and has not closed it either.
+
+- **A signal to the supervisor kills the daemon instead of stopping it.** Each
+  part is started with `exec.CommandContext` on the context that SIGINT and
+  SIGTERM cancel, and cancelling it sends SIGKILL, so the ordered teardown behind
+  it (`terminate`: SIGTERM, up to fifteen seconds, then SIGKILL) does not run
+  when the supervisor is stopped that way. Seen 2026-10-14: SIGTERM to a
+  supervisor ends its daemon in about 2 ms, with no "shutting down" line and
+  `run/daemon.json` left behind. `docker stop` is that signal, so a container
+  stopped by it leaves the file, and the next container on the same volume can
+  take it for a live daemon when its recorded process id is in use there, which
+  in a container is a small number that repeats; the gateway then dials a port
+  nothing is listening on and the run ends. `jingclaw stop` signals the daemon
+  itself and is clean. The code is as it was before the settings moved.
+  `docs/container.md` has the stop timeouts it was written for and what the
+  signal does instead.
 
 **Windows, in general**
 

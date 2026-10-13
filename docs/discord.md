@@ -2,6 +2,41 @@
 
 How a conversation reaches the agent, what it shows while it works, and how an answer comes back.
 
+## The bot token
+
+The gateway signs in to Discord with a bot token. A token is a credential and
+not a setting, so it is not kept in the database with the settings: it comes
+from an environment variable, or failing that from a file in `~/.jingclaw`.
+Which variable and which file are settings, `gateway.discord.token_env`
+(`DISCORD_BOT_TOKEN`) and `gateway.discord.token_file` (`discord.token`), and the
+variable is read first.
+
+The way in is the dashboard. Run `jingclaw dashboard`, open the settings, choose
+the gateway section and find `gateway.discord.token_file`. Under it the page says
+where the token would come from now, and has a button to set it: paste the token
+into the field and save. It is written to `~/.jingclaw/discord.token`, readable
+by you alone, and the page never shows it again.
+
+By hand, the same file:
+
+```bash
+umask 077 && cat > ~/.jingclaw/discord.token
+```
+
+Paste the token and end with Ctrl-D. A token file that others can read is
+refused rather than used, and the page offers to tighten it.
+
+The gateway reads the token when it starts, so a new one takes effect after
+`jingclaw stop` and `jingclaw`. Until there is one, `jingclaw` says `chat is off`
+and why and keeps the daemon and the dashboard running, so the token can be
+given to a deployment that is already up. In a container the dashboard cannot
+be reached yet: give the token as `DISCORD_BOT_TOKEN`, or write the file into the
+volume.
+
+A token only lets the bot in. A channel with no binding is not answered: bind
+one on the dashboard's channels page, or declare it in
+`gateway.discord.channels`.
+
 ## What it is doing, on Discord
 
 A run that reads four files and waits on a test suite used to say nothing at

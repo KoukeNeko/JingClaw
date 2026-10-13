@@ -14,9 +14,10 @@ services:
       - ollama
     restart: unless-stopped
 
-    # Long enough for a run in progress to be written down. The daemon is PID
-    # 1 behind tini and stops on the signal; what takes the time is the
-    # ordered teardown behind it.
+    # Meant to be long enough for a run in progress to be written down. The
+    # signal reaches the supervisor behind tini, and today it kills the daemon
+    # at once rather than waiting for it, so the time is not used yet
+    # (docs/container.md, "Stopping it").
     stop_grace_period: 30s
 
     volumes:
@@ -29,9 +30,13 @@ services:
       # a sentence rather than at runtime with a login error.
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?put it in .env, see .env.example}
 
-      # The whole settings file, written into the volume on the first start
-      # and never over one that is already there. Editing it here after that
-      # changes nothing: edit the file in the volume, or remove the volume.
+      # The whole settings text, saved in the database on the first start only
+      # and never over settings that are already there. Editing it here after
+      # that changes nothing: the settings are the database's from then on,
+      # and the dashboard that edits them cannot be reached from a container
+      # yet. A new volume is what starts again from this; a variable named for
+      # one setting, such as JINGCLAW_MEMORY_ENABLED, wins over it on every
+      # start. docs/container.md says more.
       JINGCLAW_CONFIG: |
         [provider]
         backend = "ollama"
@@ -54,6 +59,7 @@ services:
         # tenant_id = "000000000000000000"
         # workspace_id = "default"
 
+      # Saved the same way, on the first start only.
       JINGCLAW_PERSONA: |
         # Who you are
 

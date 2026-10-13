@@ -2,6 +2,14 @@
 
 Built. The image is 229MB, which D1 is the reason for.
 
+**Superseded in part.** Everything below that says the settings are a
+`config.toml` in the volume, or that the image carries `config.example.toml`, or
+that a first run without a credential stops, no longer holds: the settings are
+documents in the database, and [the settings
+plan](PROPOSED_PLAN-settings-in-database.md) replaced those statements. Each
+passage it replaces is marked *Superseded*, and left as it was written. The rest
+of this plan stands. What is true now is in [`container.md`](container.md).
+
 ## 1. What this is for
 
 Running JingClaw somewhere that is not the machine it was built on, without
@@ -19,6 +27,10 @@ A deployment directory holds five things, and they are not alike:
 | `workspace/` | what the agent may read and write | **no** — the operator's |
 | `run/daemon.json` | 0600, holds live credentials | **no** — written at start, regenerated |
 | `discord.token`, … | secrets | **no**, and not in a layer either |
+
+*Superseded:* `config.toml` is no longer a file in the volume. The settings are
+the `config` document in the database under `data/`, and `AGENTS.md` and
+`PERSONA.md` are documents beside it; the other four rows stand.
 
 So: **one volume, mounted at `JINGCLAW_HOME`, and nothing else.** The image
 carries a binary and the things a command needs to run. It carries no
@@ -43,6 +55,11 @@ reason, so the file route is the documented default and `-e` is what a
 one-off run uses.
 
 ### A first run with no configuration
+
+*Superseded:* the first start saves the example settings, every one at its
+default, as the `config` document, unless `JINGCLAW_CONFIG` gives another text.
+The image ships no example file; `jingclaw daemon --print-config` prints the
+text. What follows is the plan as it was written.
 
 `config.toml` is optional — the loader says so, and defaults work. So an image
 started against an empty volume comes up and says what it is missing rather
@@ -98,8 +115,10 @@ most of what it would be deployed to is amd64.
 Docker, the way `verify-sandbox-linux.sh` does:
 
 - it starts against an empty volume and the daemon answers
-- `config.toml` in the volume is the one that is read — a setting changed
-  there changes what `--print-config` reports
+- *Superseded:* `config.toml` in the volume is the one that is read — a setting
+  changed there changes what `--print-config` reports. The check seeds the first
+  start with `JINGCLAW_CONFIG` and reads the saved text back through the control
+  plane.
 - a secret in a file never appears in `docker inspect`, and neither route
   appears in any image layer
 - the database survives the container being replaced
@@ -110,6 +129,10 @@ Docker, the way `verify-sandbox-linux.sh` does:
 CI runs it on the `end-to-end` runner, which already has Docker.
 
 ## 6. What came out different
+
+- *Superseded:* a gateway that cannot start for a reason in the settings or a
+  credential exits 78, and the supervisor says `chat is off: …` and keeps the
+  daemon running, so the container no longer stops.
 
 - **A first run needs a credential, and the container exits without one.**
   The supervisor starts the daemon and the gateway and stops everything when

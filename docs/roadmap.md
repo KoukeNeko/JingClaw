@@ -20,7 +20,7 @@ answer it, not where you talk to it.
 | M0 | walking skeleton — done |
 | M1a | durable runtime, providers, tools, permissions — done |
 | **M1b** | gateway plane ✓, Discord adapter ✓, one executable ✓ |
-| M2 | the console: one scrolling log, one command line |
+| M2 | the console: one scrolling log, one command line — done |
 | M3 | skills, subagents, replay, sandboxing, remote fleet |
 
 The macOS and Windows clients are not being built. A terminal is a client that
@@ -28,25 +28,49 @@ works everywhere, and three of them at parity was three times the work for the
 same thing.
 
 The web dashboard is the exception, and deliberately not a client at parity: it
-carries no conversation. It is where you see what is waiting on you, approve it,
-and change the settings without opening a file — the part of a personal
-assistant's control surface that a terminal is worst at. See
+carries no conversation. It is where you see what is waiting on you and approve
+it, and it is the only place the settings are edited — they are documents in the
+daemon's database, not files. It also manages what stays a file: credentials,
+which it can write and never shows back, and skills, which it fetches, shows you
+whole and installs only once you have looked. Schedules, what the agent
+remembers and which channels may reach it are managed there too. That is the
+part of a personal assistant's control surface that a terminal is worst at. See
 [using it](using-it.md#the-dashboard).
+
+When the settings or the machine keep the agent from starting — text that does
+not parse, a credential that is missing, a sandbox the machine cannot provide —
+the daemon does not exit. It stays up in repair mode, serving the dashboard with
+the settings and the credentials and nothing that runs an agent, and says why;
+`jingclaw status` shows the mode, and the supervisor starts neither the gateway
+nor the console. A database that will not open is still fatal, because without
+it there is nowhere to correct anything.
+
+Not done, and said so: restarting from the page (it is `jingclaw stop`, then
+`jingclaw`, from a terminal, and a restart signs the browser out); reloading
+settings without a restart; hiding the headers and environment values typed
+into `mcp.servers` in the text the page shows; and reaching the dashboard from
+inside a container, where it is on the container's own loopback address.
 
 ### Where it keeps things
 
 ```
 ~/.jingclaw/
-  config.toml    the settings
-  AGENTS.md      standing instructions
-  PERSONA.md     who it is
   workspace/     what the agent may read and change
-  data/          the database and stored output
+  data/          the database, which holds the settings, and stored output
   run/           how clients find the daemon
+  skills/        what has been installed
   log/           what a service writes when nobody is watching
 ```
 
 Created on first run. Credentials go in beside them, mode 600.
+
+The settings are not files. The configuration, `AGENTS` and `PERSONA` are three
+documents in the database, each kept as the text it was given and edited in the
+dashboard; the daemon reads them once, when it starts, and the page marks a
+saved change as not running yet until `jingclaw stop` and `jingclaw`. A
+deployment that comes from older versions has them as `config.toml`,
+`AGENTS.md` and `PERSONA.md` in this directory: the first start imports each one
+and renames it `<name>.imported`, and never deletes it.
 
 One place, always the same place. Where you happen to be standing when you type
 the name does not take part: a daemon whose database depended on the working
@@ -62,10 +86,17 @@ one that has never had one.
 that needs the discovery file can ask rather than reimplement the rules and then
 drift from them.
 
+Two places can be moved on their own, and neither is a setting. The database and
+the discovery file are where the settings are kept and where clients find the
+daemon, so the settings cannot say where they are: they are given when the daemon
+starts, as `--data-dir` or `JINGCLAW_SERVER_DATA_DIR` and as
+`JINGCLAW_SERVER_RUNTIME_DIR`. A line for either in the settings is ignored, and
+the dashboard refuses to save one.
+
 The workspace is *inside* the directory rather than beside it, and is not a
 setting. Where the agent may read and write is one answer in one place: a
 second way to say it would be a second place for the two to disagree, and
-which one ran would depend on which file was edited last.
+which one ran would depend on which one was edited last.
 
 So a deployment cannot reach the project it was set up in. To work on your own
 code, put it in the workspace.
@@ -86,9 +117,10 @@ process group with it.
 
 ### Models
 
-| `[model] provider` | What it talks to |
+| `[provider] backend` | What it talks to |
 |---|---|
 | `gemini` | Google's API |
+| `anthropic` | Anthropic's Messages API |
 | `ollama` | a local Ollama daemon, or Ollama Cloud |
 | `openai_compat` | vLLM, LM Studio, llama.cpp, OpenRouter, Groq, Together |
 | `fake` | nothing; a deterministic stand-in for offline work |
@@ -125,30 +157,37 @@ becoming the one that knows none of this.
 
 "Discord" is not one trust level. A channel with fourteen people in it and one
 only you can see are different rooms, and the platform's own permissions are
-what separate them. Declare a private channel as a console in the config file:
+what separate them. Declare a private channel as a console in the settings, under
+the platform's own section:
 
 ```toml
-[[gateway.channels]]
-channel_id = "111111111111111111"
-tenant_id  = "222222222222222222"
+[[gateway.discord.consoles]]
+channel_ids = ["111111111111111111"]
+tenant_id = "222222222222222222"
 workspace_id = "default"
-profile = "console"
 users = ["333333333333333333"]
 ```
 
+An entry in `[[gateway.discord.channels]]` takes the same fields and is an
+ordinary channel: which list it is in is what decides what it may do.
+
 Channels are applied when the daemon starts, so a deployment is described in
-the file rather than in commands somebody has to remember running. Declaring
+the settings rather than in commands somebody has to remember running. Declaring
 one that already exists updates it. Removing one does *not* unbind it — a
-daemon started once with an incomplete file would otherwise take away the thing
+daemon started once with incomplete settings would otherwise take away the thing
 that decides who can reach the agent — and the startup log names any bound
-channel the file does not, so nothing drifts unseen.
+channel the settings do not (when they declare any), so nothing drifts unseen.
 
 The same thing from the command line, when that is easier:
 
 ```bash
-agent bindings add --channel <id> --guild <id> --workspace ws \
+jingclaw bindings add --channel <id> --guild <id> --workspace ws \
   --user <your-user-id> --profile console
 ```
+
+The dashboard's channels page does the same, and a binding made there takes
+effect without a restart. One that the settings declare is made again at every
+start, so removing it there does not outlast a restart.
 
 A console channel reads and searches the workspace, fetches pages, and reads
 what the agent remembers. Changes to files and to memory still stop and ask —
@@ -183,8 +222,8 @@ approval both. So running programs stays where somebody has to be at the
 machine, which is also the only place that can tell.
 
 The channel is told all of this the first time it is used, and again on `help`.
-A boundary that lives only in a configuration file on a machine nobody in the
-room is sitting at is one everybody will assume the shape of instead.
+A boundary that lives only in the settings of a machine nobody in the room is
+sitting at is one everybody will assume the shape of instead.
 
 A console decides only for its own conversation. A run started at the terminal
 is still answered at the terminal.
