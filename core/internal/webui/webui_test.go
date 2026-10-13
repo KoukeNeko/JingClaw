@@ -24,14 +24,44 @@ func TestThePageIsServedWithItsPolicy(t *testing.T) {
 	}
 
 	for header, want := range map[string]string{
-		"Content-Security-Policy": "frame-ancestors 'none'",
-		"X-Content-Type-Options":  "nosniff",
-		"Referrer-Policy":         "no-referrer",
-		"Cache-Control":           "no-store",
+		"X-Content-Type-Options": "nosniff",
+		"Referrer-Policy":        "no-referrer",
+		"Cache-Control":          "no-store",
 	} {
 		if got := rec.Header().Get(header); !strings.Contains(got, want) {
 			t.Errorf("%s is %q, want it to contain %q", header, got, want)
 		}
+	}
+}
+
+// The policy is what stands behind the rule that nothing anyone wrote is read
+// as markup, because the page may compile its own expressions. Each directive
+// is pinned to its value, so that widening one (a script from somewhere else,
+// an inline script, a connection to another host) is a change to this test and
+// not a quiet one.
+func TestThePolicyAllowsOnlyWhatThePageNeeds(t *testing.T) {
+	rec := httptest.NewRecorder()
+	webui.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	got := make(map[string]string)
+	for _, directive := range strings.Split(rec.Header().Get("Content-Security-Policy"), ";") {
+		name, value, _ := strings.Cut(strings.TrimSpace(directive), " ")
+		got[name] = value
+	}
+
+	want := map[string]string{
+		"default-src":     "'none'",
+		"script-src":      "'self' 'unsafe-eval'",
+		"style-src":       "'self'",
+		"style-src-attr":  "'unsafe-inline'",
+		"img-src":         "'self' data:",
+		"connect-src":     "'self'",
+		"base-uri":        "'none'",
+		"form-action":     "'none'",
+		"frame-ancestors": "'none'",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the policy is %v, want %v", got, want)
 	}
 }
 
@@ -84,6 +114,567 @@ func TestEveryFileThePageNamesIsEmbedded(t *testing.T) {
 	}
 }
 
+// page returns one of the files the page is made of.
+func page(t *testing.T, name string) string {
+	t.Helper()
+
+	raw, err := fs.ReadFile(webui.Assets(), name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(raw)
+}
+
+// htmlBinding is an attribute that puts a string into the page as markup.
+var htmlBinding = regexp.MustCompile(`x-html="([^"]*)"`)
+
+// markupSinks are the other ways a script puts a string into the page as
+// markup, or lets one decide where a link goes.
+var markupSinks = []string{
+	"x-html", "v-html", "innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "srcdoc",
+	":href", "x-bind:href", ":src", "x-bind:src", ":action", "x-bind:action",
+}
+
+// The page is allowed to run what the framework compiles ('unsafe-eval'), so
+// the one thing between a skill's description, a memory, a session title or a
+// line of the settings and a script in the administrator's page is that none
+// of them is ever read as markup. The three places that are, show text that is
+// written in schema.js and nowhere else; every other string is put in with
+// x-text.
+func TestNothingAnyoneWroteIsPutInThePageAsMarkup(t *testing.T) {
+	// The schema's own sentences: the explanation under a setting, and the note
+	// under a choice of one. Both are fixed text in a file that ships with the
+	// program, escaped before the few backticks in it become <code>.
+	allowed := map[string]int{
+		"md(r.f.help)": 2,
+		"md((r.f.options.find(o => o.v===ev(r)) || {}).note)": 1,
+	}
+
+	index := page(t, "index.html")
+
+	found := make(map[string]int)
+	for _, match := range htmlBinding.FindAllStringSubmatch(index, -1) {
+		found[match[1]]++
+	}
+	for expression, n := range found {
+		if allowed[expression] != n {
+			t.Errorf("index.html has %d x-html of %q, and %d are allowed", n, expression, allowed[expression])
+		}
+	}
+	for expression, n := range allowed {
+		if found[expression] != n {
+			t.Errorf("index.html has %d x-html of %q, and the allowed list has %d", found[expression], expression, n)
+		}
+	}
+
+	// md is the function that turns backticks into <code>, and it trusts its
+	// argument: it may only be called inside one of those.
+	if got, want := strings.Count(index, "md("), 3; got != want {
+		t.Errorf("index.html calls md( %d times, and only the %d inside the allowed x-html are meant", got, want)
+	}
+
+	for _, name := range []string{"index.html", "app.js", "api.js"} {
+		text := page(t, name)
+		for _, sink := range markupSinks {
+			if strings.Contains(text, sink) && !(name == "index.html" && sink == "x-html") {
+				t.Errorf("%s contains %s", name, sink)
+			}
+		}
+	}
+	if strings.Contains(page(t, "app.js"), "x-html") {
+		t.Error("app.js builds an x-html")
+	}
+}
+
+// The settings used to be a file, and the page said so in places a person
+// reads before deciding what to do. Each of these was true then and is false
+// now, and one of them was false even then (that a restart is not needed).
+func TestThePageDoesNotSpeakOfTheSettingsAsAFileOrAsLive(t *testing.T) {
+	retired := []string{
+		"設定檔", "config.toml", "PERSONA.md", "cfg.path",
+		"不需要重啟", "不用重啟", "重新讀取", "下一次執行就會用到", "applies from the next run",
+	}
+	for _, name := range []string{"index.html", "app.js", "schema.js"} {
+		text := page(t, name)
+		for _, phrase := range retired {
+			if strings.Contains(text, phrase) {
+				t.Errorf("%s still says %q", name, phrase)
+			}
+		}
+	}
+}
+
+// A key typed into the page has one place to be: the password box it was typed
+// in, read once when it is sent, and cleared whether the call worked or not. It
+// is in no state the page keeps, which is also what a dump of that state, a
+// settings check, the diff and the browser's storage would show.
+func TestAKeyTypedIntoThePageHasNowhereToLive(t *testing.T) {
+	index, app, api := page(t, "index.html"), page(t, "app.js"), page(t, "api.js")
+
+	boxes := regexp.MustCompile(`<input[^>]*type="password"[^>]*>`).FindAllString(index, -1)
+	if len(boxes) != 1 {
+		t.Fatalf("the page has %d password boxes, and the key has one", len(boxes))
+	}
+	if !strings.Contains(boxes[0], `autocomplete="off"`) {
+		t.Errorf("the password box lets the browser fill or keep it: %s", boxes[0])
+	}
+	// Anything that binds the box to the page's state puts the key there.
+	for _, binding := range []string{"x-model", ":value", "x-bind:value", "@input", "x-on:input", "x-ref"} {
+		if strings.Contains(boxes[0], binding) {
+			t.Errorf("the password box has %s, which would keep what is typed in the page's state", binding)
+		}
+	}
+
+	if got := strings.Count(app, `API.call("CredentialService", "PutCredential"`); got != 1 {
+		t.Errorf("app.js saves a credential in %d places, and the one that clears the box is the only one", got)
+	}
+	if strings.Contains(index, "PutCredential") || strings.Contains(api, "PutCredential") {
+		t.Error("a credential is saved from somewhere that does not clear the box")
+	}
+	// The value is read from the box, and only there, and the box is cleared in
+	// a finally, which runs when the call fails as well.
+	if got := strings.Count(app, "value: input.value"); got != 1 {
+		t.Errorf("app.js reads the typed key %d times into a request", got)
+	}
+	// Every other mention of the box is looking at whether it is empty, or
+	// emptying it. A read that keeps the text anywhere is none of those.
+	rest := app
+	for _, allowed := range []string{"!input.value.trim()", `input.value = ""`, "value: input.value"} {
+		rest = strings.ReplaceAll(rest, allowed, "")
+	}
+	if strings.Contains(rest, "input.value") {
+		t.Error("app.js reads the password box in a way that could keep what is typed")
+	}
+	if !regexp.MustCompile(`finally \{ input\.value = ""`).MatchString(app) {
+		t.Error("app.js does not clear the password box in a finally")
+	}
+	// The saved time is sent back as the string that was received.
+	if !strings.Contains(app, "body.expectModifiedAt = expect") || !strings.Contains(app, `this.credExpect = c.modifiedAt || ""`) {
+		t.Error("app.js does not send modifiedAt back as it received it")
+	}
+
+	// Nothing the page keeps outlives it or reaches a log.
+	for name, text := range map[string]string{"app.js": app, "index.html": index} {
+		for _, sink := range []string{"localStorage", "sessionStorage", "console.", "document.cookie", "location.hash =", "history.pushState"} {
+			if strings.Contains(text, sink) {
+				t.Errorf("%s uses %s", name, sink)
+			}
+		}
+	}
+	if strings.Count(api, "sessionStorage") == 0 {
+		t.Error("api.js no longer keeps the session in sessionStorage, and this test should be told why")
+	}
+
+	// A credential is not an edit of the settings: the checks and the diff are
+	// built from edits, so none of them may be built from a credential.
+	for _, name := range []string{"editsPayload() {", "scheduleCheck() {", "async runCheck() {", "askWrite() {", "async write() {"} {
+		if body := method(t, app, name); strings.Contains(body, "cred") {
+			t.Errorf("%s mentions a credential", name)
+		}
+	}
+}
+
+// A skill is somebody else's text from its name to the last file in it, and an
+// installation changes what every later session is told. So the page that
+// reviews one shows it only as text, with what cannot be seen made visible, and
+// installs only the tree it showed, replacing only when asked twice.
+func TestTheSkillsPageShowsAnotherPersonsTextAsTextAndInstallsOnlyWhatItShowed(t *testing.T) {
+	index, app := page(t, "index.html"), page(t, "app.js")
+
+	// Every box of raw text (SKILL.md, a file of the skill, what git said) is a
+	// <pre> bound with x-text through vis, which marks the characters that hide
+	// or reorder what is read.
+	raws := regexp.MustCompile(`<pre class="raw"[^>]*>`).FindAllString(index, -1)
+	if len(raws) != 3 {
+		t.Errorf("the page has %d raw boxes, and the three are SKILL.md, a file and git's error", len(raws))
+	}
+	for _, raw := range raws {
+		if !strings.Contains(raw, `x-text="vis(`) {
+			t.Errorf("a raw box is not shown through vis: %s", raw)
+		}
+	}
+	for _, line := range []string{`x-text="vis(rev.md)"`, `x-text="vis(rev.file.text)"`, `x-text="vis(stageErr)"`, `x-text="vis(l.t)"`} {
+		if !strings.Contains(index, line) {
+			t.Errorf("index.html does not show %s", line)
+		}
+	}
+
+	// Inside the skills view, a binding that names a field a repository, a skill
+	// or git wrote has to go through vis (or srcLine, which does). Words in
+	// quotes are the page's own and are not looked at.
+	_, view, found := strings.Cut(index, `<template x-if="view==='skills'">`)
+	if !found {
+		t.Fatal("index.html has no skills view")
+	}
+	view, _, _ = strings.Cut(view, "</main>")
+	quoted := regexp.MustCompile(`'[^']*'`)
+	written := regexp.MustCompile(`\b(name|description|version|directory|reason|path|repository|commit|treeDigest|stageErr|skillErr|msg|error|md|oldMd|text|source)\b`)
+	for _, match := range regexp.MustCompile(`x-text="([^"]*)"`).FindAllStringSubmatch(view, -1) {
+		expression := quoted.ReplaceAllString(match[1], "")
+		if written.MatchString(expression) && !strings.Contains(expression, "vis(") && !strings.Contains(expression, "srcLine(") {
+			t.Errorf("the skills view shows %q without vis", match[1])
+		}
+	}
+
+	// Nothing the skills page calls is a service it was not built against, and
+	// all six are used.
+	calls := regexp.MustCompile(`API\.call\("SkillService", "(\w+)"`).FindAllStringSubmatch(app, -1)
+	used := make(map[string]int)
+	for _, call := range calls {
+		used[call[1]]++
+	}
+	for _, name := range []string{"ListSkills", "StageSkill", "GetStagedSkill", "ActivateSkill", "DiscardStagedSkill", "RemoveSkill"} {
+		if used[name] == 0 {
+			t.Errorf("app.js never calls %s", name)
+		}
+		delete(used, name)
+	}
+	for name := range used {
+		t.Errorf("app.js calls SkillService/%s, which the page was not built against", name)
+	}
+
+	// One place installs. It sends the digest of the review on the screen, and
+	// replace only from the confirmation that says so.
+	if got := strings.Count(app, `API.call("SkillService", "ActivateSkill"`); got != 1 {
+		t.Errorf("app.js activates a skill in %d places", got)
+	}
+	if !strings.Contains(app, "name: rv.name, treeDigest: rv.treeDigest, replace: replace === true") {
+		t.Error("the activation does not send the digest of the review that was shown, with replace only when told")
+	}
+	if got := strings.Count(index, "activate(true)"); got != 1 {
+		t.Errorf("index.html asks to replace in %d places, and the confirmation is the one", got)
+	}
+	if got := strings.Count(app, "this.activate(false)"); got != 1 {
+		t.Errorf("app.js activates without replacing in %d places", got)
+	}
+	if !strings.Contains(app, `if (rv.replaces) this.dialog = "replaceskill"`) {
+		t.Error("a skill that replaces another is not put behind its own confirmation")
+	}
+	if !strings.Contains(index, `:disabled="!rev.matches || rev.busy"`) {
+		t.Error("the activate button is not held while the staged tree does not match its digest")
+	}
+
+	// A daemon with no agent does not serve the skills, so the page does not ask.
+	begin := method(t, app, "async begin() {")
+	repairBranch, _, _ := strings.Cut(begin[strings.Index(begin, "if (this.repair) {"):], "} else {")
+	if strings.Contains(repairBranch, "Skills") {
+		t.Error("the page asks for skills when the daemon has no agent")
+	}
+	if tick := method(t, app, "tick() {"); !strings.Contains(tick, `!this.repair && this.view === "skills"`) {
+		t.Error("the page's poll asks for skills without checking for an agent")
+	}
+	if !strings.Contains(index, `x-show="mode==='running'"`) {
+		t.Error("the page switcher is not held back until there is an agent")
+	}
+	// The approvals and questions that wait on a person belong to the board and
+	// to a session, not above a skill under review or any other page of the
+	// management view.
+	if !strings.Contains(index, `x-show="cards.length && !manage"`) {
+		t.Error("the cards waiting on a person are drawn above the management pages")
+	}
+	if !strings.Contains(app, `get manage() { return this.view === "skills" || this.view === "memory" || this.view === "channels"; }`) {
+		t.Error("the management view is not the skills, memory and channels pages")
+	}
+}
+
+// What the agent remembers can be what somebody on a chat platform said, and a
+// binding is made of ids that an operator or a settings text supplied. So the
+// pages that list them show every word as text, with what cannot be seen made
+// visible; they only call what they were built against, and a memory or a
+// binding is deleted only from the confirmation that says what is lost. Nothing
+// on the board's own poll asks for either, and a daemon with no agent does not
+// serve them.
+func TestTheMemoryAndChannelPagesShowOthersTextAsTextAndDeleteOnlyAfterConfirming(t *testing.T) {
+	index, app := page(t, "index.html"), page(t, "app.js")
+
+	// Every x-text that puts a field somebody else wrote into the page goes
+	// through vis: in the two pages, and in the two confirmations.
+	_, memoryOn, found := strings.Cut(index, `<template x-if="view==='memory'">`)
+	if !found {
+		t.Fatal("index.html has no memory view")
+	}
+	pages, _, _ := strings.Cut(memoryOn, "</main>")
+	dialogs := ""
+	for _, label := range []string{"t-forget", "t-delbind"} {
+		_, rest, found := strings.Cut(index, `aria-labelledby="`+label+`"`)
+		if !found {
+			t.Fatalf("index.html has no dialog %s", label)
+		}
+		dialog, _, _ := strings.Cut(rest, "</dialog>")
+		dialogs += dialog
+	}
+	quoted := regexp.MustCompile(`'[^']*'`)
+	written := regexp.MustCompile(`\b(text|scopeRef|approvedBy|channel|tenant|account|workspace|error|who|memFrom|titleOf|bindErr|schErr|memNote|bindNote)\b`)
+	for _, match := range regexp.MustCompile(`x-text="([^"]*)"`).FindAllStringSubmatch(pages+dialogs, -1) {
+		expression := quoted.ReplaceAllString(match[1], "")
+		// A note is built in app.js, from vis'd parts.
+		if written.MatchString(expression) && !strings.Contains(expression, "vis(") && !regexp.MustCompile(`^(memNote|bindNote)$`).MatchString(strings.TrimSpace(expression)) {
+			t.Errorf("a memory or channel page shows %q without vis", match[1])
+		}
+	}
+	// The notes are words of the page's own plus ids that went through vis.
+	for _, note := range []string{"this.bindNote = ", "this.memNote = "} {
+		for _, line := range strings.Split(app, "\n") {
+			if strings.Contains(line, note) && regexp.MustCompile(`\b(channel|workspace|text)\b`).MatchString(quoted.ReplaceAllString(line, "")) && !strings.Contains(line, "vis(") {
+				t.Errorf("a note is built from a field without vis: %s", strings.TrimSpace(line))
+			}
+		}
+	}
+
+	// Only these methods, and each of the three that change something from one
+	// place.
+	want := map[string][]string{
+		"MemoryService":  {"ListMemories", "ForgetMemory"},
+		"ChannelService": {"ListBindings", "UpsertBinding", "DeleteBinding"},
+	}
+	for service, methods := range want {
+		used := make(map[string]int)
+		for _, call := range regexp.MustCompile(`API\.call\("`+service+`", "(\w+)"`).FindAllStringSubmatch(app, -1) {
+			used[call[1]]++
+		}
+		for _, name := range methods {
+			if used[name] != 1 {
+				t.Errorf("app.js calls %s/%s in %d places, and one is meant", service, name, used[name])
+			}
+			delete(used, name)
+		}
+		for name := range used {
+			t.Errorf("app.js calls %s/%s, which the page was not built against", service, name)
+		}
+	}
+	if got := strings.Count(app, `API.call("SessionService", "CreateSchedule"`); got != 1 {
+		t.Errorf("app.js creates a schedule in %d places", got)
+	}
+
+	// Deleting is behind a confirmation: the lists only open it, and the one
+	// button that does it is in the dialog that says what is lost.
+	for method, ask := range map[string]string{"forgetMem()": "askForget(m)", "removeBinding()": "askUnbind(b)"} {
+		if got := strings.Count(index, `@click="`+method+`"`); got != 1 {
+			t.Errorf("index.html runs %s from %d places, and the dialog is the one", method, got)
+		}
+		if !strings.Contains(index, `@click="`+ask+`"`) {
+			t.Errorf("the list does not open the confirmation with %s", ask)
+		}
+	}
+	if !strings.Contains(index, "這是刪除，無法復原") || !strings.Contains(index, "不會因為忘掉這則記憶而被刪掉") {
+		t.Error("the memory confirmation does not say that it is a deletion, and what is left")
+	}
+
+	// A binding is only added where there is none: the form reads the list again
+	// and stops at a channel that is bound, because writing over one drops the
+	// approvers that only the settings can set.
+	add := method(t, app, "async addBinding() {")
+	if reread, upsert := strings.Index(add, "await this.loadBindings()"), strings.Index(add, `"UpsertBinding"`); reread < 0 || upsert < reread || !strings.Contains(add[reread:upsert], "return;") {
+		t.Error("addBinding does not read the bindings again and stop at a channel that is already bound before it upserts")
+	}
+
+	// Who may trigger is said as the CLI says it: an empty list is anybody the
+	// platform lets in, which is not nobody.
+	if !strings.Contains(index, "平台放進這個頻道的任何人") {
+		t.Error("the channels page does not say that a binding naming nobody lets in whoever the platform does")
+	}
+	channels := index[strings.Index(index, `<template x-if="view==='channels'">`):]
+	channels, _, _ = strings.Cut(channels, "</main>")
+	for _, wrong := range []string{"沒有人能觸發", "誰都不能觸發", "不能觸發"} {
+		if strings.Contains(channels, wrong) {
+			t.Errorf("the channels page says %q of a binding that names nobody", wrong)
+		}
+	}
+
+	// The board's own poll asks for neither, opening the page asks for neither,
+	// and a daemon with no agent is never asked.
+	if tick := method(t, app, "tick() {"); strings.Contains(tick, "Memory") || strings.Contains(tick, "Bindings") {
+		t.Error("the page's poll asks for memories or bindings")
+	}
+	begin := method(t, app, "async begin() {")
+	if strings.Contains(begin, "Memory") || strings.Contains(begin, "Bindings") {
+		t.Error("opening the page asks for memories or bindings")
+	}
+	if refresh := method(t, app, "async refresh() {"); strings.Contains(refresh, "MemoryService") || strings.Contains(refresh, "ChannelService") {
+		t.Error("the board's refresh asks for memories or bindings")
+	}
+}
+
+// The cards that wait on a person carry what an agent, somebody in a chat or
+// whoever named a session wrote: what the call is, what it would do, the
+// question, its choices, the titles. A reader who cannot see a character that
+// reorders or hides text decides about something other than what runs, so every
+// one of them goes through vis, and the card shows the arguments themselves
+// because the summary keeps only the start of each.
+func TestTheCardsThatWaitOnAPersonShowWhatTheyCarryThroughVisAndTheArgumentsInFull(t *testing.T) {
+	index, app := page(t, "index.html"), page(t, "app.js")
+
+	_, section, found := strings.Cut(index, `<section class="need" x-show="cards.length`)
+	if !found {
+		t.Fatal("index.html has no section of cards that wait")
+	}
+	section, _, _ = strings.Cut(section, "</section>")
+
+	quoted := regexp.MustCompile(`'[^']*'`)
+	written := regexp.MustCompile(`\b(summary|preview|prompt|label|detail|arguments|e|o)\b`)
+	for _, match := range regexp.MustCompile(`(?:x-text|:title)="([^"]*)"`).FindAllStringSubmatch(section, -1) {
+		expression := quoted.ReplaceAllString(match[1], "")
+		if written.MatchString(expression) && !strings.Contains(expression, "vis(") {
+			t.Errorf("a card shows %q without vis", match[1])
+		}
+	}
+	for _, line := range []string{
+		`x-text="vis(argsText(p.x.arguments))"`, `x-text="vis(p.x.summary)"`, `x-text="vis(p.x.prompt)"`, `x-text="titleOf(p.sid)"`,
+	} {
+		if !strings.Contains(section, line) {
+			t.Errorf("the cards do not show %s", line)
+		}
+	}
+	if !strings.Contains(app, "arguments: a.arguments") {
+		t.Error("app.js does not carry the arguments of an approval to the card")
+	}
+
+	// The same for the names of sessions and what a schedule asks, wherever they
+	// are shown, and for the toast, which says them back.
+	for _, line := range []string{`x-text="vis(s.title)"`, `x-text="vis(detail.title)"`} {
+		if !strings.Contains(index, line) {
+			t.Errorf("index.html does not show %s", line)
+		}
+	}
+	if got := strings.Count(index, `x-text="vis(sc.prompt)"`); got != 2 {
+		t.Errorf("index.html shows what a schedule asks through vis in %d places, and there are two lists", got)
+	}
+	if strings.Contains(index, `x-text="sc.prompt"`) || strings.Contains(index, `x-text="s.title"`) || strings.Contains(index, `x-text="detail.title"`) {
+		t.Error("index.html shows a title or a schedule's prompt without vis")
+	}
+	if !strings.Contains(app, "this.toast = vis(t)") {
+		t.Error("a toast is not shown through vis")
+	}
+	// A display name is whatever the person chose to be called; the id beside it
+	// is what the platform says.
+	for _, line := range []string{"vis(p.displayName)", "vis(p.principalId)"} {
+		if !strings.Contains(app, line) {
+			t.Errorf("a run's origin does not show %s", line)
+		}
+	}
+
+	// The characters it marks. Source only: a character missing from this list
+	// is one that is shown as itself.
+	hidden := regexp.MustCompile(`const HIDDEN = (.*)\n`).FindStringSubmatch(app)
+	if hidden == nil {
+		t.Fatal("app.js has no HIDDEN")
+	}
+	for _, class := range []string{`\u034F`, `\u115F`, `\u1160`, `\u17B4`, `\u17B5`, `\u180B-\u180E`, `\u2800`, `\u3164`, `\uFFA0`, `\uFE00-\uFE0F`, `\u202E`, `\u200B-\u200F`} {
+		if !strings.Contains(hidden[1], class) {
+			t.Errorf("vis does not mark %s", class)
+		}
+	}
+}
+
+// What the person was about to press must not move, and pressing it twice must
+// not decide twice.
+func TestTheCardsDoNotMoveUnderThePointerAndAnActionIsNotSentTwice(t *testing.T) {
+	app := page(t, "app.js")
+
+	// Oldest first, so that a request that arrives is added at the end.
+	if !strings.Contains(app, "sort((m, n) => m.created - n.created)") {
+		t.Error("the waiting cards are not ordered oldest first")
+	}
+
+	// An action that is still being done is not done again.
+	act := method(t, app, "async act(call, ok, key) {")
+	if !strings.Contains(act, "this._doing[key]") || !strings.Contains(act, "finally") {
+		t.Errorf("act does not hold an action while it is being done: %s", act)
+	}
+	for _, line := range []string{`"d:" + p.id`, `"a:" + p.id`, `"i:" + run.id`, `"p:" + sc.id`} {
+		if !strings.Contains(app, line) {
+			t.Errorf("app.js does not give an action its key: %s", line)
+		}
+	}
+	for _, name := range []string{"async createSession() {", "async write() {"} {
+		if body := method(t, app, name); !strings.Contains(body, "return;") || !strings.Contains(body, "finally") {
+			t.Errorf("%s is not held while it is being done", name)
+		}
+	}
+}
+
+// Two ways the page used to look fine and be wrong: a board that could not be
+// read looked like a board with nothing on it, and a daemon that had stopped
+// looked like one still being watched.
+func TestAPageThatCannotReadOrReachTheDaemonSaysSo(t *testing.T) {
+	index, app := page(t, "index.html"), page(t, "app.js")
+
+	refresh := method(t, app, "async refresh() {")
+	if !strings.Contains(refresh, "this.loadErr = ") || !strings.Contains(refresh, "this.sessLoaded = true") {
+		t.Error("a failed read of the sessions is not kept where the page can say so")
+	}
+	// Every sentence that says there is nothing here waits for a read that worked.
+	for _, sentence := range []string{"目前沒有事在等你。", "還沒有排程。"} {
+		line := regexp.MustCompile(`(?m)^.*` + regexp.QuoteMeta(sentence) + `.*$`).FindString(index)
+		if line == "" || !strings.Contains(line, "boardKnown") {
+			t.Errorf("%q is said without knowing the board was read: %s", sentence, line)
+		}
+	}
+	if !strings.Contains(index, "還沒有對話。") || !strings.Contains(index, "!list.length && boardKnown") {
+		t.Error("an empty deployment is not told apart from an empty filter, or is said before the read")
+	}
+
+	// The credential ends: the whole page starts over rather than keeping the
+	// settings and the approvals of a session that is over behind a cover.
+	if fail := method(t, app, "fail(e, quiet) {"); !strings.Contains(fail, "location.reload()") {
+		t.Error("a credential that has ended leaves the page's contents where they were")
+	}
+	// A refused action says it was not sent; a poll does not shout.
+	if !strings.Contains(app, "連不上 daemon，這個動作沒有送出") {
+		t.Error("an action that could not be sent says nothing")
+	}
+	if !strings.Contains(index, `:class="{open: drawer, off: !online}"`) || !strings.Contains(index, "staleText") {
+		t.Error("the page is not marked old when the daemon cannot be reached")
+	}
+}
+
+// A value of the wrong kind is refused by the daemon outright, not listed among
+// its problems. It has to land on the field like any other problem, or the
+// write button stays held with no word on why.
+func TestAValueTheDaemonRefusesOutrightIsShownOnItsField(t *testing.T) {
+	app := page(t, "app.js")
+
+	check := method(t, app, "async runCheck() {")
+	for _, want := range []string{`e.code !== "invalid_argument"`, "this.check = { problems: [{ key, why, fix }]"} {
+		if !strings.Contains(check, want) {
+			t.Errorf("runCheck does not turn a refused value into a problem: missing %s", want)
+		}
+	}
+}
+
+// A key box opened while there was no file must not replace one that appears
+// before it is saved.
+func TestAKeySavedAfterOpeningTheBoxOnNoFileLeavesANewFileAlone(t *testing.T) {
+	app := page(t, "app.js")
+
+	for _, want := range []string{"body.expectAbsent = true", `c.fileState === "CREDENTIAL_FILE_STATE_ABSENT"`} {
+		if !strings.Contains(app, want) {
+			t.Errorf("app.js does not hold a save to the file that was not there: missing %s", want)
+		}
+	}
+}
+
+// method is the text of one of app.js's methods, from its name to the closing
+// brace the file's layout gives it: a method on one line ends with the line.
+func method(t *testing.T, script, name string) string {
+	t.Helper()
+
+	start := strings.Index(script, "\n      "+name)
+	if start < 0 {
+		t.Fatalf("app.js has no %s, and this test reads it", name)
+	}
+	rest := script[start+1:]
+	first, _, _ := strings.Cut(rest, "\n")
+	if !strings.HasSuffix(first, "{") {
+		return first
+	}
+	end := strings.Index(rest, "\n      },")
+	if end < 0 {
+		t.Fatalf("app.js has no end for %s", name)
+	}
+	return rest[:end]
+}
+
 // ── the schema ─────────────────────────────────────────────────────────
 
 type option struct {
@@ -94,6 +685,7 @@ type field struct {
 	Key     string   `json:"key"`
 	Zh      string   `json:"zh"`
 	Type    string   `json:"type"`
+	Kind    string   `json:"kind"`
 	Def     any      `json:"def"`
 	Help    string   `json:"help"`
 	Options []option `json:"options"`
@@ -159,6 +751,18 @@ var harnessOnly = map[string]bool{
 	"provider.fake_script":    true,
 }
 
+// bootstrapOnly are the settings the saved text cannot hold, because they say
+// where it is kept: a flag or a variable gives them when the daemon starts, and
+// a line for one in the text is ignored. A page that offered an input for one
+// would take a value, show it as saved, and change nothing.
+//
+// Written out as well as read from config.BootstrapKeys, so that a list that
+// lost one of them could not quietly start offering it.
+var bootstrapOnly = map[string]bool{
+	"server.data_dir":    true,
+	"server.runtime_dir": true,
+}
+
 func (s schema) fields() map[string]field {
 	out := make(map[string]field)
 	for _, section := range s.Sections {
@@ -185,10 +789,29 @@ func kindOf(kind config.Kind) []string {
 func TestTheSchemaCoversEverySettingAndOnlyTheseSettings(t *testing.T) {
 	declared := loadSchema(t).fields()
 
+	listed := make(map[string]bool)
+	for _, bootstrap := range config.BootstrapKeys() {
+		listed[bootstrap.Key] = true
+		if !bootstrapOnly[bootstrap.Key] {
+			t.Errorf("%s cannot be saved in the settings, and this test does not list it", bootstrap.Key)
+		}
+	}
+	for key := range bootstrapOnly {
+		if !listed[key] {
+			t.Errorf("%s is listed here as given at start, and the program no longer says so", key)
+		}
+	}
+
 	known := make(map[string]config.Setting)
 	for _, setting := range config.Settings() {
 		known[setting.Key] = setting
 
+		if bootstrapOnly[setting.Key] {
+			if _, offered := declared[setting.Key]; offered {
+				t.Errorf("%s is given by a flag or a variable, not by the saved settings, and should not be offered", setting.Key)
+			}
+			continue
+		}
 		if harnessOnly[setting.Key] {
 			if _, offered := declared[setting.Key]; offered {
 				t.Errorf("%s is for the test double and should not be offered", setting.Key)
@@ -265,6 +888,33 @@ func checkElement(t *testing.T, list config.Setting, item struct {
 		if !found {
 			t.Errorf("%s names %s as the title of an element, which it does not have", list.Key, item.Title)
 		}
+	}
+}
+
+// Each setting that names a credential file gets the controls for putting a key
+// there. The page finds a slot by the setting that names its file, so a setting
+// the schema offers as a file name and no slot is kept in (or the other way
+// round) is a field with no controls, or controls with no field.
+func TestEverySecretFileSettingIsACredentialSlotAndTheOtherWayRound(t *testing.T) {
+	offered := make(map[string]bool)
+	for key, f := range loadSchema(t).fields() {
+		if f.Kind == "secretfile" {
+			offered[key] = true
+		}
+	}
+
+	slots := (config.Config{}).CredentialFiles()
+	if len(slots) != 8 || len(offered) != 8 {
+		t.Errorf("%d credential slots and %d file names in the schema, want 8 of each", len(slots), len(offered))
+	}
+	for _, slot := range slots {
+		if !offered[slot.Key] {
+			t.Errorf("%s names a credential file, and the schema does not offer it as one", slot.Key)
+		}
+		delete(offered, slot.Key)
+	}
+	for key := range offered {
+		t.Errorf("the schema offers %s as a credential file name, and no credential slot is kept in it", key)
 	}
 }
 

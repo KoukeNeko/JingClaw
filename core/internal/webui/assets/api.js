@@ -39,8 +39,15 @@
 
       history.replaceState(null, "", location.pathname + location.search);
 
-      const res = await fetch("/ui/pair", { method: "POST", body: JSON.stringify({ code: decodeURIComponent(match[1]) }) });
-      if (!res.ok) throw new Unauthorized("pairing refused");
+      let res;
+      try {
+        res = await fetch("/ui/pair", { method: "POST", body: JSON.stringify({ code: decodeURIComponent(match[1]) }) });
+      } catch (_) {
+        throw new Failure("unavailable", "連不上 daemon。確認它還在跑，再執行一次 jingclaw dashboard 取得新的連結。");
+      }
+      // 只有 401 是「這個連結不能用」。其他（例如 daemon 忙不過來）是別的問題，不要說成連結用過了。
+      if (res.status === 401) throw new Unauthorized("pairing refused");
+      if (!res.ok) throw new Failure("pair_failed", "daemon 這次沒有讓這個瀏覽器連上（HTTP " + res.status + "）。再執行一次 jingclaw dashboard 取得新的連結；還是不行，看 daemon 的紀錄。");
 
       const granted = await res.json();
       session = { token: granted.token, expiresAt: granted.expires_at };

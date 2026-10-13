@@ -165,7 +165,7 @@ window.SCHEMA = {
        "type": "string",
        "def": "",
        "adv": false,
-       "help": "模型名稱，例如 `claude-sonnet-4-5`，寫法要與服務列出的一致（`--list-models` 可查）；不一致時啟動就會失敗。留空只在服務剛好只有一個模型時可行。"
+       "help": "模型名稱，例如 `claude-sonnet-4-5`，寫法要與服務列出的一致（`--list-models` 可查）；不一致時啟動會發現，daemon 進入修復模式、不啟動代理。留空只在服務剛好只有一個模型時可行。"
       },
       {
        "key": "provider.anthropic.api_key_env",
@@ -210,7 +210,7 @@ window.SCHEMA = {
        "type": "string",
        "def": "",
        "adv": false,
-       "help": "模型名稱，例如 `gemma-4-31b-it`，寫法要與服務列出的一致（`--list-models` 可查）；不一致時啟動就會失敗。留空只在服務剛好只有一個模型時可行。"
+       "help": "模型名稱，例如 `gemma-4-31b-it`，寫法要與服務列出的一致（`--list-models` 可查）；不一致時啟動會發現，daemon 進入修復模式、不啟動代理。留空只在服務剛好只有一個模型時可行。"
       },
       {
        "key": "provider.gemini.api_key_env",
@@ -249,7 +249,7 @@ window.SCHEMA = {
        "type": "string",
        "def": "",
        "adv": false,
-       "help": "模型名稱，例如 `qwen3:8b`，寫法要與 Ollama 列出的一致（`--list-models` 可查）；不一致時啟動就會失敗。留空只在服務剛好只有一個模型時可行。"
+       "help": "模型名稱，例如 `qwen3:8b`，寫法要與 Ollama 列出的一致（`--list-models` 可查）；不一致時啟動會發現，daemon 進入修復模式、不啟動代理。留空只在服務剛好只有一個模型時可行。"
       },
       {
        "key": "provider.ollama.api_key_env",
@@ -358,7 +358,7 @@ window.SCHEMA = {
        "type": "string",
        "def": "",
        "adv": false,
-       "help": "模型名稱，寫法要與伺服器的 `/v1/models` 列出的一致（`--list-models` 可查）；不一致時啟動就會失敗。留空只在伺服器剛好只有一個模型時可行。"
+       "help": "模型名稱，寫法要與伺服器的 `/v1/models` 列出的一致（`--list-models` 可查）；不一致時啟動會發現，daemon 進入修復模式、不啟動代理。留空只在伺服器剛好只有一個模型時可行。"
       },
       {
        "key": "provider.openai_compat.api_key_env",
@@ -632,7 +632,7 @@ window.SCHEMA = {
        "type": "bool",
        "def": false,
        "adv": false,
-       "help": "把 `exec_command` 執行的每個指令關進沙盒，只能寫工作區與部署自己的快取目錄；核准管得到「有人想跑這個指令」，管不到建置時帶進來的相依套件各自做什麼。預設關閉，因為它會改變指令能做的事；開了而這台機器擋不住，daemon 會拒絕啟動或拒絕執行指令，不會不設防地照跑。支援 macOS（`sandbox-exec`）與 Linux（Landlock，核心要啟用），其他系統不支援。"
+       "help": "把 `exec_command` 執行的每個指令關進沙盒，只能寫工作區與部署自己的快取目錄；核准管得到「有人想跑這個指令」，管不到建置時帶進來的相依套件各自做什麼。預設關閉，因為它會改變指令能做的事；開了而這台機器擋不住，daemon 不會啟動代理，而是進入修復模式並說明原因，不會不設防地照跑。目前只支援 macOS（`sandbox-exec`）；在 Linux 開啟，daemon 就沒有代理。"
       },
       {
        "key": "sandbox.network",
@@ -640,7 +640,7 @@ window.SCHEMA = {
        "type": "bool",
        "def": false,
        "adv": false,
-       "help": "允許沙盒內的指令對外連線；預設不允許，因為代理跑的多半是建置或測試，用不到網路。刻意只做成一個總開關，因為逐個程式放行的清單，一項一項加下去最後就是誰都能連；Linux 要擋網路得有 Linux 6.7 以上的 Landlock，舊核心上維持關閉時指令會被拒絕。"
+       "help": "允許沙盒內的指令對外連線；預設不允許，因為代理跑的多半是建置或測試，用不到網路。刻意只做成一個總開關，因為逐個程式放行的清單，一項一項加下去最後就是誰都能連。"
       },
       {
        "key": "sandbox.hidden",
@@ -649,7 +649,7 @@ window.SCHEMA = {
        "def": [],
        "kind": "path",
        "adv": false,
-       "help": "沙盒內的指令不能讀的目錄，例如 `~/.ssh`、`~/.aws`，開頭的 `~/` 會展開成你的家目錄。只限制寫入擋不住讀取，沒有網路也只是今天送不出去，指令仍可以把讀到的東西印出來，或留給之後有網路的指令；部署目錄（放著憑證）不論這裡怎麼設都一定隱藏。Linux 的 Landlock 只能授予、無法隱藏目錄，遇到要隱藏的目錄就拒絕執行指令，所以目前在 Linux 上開啟沙盒，指令會全被擋下。"
+       "help": "沙盒內的指令不能讀的目錄，例如 `~/.ssh`、`~/.aws`，開頭的 `~/` 會展開成你的家目錄。只限制寫入擋不住讀取，沒有網路也只是今天送不出去，指令仍可以把讀到的東西印出來，或留給之後有網路的指令；部署目錄（放著憑證）不論這裡怎麼設都一定隱藏。Linux 的 Landlock 只能授予、無法隱藏目錄，所以目前在 Linux 上開啟沙盒，daemon 不會啟動代理。"
       }
      ]
     }
@@ -948,7 +948,7 @@ window.SCHEMA = {
           "type": "map",
           "def": {},
           "adv": false,
-          "help": "隨每個請求送給 `url` 伺服器的標頭，授權用的 `authorization` 就放這裡；它的值是敏感資料，會直接寫在設定檔裡，別讓不該看的人讀到。"
+          "help": "隨每個請求送給 `url` 伺服器的標頭，授權用的 `authorization` 就放這裡；它的值是敏感資料，會原樣存在儲存的設定裡，連同舊的版本也讀得到，別讓不該看的人讀到。"
          },
          {
           "key": "env",
@@ -956,7 +956,7 @@ window.SCHEMA = {
           "type": "map",
           "def": {},
           "adv": false,
-          "help": "直接給子行程的環境變數與值。子行程除了 `PATH` 這類基本變數，只會拿到這裡與 `pass_env` 指名的東西，因為 daemon 的環境裡有模型供應端的金鑰；值若是金鑰，會直接寫在設定檔裡，改用 `pass_env` 轉送較好。"
+          "help": "直接給子行程的環境變數與值。子行程除了 `PATH` 這類基本變數，只會拿到這裡與 `pass_env` 指名的東西，因為 daemon 的環境裡有模型供應端的金鑰；值若是金鑰，會原樣存在儲存的設定裡，連同舊的版本也讀得到，改用 `pass_env` 轉送較好。"
          },
          {
           "key": "pass_env",
@@ -1262,7 +1262,7 @@ window.SCHEMA = {
        "type": "list",
        "def": [],
        "adv": false,
-       "help": "別人可以在裡面對話的頻道，啟動時套用成綁定。這裡的頻道是 `gateway` 權限：讀取不用問，變更、記憶、網頁會停下來等核准，執行程式一律拒絕。從檔案移除一筆不會解除綁定，因為只寫了一半的檔案一啟動就悄悄拿掉頻道，而綁定決定誰找得到代理；啟動記錄會列出檔案裡沒有的綁定。",
+       "help": "別人可以在裡面對話的頻道，啟動時套用成綁定。這裡的頻道是 `gateway` 權限：讀取不用問，變更、記憶、網頁會停下來等核准，執行程式一律拒絕。從設定移除一筆不會解除綁定，因為只寫了一半的設定一啟動就悄悄拿掉頻道，而綁定決定誰找得到代理；設定裡有宣告頻道時，啟動記錄會列出設定裡沒有的綁定。",
        "item": {
         "title": "channel_ids",
         "fields": [
@@ -1466,7 +1466,7 @@ window.SCHEMA = {
        "type": "list",
        "def": [],
        "adv": false,
-       "help": "別人可以在裡面對話的聊天，啟動時套用成綁定。規則與 Discord 的 `channels` 相同：`gateway` 權限，讀取不用問，變更、記憶、網頁會停下來等核准，執行程式一律拒絕；從檔案移除一筆不會解除綁定。",
+       "help": "別人可以在裡面對話的聊天，啟動時套用成綁定。規則與 Discord 的 `channels` 相同：`gateway` 權限，讀取不用問，變更、記憶、網頁會停下來等核准，執行程式一律拒絕；從設定移除一筆不會解除綁定。",
        "item": {
         "title": "channel_ids",
         "fields": [
@@ -1626,7 +1626,7 @@ window.SCHEMA = {
    "zh": "伺服器",
    "table": "server",
    "group": "連線",
-   "blurb": "daemon 的控制 API 監聽哪裡、資料放哪、記錄多詳細。",
+   "blurb": "daemon 的控制 API 監聽哪裡、記錄多詳細。資料目錄與執行期目錄決定設定放在哪裡，所以不能存在設定裡：資料目錄在啟動時用 --data-dir 或 JINGCLAW_SERVER_DATA_DIR 給，執行期目錄用 JINGCLAW_SERVER_RUNTIME_DIR。",
    "blocks": [
     {
      "table": "server",
@@ -1639,25 +1639,7 @@ window.SCHEMA = {
        "def": "127.0.0.1:0",
        "kind": "addr",
        "adv": false,
-       "help": "daemon 的控制 API 監聽的位址，只能是 loopback（`127.0.0.1`、`::1` 或 `localhost`）。這個 API 能讀檔案、執行程式，綁到別的網路介面等於交給網路上的人，所以非 loopback 一律拒絕啟動，而不是相信寫這行的人知道自己在暴露什麼；埠號 `0` 會挑一個空的，並寫進探索檔讓 client 找到。"
-      },
-      {
-       "key": "server.data_dir",
-       "zh": "資料目錄",
-       "type": "string",
-       "def": "",
-       "kind": "path",
-       "adv": true,
-       "help": "放資料庫 `jingclaw.db` 與產出物 `artifacts/` 的目錄；留空就用部署目錄下的 `data/`。"
-      },
-      {
-       "key": "server.runtime_dir",
-       "zh": "執行期目錄",
-       "type": "string",
-       "def": "",
-       "kind": "path",
-       "adv": true,
-       "help": "放探索檔 `daemon.json`（內有位址與存取權杖，client 靠它找到 daemon）的目錄；留空就用部署目錄下的 `run/`。同一台機器跑多個 daemon 時各自要指定不同目錄，否則第二個會把第一個的 client 全搶走。"
+       "help": "daemon 的控制 API 監聽的位址，只能是 loopback（`127.0.0.1`、`::1` 或 `localhost`）。這個 API 能讀檔案、執行程式，綁到別的網路介面等於交給網路上的人，所以非 loopback 一律拒絕（儲存時就會被擋下），而不是相信寫這行的人知道自己在暴露什麼；埠號 `0` 會挑一個空的，並寫進探索檔讓 client 找到。"
       },
       {
        "key": "server.log_level",

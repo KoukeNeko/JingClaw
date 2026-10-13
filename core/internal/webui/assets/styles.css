@@ -16,11 +16,11 @@ button:disabled{cursor:not-allowed}
 .ic.rot{transform:rotate(90deg)}
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 
-.app{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:60px minmax(0,1fr);height:100vh;min-height:620px}
+.app{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:60px auto minmax(0,1fr);height:100vh;min-height:620px}
 .app.open{grid-template-columns:minmax(0,1fr) 520px}
 
 /* ── 頂列 ── */
-.top{grid-column:1/-1;display:flex;align-items:center;gap:28px;padding:0 28px;border-bottom:1px solid var(--line)}
+.top{grid-column:1/-1;grid-row:1;display:flex;align-items:center;gap:28px;padding:0 28px;border-bottom:1px solid var(--line)}
 .brand{font:700 19px var(--sans);letter-spacing:.01em;margin-right:6px}
 .sum{display:flex;gap:26px;align-items:baseline;color:var(--tx2)}
 .sum b{font:600 26px/1 var(--sans);color:var(--tx);margin-right:6px;font-variant-numeric:tabular-nums}
@@ -34,10 +34,10 @@ button:disabled{cursor:not-allowed}
 .set{position:relative;font-weight:600;color:var(--bg);background:var(--tx);border-radius:6px;padding:7px 16px}
 .set[aria-expanded=true]{background:var(--pane2);color:var(--tx);box-shadow:inset 0 0 0 1px #33505A}
 .set .dot{position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 2px var(--bg)}
-.rst-note{display:flex;align-items:center;gap:12px;color:var(--amber);font-size:14px}
-.rst-note b{font-weight:700}
-.rst-note .how{color:var(--tx3);font-size:13px}
-.rst-note code{font-size:12.5px;color:var(--tx2)}
+.rst-bar{grid-column:1/-1;grid-row:2;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 20px;padding:8px 28px;background:var(--amber-bg);border-bottom:1px solid var(--amber-line);color:var(--amber);font-size:14px}
+.rst-bar b{font-weight:700}
+.rst-bar .how{color:var(--tx2);font-size:13px}
+.rst-bar code{font-size:12.5px;color:var(--tx)}
 
 /* ── 通用元件 ── */
 .btn{font-size:14px;border-radius:6px;padding:7px 15px;border:1px solid #33505A;color:var(--tx);display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
@@ -67,7 +67,7 @@ button:disabled{cursor:not-allowed}
 .stt.run{color:var(--teal)}
 
 /* ── 左：看板 ── */
-.board{padding:22px 28px 28px;overflow:auto}
+.board{grid-row:3;padding:22px 28px 28px;overflow:auto}
 .bh{display:flex;align-items:center;gap:16px;margin-bottom:16px}
 h1{font:700 22px/1.3 var(--sans)}
 .chips{display:flex;gap:8px;flex:1;flex-wrap:wrap}
@@ -81,15 +81,21 @@ h1{font:700 22px/1.3 var(--sans)}
 .ask .tg i{width:9px;height:9px;border-radius:50%;background:var(--amber)}
 .ask .ago{margin-left:auto;font-weight:400;color:var(--tx3);font-size:13px}
 .ask .body{display:flex;flex-direction:column;flex:1}
-.ask h2{font:600 17px/1.4 var(--sans);margin:8px 0 2px}
+.ask h2{font:600 17px/1.4 var(--sans);margin:8px 0 2px;overflow-wrap:anywhere;max-height:12em;overflow-y:auto}
 .ask .from{font-size:13px;color:var(--tx3);margin-bottom:9px}
+.ask .from .lnk{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;text-align:left}
 .ask .hint{font-size:14px;color:var(--tx2);margin-bottom:12px}
-.ask pre{font:13px/1.5 var(--mono);background:#07100E;border:1px solid #3A3118;border-radius:6px;padding:7px 11px;margin-bottom:11px;color:#F6E7C4;white-space:pre-wrap}
+.ask pre{font:13px/1.5 var(--mono);background:#07100E;border:1px solid #3A3118;border-radius:6px;padding:7px 11px;margin-bottom:11px;color:#F6E7C4;white-space:pre-wrap;overflow-wrap:anywhere;max-height:16em;overflow:auto}
 .ask pre em{font-style:normal;color:var(--tx3)}
 .ask .warn{font-size:13px;color:var(--amber);margin:-4px 0 10px}
 .ask .acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:auto}
-.ask .eff{list-style:none;margin-top:10px;font-size:13px;color:var(--tx2);line-height:1.6}
+.ask .eff{list-style:none;margin:0 0 10px;font-size:13px;color:var(--tx2);line-height:1.6}
+.ask .args{font-size:13px;margin-bottom:10px}
+.ask .args pre{margin:6px 0 0}
 .ask .eff li:before{content:"· ";color:var(--amber)}
+.ask.done{background:var(--pane);border-color:var(--line)}
+.ask.done .tg{color:var(--teal)}
+.ask.done .tg i{background:var(--teal)}
 .own{height:32px;min-width:0;flex:1;background:#07100E;border:1px solid #4A3C1C;border-radius:6px;padding:0 10px}
 .own::placeholder{color:#A18B5A}
 
@@ -125,6 +131,7 @@ background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 .sc{display:grid;grid-template-columns:200px minmax(0,1fr) 110px auto auto;column-gap:12px;align-items:center;padding:9px 0;border-top:1px solid var(--line2);font-size:14px;color:var(--tx2)}
 .sc b{color:var(--tx);font-weight:600}
 .sc.paused b,.sc.paused .sc-what{color:var(--tx3)}
+.sc-when span{display:block;font-size:13px;color:var(--tx3)}
 .sc-what{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sc-next{font-size:13px;color:var(--tx3)}
 
@@ -143,7 +150,7 @@ background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 .rt-h{font-size:13px;color:var(--tx3);border-bottom-color:var(--line)}
 
 /* ── 右：設定抽屜 ── */
-.drawer{background:var(--pane);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;position:relative}
+.drawer{grid-row:3;background:var(--pane);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;position:relative}
 .dh{display:flex;align-items:center;gap:10px;padding:0 16px 0 22px;height:60px;border-bottom:1px solid var(--line);flex:none}
 .dh h2{font:700 17px var(--sans)}
 .srch{flex:1;min-width:0;height:34px;background:var(--field);border:1px solid var(--field-line);border-radius:6px;padding:0 11px}
@@ -162,6 +169,7 @@ background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 .n{font:600 12px/1 var(--sans);border-radius:999px;padding:3px 7px;font-style:normal}
 .n.edit{background:rgba(76,201,180,.18);color:var(--teal)}
 .n.err{background:var(--coral-bg);color:var(--coral);border:1px solid #5A2A20}
+.n.pend{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-line)}
 .mi .n+.n,.mi code+.n{margin-left:2px}
 
 .db{padding:16px 22px 24px;flex:1;overflow:auto;min-height:0}
@@ -201,11 +209,14 @@ select.in option{background:#0F1B20}
 .f.edit .in,.f.edit .chips2{border-color:var(--teal)}
 .f.bad .in,.f.bad .chips2{border-color:var(--coral);background:var(--coral-bg)}
 .area{padding:8px 11px;min-height:70px;resize:vertical;line-height:1.55}
-.doc-area{min-height:380px;height:calc(100vh - 290px);padding:12px;line-height:1.7;resize:none;font-size:14px}
+.doc{display:flex;flex-direction:column;min-height:100%}
+.doc-area{flex:1 1 auto;min-height:320px;padding:12px;line-height:1.7;resize:none;font-size:14px}
 .hintx{display:block;font-size:13px;color:var(--tx3);margin-top:3px}
 .msg{font-size:13px;line-height:1.5;margin-top:4px;color:var(--coral)}
 .msg code{font-size:12.5px}
 .msg.mute{color:var(--tx3)}
+.msg.pre{white-space:pre-wrap;font:12.5px/1.5 var(--mono)}
+.doc .msg{margin:8px 0}
 .help{display:none;font-size:13px;color:var(--tx3);margin-top:4px;line-height:1.55}
 .help code{font-size:12.5px;color:var(--tx2)}
 .help.show,.drawer.helpall .help,.f:focus-within .help,.f.tog .help,.lst .help{display:block}
@@ -253,12 +264,15 @@ select.in option{background:#0F1B20}
 .fl>span{display:block;font-size:14px;margin-bottom:4px}
 .dacts{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
 .diff{font:13px/1.65 var(--mono);background:#07100E;border:1px solid var(--line);border-radius:6px;padding:8px 0;max-height:300px;overflow:auto}
-.ln{padding:0 12px;white-space:pre}
+.ln{padding:0 12px;white-space:pre;min-height:1.65em}
 .ln.ctx{color:var(--tx3)}
 .ln.del{color:var(--tx3);background:#10191C}
 .ln.add{color:#8BE3D2;background:#0F2A27}
+.ln::before{content:"  "}
+.ln.del::before{content:"- "}
+.ln.add::before{content:"+ "}
 
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:9px 16px;border-radius:8px;font-weight:600;font-size:14px;z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:9px 16px;border-radius:8px;font-weight:600;font-size:14px;z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.5);max-width:min(640px,calc(100vw - 32px));max-height:6.5em;overflow:hidden;overflow-wrap:anywhere;pointer-events:none}
 
 /* ── 窄螢幕：抽屜改成覆蓋 ── */
 @media (max-width:1100px){
@@ -267,14 +281,18 @@ select.in option{background:#0F1B20}
   .lh,.rw{grid-template-columns:16px minmax(0,1fr) 170px 70px 56px}
   .lh span:nth-child(3),.rw .tl{display:none}
   .sum{display:none}
-  .sc{grid-template-columns:1fr auto auto}
-  .sc-what,.sc-next{grid-column:1/-1}
+  .sc{grid-template-columns:auto auto 1fr}
+  .sc-when,.sc-what,.sc-next{grid-column:1/-1}
 }
 
 @media (max-width:700px){
-  .top{gap:12px;padding:0 16px}
-  .brand{margin-right:0}
-  .pill-d span,.pill-d code,.rst-note span{display:none}
+  .top{gap:8px;padding:0 12px}
+  .rst-bar{padding:8px 16px}
+  .brand{margin-right:0;font-size:17px}
+  .nav button{padding:5px 9px;white-space:nowrap}
+  .pill-d{gap:6px;white-space:nowrap}
+  .pill-d code{display:none}
+  .set{padding:7px 12px;white-space:nowrap}
   .board{padding:16px}
   .bh{flex-wrap:wrap;gap:12px}
   .bh h1{flex:1}
@@ -296,6 +314,23 @@ select.in option{background:#0F1B20}
   .menu{right:8px;width:calc(100% - 16px)}
 }
 
+/* ── 版本紀錄、沒有 agent 的畫面 ── */
+.chips+.calm,.chips+.vers{margin-top:12px}
+.drawer .chips{margin-bottom:4px}
+.vers{border-top:1px solid var(--line2)}
+.vr{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:12px;align-items:baseline;width:100%;text-align:left;padding:8px 8px;border-bottom:1px solid var(--line2);font-size:14px}
+.vr:hover,.vr.on{background:var(--pane2)}
+.vr .mute{font-size:13px;min-width:0}
+.vm{display:flex;gap:10px;font-size:13px;color:var(--tx2)}
+.vm span+span{color:var(--teal)}
+.vview{margin-top:16px}
+.vview .diff{max-height:340px}
+.vview .dacts{margin-top:12px}
+.rep{margin-top:26px}
+.rep p{margin:8px 0;color:var(--tx2)}
+.rep .msg{color:var(--coral)}
+.rep-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.rep .cbox{max-width:560px}
 .choices{display:contents}
 .own-row{display:flex;gap:8px;align-items:center;flex:1;min-width:0}
 .connect{position:fixed;inset:0;z-index:100;background:var(--bg);display:grid;place-items:center;padding:24px}
@@ -305,3 +340,92 @@ select.in option{background:#0F1B20}
 .cbox pre{background:#07100E;border:1px solid var(--line);border-radius:8px;padding:12px 16px;font:15px var(--mono);color:var(--tx);margin:12px 0}
 .cbox .hint{font-size:14px;color:var(--tx3)}
 .cbox .warn{color:var(--amber)}
+
+/* ── 金鑰：設定欄位底下的狀態與動作 ── */
+.cred{margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--field)}
+.cred.bad{border-color:#5A2A20}
+.cred .msg{margin-top:6px}
+.cs{display:flex;align-items:center;gap:8px;font-size:14px;line-height:1.45}
+.cs .lamp{width:9px;height:9px}
+.cs .n{margin-left:auto;flex:none}
+.ck{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 14px;margin-top:8px;font-size:13px;line-height:1.5;color:var(--tx2)}
+.ck dt{color:var(--tx3);white-space:nowrap}
+.ck dd{min-width:0;overflow-wrap:anywhere}
+.cred .acts,.fgrid .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.cform{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.cform .in{flex:1 1 180px;min-width:0}
+.cform .hintx{flex-basis:100%;margin-top:0}
+
+/* ── 連不上 daemon：畫面是舊的，淡下來，並且說它是多久以前的 ── */
+.off .need,.off .rw,.off .sum,.off .sch{opacity:.5}
+.off-note{font-size:14px;margin:0 0 14px;position:sticky;top:0;z-index:3;background:var(--bg);padding:6px 0 8px;border-bottom:1px solid var(--line2)}
+.dt-title h1.ttl{overflow-wrap:anywhere;max-height:4.2em;overflow:auto}
+
+/* ── 頂列的頁面切換 ── */
+.nav{display:flex;gap:4px}
+.nav button{display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:6px;color:var(--tx2);font-weight:600}
+.nav button:hover{color:var(--tx)}
+.nav button.on{background:var(--pane2);color:var(--tx);box-shadow:inset 0 0 0 1px #33505A}
+
+/* ── 技能：別人寫的字，長的要折行、不能撐開版面 ── */
+.n.mute{background:var(--pane2);color:var(--tx2);border:1px solid #2F4B54}
+.sk-sec{margin-top:24px}
+.sk-sec:first-child{margin-top:0}
+.sk{display:flex;gap:16px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line2)}
+.sk-main{flex:1;min-width:0}
+.sk-head{display:flex;gap:6px 10px;align-items:center;flex-wrap:wrap}
+.sk-name{font:600 15px/1.35 var(--sans);overflow-wrap:anywhere}
+h1.sk-name{font:700 22px/1.3 var(--sans);margin-top:2px}
+.sk-desc{color:var(--tx2);margin-top:2px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.sk-meta{font-size:13px;color:var(--tx3);margin-top:4px;overflow-wrap:anywhere}
+.sk-meta code{font-size:12.5px;color:var(--tx2)}
+.sk .cs{margin-top:6px;font-size:13px;color:var(--tx2)}
+.sk-acts{flex:none}
+.sk-add{margin:0 0 22px;max-width:760px}
+.sk-add .hint{font-size:14px;color:var(--tx3)}
+.sk-add .cform{margin-top:14px}
+.sk-add .cs{margin-top:12px}
+.sk-add .msg{margin-top:12px}
+.raw{font:13px/1.55 var(--mono);background:#07100E;border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin:8px 0;max-height:min(58vh,540px);overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--tx)}
+
+/* ── 技能：審查 ── */
+.rv .dt-head{margin-bottom:12px}
+.rv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(360px,100%),1fr));gap:0 32px;margin-top:6px}
+.rv-grid .h3s{margin-top:14px}
+.rv-grid .ck{margin-top:0}
+.fr code{font-size:12.5px;overflow-wrap:anywhere}
+.vr.fr{grid-template-columns:minmax(0,1fr) auto auto}
+.vr:disabled{color:var(--tx3)}
+.vr:disabled:hover{background:none}
+.rv-bar{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.rv-bar .chips{flex:none}
+.sk-stop,.sk-warn{border-radius:8px;padding:9px 14px;margin:12px 0;font-size:14px;overflow-wrap:anywhere}
+.sk-stop{background:var(--coral-bg);border:1px solid #5A2A20;color:var(--coral)}
+.sk-warn{background:var(--amber-bg);border:1px solid var(--amber-line);color:var(--amber)}
+.rv .diff{margin-top:8px;max-height:min(58vh,540px)}
+.rv-decide{margin-top:26px;padding-top:16px;border-top:1px solid var(--line);max-width:760px}
+.rv-decide p+p{margin-top:8px}
+.rv-decide .mute{font-size:13px}
+.rv-decide .dacts{justify-content:flex-start;margin-top:16px}
+@media (max-width:700px){
+  .sk-add .cform .in{flex-basis:100%}
+}
+
+/* ── 管理：記憶與通道沿用技能的列；排程與綁定的新增表單 ── */
+.sk-desc.full{display:block;-webkit-line-clamp:unset;white-space:pre-wrap;color:var(--tx)}
+.sk.gone .sk-desc{color:var(--tx3)}
+.sk .sk-meta+.sk-meta{margin-top:2px}
+.sk-meta.kept{color:var(--tx2);margin-top:6px}
+.sk-meta.kept b{font-weight:600;color:var(--tx)}
+.sks>.msg{margin-top:8px;max-width:46em}
+.sks>.msg:first-child{margin-top:0}
+.sks>.chips{margin:14px 0 6px}
+.sch-h{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.sch-h h3{margin:0}
+.sch .sk-add{margin:6px 0 16px}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:4px 18px;align-items:start;margin-top:10px}
+.fgrid .wide{grid-column:1/-1}
+.fgrid .fl{margin:10px 0 0}
+.fgrid .chips{flex:none;margin-top:8px;order:0}
+.fgrid>.hint,.fgrid>.msg,.fgrid>.sk-warn{margin:6px 0 0}
+.fgrid .acts{margin-top:12px}
