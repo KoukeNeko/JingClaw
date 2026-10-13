@@ -74,6 +74,19 @@ func Run(t *testing.T, newStore Factory) {
 		"OneOccasionResolvesOnce":            testOneOccasionResolvesOnce,
 		"LastFiringIsPerRevision":            testLastFiringIsPerRevision,
 		"DeletingAScheduleForgetsItsFirings": testDeletingAScheduleForgetsItsFirings,
+
+		"ADocumentNeverWrittenIsTheZeroValue":               testADocumentNeverWrittenIsTheZeroValue,
+		"ADocumentIsCreatedByExpectingNothing":              testADocumentIsCreatedByExpectingNothing,
+		"ADocumentHashIsSha256HexAndEmptyForEmptyText":      testADocumentHashIsSha256HexAndEmptyForEmptyText,
+		"AStaleHashIsRefusedAndWritesNothing":               testAStaleHashIsRefusedAndWritesNothing,
+		"AClearedDocumentIsAnEmptyRowThatCanBeWrittenAgain": testAClearedDocumentIsAnEmptyRowThatCanBeWrittenAgain,
+		"DocumentVersionsAreNewestFirstAndPrunedToTheLimit": testDocumentVersionsAreNewestFirstAndPrunedToTheLimit,
+		"AVersionNeverWrittenOrAlreadyPrunedIsNotFound":     testAVersionNeverWrittenOrAlreadyPrunedIsNotFound,
+		"OneHashHasOneWinnerAmongConcurrentWrites":          testOneHashHasOneWinnerAmongConcurrentWrites,
+		"SeedingNeverOverwritesAndReturnsOnlyWhatItWrote":   testSeedingNeverOverwritesAndReturnsOnlyWhatItWrote,
+		"SeedingDoesNotBringBackAClearedDocument":           testSeedingDoesNotBringBackAClearedDocument,
+		"SeedingIsAllOrNothing":                             testSeedingIsAllOrNothing,
+		"ANameThatIsNotADocumentIsRefusedEverywhere":        testANameThatIsNotADocumentIsRefusedEverywhere,
 	}
 
 	for name, fn := range tests {
@@ -1670,6 +1683,432 @@ func testDeletingAScheduleForgetsItsFirings(t *testing.T, newStore Factory) {
 	}
 	if !last.IsZero() {
 		t.Errorf("a schedule created again inherited a firing at %v", last)
+	}
+}
+
+// sha256 of "hello" and of the second text below, worked out outside this
+// codebase. The suite checks the value rather than calling a hashing
+// function, because the stores must agree with config.Hash, which this
+// package cannot import, and an implementation of both that was wrong the
+// same way would pass a test written with the same function.
+const (
+	helloHash = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+	// Multi-byte text, to show it is the UTF-8 bytes that are hashed.
+	settingsText = "[server]\naddr = \"127.0.0.1:7777\"\n# 設定\n"
+	settingsHash = "def21b8088ad57c3eef2dfd9256f50b3704c2378474f53fec00e4ccefd530576"
+)
+
+// sameDocument compares what a store promises about a document. The time by
+// instant: one store hands back the time it was given and the other one it
+// has read back as a number.
+func sameDocument(got, want storage.Document) bool {
+	return got.Name == want.Name && got.Text == want.Text && got.Hash == want.Hash &&
+		got.Source == want.Source && got.Version == want.Version &&
+		got.UpdatedAt.Equal(want.UpdatedAt)
+}
+
+func mustPutDocument(
+	t *testing.T, store storage.Store, name, text, expect string,
+) storage.Document {
+	t.Helper()
+
+	doc, err := store.PutDocument(context.Background(), name, text, "web", expect, fixedTime())
+	if err != nil {
+		t.Fatalf("put %s: %v", name, err)
+	}
+	return doc
+}
+
+func testADocumentNeverWrittenIsTheZeroValue(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	for _, name := range []string{"config", "agents", "persona"} {
+		got, err := store.Document(ctx, name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		// Absent is a state, not a failure: everything that reads a document
+		// treats one never written as empty.
+		if !sameDocument(got, storage.Document{Name: name}) {
+			t.Errorf("%s was never written but reads as %+v", name, got)
+		}
+
+		versions, err := store.DocumentVersions(ctx, name)
+		if err != nil || len(versions) != 0 {
+			t.Errorf("%s has no history yet but lists %d versions (err %v)", name, len(versions), err)
+		}
+	}
+}
+
+func testADocumentIsCreatedByExpectingNothing(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	created, err := store.PutDocument(ctx, "config", "hello", "env", "", fixedTime())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	want := storage.Document{
+		Name: "config", Text: "hello", Hash: helloHash, Source: "env",
+		Version: 1, UpdatedAt: fixedTime(),
+	}
+	if !sameDocument(created, want) {
+		t.Errorf("created %+v, want %+v", created, want)
+	}
+
+	got, err := store.Document(ctx, "config")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !sameDocument(got, want) {
+		t.Errorf("read back %+v, want %+v", got, want)
+	}
+
+	// The next edit starts from what it read, and counts as the next version
+	// from whoever it came.
+	later := fixedTime().Add(time.Hour)
+	updated, err := store.PutDocument(ctx, "config", "hello again", "web", created.Hash, later)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Version != 2 || updated.Source != "web" || !updated.UpdatedAt.Equal(later) {
+		t.Errorf("updated is %+v", updated)
+	}
+
+	// Documents are separate: writing one is not writing the others.
+	if other, err := store.Document(ctx, "agents"); err != nil || other.Version != 0 {
+		t.Errorf("writing config touched agents: %+v (err %v)", other, err)
+	}
+}
+
+func testADocumentHashIsSha256HexAndEmptyForEmptyText(t *testing.T, newStore Factory) {
+	store := newStore(t)
+
+	if doc := mustPutDocument(t, store, "config", settingsText, ""); doc.Hash != settingsHash {
+		t.Errorf("hash of multi-byte text is %q, want %q", doc.Hash, settingsHash)
+	}
+
+	// Empty text hashes to nothing, not to the hash of nothing, so a cleared
+	// document and one never written are the same token to an editor.
+	cleared := mustPutDocument(t, store, "config", "", settingsHash)
+	if cleared.Hash != "" {
+		t.Errorf("empty text hashes to %q, want the empty string", cleared.Hash)
+	}
+}
+
+func testAStaleHashIsRefusedAndWritesNothing(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	// Against a document that does not exist: only "" is the hash of nothing.
+	_, err := store.PutDocument(ctx, "config", "first", "web", "not-a-hash", fixedTime())
+	if !errors.Is(err, storage.ErrDocumentChanged) {
+		t.Errorf("writing over a document that is not there, from a hash: %v", err)
+	}
+	if got, err := store.Document(ctx, "config"); err != nil || got.Version != 0 {
+		t.Errorf("the refused write created the document: %+v (err %v)", got, err)
+	}
+
+	current := mustPutDocument(t, store, "config", "mine", "")
+
+	for name, expect := range map[string]string{
+		"another document's hash":   helloHash,
+		"nothing, after it was set": "",
+	} {
+		_, err := store.PutDocument(ctx, "config", "theirs", "web", expect, fixedTime())
+		if !errors.Is(err, storage.ErrDocumentChanged) {
+			t.Errorf("expecting %s: %v", name, err)
+		}
+	}
+
+	got, err := store.Document(ctx, "config")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !sameDocument(got, current) {
+		t.Errorf("a refused write changed the document: %+v, want %+v", got, current)
+	}
+	// Nor does it leave a version behind: the history is of what was saved.
+	if versions, err := store.DocumentVersions(ctx, "config"); err != nil || len(versions) != 1 {
+		t.Errorf("history has %d versions after a refused write (err %v), want 1", len(versions), err)
+	}
+}
+
+// testAClearedDocumentIsAnEmptyRowThatCanBeWrittenAgain is the other half of
+// "absent and cleared are the same token": one is a row and the other is not,
+// and the row has to stay, or an env seed brings back what was removed.
+func testAClearedDocumentIsAnEmptyRowThatCanBeWrittenAgain(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	written := mustPutDocument(t, store, "persona", "be brief", "")
+	cleared := mustPutDocument(t, store, "persona", "", written.Hash)
+	if cleared.Text != "" || cleared.Hash != "" || cleared.Version != 2 {
+		t.Fatalf("cleared is %+v, want an empty second version", cleared)
+	}
+
+	got, err := store.Document(ctx, "persona")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	// Version 2 and not 0: it is a row that says nothing, not a missing one.
+	if got.Version != 2 || got.Text != "" || got.Hash != "" {
+		t.Errorf("a cleared document reads as %+v", got)
+	}
+
+	// The hash it had before is stale now, and "" is the token for what it is.
+	_, err = store.PutDocument(ctx, "persona", "stale", "web", written.Hash, fixedTime())
+	if !errors.Is(err, storage.ErrDocumentChanged) {
+		t.Errorf("writing from the hash before it was cleared: %v", err)
+	}
+
+	again := mustPutDocument(t, store, "persona", "be brief again", "")
+	if again.Version != 3 {
+		t.Errorf("written again as version %d, want 3: numbering carries on", again.Version)
+	}
+}
+
+func testDocumentVersionsAreNewestFirstAndPrunedToTheLimit(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	total := storage.DocumentVersionsKept + 5
+	var current storage.Document
+	for i := 1; i <= total; i++ {
+		current = mustPutDocument(t, store, "config", fmt.Sprintf("text %d", i), current.Hash)
+	}
+	// Another document's history is its own, and is not touched by this one
+	// being pruned.
+	mustPutDocument(t, store, "agents", "rules", "")
+
+	versions, err := store.DocumentVersions(ctx, "config")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(versions) != storage.DocumentVersionsKept {
+		t.Fatalf("kept %d versions, want %d", len(versions), storage.DocumentVersionsKept)
+	}
+	for i, one := range versions {
+		wantVersion := int64(total - i)
+		if one.Version != wantVersion || one.Text != fmt.Sprintf("text %d", wantVersion) {
+			t.Errorf("entry %d is version %d %q, want version %d: newest first",
+				i, one.Version, one.Text, wantVersion)
+		}
+	}
+
+	// The current version is in the history, so restoring to what is live is
+	// not a special case.
+	if !sameDocument(versions[0], current) {
+		t.Errorf("newest in history %+v, current %+v", versions[0], current)
+	}
+
+	oldest := int64(total - storage.DocumentVersionsKept + 1)
+	got, err := store.DocumentVersion(ctx, "config", oldest)
+	if err != nil || got.Text != fmt.Sprintf("text %d", oldest) {
+		t.Errorf("the oldest kept version %d: %+v (err %v)", oldest, got, err)
+	}
+	if got.Hash != storage.DocumentHash(got.Text) {
+		t.Errorf("a version read back has hash %q, which is not its text's", got.Hash)
+	}
+
+	if other, err := store.DocumentVersions(ctx, "agents"); err != nil || len(other) != 1 {
+		t.Errorf("agents has %d versions (err %v), want 1", len(other), err)
+	}
+}
+
+func testAVersionNeverWrittenOrAlreadyPrunedIsNotFound(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	if _, err := store.DocumentVersion(ctx, "config", 1); !errors.Is(err, storage.ErrDocumentVersionNotFound) {
+		t.Errorf("a version of a document never written: %v", err)
+	}
+
+	var current storage.Document
+	for i := 1; i <= storage.DocumentVersionsKept+1; i++ {
+		current = mustPutDocument(t, store, "config", fmt.Sprintf("text %d", i), current.Hash)
+	}
+
+	for name, version := range map[string]int64{
+		"already pruned":  1,
+		"zero":            0,
+		"not yet written": current.Version + 1,
+		"negative":        -1,
+	} {
+		if _, err := store.DocumentVersion(ctx, "config", version); !errors.Is(err, storage.ErrDocumentVersionNotFound) {
+			t.Errorf("version %d (%s): %v", version, name, err)
+		}
+	}
+
+	// Asking for another document's version is not finding it there.
+	if _, err := store.DocumentVersion(ctx, "agents", current.Version); !errors.Is(err, storage.ErrDocumentVersionNotFound) {
+		t.Errorf("a version number from another document: %v", err)
+	}
+}
+
+// testOneHashHasOneWinnerAmongConcurrentWrites is what the hash is for: two
+// editors who read the same version cannot both save over it.
+func testOneHashHasOneWinnerAmongConcurrentWrites(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	start := mustPutDocument(t, store, "config", "start", "")
+
+	const editors = 8
+	results := make(chan error, editors)
+	var wg sync.WaitGroup
+	for i := range editors {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := store.PutDocument(ctx, "config", fmt.Sprintf("editor %d", i), "web", start.Hash, fixedTime())
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	var won, refused int
+	for err := range results {
+		switch {
+		case err == nil:
+			won++
+		case errors.Is(err, storage.ErrDocumentChanged):
+			refused++
+		default:
+			t.Errorf("an editor failed for another reason: %v", err)
+		}
+	}
+	if won != 1 || refused != editors-1 {
+		t.Errorf("%d editors won and %d were refused, want 1 and %d", won, refused, editors-1)
+	}
+
+	// One write, one new version: the history has no trace of the others.
+	versions, err := store.DocumentVersions(ctx, "config")
+	if err != nil || len(versions) != 2 {
+		t.Errorf("history has %d versions (err %v), want 2", len(versions), err)
+	}
+}
+
+func testSeedingNeverOverwritesAndReturnsOnlyWhatItWrote(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	existing := mustPutDocument(t, store, "config", "operator's", "")
+
+	written, err := store.SeedDocuments(ctx, []storage.DocumentSeed{
+		{Name: "config", Text: "from the environment", Source: "env"},
+		{Name: "persona", Text: "be brief", Source: "env"},
+		{Name: "agents", Text: "", Source: "file"},
+	}, fixedTime().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if !reflect.DeepEqual(written, []string{"persona", "agents"}) {
+		t.Errorf("wrote %v, want [persona agents]: only what was missing, in the order given", written)
+	}
+
+	got, err := store.Document(ctx, "config")
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !sameDocument(got, existing) {
+		t.Errorf("a seed changed a document that existed: %+v, want %+v", got, existing)
+	}
+	if versions, err := store.DocumentVersions(ctx, "config"); err != nil || len(versions) != 1 {
+		t.Errorf("a seed that wrote nothing left %d versions of config (err %v)", len(versions), err)
+	}
+
+	persona, err := store.Document(ctx, "persona")
+	if err != nil {
+		t.Fatalf("read persona: %v", err)
+	}
+	wantPersona := storage.Document{
+		Name: "persona", Text: "be brief", Hash: storage.DocumentHash("be brief"),
+		Source: "env", Version: 1, UpdatedAt: fixedTime().Add(time.Hour),
+	}
+	if !sameDocument(persona, wantPersona) {
+		t.Errorf("seeded persona is %+v, want %+v", persona, wantPersona)
+	}
+	if versions, err := store.DocumentVersions(ctx, "persona"); err != nil || len(versions) != 1 {
+		t.Errorf("a seeded document has %d versions (err %v), want its first", len(versions), err)
+	}
+
+	// Seeding is idempotent: the second time everything is there.
+	again, err := store.SeedDocuments(ctx, []storage.DocumentSeed{
+		{Name: "persona", Text: "different", Source: "env"},
+	}, fixedTime())
+	if err != nil || len(again) != 0 {
+		t.Errorf("seeding what exists wrote %v (err %v)", again, err)
+	}
+}
+
+// testSeedingDoesNotBringBackAClearedDocument is why a cleared document is a
+// row: the environment still has the text the operator removed.
+func testSeedingDoesNotBringBackAClearedDocument(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	written := mustPutDocument(t, store, "agents", "old rules", "")
+	mustPutDocument(t, store, "agents", "", written.Hash)
+
+	seeded, err := store.SeedDocuments(ctx, []storage.DocumentSeed{
+		{Name: "agents", Text: "old rules", Source: "env"},
+	}, fixedTime())
+	if err != nil || len(seeded) != 0 {
+		t.Errorf("seeding over a cleared document wrote %v (err %v)", seeded, err)
+	}
+	if got, err := store.Document(ctx, "agents"); err != nil || got.Text != "" {
+		t.Errorf("the cleared document came back as %q (err %v)", got.Text, err)
+	}
+}
+
+func testSeedingIsAllOrNothing(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	// The one that cannot be written comes last, so a store that wrote as it
+	// went would already have written the first.
+	written, err := store.SeedDocuments(ctx, []storage.DocumentSeed{
+		{Name: "config", Text: "fine", Source: "env"},
+		{Name: "not-a-document", Text: "refused", Source: "env"},
+	}, fixedTime())
+	if err == nil {
+		t.Fatalf("seeding a document that cannot exist succeeded, wrote %v", written)
+	}
+	if len(written) != 0 {
+		t.Errorf("a failed seed reports having written %v", written)
+	}
+
+	got, readErr := store.Document(ctx, "config")
+	if readErr != nil || got.Version != 0 {
+		t.Errorf("config was written although the seed failed: %+v (err %v)", got, readErr)
+	}
+	if versions, err := store.DocumentVersions(ctx, "config"); err != nil || len(versions) != 0 {
+		t.Errorf("a failed seed left %d versions behind (err %v)", len(versions), err)
+	}
+}
+
+func testANameThatIsNotADocumentIsRefusedEverywhere(t *testing.T, newStore Factory) {
+	store := newStore(t)
+	ctx := context.Background()
+	const name = "secrets"
+
+	if _, err := store.Document(ctx, name); err == nil {
+		t.Error("read a document that cannot exist")
+	}
+	// Both ways of expecting: the refusal is about the name, not about a hash
+	// that happens to be wrong.
+	for _, expect := range []string{"", helloHash} {
+		if _, err := store.PutDocument(ctx, name, "x", "web", expect, fixedTime()); err == nil {
+			t.Errorf("wrote a document that cannot exist, expecting %q", expect)
+		}
+	}
+	if _, err := store.DocumentVersions(ctx, name); err == nil {
+		t.Error("listed the versions of a document that cannot exist")
+	}
+	if _, err := store.DocumentVersion(ctx, name, 1); err == nil {
+		t.Error("read a version of a document that cannot exist")
 	}
 }
 

@@ -54,6 +54,13 @@ type Store struct {
 	// it ran. That is what makes resolving one twice a refusal rather than a
 	// second row.
 	firings map[firingKey]domain.Firing
+
+	// documents holds the current version of each, and documentVersions the
+	// history of each with the oldest first. A document never written has an
+	// entry in neither, which reads as the zero Document: its hash is "" and
+	// its version 0, the same as a cleared one.
+	documents        map[string]storage.Document
+	documentVersions map[string][]storage.Document
 }
 
 // firingKey is one occasion: which schedule, at which revision, due when.
@@ -79,6 +86,9 @@ func New() *Store {
 		memoryVectors: make(map[domain.MemoryID]map[string][]float32),
 		schedules:     make(map[domain.ScheduleID]domain.Schedule),
 		firings:       make(map[firingKey]domain.Firing),
+
+		documents:        make(map[string]storage.Document),
+		documentVersions: make(map[string][]storage.Document),
 	}
 }
 

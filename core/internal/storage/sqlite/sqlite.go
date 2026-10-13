@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
+	"github.com/KoukeNeko/JingClaw/core/internal/fsperm"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage"
 )
 
@@ -34,7 +36,17 @@ var _ storage.Store = (*Store)(nil)
 
 // Open opens (or creates) the database at path and applies migrations.
 // Pass ":memory:" for an ephemeral database in tests.
+//
+// A database on disk is readable by its owner alone, new or not: it holds the
+// conversations and memories, and the daemon's settings, which can carry
+// credentials such as the headers sent to a tool server.
 func Open(ctx context.Context, path string) (*Store, error) {
+	if !isMemory(path) {
+		if err := restrictDatabase(path); err != nil {
+			return nil, err
+		}
+	}
+
 	dsn := path + pragmaSuffix(path)
 
 	db, err := sql.Open("sqlite", dsn)
@@ -67,6 +79,37 @@ func Open(ctx context.Context, path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// restrictDatabase makes the database file, and the write-ahead log and index
+// beside it, owner-only.
+//
+// The file is created before SQLite opens it because SQLite makes the -wal and
+// -shm files with the mode of the database, so creating it owner-only is what
+// makes them owner-only. Where they already exist — left by a daemon that was
+// killed rather than stopped — they keep the mode they had, and the daemon is
+// about to append to them, so they are tightened here too.
+func restrictDatabase(path string) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("sqlite: create %s: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("sqlite: create %s: %w", path, err)
+	}
+
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		if err := fsperm.Restrict(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("sqlite: %w", err)
+		}
+	}
+	return nil
+}
+
+// isMemory is a database that is not a file, which has nothing to protect and
+// nothing to create.
+func isMemory(path string) bool {
+	return strings.Contains(path, ":memory:") || strings.Contains(path, "mode=memory")
+}
+
 func pragmaSuffix(path string) string {
 	pragmas := []string{
 		// Readers never block the writer, which is what lets an event stream
@@ -80,7 +123,7 @@ func pragmaSuffix(path string) string {
 	}
 
 	// WAL needs a real file; an in-memory database rejects it.
-	if strings.Contains(path, ":memory:") || strings.Contains(path, "mode=memory") {
+	if isMemory(path) {
 		pragmas = pragmas[1:]
 	}
 
@@ -142,9 +185,16 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
-// inTx runs fn inside an immediate transaction. BEGIN IMMEDIATE takes the
-// write lock up front rather than discovering the conflict at COMMIT, which is
-// what makes read-then-write sequences such as sequence allocation safe.
+// inTx runs fn inside one transaction.
+//
+// The transaction is deferred, which is the driver's default and what this
+// DSN leaves it at: the write lock is taken by the first statement that
+// writes, not at BEGIN. Within this process that is enough for a read followed
+// by a write, such as sequence allocation, because the pool has one
+// connection and a transaction holds it. It does not exclude another process
+// on the same file: a transaction that reads before it writes can fail with
+// SQLITE_BUSY if that process committed in between. Code that has to hold
+// across processes starts its transaction with the write, as PutDocument does.
 func (s *Store) inTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

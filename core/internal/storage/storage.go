@@ -282,6 +282,7 @@ type Store interface {
 	EventStore
 	MemoryStore
 	ScheduleStore
+	DocumentStore
 }
 
 // ScheduleStore keeps standing instructions and the occasions already
