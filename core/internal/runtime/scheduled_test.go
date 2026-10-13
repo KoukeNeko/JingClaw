@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/permission"
@@ -295,5 +296,35 @@ func TestAScheduledRunCannotWriteOrRunAnything(t *testing.T) {
 	}
 	if got := runs[0].Status; got == domain.RunAwaitingApproval {
 		t.Error("a scheduled run parked waiting for a person")
+	}
+}
+
+// The session a schedule makes is called after what it asks. The title travels
+// as a protobuf string, and one cut through the middle of a Chinese character
+// is not text: every listing of sessions then fails, the board and the CLI
+// alike, until somebody edits the database by hand.
+func TestAScheduleTitleCutThroughChineseTextIsStillText(t *testing.T) {
+	rt, store, _, _ := newToolHarness(t, nil)
+	ctx := context.Background()
+
+	made, err := rt.NewSchedule(ctx, domain.Schedule{
+		Expression: "0 9 * * *",
+		Zone:       "UTC",
+		Prompt:     "整理昨天 workspace 裡改了什麼，並且把結果整理成一段摘要，放進報告裡，再寄給所有需要知道的人，最後記得確認有沒有寄成功",
+		CreatedBy:  domain.FromTheMachine("test"),
+	})
+	if err != nil {
+		t.Fatalf("new schedule: %v", err)
+	}
+
+	session, err := store.Session(ctx, made.SessionID)
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if !utf8.ValidString(session.Title) {
+		t.Errorf("the title is not valid UTF-8: %q", session.Title)
+	}
+	if !strings.HasSuffix(session.Title, "…") {
+		t.Errorf("the long prompt was not cut: %q", session.Title)
 	}
 }

@@ -446,8 +446,10 @@ func compactArguments(arguments map[string]any) string {
 	for _, key := range keys {
 		value := fmt.Sprintf("%v", arguments[key])
 		value = strings.Join(strings.Fields(value), " ")
-		if len(value) > 60 {
-			value = value[:60] + "…"
+		// By runes: a byte cut inside a multi-byte character is not text, and
+		// an approval whose summary is not text cannot be listed by anyone.
+		if runes := []rune(value); len(runes) > 60 {
+			value = string(runes[:60]) + "…"
 		}
 		parts = append(parts, key+"="+value)
 	}

@@ -1,6 +1,7 @@
 package control
 
 import (
+	"strings"
 	"time"
 
 	"fmt"
@@ -159,8 +160,10 @@ func usageToProto(usage domain.Usage) *controlv1.Usage {
 
 func sessionToProto(s domain.Session) *controlv1.Session {
 	return &controlv1.Session{
-		Id:        string(s.ID),
-		Title:     s.Title,
+		Id: string(s.ID),
+		// A title cut through a character by an older version is stored as it was
+		// cut. Sent as it is, it fails the whole listing; this keeps the rest.
+		Title:     strings.ToValidUTF8(s.Title, "\uFFFD"),
 		Model:     s.Model,
 		CreatedAt: timestamppb.New(s.CreatedAt),
 		UpdatedAt: timestamppb.New(s.UpdatedAt),

@@ -3,7 +3,9 @@ package permission_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/permission"
 	"github.com/KoukeNeko/JingClaw/core/internal/tool"
@@ -225,5 +227,28 @@ func TestOneProfileCannotEditAnother(t *testing.T) {
 
 	if permission.UnattendedProfile().Defaults[tool.LevelExecute] != permission.Deny {
 		t.Error("changing one copy of the profile changed them all")
+	}
+}
+
+// An approval's summary travels as a protobuf string, which must be UTF-8. A
+// summary cut at a byte count lands inside a Chinese character as soon as the
+// text before it is not a multiple of three bytes, and then nobody can list the
+// approval the run is waiting on.
+func TestASummaryCutThroughChineseTextIsStillText(t *testing.T) {
+	engine := permission.New(permission.LocalProfile())
+
+	outcome := engine.Evaluate(context.Background(), permission.Request{
+		Spec: tool.Spec{Name: "write_file", Level: tool.LevelWorkspaceWrite, Capabilities: tool.Capabilities{WriteFS: true}},
+		Call: tool.Call{
+			Name:      "write_file",
+			Arguments: json.RawMessage(`{"path":"a.md","content":"a這是一份很長的中文說明文件，裡面有許多字，用來看摘要會被切在哪裡。再多一些字讓它超過限制，而且要超過六十個字才會被切，所以這裡再寫一些沒有意義的字。"}`),
+		},
+	})
+
+	if !utf8.ValidString(outcome.Summary) {
+		t.Errorf("the summary is not valid UTF-8: %q", outcome.Summary)
+	}
+	if !strings.Contains(outcome.Summary, "…") {
+		t.Errorf("the long argument was not cut: %q", outcome.Summary)
 	}
 }

@@ -54,9 +54,11 @@ func (r *Runtime) NewSchedule(
 func scheduleTitle(one domain.Schedule) string {
 	const most = 40
 
+	// By runes: a byte cut lands inside a Chinese character and leaves a title
+	// the control API cannot send, which fails every listing of sessions.
 	asked := strings.TrimSpace(one.Prompt)
-	if len(asked) > most {
-		asked = asked[:most] + "…"
+	if runes := []rune(asked); len(runes) > most {
+		asked = string(runes[:most]) + "…"
 	}
 	return one.Expression + " — " + asked
 }

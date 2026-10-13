@@ -3,6 +3,9 @@ package control
 import (
 	"testing"
 	"time"
+	"unicode/utf8"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/domain"
 	"github.com/KoukeNeko/JingClaw/core/internal/domain/domaintest"
@@ -38,5 +41,18 @@ func TestEveryEventKindConvertsToProto(t *testing.T) {
 				t.Fatal("converted to an event with no payload, which no client could render")
 			}
 		})
+	}
+}
+
+// One session whose title is not text must not take the listing with it: the
+// board, and the CLI, ask for every session at once.
+func TestASessionWithABrokenTitleStillMarshals(t *testing.T) {
+	converted := sessionToProto(domain.Session{ID: "ses_1", Title: "0 9 * * * — 整理昨天\xef\xbc…"})
+
+	if !utf8.ValidString(converted.GetTitle()) {
+		t.Errorf("the title is still not text: %q", converted.GetTitle())
+	}
+	if _, err := proto.Marshal(converted); err != nil {
+		t.Errorf("marshal: %v", err)
 	}
 }
