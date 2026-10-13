@@ -124,6 +124,35 @@ func TestPairingIsBounded(t *testing.T) {
 	}
 }
 
+// There is no sign-out, so every tab ever opened holds a place for twelve
+// hours. Refusing the seventeenth browser would lock the operator out of their
+// own dashboard until the daemon restarts; the one that has been in longest
+// gives way instead.
+func TestTheOldestBrowserGivesWayToANewOne(t *testing.T) {
+	browsers, now := newBrowsers()
+
+	var tokens []string
+	for range 20 {
+		code, _, err := browsers.Pair()
+		if err != nil {
+			t.Fatalf("pair: %v", err)
+		}
+		token, _, err := browsers.Redeem(code)
+		if err != nil {
+			t.Fatalf("redeem: %v", err)
+		}
+		tokens = append(tokens, token.Value)
+		now.at = now.at.Add(time.Second)
+	}
+
+	if _, ok := browsers.Lookup(tokens[0]); ok {
+		t.Error("the first browser is still in after twenty others")
+	}
+	if _, ok := browsers.Lookup(tokens[len(tokens)-1]); !ok {
+		t.Error("the newest browser was refused")
+	}
+}
+
 // ── the exchange over HTTP ─────────────────────────────────────────────
 
 func post(handler http.Handler, body string) *httptest.ResponseRecorder {

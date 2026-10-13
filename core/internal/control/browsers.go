@@ -31,7 +31,9 @@ const (
 	sessionTTL = 12 * time.Hour
 
 	// maxLive bounds what is held. Pairing is rare and by hand, so reaching
-	// either limit means something is calling it in a loop.
+	// the limit on waiting codes means something is calling it in a loop. The
+	// limit on sessions is not that: nothing signs a browser out, a closed tab
+	// keeps its place for twelve hours, and so the oldest gives way.
 	maxLive = 16
 
 	maxPairBody = 1 << 10
@@ -98,7 +100,7 @@ func (b *Browsers) Redeem(code string) (Token, time.Time, error) {
 	delete(b.codes, key)
 
 	if len(b.sessions) >= maxLive {
-		return Token{}, time.Time{}, errors.New("control: too many browsers are signed in")
+		b.dropOldest()
 	}
 
 	secret, err := newSecret()
@@ -140,6 +142,19 @@ func (b *Browsers) expire() {
 			delete(b.sessions, key)
 		}
 	}
+}
+
+// dropOldest signs out the browser that has been in the longest. Every session
+// lasts the same time, so that is the one that runs out first.
+func (b *Browsers) dropOldest() {
+	var oldest [sha256.Size]byte
+	var soonest time.Time
+	for key, expires := range b.sessions {
+		if soonest.IsZero() || expires.Before(soonest) {
+			oldest, soonest = key, expires
+		}
+	}
+	delete(b.sessions, oldest)
 }
 
 func newSecret() (string, error) {
