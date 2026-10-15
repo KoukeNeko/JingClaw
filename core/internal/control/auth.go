@@ -49,6 +49,7 @@ var servicesForScope = map[Scope]map[string]bool{
 		"jingclaw.control.v1.CredentialService":     true,
 		"jingclaw.control.v1.SkillService":          true,
 		"jingclaw.control.v1.BrowserService":        true,
+		"jingclaw.control.v1.ChatGPTAuthService":    true,
 	},
 	ScopeGateway: {
 		"jingclaw.control.v1.GatewayIngressService": true,

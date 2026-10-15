@@ -98,8 +98,13 @@ func IsEnvName(text string) bool { return envName.MatchString(text) }
 var keptNames = []string{
 	home.ConfigName, InstructionsFile, PersonaFile,
 	home.WorkspaceName, home.DataName, home.RunName, home.LogName, home.BinName, home.SkillsName,
-	"mcp-auth", "sandbox",
+	"mcp-auth", "sandbox", chatgptauthFile,
 }
+
+// chatgptauthFile is the file the ChatGPT sign-in is kept in, written out here
+// because this package cannot import the one that writes it. The credential
+// service must never be able to read, replace or delete it.
+const chatgptauthFile = "chatgpt-auth.json"
 
 // credentialNameFix says what a name may be. The one text for the check at
 // start and for the service that is asked to write the file, so that the rule
@@ -107,7 +112,7 @@ var keptNames = []string{
 const credentialNameFix = "Give a plain file name for a file directly inside the deployment directory: " +
 	"up to 64 letters, digits, '.', '_' or '-', starting with a letter or digit and not ending in '.', " +
 	`such as "gemini.key". It cannot be a path, a name this deployment keeps for itself ` +
-	"(config.toml, AGENTS.md, PERSONA.md, workspace, data, run, log, bin, skills, mcp-auth, sandbox), " +
+	"(config.toml, AGENTS.md, PERSONA.md, workspace, data, run, log, bin, skills, mcp-auth, sandbox, chatgpt-auth.json), " +
 	"a backup name (*.bak.*), or the name of a file that was imported (*.imported)."
 
 // notShown stands for a value that is not quoted back. A problem is printed,

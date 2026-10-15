@@ -259,6 +259,39 @@ func TestGatewayCredentialCannotReachToolExecutingServices(t *testing.T) {
 			wantStatus: http.StatusForbidden,
 		},
 		{
+			// What it would learn is which account the plan usage is spent on,
+			// and what it could do is sign the deployment in as somebody else or
+			// sign it out.
+			name:       "gateway cannot see the ChatGPT account",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ChatGPTAuthService/GetChatGPTAccount",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot start a ChatGPT sign-in",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ChatGPTAuthService/StartChatGPTSignIn",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot complete a ChatGPT sign-in",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ChatGPTAuthService/CompleteChatGPTSignIn",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot sign ChatGPT out",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ChatGPTAuthService/SignOutChatGPT",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "gateway cannot list the ChatGPT models",
+			token:      gatewayValue,
+			path:       "/jingclaw.control.v1.ChatGPTAuthService/ListChatGPTModels",
+			wantStatus: http.StatusForbidden,
+		},
+		{
 			// Pairing a browser is how somebody gets the operator's powers.
 			name:       "gateway cannot pair a browser",
 			token:      gatewayValue,
@@ -287,6 +320,12 @@ func TestGatewayCredentialCannotReachToolExecutingServices(t *testing.T) {
 			name:       "control reaches the credentials",
 			token:      controlValue,
 			path:       "/jingclaw.control.v1.CredentialService/PutCredential",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "control reaches the ChatGPT sign-in",
+			token:      controlValue,
+			path:       "/jingclaw.control.v1.ChatGPTAuthService/StartChatGPTSignIn",
 			wantStatus: http.StatusOK,
 		},
 		{

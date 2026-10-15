@@ -22,7 +22,7 @@
 # permission_profile = "local"
 
 [provider]
-# "gemini", "anthropic", "ollama" or "openai_compat". Left as it is, an offline stand-in
+# "gemini", "anthropic", "chatgpt", "ollama" or "openai_compat". Left as it is, an offline stand-in
 # answers instead of a model, so a fresh install starts and does nothing
 # surprising; set this before expecting real work.
 backend = "fake"
@@ -72,6 +72,15 @@ backend = "fake"
 # api_key_file = ""
 # For a gateway or a proxy in front of the service.
 # base_url = ""
+
+[provider.chatgpt]
+# Sign in with ChatGPT: the model is served from the signed-in ChatGPT plan.
+# There is no key. Sign in from the dashboard; what that holds is kept in
+# chatgpt-auth.json in the deployment directory, never in these settings.
+# Implemented from OpenAI's documentation and tested against fake servers.
+# model = ""
+# Sent as the reasoning effort when set. Empty sends nothing.
+# reasoning_effort = ""
 
 [provider.openai_compat]
 # model = ""

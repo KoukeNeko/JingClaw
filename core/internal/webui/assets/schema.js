@@ -76,6 +76,11 @@ window.SCHEMA = {
          "note": "Anthropic 的 Messages API，需要金鑰"
         },
         {
+         "v": "chatgpt",
+         "zh": "ChatGPT 登入",
+         "note": "用你自己的 ChatGPT 方案；不需金鑰，在儀表板登入（依 OpenAI 文件實作，只對假伺服器測過）"
+        },
+        {
          "v": "gemini",
          "zh": "Gemini",
          "note": "Google 的 Gemini API，需要金鑰"
@@ -193,6 +198,32 @@ window.SCHEMA = {
        "kind": "url",
        "adv": false,
        "help": "前面有代理或閘道時才填；留空使用 Anthropic 官方位址。"
+      }
+     ]
+    },
+    {
+     "table": "provider.chatgpt",
+     "zh": "ChatGPT 登入",
+     "when": {
+      "key": "provider.backend",
+      "eq": "chatgpt"
+     },
+     "fields": [
+      {
+       "key": "provider.chatgpt.model",
+       "zh": "模型",
+       "type": "string",
+       "def": "",
+       "adv": false,
+       "help": "模型名稱，要與登入後帳號可用的模型清單一致（儀表板的 ChatGPT 登入區可列出）；不一致時啟動會發現，daemon 進入修復模式。不需要金鑰：用你的 ChatGPT 帳號登入，登入資料存在部署目錄的 `chatgpt-auth.json`，不在設定裡。這是依 OpenAI 文件實作、只對假伺服器測過的功能。"
+      },
+      {
+       "key": "provider.chatgpt.reasoning_effort",
+       "zh": "推理強度",
+       "type": "string",
+       "def": "",
+       "adv": true,
+       "help": "有填才會送出，當作這個請求的推理強度；留空就不送，由模型決定。OpenAI 文件沒有列出可用的值，所以這裡不檢查；服務不接受的值會在請求時回報。"
       }
      ]
     },

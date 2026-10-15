@@ -17,6 +17,7 @@ import (
 
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
+	"github.com/KoukeNeko/JingClaw/core/internal/chatgptauth"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
@@ -323,9 +324,10 @@ func TestARepairDaemonServesOnlyWhatRepairNeedsBehindTheSameChecks(t *testing.T)
 	d := start(t, root)
 
 	mounted := map[string]bool{
-		controlv1connect.ConfigServiceName:     true,
-		controlv1connect.CredentialServiceName: true,
-		controlv1connect.BrowserServiceName:    true,
+		controlv1connect.ConfigServiceName:      true,
+		controlv1connect.CredentialServiceName:  true,
+		controlv1connect.ChatGPTAuthServiceName: true,
+		controlv1connect.BrowserServiceName:     true,
 	}
 	for service, method := range map[string]string{
 		controlv1connect.SessionServiceName:        "ListSessions",
@@ -351,6 +353,12 @@ func TestARepairDaemonServesOnlyWhatRepairNeedsBehindTheSameChecks(t *testing.T)
 	}
 	if got := d.call(controlv1connect.BrowserServiceName+"/CreatePairing", d.file.Token); got != http.StatusOK {
 		t.Errorf("the pairing answers %d to the control token", got)
+	}
+	if got := d.call(controlv1connect.ChatGPTAuthServiceName+"/GetChatGPTAccount", d.file.Token); got != http.StatusOK {
+		t.Errorf("the ChatGPT account answers %d to the control token", got)
+	}
+	if got := d.call(controlv1connect.ChatGPTAuthServiceName+"/GetChatGPTAccount", ""); got != http.StatusUnauthorized {
+		t.Errorf("the ChatGPT account answers %d to no credential", got)
 	}
 	if got := d.call(controlv1connect.CredentialServiceName+"/ListCredentials", ""); got != http.StatusUnauthorized {
 		t.Errorf("the credentials answer %d to no credential", got)
@@ -400,13 +408,15 @@ func TestTheServicesAreChosenInOnePlace(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	var got []string
-	for _, one := range (serving{store: store}).services(nil, control.AgentState{}) {
+	signin := chatgptauth.New(filepath.Join(t.TempDir(), chatgptauth.FileName), chatgptauth.DefaultEndpoints())
+	for _, one := range (serving{store: store, signin: signin}).services(nil, control.AgentState{}) {
 		got = append(got, one.path)
 	}
 
 	want := []string{
 		"/" + controlv1connect.ConfigServiceName + "/",
 		"/" + controlv1connect.CredentialServiceName + "/",
+		"/" + controlv1connect.ChatGPTAuthServiceName + "/",
 		"/" + controlv1connect.BrowserServiceName + "/",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
@@ -437,6 +447,28 @@ func TestAnAgentThatCannotBeBuiltStartsARepairDaemonWithTheReasonItUsedToExitWit
 		// The settings are fine, and are shown as such; only nothing is running.
 		if saved := d.config(); saved.ParseError != "" || saved.RunningHash != "" {
 			t.Errorf("config says parse error %q and running hash %q", saved.ParseError, saved.RunningHash)
+		}
+	})
+
+	t.Run("the ChatGPT backend with nobody signed in", func(t *testing.T) {
+		root := isolate(t)
+		t.Setenv(config.FileEnvVar, "[provider]\nbackend = \"chatgpt\"\n")
+
+		d := start(t, root)
+
+		state := d.state()
+		if state.Mode != "repair" || len(state.Problems) != 1 {
+			t.Fatalf("state is %+v", state)
+		}
+		reason := state.Problems[0]
+		if reason.Source != "startup" || !strings.Contains(reason.Why, "not signed in") ||
+			!strings.Contains(reason.Fix, "dashboard") || !strings.Contains(reason.Fix, "ChatGPT") {
+			t.Errorf("the reason is %+v, want that nobody is signed in and where to do it", reason)
+		}
+
+		// And repair mode is where the sign-in is made: it answers.
+		if got := d.call(controlv1connect.ChatGPTAuthServiceName+"/GetChatGPTAccount", d.file.Token); got != http.StatusOK {
+			t.Errorf("the ChatGPT account answers %d", got)
 		}
 	})
 
@@ -712,7 +744,7 @@ func TestThePromptIsBuiltFromTheSavedDocumentsAndNotFromFiles(t *testing.T) {
 	asked := func() string {
 		t.Helper()
 		return capturingStdout(t, func() {
-			if err := run([]string{"--print-prompt"}); err != nil {
+			if err := Run(context.Background(), []string{"--print-prompt"}); err != nil {
 				t.Fatalf("--print-prompt: %v", err)
 			}
 		})
@@ -754,7 +786,7 @@ func TestAQuestionAskedWithADatabaseOfItsOwnLeavesTheDeploymentsFilesAlone(t *te
 	}
 
 	trial := capturingStdout(t, func() {
-		if err := run([]string{"--data-dir", filepath.Join(t.TempDir(), "scratch"), "--print-prompt"}); err != nil {
+		if err := Run(context.Background(), []string{"--data-dir", filepath.Join(t.TempDir(), "scratch"), "--print-prompt"}); err != nil {
 			t.Fatalf("--print-prompt: %v", err)
 		}
 	})
@@ -769,7 +801,7 @@ func TestAQuestionAskedWithADatabaseOfItsOwnLeavesTheDeploymentsFilesAlone(t *te
 
 	// The deployment's own start is the one that takes them.
 	real := capturingStdout(t, func() {
-		if err := run([]string{"--print-prompt"}); err != nil {
+		if err := Run(context.Background(), []string{"--print-prompt"}); err != nil {
 			t.Fatalf("--print-prompt: %v", err)
 		}
 	})
@@ -819,7 +851,7 @@ func TestAskingForTheModelsStillAnswers(t *testing.T) {
 	isolate(t)
 
 	said := capturingStdout(t, func() {
-		if err := run([]string{"--list-models"}); err != nil {
+		if err := Run(context.Background(), []string{"--list-models"}); err != nil {
 			t.Fatalf("--list-models: %v", err)
 		}
 	})
@@ -860,7 +892,7 @@ func TestInitCreatesDirectoriesAndNoSettingsFiles(t *testing.T) {
 	root := isolate(t)
 
 	said := capturingStdout(t, func() {
-		if err := run([]string{"--init"}); err != nil {
+		if err := Run(context.Background(), []string{"--init"}); err != nil {
 			t.Fatalf("--init: %v", err)
 		}
 	})

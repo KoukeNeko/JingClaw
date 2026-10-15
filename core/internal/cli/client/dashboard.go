@@ -107,7 +107,7 @@ func sayWhyThereIsNoAgent(ctx context.Context, w io.Writer) {
 // AgentState asks the daemon publishing itself in where whether it is running
 // an agent, and if it is not, why.
 //
-// Exported for the supervisor, which has to know before it starts anything that
+// Exported for the bare command, which has to know before it starts anything that
 // needs an agent.
 func AgentState(ctx context.Context, where string) (*controlv1.GetAgentStateResponse, error) {
 	httpClient, baseURL, err := authenticatedIn(where)

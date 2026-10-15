@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/chatgptauth"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
@@ -459,6 +460,17 @@ func settingsProblems(err error) []control.AgentProblem {
 // says what to do about the cause; the fix added here is only how to try again,
 // because there is no restart to ask for.
 func startupProblem(err error) control.AgentProblem {
+	// The one backend with no key is put right by signing in, not by editing.
+	if errors.Is(err, chatgptauth.ErrNotSignedIn) || errors.Is(err, chatgptauth.ErrPlanUsageNotGranted) {
+		return control.AgentProblem{
+			Problem: config.Problem{
+				Why: printable(err.Error()),
+				Fix: "Open the dashboard (run: jingclaw dashboard), sign in with ChatGPT under the model source, " +
+					"then restart: jingclaw stop, then jingclaw. Or choose another provider.",
+			},
+			Source: "startup",
+		}
+	}
 	return control.AgentProblem{
 		Problem: config.Problem{
 			Why: printable(err.Error()),
@@ -472,7 +484,7 @@ func startupProblem(err error) control.AgentProblem {
 //
 // The words of a parse error are the file's own, and the file may have come from
 // anywhere. An escape sequence in one would be run by whatever shows the reason
-// to somebody: the banner, the log, the supervisor's line, the dashboard command.
+// to somebody: the banner, the log, the bare command's line, the dashboard command.
 // Lines and tabs are words' layout and stay.
 func printable(text string) string {
 	return strings.Map(func(r rune) rune {

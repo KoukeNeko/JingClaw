@@ -14,10 +14,12 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1/controlv1connect"
+	"github.com/KoukeNeko/JingClaw/core/internal/chatgptauth"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
+	chatgptprovider "github.com/KoukeNeko/JingClaw/core/internal/provider/chatgpt"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/sqlite"
 	"github.com/KoukeNeko/JingClaw/core/internal/webui"
 )
@@ -38,6 +40,9 @@ type serving struct {
 	cfg    config.Config
 	logger *slog.Logger
 	store  *sqlite.Store
+
+	// signin is the ChatGPT account.
+	signin *chatgptauth.Auth
 
 	dbPath        string
 	discoveryPath string
@@ -71,9 +76,10 @@ type serving struct {
 // daemon with no agent has no sessions to read, and the answer to a request for
 // one is that there is no such thing and not that it is refused.
 //
-// What a daemon with no agent keeps is the three that its repair needs. The
+// What a daemon with no agent keeps is the four that its repair needs. The
 // settings are how it is corrected, the credentials are how a key it could not
-// use is put right, and the pairing is how a browser gets in to do either. The
+// use is put right, the ChatGPT account is how the one backend with no key is
+// signed in, and the pairing is how a browser gets in to do any of them. The
 // skills are not among them: they are what the agent reads, and without one
 // there is nothing for a change to them to be a change to.
 func (s serving) services(browsers *control.Browsers, state control.AgentState) []service {
@@ -88,6 +94,10 @@ func (s serving) services(browsers *control.Browsers, state control.AgentState) 
 			control.NewConfigServer(s.store, s.cfg, s.overrides, started, state))),
 		mount(controlv1connect.NewCredentialServiceHandler(
 			control.NewCredentialServer(s.store, s.candidate, s.begun, s.logger))),
+		mount(controlv1connect.NewChatGPTAuthServiceHandler(
+			control.NewChatGPTServer(s.signin, chatgptprovider.New(chatgptprovider.Config{
+				Tokens: s.signin, BaseURL: s.signin.APIBase(),
+			}), s.cfg.Provider.Backend == "chatgpt", s.logger))),
 		mount(controlv1connect.NewBrowserServiceHandler(control.NewBrowserServer(browsers))),
 	}
 

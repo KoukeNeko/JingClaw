@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KoukeNeko/JingClaw/core/internal/artifact"
+	"github.com/KoukeNeko/JingClaw/core/internal/chatgptauth"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/event"
@@ -73,6 +74,9 @@ type agentSpec struct {
 	dbPath string
 	logger *slog.Logger
 
+	// signin is the ChatGPT account, for the chatgpt backend.
+	signin *chatgptauth.Auth
+
 	// agents and persona are the standing instructions, as the snapshot holds
 	// them.
 	agents, persona string
@@ -102,7 +106,7 @@ func startAgent(rootCtx context.Context, spec agentSpec) (*agent, error) {
 		}
 	}()
 
-	modelProvider, err := buildProvider(rootCtx, cfg)
+	modelProvider, err := buildProvider(rootCtx, cfg, spec.signin)
 	if err != nil {
 		return nil, err
 	}

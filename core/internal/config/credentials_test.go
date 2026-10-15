@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/chatgptauth"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
 	"github.com/KoukeNeko/JingClaw/core/internal/mcp/mcpauth"
@@ -109,7 +110,7 @@ func TestAFileNameTheDeploymentKeepsForItselfIsRefusedWhateverItsCase(t *testing
 	for _, name := range []string{
 		"config.toml", "Config.TOML", "AGENTS.md", "agents.md", "PERSONA.md", "persona.MD",
 		"workspace", "WORKSPACE", "data", "run", "log", "bin", "skills", "Skills",
-		"mcp-auth", "sandbox", "Sandbox",
+		"mcp-auth", "sandbox", "Sandbox", "chatgpt-auth.json", "ChatGPT-Auth.JSON",
 		"config.toml.bak.1", "x.BAK.2", "gemini.bak.key",
 		// What a settings file is renamed to once it has been imported. It is the
 		// only copy of what it held, and a credential saved or deleted there would
@@ -127,7 +128,7 @@ func TestAFileNameTheDeploymentKeepsForItselfIsRefusedWhateverItsCase(t *testing
 	for _, name := range []string{
 		home.ConfigName, config.InstructionsFile, config.PersonaFile,
 		home.WorkspaceName, home.DataName, home.RunName, home.LogName, home.BinName, home.SkillsName,
-		mcpauth.DirName,
+		mcpauth.DirName, chatgptauth.FileName,
 	} {
 		if problems := problemsFor(t, textSetting(t, "web.search.key_file", name), "web.search.key_file"); len(problems) != 1 {
 			t.Errorf("%q, which this deployment uses, is accepted as a credential file", name)

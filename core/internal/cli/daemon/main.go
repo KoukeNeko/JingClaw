@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/KoukeNeko/JingClaw/core/internal/chatgptauth"
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
@@ -32,6 +33,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/prompt"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/anthropic"
+	chatgptprovider "github.com/KoukeNeko/JingClaw/core/internal/provider/chatgpt"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/fake"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/gemini"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/ollama"
@@ -60,18 +62,26 @@ const (
 	httpDrainGrace = 2 * time.Second
 )
 
-// Main runs the daemon. Args are the arguments after the subcommand name.
+// Main runs the daemon as a process of its own, until it is interrupted or
+// terminated. Args are the arguments after the subcommand name.
 func Main(args []string) error {
-	if err := run(args); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return Run(ctx, args)
+}
+
+// Run is the daemon, ending when ctx does. It handles no signals: whoever calls
+// it decides what stops it, which is how the single-process run can stop the
+// gateway first and the daemon after it. It publishes the discovery file once
+// it is serving and removes it again before it returns.
+func Run(ctx context.Context, args []string) error {
+	if err := runContext(ctx, args); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
 }
 
-func run(args []string) error { return runContext(context.Background(), args) }
-
-// runContext is run, ending when parent does as well as on a signal. For a
-// test, which has no other way to stop a daemon that is serving.
+// runContext is the daemon without the filtering of Run's errors.
 func runContext(parent context.Context, args []string) error {
 	// Before anything is read, so that a credential file modified after this is
 	// one this process cannot have read.
@@ -89,7 +99,7 @@ func runContext(parent context.Context, args []string) error {
 		// settings, and exists only so one run can differ from them. They carry
 		// no defaults of their own: the settings already hold those, and a second
 		// copy here would be one more place for them to disagree.
-		providerName = flags.String("provider", "", "model provider: gemini, anthropic, ollama, openai_compat, or fake")
+		providerName = flags.String("provider", "", "model provider: gemini, anthropic, chatgpt, ollama, openai_compat, or fake")
 		model        = flags.String("model", "", "model to use")
 		addr         = flags.String("addr", "", "loopback address to listen on; port 0 picks a free one")
 		dataDir      = flags.String("data-dir", "", "directory for the database")
@@ -153,10 +163,13 @@ func runContext(parent context.Context, args []string) error {
 		return err
 	}
 
-	// Signal-aware root context. Everything the daemon owns descends from it,
-	// so one Ctrl+C unwinds the whole tree.
-	rootCtx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	// The one ChatGPT sign-in of this process, shared by the provider and the
+	// service that signs in, so a refresh is serialised across both.
+	signin := chatgptauth.New(chatgptauth.DefaultPath(), chatgptauth.EndpointsFromEnv())
+
+	// Everything the daemon owns descends from this context, so ending it
+	// unwinds the whole tree.
+	rootCtx := parent
 
 	// Until the settings are read there is no level to log at.
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -250,7 +263,7 @@ func runContext(parent context.Context, args []string) error {
 		problems = settingsProblems(settingsErr)
 	} else {
 		built, err = startAgent(rootCtx, agentSpec{
-			cfg: cfg, store: store, dbPath: dbPath, logger: logger,
+			cfg: cfg, store: store, dbPath: dbPath, logger: logger, signin: signin,
 			agents: docs.Agents.Text, persona: docs.Persona.Text,
 			listModels: *listModels, printPrompt: *printPrompt,
 		})
@@ -278,6 +291,7 @@ func runContext(parent context.Context, args []string) error {
 		candidate: withFlags,
 		problems:  problems,
 		agent:     built,
+		signin:    signin,
 	})
 }
 
@@ -666,7 +680,7 @@ func contextWindow(cfg config.Config, model provider.ModelInfo) (int64, provider
 	return 0, provider.ContextUnknown
 }
 
-func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, error) {
+func buildProvider(ctx context.Context, cfg config.Config, signin *chatgptauth.Auth) (provider.Provider, error) {
 	switch cfg.Provider.Backend {
 	case "fake":
 		offline := fake.New(cfg.Provider.FakeDelay)
@@ -730,6 +744,27 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 
 		return provider.WithRetry(p, retryPolicy(cfg)), nil
 
+	case "chatgpt":
+		// No key: the account is signed in from the dashboard. Without a usable
+		// sign-in there is no agent, and repair mode is where one signs in.
+		if !signin.Usable() {
+			account, err := signin.Account()
+			switch {
+			case err != nil:
+				return nil, err
+			case account.SignedIn:
+				return nil, chatgptauth.ErrPlanUsageNotGranted
+			}
+			return nil, chatgptauth.ErrNotSignedIn
+		}
+		p := chatgptprovider.New(chatgptprovider.Config{
+			Tokens:          signin,
+			Model:           cfg.Provider.ChatGPT.Model,
+			ReasoningEffort: cfg.Provider.ChatGPT.ReasoningEffort,
+			BaseURL:         signin.APIBase(),
+		})
+		return provider.WithRetry(p, retryPolicy(cfg)), nil
+
 	case "ollama":
 		// A credential only if one was supplied: the hosted service needs one
 		// and a local daemon has nothing to check it against.
@@ -770,7 +805,7 @@ func buildProvider(ctx context.Context, cfg config.Config) (provider.Provider, e
 
 	default:
 		return nil, fmt.Errorf(
-			"unknown provider %q; use gemini, anthropic, ollama, openai_compat, or fake", cfg.Provider.Backend)
+			"unknown provider %q; use gemini, anthropic, chatgpt, ollama, openai_compat, or fake", cfg.Provider.Backend)
 	}
 }
 

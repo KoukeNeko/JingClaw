@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,7 +107,7 @@ func TestAskingWhereThingsAreCreatesNothing(t *testing.T) {
 	root := filepath.Join(t.TempDir(), home.DirName)
 	t.Setenv(home.EnvVar, root)
 
-	if err := run([]string{"--print-paths"}); err != nil {
+	if err := Run(context.Background(), []string{"--print-paths"}); err != nil {
 		t.Fatalf("--print-paths: %v", err)
 	}
 

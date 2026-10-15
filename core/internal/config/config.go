@@ -153,6 +153,7 @@ type Provider struct {
 	Ollama       Ollama       `koanf:"ollama"`
 	OpenAICompat OpenAICompat `koanf:"openai_compat"`
 	Anthropic    Anthropic    `koanf:"anthropic"`
+	ChatGPT      ChatGPT      `koanf:"chatgpt"`
 }
 
 // Model is what the selected backend will answer with.
@@ -170,6 +171,8 @@ func (p Provider) Model() string {
 		return p.OpenAICompat.Model
 	case "anthropic":
 		return p.Anthropic.Model
+	case "chatgpt":
+		return p.ChatGPT.Model
 	case "fake":
 		return p.FakeModel
 	}
@@ -188,6 +191,8 @@ func (p *Provider) SetModel(model string) {
 		p.OpenAICompat.Model = model
 	case "anthropic":
 		p.Anthropic.Model = model
+	case "chatgpt":
+		p.ChatGPT.Model = model
 	case "fake":
 		p.FakeModel = model
 	}
@@ -279,6 +284,17 @@ type Anthropic struct {
 
 	// BaseURL overrides the service, for a gateway or a proxy in front of it.
 	BaseURL string `koanf:"base_url"`
+}
+
+// ChatGPT serves a model from the signed-in ChatGPT plan. There is no key: the
+// account is signed in from the dashboard, and what that holds is kept in a
+// file of its own (chatgpt-auth.json), never in the settings.
+type ChatGPT struct {
+	Model string `koanf:"model"`
+
+	// ReasoningEffort is sent as the model's reasoning effort. Empty sends
+	// nothing and leaves it to the model.
+	ReasoningEffort string `koanf:"reasoning_effort"`
 }
 
 type OpenAICompat struct {
@@ -1283,7 +1299,7 @@ func (c Config) choiceProblems() []Problem {
 		problems = append(problems, Problem{
 			Key: "provider.backend", Value: quote(c.Provider.Backend),
 			Why: "is not a provider that exists",
-			Fix: `Use "gemini", "anthropic", "ollama", "openai_compat", or "fake" for the offline provider.`,
+			Fix: `Use "gemini", "anthropic", "chatgpt", "ollama", "openai_compat", or "fake" for the offline provider.`,
 		})
 	}
 	// Each provider is checked only when it is the one selected. Refusing a
@@ -1657,7 +1673,7 @@ var (
 	profileNames  = map[string]bool{"local": true, "gateway": true}
 	providerNames = map[string]bool{
 		"fake": true, "gemini": true, "ollama": true, "openai_compat": true,
-		"anthropic": true,
+		"anthropic": true, "chatgpt": true,
 	}
 	platformNames = map[string]bool{"discord": true, "telegram": true}
 
@@ -1765,7 +1781,7 @@ const Example = `# JingClaw configuration. Every setting is shown at its default
 # permission_profile = "local"
 
 [provider]
-# "gemini", "anthropic", "ollama" or "openai_compat". Left as it is, an offline stand-in
+# "gemini", "anthropic", "chatgpt", "ollama" or "openai_compat". Left as it is, an offline stand-in
 # answers instead of a model, so a fresh install starts and does nothing
 # surprising; set this before expecting real work.
 backend = "fake"
@@ -1815,6 +1831,15 @@ backend = "fake"
 # api_key_file = ""
 # For a gateway or a proxy in front of the service.
 # base_url = ""
+
+[provider.chatgpt]
+# Sign in with ChatGPT: the model is served from the signed-in ChatGPT plan.
+# There is no key. Sign in from the dashboard; what that holds is kept in
+# chatgpt-auth.json in the deployment directory, never in these settings.
+# Implemented from OpenAI's documentation and tested against fake servers.
+# model = ""
+# Sent as the reasoning effort when set. Empty sends nothing.
+# reasoning_effort = ""
 
 [provider.openai_compat]
 # model = ""

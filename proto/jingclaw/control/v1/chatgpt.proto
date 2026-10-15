@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package jingclaw.control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ChatGPTAuthService is how a person signs this deployment in with ChatGPT, so
+// that a model can be served from their own ChatGPT plan.
+//
+// Implemented from OpenAI's documentation of the flow for open-source and
+// locally hosted apps and tested against fake servers; it has not been run
+// against the live service.
+//
+// Nothing a reply carries is a token, an authorization code, an ID token, or
+// the client id the registration was issued. The one URL that is returned, the
+// authorization URL, is for the operator's own browser: it carries this
+// attempt's state and challenge, the host id, and on a repeat sign-in the
+// retained ID token as a hint, so it is not to be logged or kept.
+//
+// Served by a daemon with no agent as well: a daemon set to the chatgpt
+// backend cannot start its agent without a sign-in, so repair mode is where one
+// signs in. A sign-in is read when the agent starts, like every other setting,
+// and GetChatGPTAccount says when a restart is needed.
+//
+// Reachable by the operator's own credential and by nothing else.
+service ChatGPTAuthService {
+  // GetChatGPTAccount says whether an account is signed in and what it granted.
+  rpc GetChatGPTAccount(GetChatGPTAccountRequest) returns (GetChatGPTAccountResponse);
+
+  // StartChatGPTSignIn opens a listener on 127.0.0.1 for the redirect (port 1455
+  // when it is free, any other otherwise) and returns the address to open in a
+  // browser. A sign-in already in progress is replaced.
+  rpc StartChatGPTSignIn(StartChatGPTSignInRequest) returns (StartChatGPTSignInResponse);
+
+  // GetChatGPTSignIn reports a sign-in started earlier. NOT_FOUND for one that
+  // is not the current one.
+  rpc GetChatGPTSignIn(GetChatGPTSignInRequest) returns (GetChatGPTSignInResponse);
+
+  // CompleteChatGPTSignIn finishes a sign-in from the address the browser was
+  // redirected to, for a browser that is not on this machine. The address is
+  // read and never logged or echoed. INVALID_ARGUMENT when it is not such an
+  // address or its state is not this sign-in's (nothing is exchanged, and the
+  // sign-in keeps waiting); NOT_FOUND for an unknown sign-in; FAILED_PRECONDITION
+  // for one that has finished, or when ChatGPT refuses.
+  rpc CompleteChatGPTSignIn(CompleteChatGPTSignInRequest) returns (CompleteChatGPTSignInResponse);
+
+  // SignOutChatGPT revokes the refresh token and clears the stored tokens. The
+  // tokens are cleared even when revocation could not be confirmed, and the
+  // reply says so.
+  rpc SignOutChatGPT(SignOutChatGPTRequest) returns (SignOutChatGPTResponse);
+
+  // ListChatGPTModels lists the models the account can use. FAILED_PRECONDITION
+  // when nobody is signed in.
+  rpc ListChatGPTModels(ListChatGPTModelsRequest) returns (ListChatGPTModelsResponse);
+}
+
+message GetChatGPTAccountRequest {}
+
+message GetChatGPTAccountResponse {
+  bool signed_in = 1;
+
+  // label is what the ID token says to call the account: its email, else its
+  // name. Empty when signed out.
+  string label = 2;
+  string email = 3;
+
+  repeated string granted_scopes = 4;
+
+  // plan_usage_granted is whether chatgpt.tokens.use.direct was granted.
+  // Signed in without it, inference is refused.
+  bool plan_usage_granted = 5;
+
+  google.protobuf.Timestamp access_token_expires_at = 6;
+
+  // The last thing that went wrong with ChatGPT, by the service's own code.
+  string last_error_code = 7;
+  string last_error_message = 8;
+
+  // restart_needed is set when the chatgpt backend is selected and whether the
+  // sign-in is usable differs from what it was when this process started.
+  bool restart_needed = 9;
+}
+
+message StartChatGPTSignInRequest {}
+
+message StartChatGPTSignInResponse {
+  string flow_id = 1;
+  string authorization_url = 2;
+
+  // redirect_uri is where the browser will be sent back to. A browser on
+  // another machine cannot reach it: paste the address it ends on into
+  // CompleteChatGPTSignIn, or forward its port over SSH.
+  string redirect_uri = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+enum ChatGPTSignInState {
+  CHAT_GPT_SIGN_IN_STATE_UNSPECIFIED = 0;
+  CHAT_GPT_SIGN_IN_STATE_PENDING = 1;
+  CHAT_GPT_SIGN_IN_STATE_SUCCEEDED = 2;
+  CHAT_GPT_SIGN_IN_STATE_FAILED = 3;
+}
+
+message GetChatGPTSignInRequest {
+  string flow_id = 1;
+}
+
+message GetChatGPTSignInResponse {
+  ChatGPTSignInState state = 1;
+
+  // error says why a sign-in failed. It holds no code, token or address.
+  string error = 2;
+}
+
+message CompleteChatGPTSignInRequest {
+  string flow_id = 1;
+  string redirected_address = 2;
+}
+
+message CompleteChatGPTSignInResponse {
+  ChatGPTSignInState state = 1;
+}
+
+message SignOutChatGPTRequest {}
+
+message SignOutChatGPTResponse {
+  // revoked is whether ChatGPT confirmed the revocation.
+  bool revoked = 1;
+
+  // detail says what to do when it did not confirm.
+  string detail = 2;
+}
+
+message ListChatGPTModelsRequest {}
+
+message ListChatGPTModelsResponse {
+  repeated ChatGPTModel models = 1;
+}
+
+message ChatGPTModel {
+  string id = 1;
+  string display_name = 2;
+}

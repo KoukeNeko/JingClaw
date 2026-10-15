@@ -60,7 +60,7 @@ func PathIn(dir string) (string, error) {
 //
 // The daemon puts it where server.runtime_dir says, and that setting is given
 // as JINGCLAW_SERVER_RUNTIME_DIR now that the saved settings cannot hold it. The
-// supervisor, status and stop find the daemon through here and have no settings
+// bare command, status and stop find the daemon through here and have no settings
 // to ask, so they read the variable the daemon was told, ahead of the older one,
 // as the daemon does.
 func Path() (string, error) {
