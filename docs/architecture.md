@@ -15,10 +15,23 @@ Inside `core`:
 
 ```
 cmd/jingclaw/   the one executable
-internal/cli/   its subcommands: daemon, gateway, client, supervise, service
+internal/cli/   its subcommands: daemon, gateway, client, supervise (composes the two into one process), service
 internal/       the runtime, the store, the tools, the adapters
 gen/            generated from proto, and committed
 ```
+
+`jingclaw` with no arguments is one process: `internal/cli/supervise` composes
+`daemon.Run` and `gateway.Run`, and the console on a terminal, in it. The gateway
+is still a client of the daemon, over loopback with its gateway-scoped
+credential, and the gateway scope is the boundary between them. That boundary is
+a code boundary and was never an operating-system one (the same user, the same
+discovery file). What one process gives up is crash isolation: a panic in the
+chat library's own goroutines ends everything. `jingclaw daemon` and `jingclaw
+gateway` still run the two apart.
+
+The model sits behind `internal/provider`. One backend, `chatgpt`, has no key:
+`internal/chatgptauth` holds the sign-in (`chatgpt-auth.json`, outside the
+database) and `internal/provider/chatgpt` speaks the Responses API with it.
 
 Generated code is committed, so a build never needs `buf` installed. CI
 regenerates and fails on any drift.

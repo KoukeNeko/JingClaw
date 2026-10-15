@@ -48,7 +48,7 @@ FROM python:3.13-slim-bookworm
 # wrong key rather than a missing package.
 #
 # tini is what makes PID 1 an init. Measured rather than assumed: with the
-# supervisor as PID 1, a grandchild orphaned by its parent exiting is
+# jingclaw as PID 1, a grandchild orphaned by its parent exiting is
 # re-parented to it and stays a zombie, because Go reaps the children os/exec
 # started and nothing else. This agent runs shells, build tools and whatever
 # somebody approved, all of which fork, so those accumulate until the process
@@ -117,14 +117,13 @@ VOLUME ["/var/lib/jingclaw"]
 USER jingclaw
 WORKDIR /var/lib/jingclaw
 
-# The supervisor, which starts the daemon and the gateway and already knows
-# what to do with no terminal to draw on. One container rather than two: the
-# parts find each other through a discovery file whose whole purpose is to be
-# local, and sharing it between containers would make a local thing a network
-# one.
+# jingclaw with no arguments: the daemon and the gateway in one process, which
+# already knows what to do with no terminal to draw on. One container rather
+# than two: the gateway finds the daemon through a discovery file whose whole
+# purpose is to be local, and sharing it between containers would make a local
+# thing a network one.
 # tini forwards the signal to its immediate child and reaps whatever the
-# kernel hands it. What it does not do is signal the whole tree — so the
-# supervisor still terminates its own parts, which it does, and must: docker
-# stop signals PID 1 alone, and the moment PID 1 exits the kernel SIGKILLs
-# everything else in the namespace.
+# kernel hands it. That child is the daemon itself, so docker stop's SIGTERM
+# reaches it directly and it stops the gateway and then itself in order; the
+# moment PID 1 exits the kernel SIGKILLs everything else in the namespace.
 ENTRYPOINT ["/usr/bin/tini", "--", "jingclaw"]

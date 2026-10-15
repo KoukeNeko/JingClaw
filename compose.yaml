@@ -14,10 +14,9 @@ services:
       - ollama
     restart: unless-stopped
 
-    # Meant to be long enough for a run in progress to be written down. The
-    # signal reaches the supervisor behind tini, and today it kills the daemon
-    # at once rather than waiting for it, so the time is not used yet
-    # (docs/container.md, "Stopping it").
+    # Long enough for a run in progress to be written down. The signal reaches
+    # jingclaw through tini, and it stops the gateway and then the daemon, which
+    # is given up to 15s (docs/container.md, "Stopping it").
     stop_grace_period: 30s
 
     volumes:

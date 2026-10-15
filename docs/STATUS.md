@@ -850,6 +850,94 @@ so a container's settings come in through the three variables on its first
 start. What a skill fetch writes to disk before its limits are checked is not
 bounded, and cancelling one kills git and not what git started.
 
+**One process (2026-10-15; supersedes "Still two processes" above).** `jingclaw`
+with no arguments is one process: it runs the daemon, the chat gateway and, on
+a terminal, the console inside itself. The supervisor, the daemon and gateway
+child processes and the `__watch` watchdog are gone, along with the process
+group and Windows job-object code that existed only to contain them; `jingclaw
+daemon` and `jingclaw gateway` are unchanged as separate entry points, and the
+bare command composes the same two functions (`daemon.Run`, `gateway.Run`, each
+taking a context and returning when it ends).
+
+- The gateway is a goroutine and still a client of the daemon: it waits for the
+  discovery file, then dials loopback with its gateway-scoped credential and
+  asks `GetGatewaySettings` as before. The scope boundary is a code boundary,
+  as it always was; it was never an operating-system one.
+- **Lost: crash isolation.** A panic in a goroutine of the platform library's
+  own ends the whole process, and the gateway's socket and token now live in
+  the process that owns the shell, the workspace and the event log. Mitigations:
+  a panic in the goroutines this repository starts is caught and logged (its
+  type and stack, not its message, which can quote a request URL holding the
+  bot token); and a gateway that fails is started again after 1s, 2s, 4s, up to
+  a minute, back to 1s after a run of a minute, instead of ending the process.
+  A crash-looping gateway therefore does not take the daemon and dashboard down;
+  before, any gateway exit but 78 ended the supervisor. A configuration failure
+  (exit 78 as a process; `gateway.IsUnconfigured` in process) is not retried:
+  chat stays off with a `chat is off: <reason>` notice, which adds `(put that
+  right, then restart: jingclaw stop, then jingclaw)` only when a room is bound
+  to the chat (`gateway.IsIdle` is the case where none is, so nothing was turned
+  on to begin with).
+- Repair mode is as before: no gateway, no console, the one line saying why.
+- Shutdown on SIGINT, SIGTERM or SIGHUP: the gateway is stopped (up to 10s), then
+  the daemon (its own bounded teardown, 15s outer limit), which removes
+  `run/daemon.json`. A process killed outright leaves the file, as it always
+  could; `status` and a second start read a dead pid as not running. A leftover
+  that names the starting process's own pid, which container pid reuse makes
+  likely, is removed at start rather than mistaken for a daemon that is up.
+- With a console, the daemon's and gateway's output goes to `log/jingclaw.log`
+  by pointing `os.Stdout` and `os.Stderr` at it; the console is handed the real
+  terminal. Only the `os.Stdout` and `os.Stderr` variables are redirected, not
+  file descriptor 2, so the Go runtime's own fatal trace still reaches the
+  terminal.
+- Not carried over: the old supervisor signalled each part's whole process
+  group, so a command the agent had started was signalled with it. What happens
+  to those on stop is now only what the daemon's own teardown does.
+- Fixed by this for the single-process path: the container "`docker stop` kills
+  the daemon and leaves `run/daemon.json`" hole below. Under tini the process is
+  the daemon and receives SIGTERM itself; `verify-container.sh` stops a
+  container and checks exit 0, the "stopped" line and no leftover file.
+  `verify-one-process.sh` is new; `verify-console-owns-it.sh` now asserts one
+  process in place of the supervisor/daemon/watchdog tree.
+
+**Sign in with ChatGPT and a settings page of cards (2026-10-15).** The model
+can be served from a signed-in ChatGPT plan instead of a key, and the settings
+are a page of their own rather than a drawer.
+
+- **Built from documentation, not from the service.** The flow follows OpenAI's
+  Sign in with ChatGPT documentation for open-source and locally hosted apps
+  (developers.openai.com/siwc): authorization code with PKCE on a loopback
+  redirect, ID-token validation, rotating refresh tokens, revocation on sign-out,
+  and the Responses API with `store:false` and streaming. It was tested against
+  fake authorization and Responses servers written from the documented shapes
+  (`scripts/support/fake-chatgpt.go`, `scripts/verify-chatgpt.sh`) and **never
+  against OpenAI's live service**: there was no ChatGPT account to try it with.
+  Whether it works for a real account is unknown.
+- **The known weak spot is tool declaration.** The documentation says function
+  tools are allowed and, on its limitations page, that they are grouped in
+  namespaces or supplied as `additional_tools` input items, with no example. The
+  provider sends a plain top-level function tool; if the service refuses that, it
+  comes back as `unsupported_capability` naming the parameter and the shape has to
+  change. Without tools the agent can do very little, so this is the first thing a
+  live trial should settle.
+- **Shape of it.** `provider.backend = "chatgpt"`, settings `[provider.chatgpt]
+  model` and `reasoning_effort`; `ChatGPTAuthService` (account, start, poll,
+  complete by paste-back, sign out, list models), served in repair mode too,
+  because the agent cannot start without a sign-in. The registration, the host id
+  and the tokens are in `chatgpt-auth.json`, mode 600, never in the database, a
+  log or a reply. One signed-in account.
+- **Restrictions OpenAI documents:** open-source and locally hosted apps; a paid or
+  remotely hosted app must file OpenAI's interest form. Usage is managed in
+  ChatGPT under Settings, Usage; OpenAI documents no usage endpoint, so JingClaw
+  shows none.
+- **Not done:** a live trial, more than one account, signing in from a container
+  (it has no way to the dashboard).
+- **The settings page** is a full page: a section list on the left, grouped cards
+  on the right, toggles and pill selects, the write button in the section header,
+  and the ChatGPT account card at the top of Model provider. The write flow
+  (diff, conflicts, saved-not-running marks, repair, history, raw text,
+  credentials) is unchanged. The drawer described in
+  `docs/web-ui-explore/design-notes.md` is historical.
+
 ## Not done
 
 **Built but nothing uses it**
@@ -905,7 +993,7 @@ bounded, and cancelling one kills git and not what git started.
   binary: a client cannot be built from a different revision than the daemon
   it talks to when they are the same file. The supervisor also starts its
   parts from `os.Executable()` rather than the name on PATH, so an installed
-  copy and a freshly built one cannot be mixed.
+  copy and a freshly built one cannot be mixed. (Now there is nothing to start.)
 
 - **Nothing is sandboxed on Linux.** There is seatbelt on macOS, in
   `internal/sandbox`: approval stops what should not be done; the sandbox
@@ -942,7 +1030,9 @@ bounded, and cancelling one kills git and not what git started.
   "the current runtime does not propagate content origin within an owner
   turn" — and has not closed it either.
 
-- **A signal to the supervisor kills the daemon instead of stopping it.** Each
+- ~~**A signal to the supervisor kills the daemon instead of stopping it.**~~
+  Fixed for the bare command by it being one process ("One process" above); the
+  description below is of the arrangement before that. Each
   part is started with `exec.CommandContext` on the context that SIGINT and
   SIGTERM cancel, and cancelling it sends SIGKILL, so the ordered teardown behind
   it (`terminate`: SIGTERM, up to fifteen seconds, then SIGKILL) does not run

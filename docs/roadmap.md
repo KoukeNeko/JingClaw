@@ -35,13 +35,18 @@ which it can write and never shows back, and skills, which it fetches, shows you
 whole and installs only once you have looked. Schedules, what the agent
 remembers and which channels may reach it are managed there too. That is the
 part of a personal assistant's control surface that a terminal is worst at. See
-[using it](using-it.md#the-dashboard).
+[using it](using-it.md#the-dashboard). Its settings are a full page with a list
+of sections and grouped cards, and the model can be a signed-in ChatGPT account
+rather than a key ([using it](using-it.md#sign-in-with-chatgpt)); that sign-in
+is built from OpenAI's documentation and has met only fake servers. Not done:
+checking it against the live service, more than one account, and signing in
+from a container.
 
 When the settings or the machine keep the agent from starting — text that does
 not parse, a credential that is missing, a sandbox the machine cannot provide —
 the daemon does not exit. It stays up in repair mode, serving the dashboard with
 the settings and the credentials and nothing that runs an agent, and says why;
-`jingclaw status` shows the mode, and the supervisor starts neither the gateway
+`jingclaw status` shows the mode, and the bare `jingclaw` starts neither the gateway
 nor the console. A database that will not open is still fatal, because without
 it there is nowhere to correct anything.
 
@@ -121,6 +126,7 @@ process group with it.
 |---|---|
 | `gemini` | Google's API |
 | `anthropic` | Anthropic's Messages API |
+| `chatgpt` | a signed-in ChatGPT plan, no key; from OpenAI's documentation, tested against fake servers only |
 | `ollama` | a local Ollama daemon, or Ollama Cloud |
 | `openai_compat` | vLLM, LM Studio, llama.cpp, OpenRouter, Groq, Together |
 | `fake` | nothing; a deterministic stand-in for offline work |

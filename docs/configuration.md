@@ -177,7 +177,7 @@ The gateway reads no file. It asks the running daemon for the part of the
 settings it needs (which platform, the log level, that platform's token settings
 and limits, and not its channels, users or approvers), so the daemon has to be
 running first. A gateway that cannot start for a reason in the settings, such as
-a missing token, stops with the reason; the supervisor prints `chat is off:
+a missing token, stops with the reason; the bare `jingclaw` prints `chat is off:
 <reason>` and keeps the daemon and the dashboard up. `jingclaw mcp list`,
 `login` and `logout` ask the daemon in the same way for the tool servers in
 `config`, and need it running.
@@ -217,7 +217,7 @@ Configuration problem in the saved settings
 
   provider.backend = "openai"
       is not a provider that exists
-      Use "gemini", "anthropic", "ollama", "openai_compat", or "fake" for the offline provider.
+      Use "gemini", "anthropic", "chatgpt", "ollama", "openai_compat", or "fake" for the offline provider.
 ```
 
 The first of those refusals is not a preference. This API reads files and runs
@@ -253,6 +253,7 @@ Which model server to talk to.
 
 "gemini"         Google's API. Needs a key.
 "anthropic"      Anthropic's Messages API. Needs a key.
+"chatgpt"        Your ChatGPT plan, signed in from the dashboard. No key.
 "ollama"         A daemon on this machine, or Ollama Cloud. See below.
 "openai_compat"  vLLM, LM Studio, llama.cpp, OpenRouter, Groq, Together.
 "fake"           No network, no credential. What proves a problem is not
@@ -323,7 +324,7 @@ setting that names a credential file (`api_key_file`, `key_file` for web search,
 letters, digits, `.`, `_` or `-`, starting with a letter or digit and not ending
 in `.`. It cannot be a name the deployment keeps for itself (`config.toml`,
 `AGENTS.md`, `PERSONA.md`, `workspace`, `data`, `run`, `log`, `bin`, `skills`,
-`mcp-auth`, `sandbox`), a backup name (`*.bak.*`) or the name a settings file was
+`mcp-auth`, `sandbox`, `chatgpt-auth.json`), a backup name (`*.bak.*`) or the name a settings file was
 given when it was imported (`*.imported`). Settings that name anything else do
 not start the agent, and the daemon says which setting, without repeating what
 it holds, and what is allowed. A name with a directory part, such as
@@ -346,6 +347,41 @@ start from; they are used only once they are written into the settings.
 
 For a gateway or a proxy in front of the service. Empty is Anthropic's own
 address.
+
+## `[provider.chatgpt]`
+
+Serves the model from the signed-in ChatGPT plan ("Sign in with ChatGPT"), with
+no key. Implemented from OpenAI's documentation of the flow for open-source and
+locally hosted apps and tested against fake servers; it has not been run against
+the live service, so treat it as unproven until it has.
+
+What the backend needs is a sign-in and nothing else: no `api_key_env`, no
+`api_key_file`, no `base_url`. Sign in from the dashboard (the daemon starts
+without an agent until you do, and its repair page is where you sign in), then
+restart; [using it](using-it.md#sign-in-with-chatgpt) walks through it, including
+from a browser on another machine. The sign-in has to include the grant to use
+your ChatGPT plan, or the agent does not start. The registration, the host id and
+the tokens are kept in one owner-only file, `chatgpt-auth.json`, in the
+deployment directory (`~/.jingclaw` by default). They are never in the settings,
+the database, a log, an event or a reply, and the name is reserved: no setting
+can name it as a credential file. Deleting the file signs out without telling
+ChatGPT; the page's sign-out revokes first. One account is signed in at a time.
+A container cannot reach the dashboard yet, so it cannot be signed in this way.
+
+Usage and limits are managed by ChatGPT (Settings, Usage); OpenAI documents no
+usage endpoint, so JingClaw shows none. A usage limit stops the run and is never
+moved to another way of paying. OpenAI documents the flow for open-source and
+locally hosted apps; a paid or remotely hosted app has to file OpenAI's interest
+form instead.
+
+**`model`**
+
+A model the account can use, as the model list names it. No default.
+
+**`reasoning_effort`**
+
+Sent as the reasoning effort when set; empty sends nothing. OpenAI's
+documentation lists no values, so none are checked here.
 
 ## `[provider.ollama]`
 

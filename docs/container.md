@@ -13,10 +13,12 @@ default, says which credential the chat platform wants and where to put it, and
 carries on without chat:
 
 ```
-chat is off: the discord bot token: no credential: set DISCORD_BOT_TOKEN, or write it with mode 600 to the file that gateway.discord.token_file names (put that right, then restart: jingclaw stop, then jingclaw)
+chat is off: the discord bot token: no credential: set DISCORD_BOT_TOKEN, or write it with mode 600 to the file that gateway.discord.token_file names
 ```
 
-That message is the setup instructions. The container stays up: the daemon is
+That message is the setup instructions. (Once a room is bound in the settings
+and the token is still missing, it adds "put that right, then restart:
+jingclaw stop, then jingclaw".) The container stays up: the daemon is
 running and only the chat connection is off. In a container, "restart" is
 restarting the container. At the defaults the provider is an offline stand-in
 that echoes, so this proves the container and does nothing else.
@@ -33,6 +35,7 @@ at `/var/lib/jingclaw`, which is what `JINGCLAW_HOME` points at:
 | `workspace/` | what the agent may read and write |
 | `skills/` | installed skills |
 | `mcp-auth/` | sign-ins to tool servers that use OAuth |
+| `chatgpt-auth.json` | the Sign in with ChatGPT registration and tokens, mode 600 |
 | `run/daemon.json` | written at start, regenerated, never yours to edit |
 | `*.token`, `*.key` | credentials, mode 600 |
 
@@ -496,6 +499,9 @@ So the dashboard's work is done another way in a container:
 - **Settings and the two instruction documents** are seeded through the
   environment, on the first start, as above.
 - **Credentials** are variables, or files written into the volume as above.
+- **Sign in with ChatGPT** is done on the dashboard, so a container cannot use
+  the `chatgpt` backend yet. Nothing here has been tried with a
+  `chatgpt-auth.json` made elsewhere and placed in the volume.
 - **Reasons the agent did not start** are in `docker logs`, and
   `docker exec jingclaw jingclaw status` shows `repair` as the mode. The daemon
   says "Fix it in the dashboard"; in a container that advice cannot be followed.
@@ -574,22 +580,41 @@ until twenty later saves push those out.
 things follow from that, and both are handled here rather than left to be
 discovered.
 
-**PID 1 is tini, not the supervisor.** With the supervisor as PID 1 a
-grandchild orphaned by its parent exiting is re-parented to it and stays a
-zombie: Go waits on the children `os/exec` started and on nothing else. This
-agent runs shells, build tools and whatever somebody approved, all of which
-fork, so those accumulate until the process table is full and the container
-can start nothing at all — silently, because everything looks fine until it
-does not. Measured, not assumed: one orphan is one zombie, and the check
-beside this file is what keeps it that way.
+**PID 1 is tini, not JingClaw.** With JingClaw as PID 1 a grandchild orphaned by
+its parent exiting is re-parented to it and stays a zombie: Go waits on the
+children `os/exec` started and on nothing else. This agent runs shells, build
+tools and whatever somebody approved, all of which fork, so those accumulate
+until the process table is full and the container can start nothing at all —
+silently, because everything looks fine until it does not. Measured, not
+assumed: one orphan is one zombie, and the check beside this file is what keeps
+it that way.
 
 `docker run --init` does the same job from outside. It is not needed here and
 does no harm if passed: it puts docker-init in front of tini.
 
-**Give it longer than ten seconds.** Docker's default stop timeout is 10s and
-the supervisor allows each part 15s to close its database and let go of its
-runs. A part that takes its time is killed by Docker before the supervisor has
-finished waiting for it.
+**One process.** `jingclaw` with no arguments runs the daemon and the chat
+gateway (and, on a terminal, the console) inside the one process tini starts,
+so the container holds tini and `jingclaw` and no other part of JingClaw. `docker stop` signals PID 1; tini passes the signal on; that process
+stops the gateway and then the daemon, in that order, and removes
+`run/daemon.json` before it exits with status 0. The check beside this file
+stops a container and looks for exactly that: exit 0, the daemon's `stopped`
+line in `docker logs`, no file left in the volume.
+
+Where crash isolation went: the gateway used to be a process of its own, so a
+panic in the chat library could not take the daemon with it. It is a goroutine
+now. A panic in the goroutines JingClaw starts is caught, logged without its
+message, and the gateway is started again with a growing wait (a second, doubling,
+up to a minute); a panic in a goroutine the chat library starts for itself ends
+the container, and `restart: unless-stopped` starts it again. A gateway that
+cannot be configured — no token, a platform it does not serve — stays off and
+says why in `docker logs` (`chat is off: …`), and the daemon and the dashboard
+keep running.
+
+**Give it longer than ten seconds.** Docker's default stop timeout is 10s. The
+gateway is given up to 10s to stop and the daemon up to 15s after it, to close
+its database and let go of its runs; Docker kills the container when its timeout
+is up, so a stop that waits for a run to be written down needs more than the
+default.
 
 ```
 docker run --stop-timeout 30 …
@@ -601,24 +626,15 @@ services:
     stop_grace_period: 30s
 ```
 
-**What that gets you today is less than it says.** The signal reaches the
-supervisor, and the supervisor started its parts on the context that signal
-cancels, which kills them at once rather than waiting for them. Seen on this
-image: the daemon is gone within milliseconds of `docker stop`, with no
-shutdown line in `docker logs`, and `run/daemon.json` is left in the volume.
-SQLite recovers its write-ahead log the next time the database is opened, and
-a process that is killed, as against a machine that loses power, loses nothing
-it had committed.
-
-The leftover file is the problem, as far as it was traced. A container's process
-ids repeat from one start to the next, so the file can name the new daemon's own
-id before the new daemon has written its own, and the supervisor appears to
-take that for the daemon being up: it starts the gateway against the old port,
-and the run ends with the gateway's "connection refused". Two of three new
-containers started on a volume stopped that way failed like this here, and a
-stopped container started again with `docker start` came up. Removing
-`run/daemon.json` from the volume while no container is running cleared it once.
-This is a known hole, in [`STATUS.md`](STATUS.md#not-done).
+**A container that is killed, not stopped** (the host runs out of memory,
+`docker kill`, a power cut) cannot remove `run/daemon.json`. A process id in a
+container is a small number that repeats from one start to the next, so the
+leftover can name the new process's own id. JingClaw removes a file that names
+its own process when it starts, before looking for a deployment that is already
+running, so it does not mistake the leftover for a daemon that is up. SQLite
+recovers its write-ahead log the next time the database is opened, and a
+process that is killed, as against a machine that loses power, loses nothing it
+had committed.
 
 ## The sandbox
 

@@ -44,7 +44,7 @@ gateway，並給你一個 console 看著它們。在另一個終端機再跑一�
 
 第一次執行還沒有模型、也還沒有聊天帳號。它會先用一個離線的替身代替模型，並說明在
 有 bot token 之前聊天是關著的。設定不是讓你編輯的檔案：它們存在 daemon 的資料庫裡，
-要改就到儀表板。執行 `jingclaw dashboard`，在那裡選好 provider、填入金鑰和 bot
+要改就到儀表板。執行 `jingclaw dashboard`，在那裡選好 provider、填入金鑰（或用 ChatGPT 登入）和 bot
 token，重啟一次（`jingclaw stop`，再 `jingclaw`），就可以在 Discord 跟它說話。
 
 ```bash
@@ -73,13 +73,24 @@ amd64 和 arm64 都有，而且裡面沒有設定、沒有資料庫、也沒有�
 地方。它會在做事的同時說出自己在做什麼——開了哪個檔案、讀了哪一頁——而答案是
 一邊寫一邊送出來的。
 
-**一個執行檔，兩個行程。** gateway 拿著 bot token，並且對網際網路開著一個
-socket。而擁有你的 shell、你的 workspace 和事件記錄的那個行程，不會跟著它一起
-倒下。
+**用你的 ChatGPT 方案當模型。** 除了要 API 金鑰的 provider，模型也可以來自你自己的
+ChatGPT 帳號：provider 選 `chatgpt`，在儀表板登入，不需要 API 金鑰。這是依 OpenAI
+針對開源與本機執行的應用所寫的 Sign in with ChatGPT 文件
+（developers.openai.com/siwc）實作的，只對假的伺服器測過，**沒有**對實際的服務驗證過。
+只能登入一個帳號。OpenAI 的文件寫明這是給開源或本機執行的應用用的，付費或遠端代管的
+應用要走 OpenAI 的申請表單。用量與上限在 ChatGPT 的 Settings → Usage 管理，JingClaw
+不顯示用量數字。[細節](docs/using-it.md#sign-in-with-chatgpt)。
+
+**一個執行檔，一個行程。** `jingclaw` 把 daemon、聊天 gateway 和（在終端機上的）
+console 跑在同一個行程裡。gateway 仍然經由 loopback、用一個只能遞送訊息的憑證
+連到 daemon，所以它沒有直通 runtime 的捷徑。單一行程的代價是失去崩潰隔離：
+gateway 拿著 bot token 並對網際網路開著 socket，聊天函式庫自己的 goroutine 若
+panic，現在會讓整個行程結束。gateway 自己的程式碼 panic 會被攔下並重啟 gateway；
+`jingclaw daemon` 和 `jingclaw gateway` 仍可把兩者分開跑。
 
 ```
-Discord ──→ gateway ─┐
-                     ├──→ daemon ──→ SQLite
+Discord ──→ gateway ─┐   （同一個行程；gateway
+                     ├──→ daemon ──→ SQLite   經由 loopback 連 daemon）
 CLI, console ────────┘
 ```
 
@@ -110,6 +121,6 @@ Windows 上也通過了。
 
 ## 需求
 
-建置需要 Go 1.26+。一個 provider——Gemini、Ollama、Anthropic，或任何說
+建置需要 Go 1.26+。一個 provider——Gemini、Ollama、Anthropic、ChatGPT 帳號（還沒對實際服務驗證過，見上），或任何說
 OpenAI 那套格式的服務——想要聊天那一半的話還需要一個 Discord bot token。
 macOS、Linux 和 Windows，但要注意上面狀態那節寫的但書。

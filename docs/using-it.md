@@ -8,17 +8,19 @@ What there is to do once it is running: what a tool may reach, what stops for a 
 jingclaw
 ```
 
-That is the whole thing: it creates `~/.jingclaw` if there is none, starts the
-daemon and the gateway, and stays until you interrupt it. Run it again from
-another terminal and it says so rather than starting a second one.
+That is the whole thing: it creates `~/.jingclaw` if there is none, runs the
+daemon and the chat gateway in that one process (and the console, on a
+terminal), and stays until you interrupt it. Run it again from another terminal
+and it attaches a console to the one that is running rather than starting a
+second. Interrupting it (or `jingclaw stop`) stops the gateway, then the daemon.
 
 ```bash
 jingclaw status      # running, and where
 jingclaw stop        # stop the one that is running
 ```
 
-To be one of the parts by hand — which is what the supervisor does, and what
-the checks do:
+To run a part by itself, in a process of its own — which is what most of the
+checks do, and what to use if you want the gateway kept apart from the daemon:
 
 ```bash
 jingclaw daemon --provider=gemini --model=gemma-4-31b-it
@@ -26,7 +28,15 @@ jingclaw gateway
 ```
 
 The gateway reads no settings of its own: it asks the running daemon for the
-part it needs, so the daemon goes first.
+part it needs, so the daemon goes first. In the single process it is the same:
+the gateway waits until the daemon has published itself, then reaches it over
+loopback with its own credential, as if it were a separate process. What a
+separate process gives that the single one does not is crash isolation: in the
+single process a panic in the chat library's own goroutines ends everything. A
+panic in the gateway's code is caught and logged, and the gateway is started
+again after a wait that grows from a second to a minute. A gateway that cannot be
+configured, such as a missing token, is not retried: chat stays off and the
+terminal says `chat is off: <reason>`.
 
 `~/.jingclaw/workspace` is the only directory tools can reach. Paths are
 resolved and symlink-checked against it before any I/O, so neither traversal
@@ -134,6 +144,18 @@ start, and [`container.md`](container.md) says how.
 
 ### Settings
 
+The settings are a full page, not a panel beside the board. A list of sections
+runs down the left, grouped as model and turns, capabilities and limits, memory,
+and connections, with a search box above it; the instruction documents, the raw
+text of `config` and the version history are listed under it. The section you
+pick fills the right as cards: each card is a table of `config`, its rows are
+the settings, and a toggle, a select or a field sits at the right of each. The
+button that writes your changes is in the section's header, next to a count of
+what is unwritten, and stays off until there is something to write. Nothing
+else about saving changed: the diff you confirm, the refusal of a text that
+fails the check, the marks for saved-not-running and the history are all as
+described below.
+
 Each section of `config` is a form, and a save writes only the lines you
 changed: comments, order and settings this version does not know are left as
 they are. A setting that an environment variable or a flag decides is shown as
@@ -152,6 +174,78 @@ when the daemon starts (see Repair mode, below). A document saved from
 somewhere else while you were editing it is not written over unseen: the page
 says so and loads the newer text, and the version you replace stays in the
 history.
+
+### Sign in with ChatGPT
+
+Instead of an API key, the model can be served from your own ChatGPT plan.
+Choose it under Model provider (`provider.backend = "chatgpt"`) and sign in. The
+account card is at the top of that section, and in repair mode it is on the list
+of what is wrong, so a deployment that has no key and no sign-in can be put
+right from the page. Without a sign-in the daemon stays up without an agent:
+
+```
+Why there is no agent:
+  - chatgpt: not signed in; sign in with ChatGPT from the dashboard
+```
+
+To sign in:
+
+1. Press the sign-in button on the card. The daemon opens a listener on
+   `127.0.0.1` (port 1455 if it is free, otherwise any free port) and the card
+   shows an `https://auth.openai.com` link, which the page also tries to open in
+   a new tab. The wait is ten minutes.
+2. Approve on the ChatGPT page, including using your ChatGPT plan. Without that
+   grant the card says so and the account cannot be used; sign in again and
+   approve it.
+3. The browser is sent back to `127.0.0.1:<port>` and the card reports that you
+   are signed in. Pick the model from the list the account can use, set the
+   provider to ChatGPT (the card has a button for it), write, and restart:
+   `jingclaw stop`, then `jingclaw`. The sign-in is read when the daemon starts,
+   like the settings.
+
+**A browser on another machine** (a container host, an LXC, a server you reach
+over SSH) cannot finish step 3 by itself: after you approve, it is sent to
+`127.0.0.1:<port>`, which means the machine the browser is on, so that page fails
+to load. That is expected. Either copy the whole address from the browser's
+address bar and paste it into the field under the link on the card, or forward
+the port first and the sign-in completes by itself:
+
+```bash
+ssh -L <port>:127.0.0.1:<port> <the machine running JingClaw>
+```
+
+The pasted address holds a one-time code. It goes to the daemon and is not kept
+on the page.
+
+**Sign out** is on the card too. It asks ChatGPT to revoke the sign-in and
+removes the tokens from this machine, and then says whether ChatGPT confirmed
+the revocation; when it did not, check your ChatGPT account yourself. The
+registration and the host id stay in the file, so signing in again reuses them.
+A model backend of ChatGPT with nobody signed in does not start an agent.
+
+**Usage and limits** are managed by ChatGPT, under Settings, Usage. OpenAI
+documents no usage endpoint, so JingClaw shows no usage numbers and never guesses
+a reset time. When the plan's limit is reached the run stops with that reason,
+the card shows the last error, and nothing is retried or moved to another way of
+paying.
+
+What to know before relying on it:
+
+- It is implemented from OpenAI's documentation (developers.openai.com/siwc) and
+  tested only against fake servers built from the documented shapes. It has not
+  been run against the live service. The least certain part is how the agent's
+  tools are declared to it: the documentation allows function tools but shows no
+  example of the shape, so a refusal from the service may need a change here.
+  If a run fails with "unsupported" naming `tools`, that declaration is the
+  likely cause, not your setup.
+- One account at a time.
+- OpenAI documents this flow for open-source and locally hosted apps. A paid or
+  remotely hosted app has to file OpenAI's interest form instead. The grant gives
+  no access to your ChatGPT conversations.
+- What the sign-in holds is in `chatgpt-auth.json` in `~/.jingclaw`, readable by
+  its owner alone. It is not in the database, the settings, a log or any reply
+  the page receives.
+- A container cannot reach the dashboard yet, so it cannot be signed in this way.
 
 ### Saved, not running yet
 

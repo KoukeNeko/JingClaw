@@ -45,7 +45,7 @@ The first run has no model and no chat account yet. It starts with an offline
 stand-in where the model goes, and says that chat is off until there is a bot
 token. The settings are not a file you edit: they live in the daemon's database,
 and the dashboard is where you change them. Run `jingclaw dashboard`, choose a
-provider and give it a key and a bot token there, restart it (`jingclaw stop`,
+provider and give it a key (or sign in with ChatGPT) and a bot token there, restart it (`jingclaw stop`,
 then `jingclaw`), and talk to it in Discord.
 
 ```bash
@@ -79,13 +79,29 @@ terminal is where you watch it and answer it. It says what it is doing while it
 does it — which file it opened, which page it read — and the answer arrives as
 it is written.
 
-**One binary, two processes.** The gateway holds a bot token and keeps a socket
-open to the internet. The process that owns your shell, your workspace and the
-event log does not go down with it.
+**Your ChatGPT plan as the model.** Besides API-key providers, the model can
+come from your own ChatGPT account: choose `chatgpt` as the provider and sign in
+from the dashboard, with no API key. This is implemented from OpenAI's
+documentation of Sign in with ChatGPT for open-source and locally hosted apps
+(developers.openai.com/siwc) and tested only against fake servers; it has not
+been verified against the live service. One account can be signed in. OpenAI
+documents that this is for open-source or locally hosted apps, and that a paid
+or remotely hosted app must go through OpenAI's interest form. Usage limits are
+managed in ChatGPT under Settings, Usage; JingClaw shows no usage numbers.
+[Details](docs/using-it.md#sign-in-with-chatgpt).
+
+**One binary, one process.** `jingclaw` runs the daemon, the chat gateway and
+(on a terminal) the console in a single process. The gateway still reaches the
+daemon over loopback with a credential that can deliver messages and nothing
+else, so it has no shortcut into the runtime. What a single process costs is
+crash isolation: the gateway holds a bot token and a socket to the internet, and
+a panic in the chat library's own goroutines now ends everything. A panic in the
+gateway's own code is caught and the gateway restarted; `jingclaw daemon` and
+`jingclaw gateway` still run the two apart.
 
 ```
-Discord ──→ gateway ─┐
-                     ├──→ daemon ──→ SQLite
+Discord ──→ gateway ─┐   (one process; the gateway
+                     ├──→ daemon ──→ SQLite   dials the daemon over loopback)
 CLI, console ────────┘
 ```
 
@@ -118,6 +134,6 @@ milestones.
 
 ## Requirements
 
-Go 1.26+ to build. A provider — Gemini, Ollama, Anthropic, or anything that
-speaks the OpenAI shape — and a Discord bot token if you want the chat half.
+Go 1.26+ to build. A provider — Gemini, Ollama, Anthropic, a ChatGPT account (unverified against
+the live service, see above), or anything that speaks the OpenAI shape — and a Discord bot token if you want the chat half.
 macOS, Linux and Windows — with the caveats in the status above.
