@@ -147,7 +147,7 @@ func TestASettingTheDaemonDidNotSendIsNotADefault(t *testing.T) {
 func TestAGatewayWithNoTokenIsNotConfigured(t *testing.T) {
 	aDaemon(t, running(), "")
 
-	err := run(nil)
+	err := Run(context.Background(), nil)
 
 	var unusable *notConfigured
 	if !errors.As(err, &unusable) {
@@ -165,7 +165,7 @@ func TestAGatewayWithNoTokenIsNotConfigured(t *testing.T) {
 func TestThePlatformFlagChoosesWhichSectionIsRead(t *testing.T) {
 	aDaemon(t, running(), "")
 
-	err := run([]string{"--platform", "telegram", "--account", "elsewhere"})
+	err := Run(context.Background(), []string{"--platform", "telegram", "--account", "elsewhere"})
 
 	var unusable *notConfigured
 	if !errors.As(err, &unusable) {
@@ -185,7 +185,7 @@ func TestThePlatformFlagChoosesWhichSectionIsRead(t *testing.T) {
 func TestAPlatformNobodyServesIsNotConfigured(t *testing.T) {
 	aDaemon(t, running(), "")
 
-	err := run([]string{"--platform", "slack"})
+	err := Run(context.Background(), []string{"--platform", "slack"})
 
 	var unusable *notConfigured
 	if !errors.As(err, &unusable) {
@@ -202,7 +202,7 @@ func TestAPlatformNobodyServesIsNotConfigured(t *testing.T) {
 func TestADaemonWithNoAgentIsNotConfigured(t *testing.T) {
 	publish(t, discovery.File{BaseURL: "http://127.0.0.1:1", Token: "control", Mode: discovery.ModeRepair})
 
-	err := run(nil)
+	err := Run(context.Background(), nil)
 
 	var unusable *notConfigured
 	if !errors.As(err, &unusable) {
@@ -223,7 +223,7 @@ func TestAFailureThatIsNotTheSettingsIsNotConfiguration(t *testing.T) {
 		t.Setenv("JINGCLAW_SERVER_RUNTIME_DIR", t.TempDir())
 		t.Setenv("JINGCLAW_RUNTIME_DIR", "")
 
-		err := run(nil)
+		err := Run(context.Background(), nil)
 
 		var unusable *notConfigured
 		if err == nil || errors.As(err, &unusable) {
@@ -242,7 +242,7 @@ func TestAFailureThatIsNotTheSettingsIsNotConfiguration(t *testing.T) {
 		t.Cleanup(server.Close)
 		publish(t, discovery.File{BaseURL: server.URL, Token: "control", GatewayToken: "gateway"})
 
-		err := run(nil)
+		err := Run(context.Background(), nil)
 
 		var unusable *notConfigured
 		if err == nil || errors.As(err, &unusable) {
@@ -259,7 +259,7 @@ func TestAFailureThatIsNotTheSettingsIsNotConfiguration(t *testing.T) {
 		t.Setenv("JINGCLAW_AGENT_MAX_ITERATIONS", "not-a-number")
 
 		var unusable *notConfigured
-		if err := run(nil); !errors.As(err, &unusable) {
+		if err := Run(context.Background(), nil); !errors.As(err, &unusable) {
 			t.Fatalf("an unreadable environment came back as %v", err)
 		}
 	})
@@ -269,7 +269,7 @@ func TestAFailureThatIsNotTheSettingsIsNotConfiguration(t *testing.T) {
 // of the flag rather than a quiet ignoring of it: a gateway started with the
 // old flag would otherwise run on settings its operator believes it is not.
 func TestTheConfigFlagIsGone(t *testing.T) {
-	err := run([]string{"--config", "/etc/jingclaw/config.toml"})
+	err := Run(context.Background(), []string{"--config", "/etc/jingclaw/config.toml"})
 
 	if err == nil || !strings.Contains(err.Error(), "config") {
 		t.Errorf("--config was accepted: %v", err)
@@ -325,4 +325,26 @@ func TestTheProcessExitsWithTheConfigurationStatusOnlyForConfiguration(t *testin
 			t.Errorf("exited with %d, want 1:\n%s", status, out)
 		}
 	})
+}
+
+// A panic is an error that names what was panicked with by its type and not by
+// its value, because the value can be a request's URL and the URL holds the
+// token.
+func TestAPanicIsContainedWithoutItsMessage(t *testing.T) {
+	err := Contain(func() error {
+		panic(fmt.Errorf("Post https://api.telegram.org/botSECRET-123/getUpdates: refused"))
+	})
+	if err == nil {
+		t.Fatal("a panic was not turned into an error")
+	}
+	if !strings.Contains(err.Error(), "panicked") {
+		t.Errorf("the error does not say what happened: %.200s", err)
+	}
+	if strings.Contains(err.Error(), "SECRET-123") {
+		t.Error("the panic's message was kept")
+	}
+
+	if err := Contain(func() error { return nil }); err != nil {
+		t.Errorf("a function that did not panic returned %v", err)
+	}
 }

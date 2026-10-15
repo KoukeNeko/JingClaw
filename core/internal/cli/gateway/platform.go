@@ -57,12 +57,18 @@ type decider interface {
 // The relay is passed twice under two names on purpose: one is the way work
 // gets started, the other the way a decision gets recorded. They are different
 // powers, and an adapter is handed each of them explicitly.
+// unbound is whether no room is bound on the selected platform.
+func unbound(cfg config.Config) bool {
+	bound := cfg.Gateway.Selected()
+	return len(bound.Channels) == 0 && len(bound.Consoles) == 0
+}
+
 func newAdapter(cfg config.Config, into sink, decisions decider, logger *slog.Logger) (adapter, error) {
 	switch cfg.Gateway.Platform {
 	case "discord":
 		token, err := secret.Find(cfg.Gateway.Discord.TokenEnv, cfg.Gateway.Discord.TokenFile, "gateway.discord.token_file")
 		if err != nil {
-			return nil, &notConfigured{fmt.Errorf("the discord bot token: %w", err)}
+			return nil, &notConfigured{err: fmt.Errorf("the discord bot token: %w", err), idle: unbound(cfg)}
 		}
 		return discord.New(discord.Config{
 			Token:              token.Reveal(),
@@ -76,7 +82,7 @@ func newAdapter(cfg config.Config, into sink, decisions decider, logger *slog.Lo
 	case "telegram":
 		token, err := secret.Find(cfg.Gateway.Telegram.TokenEnv, cfg.Gateway.Telegram.TokenFile, "gateway.telegram.token_file")
 		if err != nil {
-			return nil, &notConfigured{fmt.Errorf("the telegram bot token: %w", err)}
+			return nil, &notConfigured{err: fmt.Errorf("the telegram bot token: %w", err), idle: unbound(cfg)}
 		}
 		return telegram.New(telegram.Config{
 			Token:          token.Reveal(),
@@ -91,7 +97,7 @@ func newAdapter(cfg config.Config, into sink, decisions decider, logger *slog.Lo
 		// here means --platform named one, or one was added to the settings
 		// and not to this switch — which is worth saying plainly rather than
 		// starting a process that serves nothing.
-		return nil, &notConfigured{fmt.Errorf(
+		return nil, &notConfigured{err: fmt.Errorf(
 			"no adapter for platform %q; the platforms are %s and %s (gateway.platform, or --platform)",
 			cfg.Gateway.Platform, config.PlatformDiscord, config.PlatformTelegram)}
 	}

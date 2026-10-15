@@ -1,10 +1,16 @@
-// Package supervise starts the parts and keeps them together.
+// Package supervise runs the whole product as one process.
 //
-// The daemon and the gateway are separate processes on purpose: the gateway
-// holds somebody else's bot token and keeps a socket open to the internet, and
-// the process that owns the shell, the workspace and the event log must not go
-// down with it. One executable and two processes are not in tension — this is
-// what makes them one executable without making them one process.
+// `jingclaw` with no arguments runs the daemon, the chat gateway and, on a
+// terminal, the console inside this process. They used to be a supervisor and
+// two child processes with a watchdog beside them; what that bought was crash
+// isolation for the gateway, which holds somebody else's bot token and a
+// platform library with a socket open to the internet. That is given up here
+// on purpose (the gateway package says what is left of it) in exchange for one
+// process to start, stop, containerise and find in ps.
+//
+// What stays a boundary is the code one: the gateway still reaches the daemon
+// over loopback with its own gateway-scoped credential, through the same
+// ingress as when it was a process, and has no way into the runtime.
 package supervise
 
 import (
@@ -13,10 +19,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +30,7 @@ import (
 	controlv1 "github.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1"
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/client"
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/console"
+	"github.com/KoukeNeko/JingClaw/core/internal/cli/daemon"
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/gateway"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
@@ -35,32 +40,79 @@ import (
 // is called a failure.
 const readyTimeout = 60 * time.Second
 
-// stopGrace is how long a part gets to finish after being asked to stop.
+// stopGrace is how long the daemon gets to finish after being asked to stop.
+// The daemon bounds its own teardown (about twelve seconds); this is the
+// outer limit, so a stop cannot hang forever on something that will not go.
 const stopGrace = 15 * time.Second
+
+// chatGrace is how long the gateway gets to stop before the daemon is asked to.
+const chatGrace = 10 * time.Second
+
+// parts are the two long-running pieces Run composes. Fields rather than
+// direct calls so that a test can play them without a database or a bot.
+type parts struct {
+	daemon  func(ctx context.Context) error
+	gateway func(ctx context.Context) error
+}
+
+// part is a function running in a goroutine of its own, and how it ended.
+type part struct {
+	done chan struct{}
+	err  error // valid once done is closed
+}
+
+func goPart(fn func() error) *part {
+	p := &part{done: make(chan struct{})}
+	go func() {
+		p.err = fn()
+		close(p.done)
+	}()
+	return p
+}
+
+// stopsWithin waits for the part to have ended, for at most d.
+func (p *part) stopsWithin(d time.Duration) {
+	select {
+	case <-p.done:
+	case <-time.After(d):
+	}
+}
 
 // Run starts whatever is not already running and stays until interrupted.
 //
-// The rule is that you stop what you started. Started here, the parts are
-// stopped on the way out; found already running — a service, or another
-// terminal — they are left alone. Without that rule the second run of this
-// command is two daemons on one database, each of them certain it is the one.
+// The rule is that you stop what you started. Started here, the daemon and the
+// gateway are stopped on the way out; found already running — a service, or
+// another terminal — they are left alone and this attaches a console to them.
+// Without that rule the second run of this command is two daemons on one
+// database, each of them certain it is the one.
 //
 // Two things leave part of it off without ending it, because what is left is
 // what somebody puts them right with. A daemon that came up with no agent
 // (repair mode) gets no gateway and no console, and the run says why and waits.
-// A gateway that exits because its settings or its token are wrong is said and
-// left off. Anything else a part does by stopping ends the run.
+// A gateway that cannot start because its settings or its token are wrong is
+// said and left off. A gateway that fails any other way is logged and started
+// again with a growing wait (see keepChatUp): a crash-looping gateway must not
+// take the daemon and the dashboard down with it. Only the daemon ending, or
+// the console being closed, ends the run.
 func Run(ctx context.Context) error {
+	return run(ctx, parts{
+		daemon:  func(ctx context.Context) error { return daemon.Run(ctx, nil) },
+		gateway: func(ctx context.Context) error { return gateway.Run(ctx, nil) },
+	})
+}
+
+func run(ctx context.Context, p parts) error {
 	// The hangup as well as the interrupt and the terminate. A terminal that
 	// goes away — a window closed, an ssh session dropped — sends this, and
 	// Go's own answer to it is to die without running anything deferred: the
-	// parts would be left orphaned, holding the port and the database, with a
-	// status that says "running" to whoever looks next.
+	// discovery file would be left behind, naming a process that is gone.
 	//
 	// An ssh session with no terminal at all sends no signal, and there the
 	// console's own read returns EOF and leaves the same way.
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, hangup)
 	defer stop()
+
+	forgetAFileNamingThisProcess()
 
 	if running, err := alreadyRunning(); err != nil {
 		return err
@@ -68,51 +120,53 @@ func Run(ctx context.Context) error {
 		return attach(ctx)
 	}
 
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("supervise: find this program: %w", err)
+	// Where this process writes. When somebody is watching, that is a file: the
+	// console owns the bottom line of the terminal, and the daemon and the
+	// gateway write through os.Stdout and os.Stderr, so those are pointed at
+	// the file and the console is handed the real terminal. Without a terminal
+	// — under a service, or piped — there is no console and no line to
+	// protect, so they write where they always did.
+	tty := os.Stdout
+	logFile, watching := where()
+	if watching {
+		oldStdout, oldStderr := os.Stdout, os.Stderr
+		os.Stdout, os.Stderr = logFile, logFile
+		defer func() { _ = logFile.Close() }()
+		defer func() { os.Stdout, os.Stderr = oldStdout, oldStderr }()
 	}
 
-	// Started from this file rather than from the name on PATH. A machine
-	// commonly has an installed copy and a freshly built one, and a gateway
-	// from the other copy is the hardest kind of wrong: both processes are
-	// correct, and they are not the same program.
-	// Where the parts write. When somebody is watching, that is a file: the
-	// console owns the bottom line of the terminal, and a part writing to the
-	// same stream lands in the middle of whatever is being typed. Without a
-	// terminal — under a service, or piped — there is no console and no line
-	// to protect, so they write where they always did.
-	output, closeOutput, watching := where()
-	defer closeOutput()
+	// The daemon's context does not descend from ctx's cancellation: a signal
+	// stops the gateway first, and the daemon only after it has gone.
+	daemonCtx, stopDaemon := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopDaemon()
+	chatCtx, stopChat := context.WithCancel(ctx)
+	defer stopChat()
 
-	// Kept as well as written, so a part that fails to start can be quoted
-	// rather than only reported.
-	saidByAgent := &lastWords{limit: lastWordsKept}
+	agent := goPart(func() error { return p.daemon(daemonCtx) })
+	var chat *part
 
-	agent, err := start(ctx, self, "daemon", io.MultiWriter(output, saidByAgent))
-	if err != nil {
-		return err
-	}
-	defer terminate(agent)
+	// Registered after the log file is arranged, so that it runs first: the
+	// gateway, then the daemon, which removes the discovery file on its way
+	// out, each given a bounded time.
+	defer func() {
+		stopChat()
+		if chat != nil {
+			chat.stopsWithin(chatGrace)
+		}
+		stopDaemon()
+		agent.stopsWithin(stopGrace)
+	}()
 
-	agentGone := whenItExits(agent)
-	if err := waitForReady(ctx, agentGone, saidByAgent, alreadyRunning); err != nil {
+	if err := waitForReady(ctx, agent, alreadyRunning); err != nil {
 		return err
 	}
 
 	// Asked now that the daemon has published itself, because only then is there
 	// anything to ask. One that could not build an agent is up and serving what
 	// is needed to fix that, and a gateway has no agent to reach.
-	repairing := publishedMode() == discovery.ModeRepair
-
-	// No gateway is started in a repair, and one that is started may switch
-	// itself off by how it exits, below. A nil part and a nil channel are what
-	// "no gateway" looks like to everything that follows.
-	var (
-		chat       *supervised
-		chatEnds   <-chan struct{}
-		saidByChat = &lastWords{limit: lastWordsKept}
-	)
+	if publishedMode() == discovery.ModeRepair {
+		return stayWithoutAnAgent(ctx, tty, agent)
+	}
 
 	// Said to whoever is looking. In front of a console that is the console,
 	// which owns the screen: a line printed beside it lands in the middle of
@@ -129,36 +183,13 @@ func Run(ctx context.Context) error {
 		}
 	}
 
-	if !repairing {
-		chat, err = start(ctx, self, "gateway", io.MultiWriter(output, saidByChat))
-		if err != nil {
-			return err
-		}
-		defer terminate(chat)
-
-		chatEnds = whenItEndsTheRun(chat, whenItExits(chat), saidByChat, tell)
-	}
-
-	// Held for as long as this console is. Whatever happens to it — a clean
-	// exit, a hangup, or being killed outright — the other end of this goes
-	// with it, and the watchdog stops the parts. It is insurance against the
-	// one way of leaving that runs nothing here, so a failure to arrange it
-	// is said and not fatal.
-	lifeline, err := watchOver(self, agent, chat)
-	if err != nil {
-		fmt.Fprintln(os.Stderr,
-			"nothing will clean up if this console is killed outright:", err)
-	}
-	if lifeline != nil {
-		defer func() { _ = lifeline.Close() }()
-	}
-
-	if repairing {
-		return stayWithoutAnAgent(ctx, agentGone, saidByAgent)
-	}
+	chat = goPart(func() error {
+		keepChatUp(chatCtx, p.gateway, tell, chatPace)
+		return nil
+	})
 
 	if watching {
-		return watch(ctx, agentGone, chatEnds, notices)
+		return watch(ctx, tty, agent.done, notices)
 	}
 
 	fmt.Println("JingClaw is running. Press Ctrl-C to stop it.")
@@ -166,29 +197,28 @@ func Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return nil
-	case <-agentGone:
-		return stopped("daemon", saidByAgent)
-	case <-chatEnds:
-		return stopped("gateway", saidByChat)
+	case <-agent.done:
+		return stopped(os.Stdout, "daemon", agent.err)
 	}
 }
 
-// where says what the parts should write to, and whether anybody is looking.
+// where says whether anybody is looking, and gives the file the daemon and the
+// gateway should write to if so.
 //
 // A file under the deployment when this is a terminal, so the console has the
 // screen to itself and there is still somewhere to look when something goes
-// wrong. Standard error otherwise, which is what a service captures.
-func where() (io.Writer, func(), bool) {
+// wrong. Otherwise standard error stays what a service captures.
+func where() (*os.File, bool) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return os.Stderr, func() {}, false
+		return nil, false
 	}
 
 	dir, found := home.Resolve()
 	if !found {
-		return os.Stderr, func() {}, false
+		return nil, false
 	}
 	if err := os.MkdirAll(dir.Log(), 0o700); err != nil {
-		return os.Stderr, func() {}, false
+		return nil, false
 	}
 
 	path := filepath.Join(dir.Log(), "jingclaw.log")
@@ -196,32 +226,30 @@ func where() (io.Writer, func(), bool) {
 	if err != nil {
 		// Not worth refusing to start over. Sharing the screen is worse than
 		// a console, and better than nothing running at all.
-		return os.Stderr, func() {}, false
+		return nil, false
 	}
-	return file, func() { _ = file.Close() }, true
+	return file, true
 }
 
-// watch runs the console until it is closed or a part stops.
-func watch(ctx context.Context, agent, chat <-chan struct{}, notices <-chan string) error {
+// watch runs the console until it is closed or the daemon stops.
+func watch(ctx context.Context, tty *os.File, agent <-chan struct{}, notices <-chan string) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
-	// A part stopping ends the console too: what it was showing has gone.
+	// The daemon stopping ends the console too: what it was showing has gone.
 	go func() {
 		select {
 		case <-ctx.Done():
 		case <-agent:
 			stop()
-		case <-chat:
-			stop()
 		}
 	}()
 
-	if err := console.Run(ctx, "", howLeavingWorks(false), notices); err != nil {
-		// The console failing is not the parts failing. They keep running,
+	if err := console.Run(ctx, "", howLeavingWorks(false), notices, tty); err != nil {
+		// The console failing is not the daemon failing. It keeps running,
 		// and saying so is more use than an error nobody can act on.
-		fmt.Fprintln(os.Stderr, "the console stopped:", err)
-		fmt.Println("JingClaw is still running. Press Ctrl-C to stop it.")
+		fmt.Fprintln(tty, "the console stopped:", err)
+		fmt.Fprintln(tty, "JingClaw is still running. Press Ctrl-C to stop it.")
 		<-ctx.Done()
 	}
 	return nil
@@ -240,7 +268,7 @@ func attach(ctx context.Context) error {
 	if publishedMode() == discovery.ModeRepair {
 		// Nothing to draw a console of: it follows an agent's sessions, and
 		// there is none. What there is to see is why.
-		sayWhyThereIsNoAgent(ctx)
+		sayWhyThereIsNoAgent(ctx, os.Stdout)
 		<-ctx.Done()
 		return nil
 	}
@@ -252,7 +280,7 @@ func attach(ctx context.Context) error {
 		return nil
 	}
 
-	if err := console.Run(ctx, "", howLeavingWorks(true), nil); err != nil {
+	if err := console.Run(ctx, "", howLeavingWorks(true), nil, os.Stdout); err != nil {
 		// The console failing is not the parts failing. They keep running,
 		// and saying so is more use than an error nobody can act on.
 		fmt.Fprintln(os.Stderr, "the console stopped:", err)
@@ -356,27 +384,32 @@ func howLeavingWorks(foundAlreadyRunning bool) console.Leaving {
 // canAttach says whether there is anything to draw a console on.
 func canAttach(isTerminal bool) bool { return isTerminal }
 
-// stopped says why one of the parts is no longer running.
+// stopped says why the daemon is no longer running.
 //
-// A part that exits without an error was asked to: jingclaw stop signals the
-// daemon, and the daemon exiting is then the whole point rather than a
-// failure. Reporting that as one made every clean shutdown end with an error
-// line and a non-zero status.
-// stopped reports a part that ended, with what it said on the way out.
-//
-// Under a console the parts write to a log file, so a message saying only
-// that something stopped sends whoever read it looking for a file nobody told
-// them about.
-func stopped(part string, said *lastWords) error {
-	last := ""
-	if said != nil {
-		last = said.String()
-	}
-	if last == "" {
-		fmt.Printf("The %s stopped; stopping the rest.\n", part)
+// One that returns without an error was asked to, or had nothing left to do,
+// and is not a failure; reporting that as one made every clean shutdown end
+// with an error line and a non-zero status. One that returns an error is quoted
+// in the error, which main prints, rather than only in a log file nobody was
+// told about.
+func stopped(out io.Writer, part string, why error) error {
+	if why == nil {
+		fmt.Fprintf(out, "The %s stopped; stopping the rest.\n", part)
 		return nil
 	}
-	return fmt.Errorf("the %s stopped:\n%s", part, last)
+	return fmt.Errorf("the %s stopped: %w", part, why)
+}
+
+// forgetAFileNamingThisProcess removes a discovery file that names this very
+// process, which at this point can only be a leftover.
+//
+// Nothing has been published yet, so a file with our own pid is from an earlier
+// process that had it and was killed before it could clean up. In a container
+// pids repeat from one start to the next, and the leftover would read as a
+// daemon that is up: this process would attach to itself and start nothing.
+func forgetAFileNamingThisProcess() {
+	if path, err := discovery.Path(); err == nil {
+		_ = discovery.RemoveIfOwnedBy(path, os.Getpid())
+	}
 }
 
 // alreadyRunning reports whether a daemon has published itself and is alive.
@@ -429,25 +462,25 @@ func publishedMode() string {
 // is serving is what somebody needs to put that right, and ending the run
 // would take it away. Why is said once, and then the run waits. A daemon that
 // goes away still ends it.
-func stayWithoutAnAgent(ctx context.Context, agentGone <-chan struct{}, said *lastWords) error {
-	sayWhyThereIsNoAgent(ctx)
-	fmt.Println("JingClaw is running without an agent. Press Ctrl-C to stop it.")
+func stayWithoutAnAgent(ctx context.Context, out io.Writer, agent *part) error {
+	sayWhyThereIsNoAgent(ctx, out)
+	fmt.Fprintln(out, "JingClaw is running without an agent. Press Ctrl-C to stop it.")
 
 	select {
 	case <-ctx.Done():
 		return nil
-	case <-agentGone:
-		return stopped("daemon", said)
+	case <-agent.done:
+		return stopped(out, "daemon", agent.err)
 	}
 }
 
 // sayWhyThereIsNoAgent asks the daemon why, and says what it answered.
-func sayWhyThereIsNoAgent(ctx context.Context) {
+func sayWhyThereIsNoAgent(ctx context.Context, out io.Writer) {
 	asking, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	state, err := client.AgentState(asking, "")
-	fmt.Println(agentNotRunning(state, err))
+	fmt.Fprintln(out, agentNotRunning(state, err))
 }
 
 // agentNotRunning is the one line that says there is no agent, why, and what to
@@ -476,108 +509,12 @@ func agentNotRunning(state *controlv1.GetAgentStateResponse, asked error) string
 	return fmt.Sprintf("agent not running: %s%s%s", client.ProblemLine(problems[0]), more, pointer)
 }
 
-// whenItEndsTheRun is closed when the gateway has gone in a way that ends the
-// run, and says why when it has gone in one that does not.
-//
-// Exiting with gateway.ExitConfiguration does not. That is a gateway that cannot
-// start for a reason in the settings or the credential — the token is not
-// there, the platform is not one it serves — and the daemon and the dashboard
-// are what somebody puts that right with. Ending the run would take them away
-// over a missing file, so it is said and the run goes on without chat.
-// Any other exit is a fault and ends the run, as it always has.
-func whenItEndsTheRun(
-	chat *supervised, gone <-chan struct{}, said *lastWords, tell func(string),
-) <-chan struct{} {
-	ends := make(chan struct{})
-	go func() {
-		<-gone
-		if chatEndsTheRun(chat.exitCode()) {
-			close(ends)
-			return
-		}
-		tell("chat is off: " + reasonOf(said) +
-			" (put that right, then restart: jingclaw stop, then jingclaw)")
-	}()
-	return ends
-}
-
-// chatEndsTheRun says whether a gateway that exited with this status ends the
-// run. Only a configuration status does not.
-func chatEndsTheRun(status int) bool { return status != gateway.ExitConfiguration }
-
-// reasonOf is what a gateway said it was stopping for: the message after the
-// last "error: " it printed, or all it said if it printed none.
-//
-// Quoted without that prefix because it is put after one of this program's own.
-func reasonOf(said *lastWords) string {
-	all := said.String()
-	lines := strings.Split(all, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if reason, found := strings.CutPrefix(strings.TrimSpace(lines[i]), "error: "); found {
-			return reason
-		}
-	}
-	if all == "" {
-		return "the gateway exited and said nothing about why"
-	}
-	return all
-}
-
-// supervised is a started part and the group that contains its tree, so that
-// stopping the part takes with it whatever the part started.
-type supervised struct {
-	command *exec.Cmd
-	group   *procGroup
-}
-
-// exitCode is the status the part ended with, once whenItExits has closed.
-func (s *supervised) exitCode() int {
-	if s.command.ProcessState == nil {
-		return -1
-	}
-	return s.command.ProcessState.ExitCode()
-}
-
-func start(ctx context.Context, self, part string, output io.Writer) (*supervised, error) {
-	command := exec.CommandContext(ctx, self, part)
-	command.Stdout = output
-	command.Stderr = output
-
-	group, err := newProcGroup()
-	if err != nil {
-		return nil, fmt.Errorf("supervise: contain the %s: %w", part, err)
-	}
-	group.configure(command)
-
-	if err := command.Start(); err != nil {
-		group.close()
-		return nil, fmt.Errorf("supervise: start the %s: %w", part, err)
-	}
-
-	// The part may have been started suspended so it could be placed in its
-	// group before running; started assigns it and lets it go. A failure here
-	// leaves a part that must not be left behind, so it is killed and reaped
-	// before the error is returned.
-	if err := group.started(command); err != nil {
-		_ = command.Process.Kill()
-		_ = command.Wait()
-		group.close()
-		return nil, fmt.Errorf("supervise: contain the %s: %w", part, err)
-	}
-	return &supervised{command: command, group: group}, nil
-}
-
 // waitForReady blocks until the daemon has published itself.
 //
 // The gateway is started after, because a gateway that comes up first spends
 // its early life failing to reach something that is not there yet and says so
 // in a way that reads like a fault.
-func waitForReady(
-	ctx context.Context,
-	gone <-chan struct{},
-	said *lastWords,
-	published func() (bool, error),
-) error {
+func waitForReady(ctx context.Context, agent *part, published func() (bool, error)) error {
 	deadline := time.NewTimer(readyTimeout)
 	defer deadline.Stop()
 
@@ -592,85 +529,28 @@ func waitForReady(
 		case <-ctx.Done():
 			return ctx.Err()
 
-		case <-gone:
-			// It has exited, so waiting out the timeout would be a minute of
+		case <-agent.done:
+			// It has returned, so waiting out the timeout would be a minute of
 			// blank terminal before saying what is already known. What it
-			// said on the way out is the answer.
-			return failedToStart(said)
+			// returned is the answer.
+			return failedToStart(agent.err)
 
 		case <-deadline.C:
-			// Still running and still not published. Whatever it has said so
-			// far is the best account there is.
-			return failedToStart(said)
+			// Still running and still not published.
+			return failedToStart(nil)
 
 		case <-tick.C:
 		}
 	}
 }
 
-// failedToStart is the message, carrying what the part said if it said any.
-//
-// Under a console the parts write to a log file, so an error saying only that
-// something did not start sends whoever read it looking for a file nobody
-// told them about.
-func failedToStart(said *lastWords) error {
-	if said == nil {
-		return errors.New("supervise: the daemon did not start")
-	}
-	if last := said.String(); last != "" {
-		return fmt.Errorf("supervise: the daemon did not start:\n%s", last)
+// failedToStart is the message, carrying why when the daemon said.
+func failedToStart(why error) error {
+	if why != nil {
+		return fmt.Errorf("supervise: the daemon did not start: %w", why)
 	}
 	return errors.New("supervise: the daemon did not start, and said nothing about why")
 }
-
-// terminate asks a part to stop and waits, briefly.
-//
-// Asked rather than killed: the daemon has a database to close and runs to
-// let go of, and the difference between a clean stop and a killed one is a
-// session that comes back and one that comes back with a hole in it.
-func terminate(one *supervised) {
-	if one == nil || one.command.Process == nil {
-		return
-	}
-	// The group rather than the process. A part runs whatever somebody
-	// approved and those run their own children; signalling only the process
-	// this program started leaves the rest holding what they held, and the
-	// next start fails for a reason that looks nothing like the cause.
-	one.group.askToStop(one.command)
-
-	done := make(chan struct{})
-	go func() { _, _ = one.command.Process.Wait(); close(done) }()
-
-	select {
-	case <-done:
-	case <-time.After(stopGrace):
-		one.group.kill(one.command)
-	}
-
-	// Release the group. On Windows this is also the safety net: a job object
-	// set to end its processes when its handle closes takes any descendant a
-	// stop did not.
-	one.group.close()
-}
-
-// whenItExits is closed when a part has gone.
-//
-// Closed rather than sent to, because more than one place waits on it and a
-// value can only be taken once. Wait may only be called once per command, so
-// this is the one place that calls it.
-func whenItExits(one *supervised) <-chan struct{} {
-	gone := make(chan struct{})
-	go func() {
-		_ = one.command.Wait()
-		close(gone)
-	}()
-	return gone
-}
-
-// lastWordsKept is how much of a failing part's output is quoted back. Enough
-// for the error it ended on, and not so much that a stack trace becomes the
-// message.
-const lastWordsKept = 2000
 
 // Commands are the subcommands for managing what Run starts.
 func Commands() []*cobra.Command {

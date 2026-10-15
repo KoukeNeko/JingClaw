@@ -2,7 +2,8 @@ package supervise
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"io"
 	"os"
 	"time"
 
@@ -15,20 +16,17 @@ import (
 // jingclaw stop signals the daemon, so the daemon exiting is the point of the
 // command rather than a failure of it.
 func TestACleanExitIsNotAnError(t *testing.T) {
-	if err := stopped("daemon", nil); err != nil {
+	if err := stopped(io.Discard, "daemon", nil); err != nil {
 		t.Errorf("a clean exit was reported as an error: %v", err)
 	}
 }
 
 func TestACrashIsStillAnError(t *testing.T) {
-	said := &lastWords{limit: 200}
-	fmt.Fprintln(said, "error: the database is held by something else")
-
-	err := stopped("gateway", said)
+	err := stopped(io.Discard, "daemon", errors.New("the database is held by something else"))
 	if err == nil {
 		t.Fatal("a crash was reported as a clean stop")
 	}
-	if !strings.Contains(err.Error(), "gateway") {
+	if !strings.Contains(err.Error(), "daemon") {
 		t.Errorf("the message does not say which part: %v", err)
 	}
 	// What it said, not that it said something. The exit status alone is
@@ -174,25 +172,24 @@ func TestATimeSaysWhichDayWhenItIsNotToday(t *testing.T) {
 	}
 }
 
-// A part that failed to start says why.
+// A daemon that failed to start says why.
 //
 // The daemon refuses to run against a model the provider does not serve, and
-// says so on the way out. Under a console its output goes to a log file so it
+// says so by what it returns. Under a console its log goes to a file so it
 // cannot land in the middle of what somebody is typing, and what reached the
 // terminal was "the daemon did not start" — sixty seconds later, with the
 // reason sitting in a file nobody was told to look at.
-func TestAPartThatFailedToStartSaysWhy(t *testing.T) {
-	said := &lastWords{limit: 400}
-	fmt.Fprintln(said, `error: provider ollama does not serve model "nemotron-3-ultra:cloud"`)
+func TestADaemonThatFailedToStartSaysWhy(t *testing.T) {
+	agent := goPart(func() error {
+		return errors.New(`provider ollama does not serve model "nemotron-3-ultra:cloud"`)
+	})
+	<-agent.done
 
-	gone := make(chan struct{})
-	close(gone)
-
-	err := waitForReady(context.Background(), gone, said, func() (bool, error) {
+	err := waitForReady(context.Background(), agent, func() (bool, error) {
 		return false, nil
 	})
 	if err == nil {
-		t.Fatal("a part that exited without publishing was reported as ready")
+		t.Fatal("a daemon that returned without publishing was reported as ready")
 	}
 	if !strings.Contains(err.Error(), "does not serve model") {
 		t.Errorf("the failure does not say why: %v", err)
@@ -203,53 +200,35 @@ func TestAPartThatFailedToStartSaysWhy(t *testing.T) {
 //
 // Sixty seconds of a blank terminal is what somebody presses Ctrl-C through,
 // and then they have no message at all.
-func TestItDoesNotWaitOutTheTimeoutForAPartThatHasGone(t *testing.T) {
-	gone := make(chan struct{})
-	close(gone)
+func TestItDoesNotWaitOutTheTimeoutForADaemonThatHasGone(t *testing.T) {
+	agent := goPart(func() error { return nil })
+	<-agent.done
 
 	started := time.Now()
-	if err := waitForReady(context.Background(), gone, &lastWords{limit: 10},
+	if err := waitForReady(context.Background(), agent,
 		func() (bool, error) { return false, nil }); err == nil {
-		t.Fatal("a part that exited was reported as ready")
+		t.Fatal("a daemon that returned was reported as ready")
 	}
 	if waited := time.Since(started); waited > 5*time.Second {
 		t.Errorf("it waited %v for something that had already gone", waited)
 	}
 }
 
-// A part that comes up is ready, and nothing is said about it.
-func TestAPartThatPublishesIsReady(t *testing.T) {
+// A daemon that comes up is ready, and nothing is said about it.
+func TestADaemonThatPublishesIsReady(t *testing.T) {
+	stays := make(chan struct{})
+	defer close(stays)
+	agent := goPart(func() error { <-stays; return nil })
+
 	published := false
-	err := waitForReady(context.Background(), make(chan struct{}), &lastWords{limit: 10},
+	err := waitForReady(context.Background(), agent,
 		func() (bool, error) {
 			was := published
 			published = true
 			return was, nil
 		})
 	if err != nil {
-		t.Errorf("a part that published was reported as failed: %v", err)
-	}
-}
-
-// What a part said last is what is kept.
-//
-// The end rather than the start: a program that failed says why on its way
-// out, and its first lines are it announcing itself.
-func TestWhatIsKeptIsWhatWasSaidLast(t *testing.T) {
-	said := &lastWords{limit: 20}
-
-	fmt.Fprint(said, strings.Repeat("announcing itself\n", 40))
-	fmt.Fprint(said, "the actual reason")
-
-	kept := said.String()
-	if !strings.Contains(kept, "the actual reason") {
-		t.Errorf("the end was dropped: %q", kept)
-	}
-	if strings.Contains(kept, "announcing itself") {
-		t.Errorf("the beginning was kept instead: %q", kept)
-	}
-	if len(kept) > 20 {
-		t.Errorf("it kept %d bytes against a limit of 20", len(kept))
+		t.Errorf("a daemon that published was reported as failed: %v", err)
 	}
 }
 

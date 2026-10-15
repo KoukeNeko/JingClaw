@@ -2,7 +2,11 @@
 
 package supervise
 
-import "golang.org/x/sys/windows"
+import (
+	"syscall"
+
+	"golang.org/x/sys/windows"
+)
 
 // stillActive is the exit code Windows reports for a process that has not
 // exited (STILL_ACTIVE / STATUS_PENDING).
@@ -37,3 +41,8 @@ func alive(pid int) bool {
 	}
 	return code == stillActive
 }
+
+// hangup is what a terminal going away would send, where terminals send that.
+// Windows does not, and Go's signal package will not deliver it. Named here so
+// the list of ways to leave reads the same on both platforms.
+const hangup = syscall.SIGHUP

@@ -1,10 +1,10 @@
 // Command jingclaw is the whole thing.
 //
 // Run with no arguments it starts everything and gives you the console, the
-// way a game server does: one file, you open it, it is running. The
-// subcommands are for the cases that are not that — being one of the daemons
-// it starts, asking a running one a question from a script, or installing it
-// as a service so it survives the terminal closing.
+// way a game server does: one file, you open it, it is running, in one
+// process. The subcommands are for the cases that are not that — running the
+// daemon or the gateway by itself, asking a running one a question from a
+// script, or installing it as a service so it survives the terminal closing.
 package main
 
 import (
@@ -32,10 +32,6 @@ func main() {
 	// all: it may be one started to confine a command and then become it.
 	confineIfAsked()
 
-	// And this process may be the smaller thing left behind to notice that
-	// the program is gone, which is not the program either.
-	supervise.WatchIfAsked()
-
 	if err := root().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -48,7 +44,7 @@ func root() *cobra.Command {
 		Version: version,
 		Short:   "A local agent that answers in chat",
 		Long: "Run with no arguments to start everything and watch it.\n" +
-			"Everything else is for scripts, or for being one of the parts.",
+			"Everything else is for scripts, or for running a part by itself.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 
@@ -59,9 +55,8 @@ func root() *cobra.Command {
 		},
 	}
 
-	// The two long-running parts. Named rather than hidden: something has to
-	// start them, and a process somebody finds in ps should be something they
-	// can also run by hand to see what it says.
+	// The two long-running parts on their own. The bare command runs both in
+	// one process; these are for running them apart, and for scripts.
 	cmd.AddCommand(&cobra.Command{
 		Use:                "daemon",
 		Short:              "Run the agent daemon in the foreground",

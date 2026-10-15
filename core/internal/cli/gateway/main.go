@@ -1,12 +1,24 @@
 // Package gateway carries traffic between a messaging platform and the
 // daemon.
 //
-// It is a separate process on purpose. It holds somebody else's bot token and
-// runs a library that keeps a socket open to the internet; if that library
-// panics or its connection loop misbehaves, the process that owns the shell,
-// the workspace and the event log must not go down with it. The credential it
-// uses reaches the ingress and nothing else, so being compromised means "can
-// deliver messages inward", not "can execute tools".
+// It holds somebody else's bot token and runs a library that keeps a socket
+// open to the internet. The credential it uses reaches the ingress and nothing
+// else, so a compromised gateway means "can deliver messages inward", not "can
+// execute tools". That boundary is made of code: the gateway asks the daemon
+// for its settings and sends everything through the gateway-scoped ingress over
+// loopback, and has no way into the runtime. It was never an operating-system
+// boundary either, since both run as the same user and read the same discovery
+// file.
+//
+// What `jingclaw` with no arguments gives up is crash isolation. The gateway
+// used to be a process of its own so that a panic or a runaway connection loop
+// in the platform library could not take down the process that owns the shell,
+// the workspace and the event log. Now it is a goroutine in that process. A
+// panic in a goroutine this package starts is caught (see Contain) and the
+// gateway is restarted with backoff; a panic in a goroutine the platform
+// library starts for itself cannot be caught, and ends the whole process.
+// `jingclaw gateway` still runs it as a process of its own, for whoever wants
+// the isolation back.
 package gateway
 
 import (
@@ -18,6 +30,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -43,27 +56,69 @@ const settingsTimeout = 10 * time.Second
 //
 // Its own status because the two want different answers from whatever started
 // it. A fault may be gone on the next try; a missing token is there on every
-// one until somebody writes it down, and the supervisor, which keeps the daemon
-// and the dashboard up for exactly that somebody, has to be able to tell them
-// apart. 78 is EX_CONFIG.
+// one until somebody writes it down, and whatever started it — the process
+// that keeps the daemon and the dashboard up for exactly that somebody — has to
+// be able to tell them apart. 78 is EX_CONFIG. Run, which is what the single
+// process calls, reports the same distinction as IsUnconfigured.
 const ExitConfiguration = 78
 
 // notConfigured is a failure to start that is put right by changing a setting
 // or a credential, and that the message already says how.
-type notConfigured struct{ err error }
+//
+// idle is set when nothing is bound to the chat at all: nobody has turned it on,
+// so it being off is the normal state and not something to be restarted for.
+type notConfigured struct {
+	err  error
+	idle bool
+}
 
 func (e *notConfigured) Error() string { return e.err.Error() }
 func (e *notConfigured) Unwrap() error { return e.err }
 
-// Main runs the gateway. Args are the arguments after the subcommand name.
-func Main(args []string) error {
-	err := run(args)
+// Unconfigured marks err as one that only a change to a setting or a credential
+// puts right, which is what makes it not worth trying again.
+func Unconfigured(err error) error { return &notConfigured{err: err} }
 
+// IsIdle says whether err is one of those for a chat nobody has set up: no
+// room is bound to it.
+func IsIdle(err error) bool {
 	var unusable *notConfigured
+	return errors.As(err, &unusable) && unusable.idle
+}
+
+// IsUnconfigured says whether err, or what it wraps, is one of those.
+func IsUnconfigured(err error) bool {
+	var unusable *notConfigured
+	return errors.As(err, &unusable)
+}
+
+// Contain runs fn and turns a panic in it into an error.
+//
+// The error names the kind of value that was panicked with and carries the
+// stack, and does not carry the value: this library talks to a service by URLs
+// that hold the bot token, and an error that quotes its request would put the
+// token in a log. The stack shows addresses and sizes, not strings.
+func Contain(fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("the gateway panicked (%T; its message is not logged):\n%s", r, debug.Stack())
+		}
+	}()
+	return fn()
+}
+
+// Main runs the gateway as a process of its own. Args are the arguments after
+// the subcommand name.
+func Main(args []string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	err := Run(ctx, args)
+
 	switch {
 	case err == nil, errors.Is(err, context.Canceled):
 		return nil
-	case errors.As(err, &unusable):
+	case IsUnconfigured(err):
 		// Said here, in the form the program's own main would have said it,
 		// because that one can only exit with 1.
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -72,7 +127,10 @@ func Main(args []string) error {
 	return err
 }
 
-func run(args []string) error {
+// Run serves one platform until ctx ends, and returns what ended it. A nil or
+// context.Canceled return is a requested stop; IsUnconfigured says it cannot
+// run until somebody changes a setting; anything else is a fault.
+func Run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("jingclaw gateway", flag.ContinueOnError)
 	var (
 		platform  = flags.String("platform", "", "messaging platform to serve; overrides the daemon's settings")
@@ -88,11 +146,10 @@ func run(args []string) error {
 	// there is not a second copy that can disagree.
 	bootstrap, err := config.Candidate(nil)
 	if err != nil {
-		return &notConfigured{err}
+		return &notConfigured{err: err}
 	}
 
-	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	rootCtx := ctx
 
 	client, err := dialAgent(bootstrap.Server.RuntimeDir)
 	if err != nil {
@@ -144,8 +201,8 @@ func run(args []string) error {
 	// The connection and the delivery loop are independent: an outage in one
 	// must not silently stop the other, and errgroup makes either failing
 	// bring the process down rather than leaving it half working.
-	group.Go(func() error { return platformAdapter.Run(ctx) })
-	group.Go(func() error { return relay.deliver(ctx) })
+	group.Go(func() error { return Contain(func() error { return platformAdapter.Run(ctx) }) })
+	group.Go(func() error { return Contain(func() error { return relay.deliver(ctx) }) })
 
 	if err := group.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		return err
@@ -390,7 +447,7 @@ func dialAgent(runtimeDir string) (controlv1connect.GatewayIngressServiceClient,
 		// Not a fault in the gateway or in the daemon: the daemon is up and is
 		// running no agent because its settings need fixing, which is what this
 		// is told about. The ingress it would reach is not there.
-		return nil, &notConfigured{errors.New(
+		return nil, &notConfigured{err: errors.New(
 			"the daemon is running no agent, so there is nothing for a gateway to reach; " +
 				"fix what is wrong in the dashboard (run: jingclaw dashboard), then restart: jingclaw stop, then jingclaw")}
 	}

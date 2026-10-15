@@ -4,13 +4,17 @@
 # A console that starts a deployment owns it: leaving is supposed to take it
 # with you. Typing quit does that today, and so does Ctrl-C. What did not is
 # the terminal simply going away — closing the window, or an ssh session
-# dropping — because the supervisor listened for interrupt and terminate and
-# not for the hangup a terminal sends, and Go's own answer to a hangup is to
-# die without running anything deferred.
+# dropping — because the program listened for interrupt and terminate and not
+# for the hangup a terminal sends, and Go's own answer to a hangup is to die
+# without running anything deferred.
 #
-# What that leaves is worse than nothing running: a daemon holding the port
-# and the database with no console that can stop it, and a `status` that says
-# "running" to whoever looks next.
+# The program is one process now: the daemon, the gateway and the console run
+# inside it, so there is no child to be orphaned and no watchdog to clean up
+# after one. What is left to lose is the discovery file, which a hangup that was
+# not answered would leave behind naming a process that is gone, and a `status`
+# that says "running" to whoever looks next. So this checks both: that it really
+# is one process, and that every way of leaving ends it, with the file removed
+# whenever the process was given the chance to remove it.
 set -eu
 
 # Nothing inherited may supply a document or override a setting: the settings
@@ -55,7 +59,7 @@ account_id = "main"
 api_base = "http://127.0.0.1:7844"
 '
 
-# Drives the supervisor under a pty and then takes the pty away, which is what
+# Drives the program under a pty and then takes the pty away, which is what
 # closing a terminal window and losing an ssh session both come down to.
 cat > "$WORK/leave.py" <<'DRIVE'
 import fcntl, os, pty, select, struct, subprocess, sys, termios, time
@@ -93,12 +97,17 @@ def running():
     return [line.strip() for line in out.splitlines() if binary in line]
 
 
-# There has to be something to lose. Every check below passes on an empty
-# process table, so without this they would all go green on a deployment that
-# had already fallen over for its own reasons.
+# There has to be something to lose, and it has to be one process. Every check
+# below passes on an empty process table, so without this they would all go
+# green on a deployment that had already fallen over for its own reasons; and
+# a second line here, a daemon or a gateway or a watchdog of its own, would be
+# the old shape coming back.
 before = running()
-if len(before) < 2:
+if len(before) == 0:
     print("NOTHING-WAS-RUNNING", len(before))
+    raise SystemExit(0)
+if len(before) != 1 or not before[0].endswith(binary):
+    print("MORE-THAN-ONE-PROCESS", before)
     raise SystemExit(0)
 
 if how == "close":
@@ -106,13 +115,13 @@ if how == "close":
 elif how == "quit":
     os.write(fd, b"quit\r")
 elif how == "kill":
-    # Nothing the supervisor runs can help here. Whatever cleans up has to
-    # already be running and has to notice on its own.
+    # Nothing the process runs can help here: it is gone without running a
+    # line. It is all in one process now, so there is nothing else left holding
+    # the port, which is what this checks.
     os.kill(pid, 9)
 elif how == "killgroup":
     # The whole foreground group, which is what a hard close of a terminal
-    # and a job-control kill both come to. Whatever cleans up has to be
-    # outside that group as well as still running.
+    # and a job-control kill both come to.
     os.killpg(os.getpgid(pid), 9)
 
 time.sleep(6)
@@ -124,8 +133,10 @@ DRIVE
 printf '%s' "checking that quitting takes it with you... "
 LEFT=$(python3 "$WORK/leave.py" "$WORK" quit)
 case "$LEFT" in *NOTHING-WAS-RUNNING*) fail "nothing was running to lose: $LEFT" ;; esac
+case "$LEFT" in *MORE-THAN-ONE-PROCESS*) fail "it is not one process: $LEFT" ;; esac
 [ -z "$LEFT" ] || fail "quit left these behind:
 $LEFT"
+[ ! -e "$WORK/run/daemon.json" ] || fail "quit left the discovery file behind"
 printf 'ok\n'
 
 pkill -f "$WORK/jingclaw" 2>/dev/null || true
@@ -134,8 +145,10 @@ sleep 1
 printf '%s' "checking that closing the terminal takes it with you... "
 LEFT=$(python3 "$WORK/leave.py" "$WORK" close)
 case "$LEFT" in *NOTHING-WAS-RUNNING*) fail "nothing was running to lose: $LEFT" ;; esac
+case "$LEFT" in *MORE-THAN-ONE-PROCESS*) fail "it is not one process: $LEFT" ;; esac
 [ -z "$LEFT" ] || fail "closing the terminal left these behind, orphaned and still holding the port:
 $LEFT"
+[ ! -e "$WORK/run/daemon.json" ] || fail "closing the terminal left the discovery file behind, naming a process that is gone"
 printf 'ok\n'
 
 pkill -f "$WORK/jingclaw" 2>/dev/null || true
@@ -144,8 +157,13 @@ sleep 1
 printf '%s' "checking that killing the console outright takes it with you... "
 LEFT=$(python3 "$WORK/leave.py" "$WORK" kill)
 case "$LEFT" in *NOTHING-WAS-RUNNING*) fail "nothing was running to lose: $LEFT" ;; esac
+case "$LEFT" in *MORE-THAN-ONE-PROCESS*) fail "it is not one process: $LEFT" ;; esac
 [ -z "$LEFT" ] || fail "the console was killed and these kept running:
 $LEFT"
+# Nothing could remove it, so it is there; what matters is that it is not
+# believed. A process that is gone is not a running deployment.
+"$WORK/jingclaw" status 2>&1 | grep -q "^not running" ||
+	fail "status believed a process that had been killed: $("$WORK/jingclaw" status 2>&1)"
 printf 'ok\n'
 
 pkill -f "$WORK/jingclaw" 2>/dev/null || true
@@ -154,6 +172,7 @@ sleep 1
 printf '%s' "checking that killing the whole foreground group takes it with you... "
 LEFT=$(python3 "$WORK/leave.py" "$WORK" killgroup)
 case "$LEFT" in *NOTHING-WAS-RUNNING*) fail "nothing was running to lose: $LEFT" ;; esac
+case "$LEFT" in *MORE-THAN-ONE-PROCESS*) fail "it is not one process: $LEFT" ;; esac
 [ -z "$LEFT" ] || fail "the console's whole group was killed and these kept running:
 $LEFT"
 printf 'ok\n'

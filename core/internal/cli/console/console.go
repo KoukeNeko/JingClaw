@@ -57,7 +57,11 @@ const (
 // see, drawn above the input line as they arrive. They go through here because
 // the console owns the terminal: a line printed beside it lands in the middle
 // of what is being typed. Nil is allowed, and then there are none.
-func Run(ctx context.Context, runtimeDir string, leaving Leaving, notices <-chan string) error {
+//
+// screenOut is the terminal it draws on. It is a parameter because a process
+// that runs the daemon too points os.Stdout at its log file, so that nothing
+// else writes over the console, and the console must not follow it there.
+func Run(ctx context.Context, runtimeDir string, leaving Leaving, notices <-chan string, screenOut *os.File) error {
 	daemon, artifacts, err := client.DialForConsole(runtimeDir)
 	if err != nil {
 		return err
@@ -76,8 +80,8 @@ func Run(ctx context.Context, runtimeDir string, leaving Leaving, notices <-chan
 	// Asked each time rather than remembered: a window can be resized while
 	// this is running, and a stale width means the input line is erased by
 	// the wrong number of rows.
-	screen := console.NewScreen(os.Stdout, func() int {
-		width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	screen := console.NewScreen(screenOut, func() int {
+		width, _, err := term.GetSize(int(screenOut.Fd()))
 		if err != nil {
 			return 0
 		}
@@ -526,7 +530,7 @@ func Commands() []*cobra.Command {
 			"One scrolling log of every session and one line to type at.\n" +
 			"Leaving the console does not stop anything.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return Run(cmd.Context(), runtimeDir, LeavesItRunning, nil)
+			return Run(cmd.Context(), runtimeDir, LeavesItRunning, nil, os.Stdout)
 		},
 	}
 	command.Flags().StringVar(&runtimeDir, "runtime-dir", "",

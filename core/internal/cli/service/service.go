@@ -174,6 +174,12 @@ func minimalEnvironment() []string {
 
 // plist is the job as launchd wants to read it.
 //
+// The program is run with no arguments, which is the daemon and the gateway in
+// one process. That is the one process launchd supervises: it is started, kept
+// alive and, on bootout, sent SIGTERM, which stops the gateway and then the
+// daemon and removes the discovery file. There is no supervisor behind it and no
+// child for launchd to lose track of.
+//
 // The two environment variables are written out rather than inherited on
 // purpose. A service does not get the environment of the shell that installed
 // it: PATH would be the short system one, and every tool the agent runs by

@@ -67,7 +67,7 @@ printf 'ok   the volume is writable by the user the image runs as\n'
 # What a first run looks like. An image that needs a credential must say
 # which one and where it is looked for. It no longer exits to do it: the
 # daemon and the dashboard are what the operator puts a missing credential
-# right with, so the supervisor says "chat is off" and the container stays up.
+# right with, so the process says "chat is off" and the container stays up.
 docker run --rm -v "$VOLUME:/var/lib/jingclaw" --entrypoint sh "$IMAGE" -c \
 	'rm -f /var/lib/jingclaw/discord.token' >/dev/null
 
@@ -88,14 +88,40 @@ printf '%s' "$FIRST" | grep -q "DISCORD_BOT_TOKEN" ||
 printf '%s' "$FIRST" | grep -q "gateway.discord.token_file" ||
 	fail "it does not say where the credential is looked for: $FIRST"
 
-# Said and then still there: a supervisor that printed it and went away would
+# Said and then still there: a process that printed it and went away would
 # pass everything above.
 sleep 1
 [ "$(docker inspect -f '{{.State.Running}}' "$NAME-first")" = "true" ] &&
 	docker exec "$NAME-first" test -f /var/lib/jingclaw/run/daemon.json ||
 	fail "a first run with no credential took the daemon down with the chat: $(docker logs "$NAME-first" 2>&1 | tail -20)"
-docker rm -f "$NAME-first" >/dev/null
 printf 'ok   a first run with nothing set up says what it needs and where, and stays up\n'
+
+# One process, under tini and nothing else of JingClaw's own: the daemon, the
+# gateway and the watchdog the old arrangement had are inside it or gone.
+COPIES=$(docker exec "$NAME-first" sh -c '
+	for p in /proc/[0-9]*; do
+		tr "\0" " " < $p/cmdline 2>/dev/null | grep -q "^jingclaw" && echo $p
+	done' | wc -l | tr -d " ")
+[ "$COPIES" = "1" ] ||
+	fail "there are $COPIES jingclaw processes in the container, not one: $(docker top "$NAME-first")"
+printf 'ok   as one process\n'
+
+# docker stop signals PID 1 alone. tini passes the signal to the one process,
+# which is the daemon, so it shuts down in order instead of being killed by the
+# kernel when its parent goes: it exits 0, says it stopped, and takes its
+# discovery file with it, which the next container started on this volume would
+# otherwise read as a daemon that is up.
+docker stop -t 30 "$NAME-first" >/dev/null
+[ "$(docker inspect -f '{{.State.ExitCode}}' "$NAME-first")" = "0" ] ||
+	fail "docker stop did not end it cleanly: exit $(docker inspect -f '{{.State.ExitCode}}' "$NAME-first")
+$(docker logs "$NAME-first" 2>&1 | tail -10)"
+docker logs "$NAME-first" 2>&1 | grep -q '"msg":"stopped"' ||
+	fail "docker stop killed it rather than stopping it: $(docker logs "$NAME-first" 2>&1 | tail -10)"
+docker run --rm -v "$VOLUME:/var/lib/jingclaw" --entrypoint sh "$IMAGE" -c \
+	'test ! -e /var/lib/jingclaw/run/daemon.json' ||
+	fail "docker stop left the discovery file in the volume"
+docker rm -f "$NAME-first" >/dev/null
+printf 'ok   and docker stop stops it in order and leaves no discovery file\n'
 
 # Put it back for the rest.
 docker run --rm -v "$VOLUME:/var/lib/jingclaw" --entrypoint sh "$IMAGE" -c \

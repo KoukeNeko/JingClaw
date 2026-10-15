@@ -22,3 +22,6 @@ func alive(pid int) bool {
 	}
 	return process.Signal(syscall.Signal(0)) == nil
 }
+
+// hangup is the signal a terminal sends when it goes away.
+const hangup = syscall.SIGHUP

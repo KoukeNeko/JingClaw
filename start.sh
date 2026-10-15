@@ -17,10 +17,9 @@ set -eu
 
 cd "$(dirname "$0")"
 
-# Built rather than `go run`, and to a stable path. The supervisor starts the
-# daemon and the gateway from its own file, so all three are this build; `go
-# run` works, but its executable lives in a temporary directory that only
-# exists while it does, which makes `ps` harder to read than it needs to be.
+# Built rather than `go run`, and to a stable path. `go run` works, but its
+# executable lives in a temporary directory that only exists while it does, which
+# makes `ps` harder to read than it needs to be.
 BIN="core/bin/jingclaw"
 mkdir -p "$(dirname "$BIN")"
 

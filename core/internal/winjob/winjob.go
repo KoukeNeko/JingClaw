@@ -6,8 +6,8 @@
 // equivalent that actually holds descendants: a process assigned to one draws
 // its children in with it, and JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE means the
 // tree cannot outlive the job's handle even if the program that owns it is
-// itself killed. It is shared so the agent's managed processes and the daemon's
-// own parts contain their trees the same way.
+// itself killed. It is shared so the agent's managed processes and the shell tool
+// contain their trees the same way.
 //
 // The order of use closes a race: a job is created, the process is started
 // suspended so it cannot spawn a child before being assigned, Assign puts it in
