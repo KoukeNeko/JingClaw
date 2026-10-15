@@ -23,6 +23,9 @@
 #     file changed since the page listed it, and a key anybody can read is put
 #     right from the daemon with no agent, which is where it is most often found
 #   the page has one password box, bound to nothing, cleared after every save
+#   the settings are a page of their own, and the ChatGPT card shows the
+#     addresses it handles only as text, opens only OpenAI's, and keeps a pasted
+#     one in its box; the sign-in is served to a session and not to a gateway
 #   the management pages are served, take another person's words only as text,
 #     and nothing on the board's own poll asks for what they show
 #   a schedule is made through the page's call, refused with the daemon's own
@@ -207,6 +210,33 @@ for SINK in localStorage sessionStorage console. document.cookie; do
 done
 printf 'ok   the page has one password box, bound to nothing, cleared after every save, and nothing in it stores or logs\n'
 
+# The settings are a page of their own (a section list and cards), and the
+# ChatGPT card shows the two addresses it handles as text only: the one to open
+# is opened by the page only when it is OpenAI's, and the one pasted back lives
+# in its box until the call returns.
+curl -s "$BASE/ui/styles.css" > "$WORK/served-styles.css"
+[ -s "$WORK/served-styles.css" ] || fail "styles.css is not served"
+grep -qF 'class="setp"' "$WORK/served-index.html" || fail "the settings are not a page of their own"
+grep -qF 'class="drawer"' "$WORK/served-index.html" && fail "the settings are still a drawer"
+[ "$(grep -c -- '--r-card:' "$WORK/served-styles.css")" = 1 ] || fail "the card radius is not defined once, as a token"
+for SINK in ':href' ':src' 'x-bind:href' 'x-bind:src' 'window.open' 'location.href'; do
+	if grep -qF -- "$SINK" "$WORK/served-index.html"; then fail "index.html contains $SINK"; fi
+done
+[ "$(grep -o 'gptFlow.url' "$WORK/served-index.html" | wc -l | tr -d ' ')" = 1 ] || fail "the authorization address is used for more than showing it"
+grep -qF '<code class="g-url" x-text="gptFlow.url"></code>' "$WORK/served-index.html" || fail "the authorization address is not shown as text in a <code>"
+grep -qF 'u.origin !== "https://auth.openai.com"' "$WORK/served-app.js" || fail "the page does not check the origin of the authorization address"
+[ "$(grep -o 'window.open(' "$WORK/served-app.js" | wc -l | tr -d ' ')" = 1 ] || fail "the page opens a window from more than the one place that checks the origin"
+[ "$(grep -o 'redirectedAddress: box.value' "$WORK/served-app.js" | wc -l | tr -d ' ')" = 1 ] || fail "a pasted address is sent from more than one place"
+grep -qF 'finally { box.value = ""' "$WORK/served-app.js" || fail "the paste-back box is not cleared when the call fails"
+PASTE=$(grep -o '<input[^>]*placeholder="貼上瀏覽器網址列的網址"[^>]*>' "$WORK/served-index.html")
+[ -n "$PASTE" ] || fail "the page has no paste-back box"
+case "$PASTE" in *x-model*|*:value*|*@input*|*x-ref*|*'type="password"'*) fail "the paste-back box is bound to the page's state: $PASTE" ;; esac
+for METHOD in GetChatGPTAccount StartChatGPTSignIn GetChatGPTSignIn CompleteChatGPTSignIn SignOutChatGPT ListChatGPTModels; do
+	[ "$(grep -o "API.call(\"ChatGPTAuthService\", \"$METHOD\"" "$WORK/served-app.js" | wc -l | tr -d ' ')" = 1 ] || fail "the page does not call ChatGPTAuthService/$METHOD from exactly one place"
+done
+grep -qF 'Settings → Usage' "$WORK/served-index.html" || fail "the card does not say where ChatGPT's limits are managed"
+printf 'ok   the settings are a page, the ChatGPT card shows its addresses as text, opens only OpenAI'"'"'s, and keeps a pasted one in its box\n'
+
 # The skills page shows a repository's words, so it shows them as text, and it
 # installs only the tree it showed. verify-skills-web.sh proves the calls it
 # makes against a real repository; this is what the page that is served says.
@@ -264,6 +294,16 @@ done
 [ "$(call SkillService/ListSkills "$SESSION" '{}' | field 'len(d.get("installed", [])) + len(d.get("staged", [])) + int(d.get("restartRequired", False))')" = 0 ] ||
 	fail "a deployment with no skills lists some, or wants a restart for them"
 printf 'ok   the skills the page asks for are served to a session and not to a gateway, and an empty deployment is an empty list\n'
+
+# The ChatGPT sign-in is the operator's: a session reaches it, a gateway does not,
+# and nobody signed in is said so without a request to ChatGPT.
+ACCOUNT=$(call ChatGPTAuthService/GetChatGPTAccount "$SESSION" '{}')
+[ "$(printf '%s' "$ACCOUNT" | field 'd.get("signedIn", False)')" = False ] || fail "a deployment nobody signed in says somebody did: $ACCOUNT"
+for METHOD in GetChatGPTAccount StartChatGPTSignIn GetChatGPTSignIn CompleteChatGPTSignIn SignOutChatGPT ListChatGPTModels; do
+	[ "$(status "ChatGPTAuthService/$METHOD" "$GATEWAY" '{}')" = 403 ] || fail "the gateway credential reaches ChatGPTAuthService/$METHOD"
+	[ "$(status "ChatGPTAuthService/$METHOD" not-a-credential '{}')" = 401 ] || fail "a made-up credential reaches ChatGPTAuthService/$METHOD"
+done
+printf 'ok   the ChatGPT sign-in is served to a session, says nobody is signed in, and is not reachable by a gateway or a made-up credential\n'
 
 # 6. What is saved, and what is running.
 GOT=$(call ConfigService/GetConfig "$SESSION" '{}')

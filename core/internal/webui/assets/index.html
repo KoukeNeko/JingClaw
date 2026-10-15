@@ -29,7 +29,7 @@
 <header class="top">
   <span class="brand">JingClaw</span>
   <nav class="nav" aria-label="頁面" x-show="mode==='running'">
-    <button :class="{on: !manage}" :aria-current="!manage ? 'page' : null" @click="back()">對話<b class="n pend" x-show="manage && pending.length" x-text="pending.length"></b></button>
+    <button :class="{on: !manage && !drawer}" :aria-current="!manage && !drawer ? 'page' : null" @click="back()">對話<b class="n pend" x-show="(manage || drawer) && pending.length" x-text="pending.length"></b></button>
     <button :class="{on: manage}" :aria-current="manage ? 'page' : null" @click="openManage()">管理</button>
   </nav>
   <div class="sum" aria-label="摘要" x-show="!repair">
@@ -612,6 +612,9 @@
     </template>
   </section>
 
+  <!-- 缺的是 ChatGPT 登入：卡片搬到這裡（見 placeGpt） -->
+  <div id="gpt-in-repair" class="rep" x-show="gptRepair"></div>
+
   <section class="rep" aria-labelledby="t-saved">
     <h3 class="h3s" id="t-saved">現在儲存的設定</h3>
     <p x-show="verdict.state==='ok'">通過了設定值的檢查。供應端連不連得上，要重啟才會知道；金鑰檔的狀態在設定裡各金鑰檔名那一欄底下。</p>
@@ -619,7 +622,7 @@
     <div x-show="verdict.state==='bad'">
       <p><span x-text="verdict.problems.length"></span> 項還要修正：</p>
       <template x-for="(p, i) in verdict.problems" :key="i">
-        <p><button class="lnk bad" @click="goProblem(p)" x-text="p.key + ' ' + p.why + '.'"></button></p>
+        <p><button class="lnk bad" @click="goProblem(p)" x-text="msg(p)" :title="p.raw || ''"></button></p>
       </template>
     </div>
     <div class="rep-acts">
@@ -667,249 +670,416 @@ jingclaw</code></pre>
   <p class="calm" x-text="online ? '讀取中…' : '連不上 daemon，會自動重試。'"></p>
 </main>
 
-<!-- ═════════ 右：設定抽屜 ═════════ -->
-<aside class="drawer" x-show="drawer" aria-label="設定" :class="{helpall: helpAll}">
-  <div class="dh">
-    <h2>設定</h2>
-    <input class="srch" type="search" x-model.debounce.120ms="q" placeholder="搜尋設定" aria-label="搜尋設定名稱、鍵或說明">
-    <button class="sel" @click="menu=!menu" :aria-expanded="menu" aria-haspopup="true" :disabled="!!q.trim()">
-      <span x-text="where.zh"></span><code x-text="where.code"></code>
-      <svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
-    </button>
-    <button class="x" @click="drawer=false" aria-label="關閉設定">×</button>
-  </div>
-
-  <div class="menu" x-show="menu" @click.outside="menu=false">
-    <template x-for="g in S.groups" :key="g">
-      <div class="mg">
-        <p class="mgt" x-text="g"></p>
-        <template x-for="sec in S.sections.filter(x => x.group === g)" :key="sec.id">
-          <button class="mi" :class="{on: tab==='section' && section===sec.id}" @click="pick(sec.id)">
-            <span x-text="sec.zh"></span><code x-text="'[' + sec.table + ']'"></code>
-            <b class="n edit" x-show="secEdits(sec.id)" x-text="secEdits(sec.id)" aria-label="未寫入"></b>
-            <b class="n err" x-show="secErrs(sec.id)" x-text="secErrs(sec.id)" aria-label="需修正"></b>
-          </button>
-        </template>
-      </div>
-    </template>
-    <div class="mg">
-      <p class="mgt">指示文件</p>
-      <template x-for="id in ['persona', 'agents']" :key="id">
-        <button class="mi" :class="{on: tab==='doc' && docId===id}" @click="pickDoc(id)"><span x-text="DOCS[id].zh"></span><code x-text="DOCS[id].name"></code><b class="n pend" x-show="docs[id].pending">待重啟</b></button>
-      </template>
+<!-- ═════════ 設定：整頁 ═════════ -->
+<div class="setp" x-show="drawer" role="region" aria-label="設定" :class="{helpall: helpAll}">
+  <aside class="snav">
+    <div class="snav-top">
+      <input class="srch" type="search" x-model.debounce.120ms="q" placeholder="搜尋設定" aria-label="搜尋設定名稱、鍵或說明">
+      <button class="sel" @click="menu=!menu" :aria-expanded="menu" aria-haspopup="true" :disabled="!!q.trim()">
+        <span x-text="where.zh"></span><code x-text="where.code"></code>
+        <svg class="ic" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+      </button>
     </div>
-    <div class="mg">
-      <p class="mgt">進階</p>
-      <button class="mi" :class="{on: tab==='raw'}" @click="pickTab('raw')"><span>設定原文</span><code>config</code><b class="n pend" x-show="docs.config.pending">待重啟</b></button>
-      <button class="mi" :class="{on: tab==='history'}" @click="pickTab('history')"><span>版本紀錄</span></button>
-    </div>
-  </div>
-
-  <!-- 設定欄位 -->
-  <div class="db" x-show="tab==='section' || q.trim()">
-    <template x-if="!q.trim() && sectionNow">
-      <div class="lead">
-        <p x-text="sectionNow.blurb"></p>
-        <button class="lnk" @click="helpAll=!helpAll" x-text="helpAll ? '收起說明' : '展開所有說明'"></button>
-      </div>
-    </template>
-    <template x-if="q.trim()">
-      <div class="lead"><p>搜尋「<b x-text="q.trim()"></b>」</p><button class="lnk" @click="q=''">清除</button></div>
-    </template>
-    <div class="lead" x-show="docs.config.parseError"><p class="msg">儲存的設定讀不進來，下面顯示的不是儲存的內容，也不能在這裡改。</p><button class="lnk" @click="pickTab('raw')">到設定原文修正</button></div>
-
-    <div class="g" :inert="!!docs.config.parseError">
-      <template x-for="r in rows" :key="r.id">
-        <div class="cell" :class="['k-' + r.kind, r.wide ? 'wide' : '', r.depth ? 'sub' : '']" x-show="!r.hide">
-
-          <template x-if="r.kind==='sec'"><h3 class="sech"><span x-text="r.sec.zh"></span><code x-text="'[' + r.sec.table + ']'"></code></h3></template>
-          <template x-if="r.kind==='none'"><p class="calm">找不到符合的設定。</p></template>
-
-          <template x-if="r.kind==='blk'">
-            <div class="blk"><span x-text="r.blk.zh || '共用'"></span><code x-text="'[' + r.blk.table + ']'"></code></div>
-          </template>
-
-          <template x-if="r.kind==='fold'">
-            <button class="fold" :class="{strong: r.strong}" @click="flip(r.fid, r.auto)" :aria-expanded="r.open">
-              <svg class="ic" :class="{rot: r.open}" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
-              <span x-text="r.label"></span><span class="cnt" x-text="r.n + (r.strong ? ' 組' : ' 項')"></span>
+    <nav class="menu" :class="{shown: menu}" aria-label="設定的區段">
+      <template x-for="g in S.groups" :key="g">
+        <div class="mg">
+          <p class="mgt" x-text="g"></p>
+          <template x-for="sec in S.sections.filter(x => x.group === g)" :key="sec.id">
+            <button class="mi" :class="{on: tab==='section' && section===sec.id && !q.trim()}" @click="pick(sec.id)">
+              <span x-text="sec.zh"></span><code x-text="'[' + sec.table + ']'"></code>
+              <b class="n edit" x-show="secEdits(sec.id)" x-text="secEdits(sec.id)" aria-label="未寫入"></b>
+              <b class="n err" x-show="secErrs(sec.id)" x-text="secErrs(sec.id)" aria-label="需修正"></b>
             </button>
-          </template>
-
-          <!-- 列表（MCP 伺服器、通道…） -->
-          <template x-if="r.kind==='list'">
-            <div class="lst" :data-path="r.path">
-              <div class="lab"><span class="zh" x-text="r.f.zh"></span><code x-text="shortKey(r)"></code><span class="s" :class="rowSrc(r)" x-text="srcZh(rowSrc(r))"></span>
-                <button class="rst" x-show="rowSrc(r)==='edit'" @click="revert(r.path)">還原</button></div>
-              <p class="help" x-html="md(r.f.help)"></p>
-              <p class="calm sm" x-show="!(val(r.path)||[]).length">還沒有任何一筆。</p>
-              <template x-for="p in probs(r.path)" :key="p.why"><p class="msg"><span x-text="p.key + ' ' + p.why + '.'"></span> <span x-text="p.fix"></span></p></template>
-            </div>
-          </template>
-          <template x-if="r.kind==='item'">
-            <div class="item" :data-path="r.path">
-              <button class="ihead" @click="open[r.path] = !open[r.path]" :aria-expanded="r.expanded">
-                <svg class="ic" :class="{rot: r.expanded}" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
-                <span class="it" x-text="itemTitle(r.f, r.i)"></span><span class="n err" x-show="probs(r.path).length || problems.some(p => p.key.startsWith(r.path + '.'))">需修正</span>
-              </button>
-              <button class="rst" @click="delItem(r.f, r.i)" :aria-label="'移除第 ' + (r.i+1) + ' 筆'">移除</button>
-            </div>
-          </template>
-          <template x-if="r.kind==='add'"><button class="btn sm addb" @click="addItem(r.f)">＋ 新增一筆</button></template>
-
-          <!-- 一般欄位 -->
-          <template x-if="r.kind==='field'">
-            <div class="f" :data-path="r.path" :class="{locked: rowLocked(r), bad: probs(r.path).length, edit: rowSrc(r)==='edit', tog: r.f.type==='bool'}">
-              <div class="lab">
-                <label :for="'f-' + r.path"><span class="zh" x-text="r.f.zh"></span></label><code x-text="shortKey(r)"></code>
-                <span class="s" :class="rowSrc(r)" x-show="rowSrc(r)" x-text="pendingKey(r.path) && rowSrc(r)!=='edit' ? '已儲存 · 待重啟' : srcZh(rowSrc(r))"></span>
-                <button class="rst" x-show="!r.lk && !rowLocked(r) && (rowSrc(r)==='edit' || !isDefault(r.path))" @click="rowSrc(r)==='edit' ? revert(r.path) : toDefault(r.path)" x-text="rowSrc(r)==='edit' ? '還原' : '改回預設'"></button>
-              </div>
-
-              <template x-if="r.f.type==='bool'">
-                <div class="swrap"><button type="button" role="switch" class="sw" :id="'f-' + r.path" :aria-checked="!!ev(r)" :disabled="rowLocked(r)" @click="es(r, !ev(r))"><i></i></button><span x-text="ev(r) ? '開' : '關'"></span></div>
-              </template>
-              <template x-if="r.f.type==='int' || r.f.type==='float'">
-                <div><input class="in mono" type="number" :id="'f-' + r.path" :value="ev(r)" :min="r.f.min" :max="r.f.max" :step="r.f.type==='float' ? 0.05 : 1" :disabled="rowLocked(r)" @input="num(r, $event.target.value)"><span class="hintx" x-text="hint(r)"></span></div>
-              </template>
-              <template x-if="r.f.type==='duration'">
-                <input class="in mono" type="text" :id="'f-' + r.path" :value="ev(r)" :placeholder="r.f.def" :disabled="rowLocked(r)" spellcheck="false" @input="es(r, $event.target.value)">
-              </template>
-              <template x-if="r.f.type==='string'">
-                <div><input class="in" :class="{mono: ['url','path','secretfile','addr'].includes(r.f.kind)}" type="text" :id="'f-' + r.path" :value="ev(r)" :placeholder="r.f.def || (r.f.kind==='secretfile' ? '未設定' : '')" :disabled="rowLocked(r)" spellcheck="false" @input="es(r, $event.target.value)">
-                  <span class="hintx" x-show="r.f.kind==='secretfile'" x-text="ev(r) ? '放在部署目錄下，權限必須是 600' : ''"></span></div>
-              </template>
-              <template x-if="r.f.type==='enum'">
-                <div><select class="in" :id="'f-' + r.path" :disabled="rowLocked(r)" @change="es(r, $event.target.value)">
-                    <template x-for="o in r.f.options" :key="o.v"><option :value="o.v" :selected="o.v===ev(r)" x-text="(o.zh || o.v || '（空）')"></option></template>
-                  </select>
-                  <span class="hintx" x-html="md((r.f.options.find(o => o.v===ev(r)) || {}).note)"></span></div>
-              </template>
-              <template x-if="r.f.type==='strings'">
-                <div class="chips2" :id="'f-' + r.path">
-                  <template x-for="(c,i) in (ev(r)||[])" :key="c + i">
-                    <span class="chip2"><span x-text="c"></span><button type="button" :disabled="rowLocked(r)" @click="delChip(r,i)" :aria-label="'移除 ' + c">×</button></span>
-                  </template>
-                  <input class="chipin" type="text" :disabled="rowLocked(r)" :placeholder="r.f.kind==='envnames' ? '加入環境變數名稱' : '加入一項，按 Enter'" aria-label="加入一項"
-                    @keydown.enter.prevent="addChip(r, $event.target.value); $event.target.value=''" @keydown.comma.prevent="addChip(r, $event.target.value); $event.target.value=''" @blur="addChip(r, $event.target.value); $event.target.value=''">
-                </div>
-              </template>
-              <template x-if="r.f.type==='map'">
-                <div><textarea class="in mono area" rows="3" :id="'f-' + r.path" :value="mapText(r)" placeholder="每行一組：名稱=值" spellcheck="false" :disabled="rowLocked(r)" @input="mapSet(r, $event.target.value)"></textarea>
-                  <p class="msg" x-show="mapBad[r.path]" x-text="mapBad[r.path]"></p></div>
-              </template>
-
-              <template x-for="p in probs(r.path)" :key="p.why">
-                <p class="msg"><span x-text="p.key + ' ' + p.why + '.'"></span> <span x-text="p.fix"></span></p>
-              </template>
-              <p class="msg mute" x-show="rowLocked(r)"><span x-text="lockNote(r.path)"></span><span x-text="' 蓋過了' + (r.path in stored ? '；儲存的設定裡寫的是 ' + JSON.stringify(stored[r.path]) : '') + '。要改請改' + (lock[r.path] && lock[r.path].source === 'flag' ? '啟動時的旗標' : '環境變數') + '。'"></span></p>
-              <p class="help" x-html="md(r.f.help)"></p>
-            </div>
-          </template>
-
-          <!-- 金鑰檔欄位底下：這個檔現在的狀態，和放金鑰的動作。說的是儲存的設定，不是還沒寫入的修改 -->
-          <template x-for="c in credFor(r.path)" :key="c.slot">
-            <div class="cred" :class="{bad: credProblem(c)}">
-              <p class="msg mute" x-show="credEdited(c)">你改了這一欄，還沒寫入。下面說的是儲存的設定。</p>
-              <p class="cs"><i class="lamp" :class="credLamp(c)" aria-hidden="true"></i><span x-text="credSource(c)"></span><b class="n pend" x-show="c.restartNeeded">待重啟</b></p>
-              <p class="msg mute" x-show="credShadow(c)" x-text="credShadow(c)"></p>
-              <dl class="ck">
-                <dt>設定</dt><dd><code x-text="c.fileSetting"></code></dd>
-                <dt>環境變數</dt><dd x-text="credEnv(c)"></dd>
-                <dt>檔案</dt><dd x-text="credFile(c)"></dd>
-                <dt>需要</dt><dd x-text="credNeed(c)"></dd>
-              </dl>
-              <p class="msg mute" x-show="credGateway(c)">這把金鑰由 gateway 讀。gateway 有自己的環境變數，可能和 daemon 看到的不同，所以上面的環境變數只代表 daemon 看到的。</p>
-              <p class="msg" x-show="c.fileState==='CREDENTIAL_FILE_STATE_INVALID_NAME' && c.fileDetail" x-text="c.fileDetail"></p>
-              <p class="msg mute" x-show="!credHasName(c)">沒有可用的檔名，就沒有地方放金鑰。先在上面填好檔名並寫入設定，再回來存。</p>
-              <p class="msg mute" x-show="c.restartNeeded">已更動；讀它的程序只在啟動時讀，重啟後才會用上。</p>
-              <p class="msg" x-show="credMsg && credMsg.slot===c.slot" x-text="credMsg && credMsg.text"></p>
-
-              <template x-if="credForm===c.slot">
-                <form class="cform" @submit.prevent="putCred(c, $event.target.querySelector('input'))" x-init="$nextTick(() => $el.querySelector('input').focus())">
-                  <input class="in mono" type="password" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore :aria-label="'新的金鑰，存進 ' + c.fileName" placeholder="貼上金鑰">
-                  <button type="submit" class="btn primary sm" :disabled="credBusy">存起來</button>
-                  <button type="button" class="btn sm" @click="credClose()">取消</button>
-                  <p class="hintx" x-text="'存進 ' + c.fileName + '，只有擁有者讀得到。存好之後這裡不會再顯示它' + (credHasFile(c) ? '；會蓋掉現在的，沒有備份。' : '。')"></p>
-                </form>
-              </template>
-              <div class="acts" x-show="credForm!==c.slot">
-                <button class="btn sm" x-show="c.fileState==='CREDENTIAL_FILE_STATE_WRONG_MODE'" @click="restrictCred(c)">改成只有擁有者讀得到</button>
-                <button class="btn sm" :class="{amber: credProblem(c)}" x-show="credCanPut(c)" @click="credOpen(c)" x-text="credHasFile(c) ? '更換金鑰' : '設定金鑰'"></button>
-                <button class="btn sm ghost" x-show="credCanRemove(c)" @click="askRemoveCred(c)">移除金鑰檔</button>
-                <button class="btn sm" x-show="!credHasName(c)" @click="credGo(c)">到上面的欄位</button>
-              </div>
-            </div>
           </template>
         </div>
       </template>
-    </div>
-  </div>
-
-  <!-- 文件：人格、指示、設定原文 -->
-  <div class="db" x-show="(tab==='doc' || tab==='raw') && !q.trim()">
-    <template x-for="id in [curDoc]" :key="id">
-      <div class="doc">
-        <div class="lead"><p x-text="DOCS[id].lead"></p></div>
-        <template x-if="id==='config' && docs.config.parseError">
-          <div><p class="msg">儲存的設定讀不進來：</p><p class="msg pre" x-text="docs.config.parseError"></p></div>
+      <div class="mg">
+        <p class="mgt">指示文件</p>
+        <template x-for="id in ['persona', 'agents']" :key="id">
+          <button class="mi" :class="{on: tab==='doc' && docId===id && !q.trim()}" @click="pickDoc(id)"><span x-text="DOCS[id].zh"></span><code x-text="DOCS[id].name"></code><b class="n pend" x-show="docs[id].pending">待重啟</b></button>
         </template>
-        <p class="msg" x-show="docs[id].stale">這份文件在你編輯時被改過，已載入新的版本。你的修改還在，儲存會蓋過它；被蓋過的版本留在版本紀錄裡。</p>
-        <textarea class="in mono doc-area" x-model="docs[id].draft" @input="docs[id].problems = []" :disabled="!docs[id].loaded" spellcheck="false" :aria-label="DOCS[id].zh + '的內容'"></textarea>
-        <template x-for="(p, i) in docs[id].problems" :key="i">
-          <p class="msg"><span x-text="(p.key ? p.key + ' ' : '') + p.why + '.'"></span> <span x-text="p.fix"></span></p>
-        </template>
-        <p class="help show" x-text="DOCS[id].note"></p>
       </div>
-    </template>
-  </div>
+      <div class="mg">
+        <p class="mgt">進階</p>
+        <button class="mi" :class="{on: tab==='raw' && !q.trim()}" @click="pickTab('raw')"><span>設定原文</span><code>config</code><b class="n pend" x-show="docs.config.pending">待重啟</b></button>
+        <button class="mi" :class="{on: tab==='history' && !q.trim()}" @click="pickTab('history')"><span>版本紀錄</span></button>
+      </div>
+    </nav>
+  </aside>
 
-  <!-- 版本紀錄 -->
-  <div class="db" x-show="tab==='history' && !q.trim()">
-    <div class="lead"><p>每份文件最近 20 次儲存的版本。選一個，看它和現在儲存的差在哪；也可以還原成它，還原會存成新的一版。</p></div>
-    <div class="chips">
-      <template x-for="id in ['config', 'persona', 'agents']" :key="id">
-        <button class="chip" :class="{on: hist.doc===id}" @click="openHistory(id)"><span x-text="DOCS[id].zh"></span><b class="n pend" x-show="docs[id].pending">待重啟</b></button>
+  <div class="smain">
+    <header class="shead">
+      <div class="sht">
+        <h2><span x-text="where.zh"></span><code x-text="where.code"></code></h2>
+        <p class="sd" x-show="headDesc" x-text="headDesc"></p>
+      </div>
+      <div class="act" x-show="tab==='section' || q.trim()">
+        <p class="st">
+          <template x-if="editKeys.length"><span><b x-text="editKeys.length"></b> 項未寫入<template x-if="problems.length"><span>，<button class="lnk bad" @click="goProblem()"><span x-text="problems.length"></span> 項需修正</button></span></template><template x-if="check.busy"><span class="mute">，檢查中…</span></template><br>寫入後重啟才生效<span x-show="restartNote" x-text="'。' + restartNote"></span></span></template>
+          <template x-if="!editKeys.length"><span>沒有未寫入的修改<br><span class="mute">只會改動你動過的那幾行</span></span></template>
+        </p>
+        <button class="btn pill" :disabled="!editKeys.length" @click="dialog='discard'">捨棄</button>
+        <button class="btn pill primary" :disabled="!editKeys.length || problems.length > 0 || !checked" @click="askWrite()">寫入</button>
+      </div>
+      <div class="act" x-show="(tab==='doc' || tab==='raw') && !q.trim()">
+        <p class="st" x-text="docState(curDoc)"></p>
+        <button class="btn pill" :disabled="!dirty(curDoc)" @click="dialog='discard'">還原</button>
+        <button class="btn pill primary" :disabled="!dirty(curDoc) || docs[curDoc].busy" @click="saveDoc(curDoc)">儲存</button>
+      </div>
+    </header>
+
+    <!-- 設定欄位 -->
+    <div class="db" x-show="tab==='section' || q.trim()">
+      <template x-if="q.trim()">
+        <div class="lead"><p>搜尋「<b x-text="q.trim()"></b>」</p><button class="lnk" @click="q=''">清除</button></div>
+      </template>
+      <div class="lead" x-show="docs.config.parseError"><p class="msg">儲存的設定讀不進來，下面顯示的不是儲存的內容，也不能在這裡改。</p><button class="lnk" @click="pickTab('raw')">到設定原文修正</button></div>
+      <div class="lead" x-show="!q.trim() && !docs.config.parseError"><span></span><button class="lnk" @click="helpAll=!helpAll" x-text="helpAll ? '收起說明' : '展開所有說明'"></button></div>
+
+      <!-- 模型來源：ChatGPT 登入。這張卡只有一份：設定的「模型提供者」最上面，沒有 agent 的畫面要用時，由 placeGpt() 搬過去。 -->
+      <div id="gpt-in-settings" x-show="gptInSettings">
+        <section class="gptc" x-ref="gptc" aria-labelledby="t-gpt">
+          <h3 class="ct" id="t-gpt"><span>模型來源</span><code>ChatGPT 登入</code></h3>
+          <div class="card" :inert="!gpt.loaded && !gpt.error">
+            <div class="g-row g-acct">
+              <span class="av" aria-hidden="true" x-text="gpt.signedIn ? (Array.from(gpt.label || 'C')[0] || 'C').toUpperCase() : 'C'"></span>
+              <div class="g-t">
+                <p class="nm" x-text="gpt.error ? '讀不到登入狀態' : gpt.signedIn ? vis(gpt.label || '已登入') : '尚未登入 ChatGPT'"></p>
+                <p class="sub" x-show="gpt.error" x-text="vis(gpt.error)"></p>
+                <p class="sub" x-show="!gpt.error && !gpt.signedIn">用你自己的 ChatGPT 方案提供模型，不需要 API 金鑰。</p>
+                <p class="sub" x-show="!gpt.error && gpt.signedIn">已登入 ChatGPT</p>
+              </div>
+              <div class="g-c">
+                <button class="btn pill primary" x-show="!gpt.signedIn && !gpt.error" :disabled="gptBusy || (gptFlow && gptFlow.state==='pending')" @click="gptStart()">用 ChatGPT 登入</button>
+                <button class="btn pill" x-show="gpt.signedIn" @click="askGptOut()">登出</button>
+              </div>
+            </div>
+
+            <div class="g-row" x-show="gpt.signedIn">
+              <div class="g-t">
+                <p class="nm">使用 ChatGPT 方案</p>
+                <p class="sub" x-show="gpt.plan">登入時同意了使用 ChatGPT 方案。</p>
+                <p class="sub warn" x-show="!gpt.plan">這次登入沒有授權使用 ChatGPT 方案，所以停用：送給模型的請求會被拒絕。重新登入，並在 ChatGPT 的同意畫面核准。</p>
+              </div>
+              <div class="g-c">
+                <span class="tag ok" x-show="gpt.plan">已授權</span>
+                <span class="tag off" x-show="!gpt.plan">停用</span>
+                <button class="btn pill" x-show="!gpt.plan" :disabled="gptBusy || (gptFlow && gptFlow.state==='pending')" @click="gptStart()">重新登入並同意</button>
+              </div>
+            </div>
+
+            <div class="g-row" x-show="gpt.signedIn">
+              <div class="g-t">
+                <p class="nm">授權範圍</p>
+                <p class="g-scopes"><template x-for="sc in gpt.scopes" :key="sc"><code x-text="vis(sc)"></code></template><span class="mute" x-show="!gpt.scopes.length">沒有記錄</span></p>
+              </div>
+            </div>
+
+            <div class="g-row" x-show="gpt.signedIn">
+              <div class="g-t">
+                <p class="nm">存取權杖到期</p>
+                <p class="sub">到期前由 daemon 用更新權杖換新；換新失敗才需要重新登入。</p>
+              </div>
+              <div class="g-c"><span class="val" x-text="gptExpiry()"></span></div>
+            </div>
+
+            <div class="g-row" x-show="gpt.errCode" role="alert">
+              <div class="g-t">
+                <p class="nm">最近一次錯誤</p>
+                <p class="sub"><code class="lead" x-text="vis(gpt.errCode)"></code><span x-show="gpt.errMsg"> </span><span x-text="vis(gpt.errMsg)"></span></p>
+                <p class="sub warn" x-show="gptLimited">已達 ChatGPT 方案的用量上限。到 ChatGPT 的「Settings → Usage」查看與調整。OpenAI 的文件沒有提供查詢用量或重置時間的介面，所以這裡不顯示時間。</p>
+              </div>
+            </div>
+
+            <div class="g-row" x-show="gpt.signedIn && gpt.plan && drawer">
+              <div class="g-t">
+                <label class="nm" for="gpt-model">模型</label>
+                <p class="sub" x-show="!gptModels.error">清單來自這個帳號；選好之後要「寫入」才會存進設定。</p>
+                <p class="sub warn" x-show="gptModels.error">讀不到模型清單：<span x-text="vis(gptModels.error)"></span></p>
+              </div>
+              <div class="g-c">
+                <select class="psel" id="gpt-model" :disabled="locked('provider.chatgpt.model') || gptModels.busy" @change="setv('provider.chatgpt.model', $event.target.value)">
+                  <option value="" :selected="!val('provider.chatgpt.model')">（沒有選）</option>
+                  <template x-for="m in gptModelChoices" :key="m.id"><option :value="m.id" :selected="m.id===val('provider.chatgpt.model')" x-text="vis(m.name) + (m.name===m.id ? '' : '　' + vis(m.id))"></option></template>
+                </select>
+                <button class="btn pill sm" x-show="gptModels.error" :disabled="gptModels.busy" @click="loadGptModels().catch(e => fail(e, true))">再讀一次</button>
+              </div>
+            </div>
+
+            <div class="g-row" x-show="drawer && !gpt.error">
+              <div class="g-t">
+                <p class="nm">用作模型來源</p>
+                <p class="sub" x-show="val('provider.backend')==='chatgpt'">模型後端選的是「ChatGPT 登入」<span x-show="pendingKey('provider.backend')">；已儲存，重啟後才會用上</span>。</p>
+                <p class="sub" x-show="val('provider.backend')!=='chatgpt'">模型後端選的不是「ChatGPT 登入」，所以不會用到這個帳號。</p>
+              </div>
+              <div class="g-c"><button class="btn pill" x-show="val('provider.backend')!=='chatgpt'" :disabled="locked('provider.backend')" @click="setv('provider.backend', 'chatgpt')">改用 ChatGPT 登入</button></div>
+            </div>
+
+            <div class="g-row" x-show="gpt.restart">
+              <div class="g-t">
+                <p class="nm">重啟後才會用上</p>
+                <p class="sub">登入的狀態和 daemon 啟動時不同，而它只在啟動時讀。在終端機執行 <code>jingclaw stop</code>，再執行 <code>jingclaw</code>。重啟後這個瀏覽器的連線會失效，再執行 <code>jingclaw dashboard</code>。</p>
+              </div>
+            </div>
+
+            <!-- 進行中的登入 -->
+            <div class="g-row g-flow" x-show="gptFlow">
+              <template x-if="gptFlow">
+                <div class="g-t">
+                  <!-- 登入網址帶著這次登入的 state 和這個部署的識別碼：只在等待的時候留在頁面上，失敗、過期、不等了就清掉 -->
+                  <div x-show="gptFlow.state==='pending'">
+                    <p class="nm">在瀏覽器開啟這個網址，完成登入</p>
+                    <p class="sub" x-show="gptFlow.opened==='opened'">已在新分頁開啟。</p>
+                    <p class="sub warn" x-show="gptFlow.opened==='blocked'">瀏覽器擋掉了新分頁。請複製網址，自己開啟。</p>
+                    <p class="sub warn" x-show="gptFlow.opened==='foreign' || gptFlow.opened==='bad'">這個網址不是 https://auth.openai.com 開頭，頁面不會替你開啟。確認它是你要的，再自己複製去開。</p>
+                    <code class="g-url" x-text="gptFlow.url"></code>
+                    <div class="acts">
+                      <button class="btn pill sm" @click="gptCopy()">複製網址</button>
+                      <button class="btn pill sm ghost" @click="gptCancel()">不等了</button>
+                    </div>
+                    <p class="sub"><i class="lamp run" aria-hidden="true"></i> 等待登入完成</p>
+                  </div>
+                  <template x-if="gptFlow.state==='failed'">
+                    <div>
+                      <p class="msg" role="alert">登入沒有成功：<span x-text="vis(gptFlow.error)"></span></p>
+                      <div class="acts"><button class="btn pill" :disabled="gptBusy" @click="gptStart()">重新登入</button></div>
+                    </div>
+                  </template>
+
+                  <div x-show="gptFlow.state==='pending'">
+                    <p class="nm g-h">瀏覽器不在這台機器上？</p>
+                    <p class="sub">登入後瀏覽器會被轉到 <code x-text="'127.0.0.1:' + gptPort()"></code>。這個位址指的是瀏覽器所在的那台機器，不是 JingClaw 在的這台，所以頁面會載入失敗，這是正常的。兩種做法：</p>
+                    <ol class="g-ol">
+                      <li>複製瀏覽器網址列的整個網址，貼到下面的欄位送出。</li>
+                      <li>先用 SSH 把這個埠轉過來，登入就會自己完成，不必貼：<code x-text="'ssh -L ' + gptPort() + ':127.0.0.1:' + gptPort() + ' 執行 JingClaw 的機器'"></code></li>
+                    </ol>
+                    <form class="g-paste" @submit.prevent="gptComplete($event.target.querySelector('input'))">
+                      <input class="in mono" type="text" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore aria-label="貼上瀏覽器網址列的網址" placeholder="貼上瀏覽器網址列的網址">
+                      <button type="submit" class="btn pill primary" :disabled="gptBusy">送出</button>
+                    </form>
+                    <p class="sub">網址裡有一次性的授權碼，只送給 daemon，不會留在頁面上。</p>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <div class="g-row" x-show="gptNote || gptOut" role="status">
+              <div class="g-t">
+                <p class="sub" x-show="gptNote" x-text="gptNote"></p>
+                <template x-if="gptOut">
+                  <p class="sub">已登出，這台機器上的登入資料已清除。<span x-text="gptOut.revoked ? 'ChatGPT 確認撤銷了授權。' : 'ChatGPT 沒有確認撤銷授權，要自己到 ChatGPT 檢查。'"></span> <span x-show="gptOut.detail" x-text="vis(gptOut.detail)"></span></p>
+                </template>
+              </div>
+            </div>
+
+            <div class="g-row">
+              <div class="g-t">
+                <p class="nm">用量與上限</p>
+                <p class="sub">在 ChatGPT 的「Settings → Usage」管理。OpenAI 的文件沒有提供查詢用量的介面，所以這裡不顯示用量。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="cards" :inert="!!docs.config.parseError">
+        <template x-for="cd in setCards" :key="cd.id">
+          <div class="cg">
+            <template x-if="cd.kind==='none'"><p class="calm">找不到符合的設定。</p></template>
+            <template x-if="cd.kind==='fold'">
+              <button class="fold strong" @click="flip(cd.row.fid, cd.row.auto)" :aria-expanded="cd.row.open">
+                <svg class="ic" :class="{rot: cd.row.open}" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
+                <span x-text="cd.row.label"></span><span class="cnt" x-text="cd.row.n + ' 組'"></span>
+              </button>
+            </template>
+            <template x-if="cd.kind==='card'">
+              <section>
+                <h3 class="ct" x-show="cd.title"><span x-text="cd.title"></span><code x-text="cd.code"></code></h3>
+                <div class="card">
+                  <template x-for="r in cd.rows" :key="r.id">
+                    <div class="cell" :class="['k-' + r.kind, r.depth ? 'sub' : '']">
+
+                      <template x-if="r.kind==='fold'">
+                        <button class="fold" @click="flip(r.fid, r.auto)" :aria-expanded="r.open">
+                          <svg class="ic" :class="{rot: r.open}" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
+                          <span x-text="r.label"></span><span class="cnt" x-text="r.n + ' 項'"></span>
+                        </button>
+                      </template>
+
+                      <!-- 列表（MCP 伺服器、通道…） -->
+                      <template x-if="r.kind==='list'">
+                        <div class="lst" :data-path="r.path">
+                          <div class="lab"><span class="zh" x-text="r.f.zh"></span><code x-text="shortKey(r)"></code><span class="s" :class="rowSrc(r)" x-text="srcZh(rowSrc(r))"></span>
+                            <button class="rst" x-show="rowSrc(r)==='edit'" @click="revert(r.path)">還原</button></div>
+                          <p class="help" x-html="md(r.f.help)"></p>
+                          <p class="calm sm" x-show="!(val(r.path)||[]).length">還沒有任何一筆。</p>
+                          <template x-for="p in probs(r.path)" :key="p.why"><p class="msg"><span x-text="msg(p)" :title="p.raw || ''"></span> <span x-text="p.fix"></span></p></template>
+                        </div>
+                      </template>
+                      <template x-if="r.kind==='item'">
+                        <div class="item" :data-path="r.path">
+                          <button class="ihead" @click="open[r.path] = !open[r.path]" :aria-expanded="r.expanded">
+                            <span class="av" aria-hidden="true" x-text="itemInitial(r.f, r.i)"></span>
+                            <span class="it" x-text="itemTitle(r.f, r.i)"></span><span class="n err" x-show="probs(r.path).length || problems.some(p => p.key.startsWith(r.path + '.'))">需修正</span>
+                            <svg class="ic chev" :class="{rot: r.expanded}" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
+                          </button>
+                          <button class="rst" @click="delItem(r.f, r.i)" :aria-label="'移除第 ' + (r.i+1) + ' 筆'">移除</button>
+                        </div>
+                      </template>
+                      <template x-if="r.kind==='add'"><div class="addrow"><button class="btn pill sm" @click="addItem(r.f)">＋ 新增一筆</button></div></template>
+
+                      <!-- 一般欄位 -->
+                      <template x-if="r.kind==='field'">
+                        <div class="f" :data-path="r.path" :class="{locked: rowLocked(r), bad: probs(r.path).length, edit: rowSrc(r)==='edit', tog: r.f.type==='bool', stack: r.f.type==='strings' || r.f.type==='map'}">
+                          <div class="fl">
+                            <div class="lab">
+                              <label :for="'f-' + r.path"><span class="zh" x-text="r.f.zh"></span></label>
+                              <span class="lm">
+                                <code x-text="shortKey(r)"></code>
+                                <span class="s" :class="rowSrc(r)" x-show="rowSrc(r)" x-text="pendingKey(r.path) && rowSrc(r)!=='edit' ? '已儲存 · 待重啟' : srcZh(rowSrc(r))"></span>
+                                <button class="rst" x-show="!r.lk && !rowLocked(r) && (rowSrc(r)==='edit' || !isDefault(r.path))" @click="rowSrc(r)==='edit' ? revert(r.path) : toDefault(r.path)" x-text="rowSrc(r)==='edit' ? '還原' : '改回預設'"></button>
+                              </span>
+                            </div>
+                            <p class="help" x-html="md(r.f.help)"></p>
+                            <template x-if="r.f.type==='enum'"><span class="hintx" x-html="md((r.f.options.find(o => o.v===ev(r)) || {}).note)"></span></template>
+                          </div>
+
+                          <div class="fr">
+                            <template x-if="r.f.type==='bool'">
+                              <button type="button" role="switch" class="sw" :id="'f-' + r.path" :aria-checked="!!ev(r)" :aria-label="r.f.zh" :disabled="rowLocked(r)" @click="es(r, !ev(r))"><i></i></button>
+                            </template>
+                            <template x-if="r.f.type==='int' || r.f.type==='float'">
+                              <div><input class="in mono" type="number" :id="'f-' + r.path" :value="ev(r)" :min="r.f.min" :max="r.f.max" :step="r.f.type==='float' ? 0.05 : 1" :disabled="rowLocked(r)" @input="num(r, $event.target.value)"><span class="hintx" x-text="hint(r)"></span></div>
+                            </template>
+                            <template x-if="r.f.type==='duration'">
+                              <input class="in mono" type="text" :id="'f-' + r.path" :value="ev(r)" :placeholder="r.f.def" :disabled="rowLocked(r)" spellcheck="false" @input="es(r, $event.target.value)">
+                            </template>
+                            <template x-if="r.f.type==='string'">
+                              <div><input class="in" :class="{mono: ['url','path','secretfile','addr'].includes(r.f.kind), long: ['url','path','secretfile','addr'].includes(r.f.kind)}" type="text" :id="'f-' + r.path" :value="ev(r)" :placeholder="r.f.def || (r.f.kind==='secretfile' ? '未設定' : r.f.kind==='url' ? 'https://…' : '')" :disabled="rowLocked(r)" spellcheck="false" @input="es(r, $event.target.value)">
+                                <span class="hintx" x-show="r.f.kind==='secretfile'" x-text="ev(r) ? '放在部署目錄下，權限必須是 600' : ''"></span></div>
+                            </template>
+                            <template x-if="r.f.type==='enum'">
+                              <select class="psel" :id="'f-' + r.path" :disabled="rowLocked(r)" @change="es(r, $event.target.value)">
+                                <template x-for="o in r.f.options" :key="o.v"><option :value="o.v" :selected="o.v===ev(r)" x-text="(o.zh || o.v || '（空）')"></option></template>
+                              </select>
+                            </template>
+                            <template x-if="r.f.type==='strings'">
+                              <div class="chips2" :id="'f-' + r.path">
+                                <template x-for="(c,i) in (ev(r)||[])" :key="c + i">
+                                  <span class="chip2"><span x-text="c"></span><button type="button" :disabled="rowLocked(r)" @click="delChip(r,i)" :aria-label="'移除 ' + c">×</button></span>
+                                </template>
+                                <input class="chipin" type="text" :disabled="rowLocked(r)" :placeholder="r.f.kind==='envnames' ? '加入環境變數名稱' : '加入一項，按 Enter'" aria-label="加入一項"
+                                  @keydown.enter.prevent="addChip(r, $event.target.value); $event.target.value=''" @keydown.comma.prevent="addChip(r, $event.target.value); $event.target.value=''" @blur="addChip(r, $event.target.value); $event.target.value=''">
+                              </div>
+                            </template>
+                            <template x-if="r.f.type==='map'">
+                              <div><textarea class="in mono area" rows="3" :id="'f-' + r.path" :value="mapText(r)" placeholder="每行一組：名稱=值" spellcheck="false" :disabled="rowLocked(r)" @input="mapSet(r, $event.target.value)"></textarea>
+                                <p class="msg" x-show="mapBad[r.path]" x-text="mapBad[r.path]"></p></div>
+                            </template>
+                          </div>
+
+                          <div class="fm">
+                            <template x-for="p in probs(r.path)" :key="p.why">
+                              <p class="msg"><span x-text="msg(p)" :title="p.raw || ''"></span> <span x-text="p.fix"></span></p>
+                            </template>
+                            <p class="msg mute" x-show="rowLocked(r)"><span x-text="lockNote(r.path)"></span><span x-text="' 蓋過了' + (r.path in stored ? '；儲存的設定裡寫的是 ' + JSON.stringify(stored[r.path]) : '') + '。要改請改' + (lock[r.path] && lock[r.path].source === 'flag' ? '啟動時的旗標' : '環境變數') + '。'"></span></p>
+                          </div>
+                        </div>
+                      </template>
+
+                      <!-- 金鑰檔欄位底下：這個檔現在的狀態，和放金鑰的動作。說的是儲存的設定，不是還沒寫入的修改 -->
+                      <template x-for="c in credFor(r.path)" :key="c.slot">
+                        <div class="cred" :class="{bad: credProblem(c)}">
+                          <p class="msg mute" x-show="credEdited(c)">你改了這一欄，還沒寫入。下面說的是儲存的設定。</p>
+                          <p class="cs"><i class="lamp" :class="credLamp(c)" aria-hidden="true"></i><span x-text="credSource(c)"></span><b class="n pend" x-show="c.restartNeeded">待重啟</b></p>
+                          <p class="msg mute" x-show="credShadow(c)" x-text="credShadow(c)"></p>
+                          <dl class="ck">
+                            <dt>設定</dt><dd><code x-text="c.fileSetting"></code></dd>
+                            <dt>環境變數</dt><dd x-text="credEnv(c)"></dd>
+                            <dt>檔案</dt><dd x-text="credFile(c)"></dd>
+                            <dt>需要</dt><dd x-text="credNeed(c)"></dd>
+                          </dl>
+                          <p class="msg mute" x-show="credGateway(c)">這把金鑰由 gateway 讀。gateway 有自己的環境變數，可能和 daemon 看到的不同，所以上面的環境變數只代表 daemon 看到的。</p>
+                          <p class="msg" x-show="c.fileState==='CREDENTIAL_FILE_STATE_INVALID_NAME' && c.fileDetail" x-text="c.fileDetail"></p>
+                          <p class="msg mute" x-show="!credHasName(c)">沒有可用的檔名，就沒有地方放金鑰。先在上面填好檔名並寫入設定，再回來存。</p>
+                          <p class="msg mute" x-show="c.restartNeeded">已更動；讀它的程序只在啟動時讀，重啟後才會用上。</p>
+                          <p class="msg" x-show="credMsg && credMsg.slot===c.slot" x-text="credMsg && credMsg.text"></p>
+
+                          <template x-if="credForm===c.slot">
+                            <form class="cform" @submit.prevent="putCred(c, $event.target.querySelector('input'))" x-init="$nextTick(() => $el.querySelector('input').focus())">
+                              <input class="in mono" type="password" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore :aria-label="'新的金鑰，存進 ' + c.fileName" placeholder="貼上金鑰">
+                              <button type="submit" class="btn pill primary sm" :disabled="credBusy">存起來</button>
+                              <button type="button" class="btn pill sm" @click="credClose()">取消</button>
+                              <p class="hintx" x-text="'存進 ' + c.fileName + '，只有擁有者讀得到。存好之後這裡不會再顯示它' + (credHasFile(c) ? '；會蓋掉現在的，沒有備份。' : '。')"></p>
+                            </form>
+                          </template>
+                          <div class="acts" x-show="credForm!==c.slot">
+                            <button class="btn pill sm" x-show="c.fileState==='CREDENTIAL_FILE_STATE_WRONG_MODE'" @click="restrictCred(c)">改成只有擁有者讀得到</button>
+                            <button class="btn pill sm" :class="{amber: credProblem(c)}" x-show="credCanPut(c)" @click="credOpen(c)" x-text="credHasFile(c) ? '更換金鑰' : '設定金鑰'"></button>
+                            <button class="btn pill sm ghost" x-show="credCanRemove(c)" @click="askRemoveCred(c)">移除金鑰檔</button>
+                            <button class="btn pill sm" x-show="!credHasName(c)" @click="credGo(c)">到上面的欄位</button>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </section>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 文件：人格、指示、設定原文 -->
+    <div class="db" x-show="(tab==='doc' || tab==='raw') && !q.trim()">
+      <template x-for="id in [curDoc]" :key="id">
+        <div class="doc">
+          <template x-if="id==='config' && docs.config.parseError">
+            <div><p class="msg">儲存的設定讀不進來：</p><p class="msg pre" x-text="docs.config.parseError"></p></div>
+          </template>
+          <p class="msg" x-show="docs[id].stale">這份文件在你編輯時被改過，已載入新的版本。你的修改還在，儲存會蓋過它；被蓋過的版本留在版本紀錄裡。</p>
+          <textarea class="in mono doc-area" x-model="docs[id].draft" @input="docs[id].problems = []" :disabled="!docs[id].loaded" spellcheck="false" :aria-label="DOCS[id].zh + '的內容'"></textarea>
+          <template x-for="(p, i) in docs[id].problems" :key="i">
+            <p class="msg"><span x-text="msg(p)" :title="p.raw || ''"></span> <span x-text="p.fix"></span></p>
+          </template>
+          <p class="help show" x-text="DOCS[id].note"></p>
+        </div>
       </template>
     </div>
-    <p class="calm sm" x-show="hist.loaded && !hist.versions.length">還沒有任何一版。</p>
-    <div class="vers">
-      <template x-for="(v, i) in hist.versions" :key="v.version">
-        <button class="vr" :class="{on: hist.sel && hist.sel.version===v.version}" @click="viewVersion(v)">
-          <b x-text="'第 ' + v.version + ' 版'"></b>
-          <span class="mute" x-text="rel(v.saved) + ' · ' + versionSource(v.source)"></span>
-          <span class="vm"><span x-show="i===0">目前</span><span x-show="inUse(hist.doc, v)">執行中</span></span>
-        </button>
-      </template>
-    </div>
-    <template x-if="hist.sel">
-      <div class="vview">
-        <h3 class="h3s" x-text="hist.sel.same ? '第 ' + hist.sel.version + ' 版和現在儲存的一樣' : '改回第 ' + hist.sel.version + ' 版，會有這些變化'"></h3>
-        <div class="diff" x-show="!hist.sel.same"><template x-for="(l, k) in hist.sel.lines" :key="k"><div class="ln" :class="l.c" x-text="l.t"></div></template></div>
-        <template x-for="(p, k) in hist.problems" :key="k">
-          <p class="msg"><span x-text="(p.key ? p.key + ' ' : '') + p.why + '.'"></span> <span x-text="p.fix"></span></p>
-        </template>
-        <p class="msg" x-show="dirty(hist.doc)">這份文件有尚未儲存的修改，先到編輯畫面儲存或還原它，再還原舊版本。</p>
-        <div class="dacts"><button class="btn primary" :disabled="hist.sel.same || dirty(hist.doc) || hist.busy" @click="restore()">還原成這一版</button></div>
-      </div>
-    </template>
-    <p class="help show">每一版的全文都讀得到。如果當時在 MCP 伺服器的標頭或環境變數裡填過金鑰，它還留在那一版裡，直到被後來的 20 次儲存擠掉；把它從現在的設定刪掉，舊的版本不會跟著變。</p>
-  </div>
 
-  <div class="act" x-show="tab==='section' || q.trim()">
-    <p>
-      <template x-if="editKeys.length"><span><b x-text="editKeys.length"></b> 項未寫入<template x-if="problems.length"><span>，<button class="lnk bad" @click="goProblem()"><span x-text="problems.length"></span> 項需修正</button></span></template><template x-if="check.busy"><span class="mute">，檢查中…</span></template><br>寫入後重啟才生效<span x-show="restartNote" x-text="'。' + restartNote"></span></span></template>
-      <template x-if="!editKeys.length"><span>沒有未寫入的修改<br><span class="mute">只會改動你動過的那幾行</span></span></template>
-    </p>
-    <button class="btn" :disabled="!editKeys.length" @click="dialog='discard'">捨棄</button>
-    <button class="btn primary" :disabled="!editKeys.length || problems.length > 0 || !checked" @click="askWrite()">寫入</button>
+    <!-- 版本紀錄 -->
+    <div class="db" x-show="tab==='history' && !q.trim()">
+      <div class="chips">
+        <template x-for="id in ['config', 'persona', 'agents']" :key="id">
+          <button class="chip" :class="{on: hist.doc===id}" @click="openHistory(id)"><span x-text="DOCS[id].zh"></span><b class="n pend" x-show="docs[id].pending">待重啟</b></button>
+        </template>
+      </div>
+      <p class="calm sm" x-show="hist.loaded && !hist.versions.length">還沒有任何一版。</p>
+      <div class="vers">
+        <template x-for="(v, i) in hist.versions" :key="v.version">
+          <button class="vr" :class="{on: hist.sel && hist.sel.version===v.version}" @click="viewVersion(v)">
+            <b x-text="'第 ' + v.version + ' 版'"></b>
+            <span class="mute" x-text="rel(v.saved) + ' · ' + versionSource(v.source)"></span>
+            <span class="vm"><span x-show="i===0">目前</span><span x-show="inUse(hist.doc, v)">執行中</span></span>
+          </button>
+        </template>
+      </div>
+      <template x-if="hist.sel">
+        <div class="vview">
+          <h3 class="h3s" x-text="hist.sel.same ? '第 ' + hist.sel.version + ' 版和現在儲存的一樣' : '改回第 ' + hist.sel.version + ' 版，會有這些變化'"></h3>
+          <div class="diff" x-show="!hist.sel.same"><template x-for="(l, k) in hist.sel.lines" :key="k"><div class="ln" :class="l.c" x-text="l.t"></div></template></div>
+          <template x-for="(p, k) in hist.problems" :key="k">
+            <p class="msg"><span x-text="msg(p)" :title="p.raw || ''"></span> <span x-text="p.fix"></span></p>
+          </template>
+          <p class="msg" x-show="dirty(hist.doc)">這份文件有尚未儲存的修改，先到編輯畫面儲存或還原它，再還原舊版本。</p>
+          <div class="dacts"><button class="btn pill primary" :disabled="hist.sel.same || dirty(hist.doc) || hist.busy" @click="restore()">還原成這一版</button></div>
+        </div>
+      </template>
+      <p class="help show">每一版的全文都讀得到。如果當時在 MCP 伺服器的標頭或環境變數裡填過金鑰，它還留在那一版裡，直到被後來的 20 次儲存擠掉；把它從現在的設定刪掉，舊的版本不會跟著變。</p>
+    </div>
   </div>
-  <div class="act" x-show="(tab==='doc' || tab==='raw') && !q.trim()">
-    <p x-text="docState(curDoc)"></p>
-    <button class="btn" :disabled="!dirty(curDoc)" @click="dialog='discard'">還原</button>
-    <button class="btn primary" :disabled="!dirty(curDoc) || docs[curDoc].busy" @click="saveDoc(curDoc)">儲存</button>
-  </div>
-</aside>
+</div>
 
 <!-- ═════════ 對話框 ═════════ -->
 <dialog class="dlg" x-effect="dialog==='new' ? ($el.open || $el.showModal()) : ($el.open && $el.close())" @cancel.prevent="dialog=null" @click.self="dialog=null" aria-labelledby="t-new">
@@ -978,6 +1148,13 @@ jingclaw</code></pre>
   <p class="sub" x-show="target">頻道 <code x-text="target && vis(target.channel)"></code>（<span x-text="target && platformZh(target.platform)"></span>）移除後找不到 agent，它傳來的訊息不會再被受理。已經建立的對話還在。立刻生效。</p>
   <p class="fine" x-show="target && declaredFor(target)" x-text="target && declaredFor(target) ? '儲存的設定也寫了這個頻道（' + declaredFor(target).key + ' 第 ' + declaredFor(target).n + ' 筆），下次啟動會再綁回來。要讓它不再回來，也把設定裡這一筆拿掉。' : ''"></p>
   <div class="dacts"><button class="btn" @click="dialog=null">取消</button><button class="btn danger" @click="removeBinding()">移除</button></div>
+</dialog>
+
+<dialog class="dlg" x-effect="dialog==='gptout' ? ($el.open || $el.showModal()) : ($el.open && $el.close())" @cancel.prevent="dialog=null" @click.self="dialog=null" aria-labelledby="t-gptout">
+  <h2 id="t-gptout">登出 ChatGPT</h2>
+  <p class="sub">會請 ChatGPT 撤銷這個登入，並清除這台機器上存的登入資料。撤銷有沒有成功，登出之後會告訴你。</p>
+  <p class="fine">要再用 ChatGPT 提供模型，得重新登入。如果現在的模型後端是 ChatGPT 登入，登出之後送給模型的請求會失敗，直到再登入。</p>
+  <div class="dacts"><button class="btn pill" @click="dialog=null">取消</button><button class="btn pill danger" @click="gptSignOut()">登出</button></div>
 </dialog>
 
 <div class="toast" role="status" aria-live="polite" x-show="toast" x-text="toast"></div>

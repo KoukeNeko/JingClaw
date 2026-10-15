@@ -1,4 +1,4 @@
-/* 值班台：對話看板 + 設定抽屜。無建置，Alpine 管狀態，資料來自 daemon（api.js）。
+/* 值班台：對話看板 + 設定整頁。無建置，Alpine 管狀態，資料來自 daemon（api.js）。
    規則：任何來自 agent 或使用者的文字一律用 x-text 顯示，從不當成標記塞進頁面。 */
 (function () {
   const S = window.SCHEMA, API = window.API;
@@ -12,7 +12,9 @@
   S.byKey = byKey;
 
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
-  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // 物件的鍵順序不算差別（儲存的設定與執行中的值排法不同）。
+  const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x));
+  const eq = (a, b) => canon(a) === canon(b);
   const baseKey = (k) => k.replace(/\[\d+\].*$/, "");
   const at = (ts) => (ts ? Date.parse(ts) : null);
 
@@ -111,6 +113,21 @@
   // 異體字選擇符（FE00–FE0F）跟在表情符號、文字後面是正常的，只有接在 ASCII 後面或連著出現時才標：
   // 那不是在修飾一個字，而是在夾帶看不見的東西。
   const HIDDEN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFEFF\uFFA0\uFFF9-\uFFFB]|\r(?!\n)|[\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]|(?<![^\x00-\x7F])[\uFE00-\uFE0F]|(?<=[\uFE00-\uFE0F])[\uFE00-\uFE0F]|[\uFE00-\uFE0F](?=[\uFE00-\uFE0F])/gu;
+  // daemon 的驗證文字是英文。欄位常見的幾種換成中文一句話，原文留在 raw（顯示時放在 title）；
+  // 認不得的原樣不動，不去翻譯每一句。
+  const TYPE_ZH = { int: "整數", int64: "整數", uint: "整數", float64: "數字", float32: "數字", bool: "true 或 false", string: "文字" };
+  const nice = (p) => {
+    const why = String(p.why || ""), raw = why, key = p.key || "";
+    const fixed = (w, f) => Object.assign({}, p, { why: w, fix: f, raw: raw + (p.fix ? "\n" + p.fix : "") });
+    if (/cannot be written as/.test(why)) return fixed("這一格的值類型不對", "數字欄位只能填數字，填回正確的類型，或按「還原」。");
+    if (/is not a duration/.test(why)) return fixed("時間格式不對", "寫成數字加單位，例如 30s、5m、1h30m。");
+    if (why === "is empty" && /(^|\.|\])name$/.test(key)) return fixed("還沒有填名字", "每一項都要有名字。");
+    if (/^toml:/.test(why)) return fixed("這段文字不是有效的 TOML 設定", "解析器指出的地方：" + why.replace(/^toml:\s*/, "") + "。照這處改正，或換回較早的版本。");
+    const m = /'([^']+)' cannot parse value as '([^']+)'/.exec(why);
+    if (m) return fixed(m[1] + " 要填" + (TYPE_ZH[m[2]] || m[2]) + "，現在寫的不是", "改成正確的類型，或換回較早的版本。");
+    if (/^config: decode:/.test(why)) return fixed("有欄位的值類型不對", "改成正確的類型，或換回較早的版本。");
+    return p;
+  };
   const vis = (t) => String(t == null ? "" : t).replace(HIDDEN, (c) => "‹U+" + c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0") + "›");
   const hidden = (t) => (String(t || "").match(HIDDEN) || []).length;
   // bytes 欄位在 JSON 裡是 base64。
@@ -189,6 +206,7 @@
       newBusy: false, writing: false, _doing: {}, mapBad: {},
       mode: "", agentProblems: [], verdict: { state: "", problems: [] },
       view: "board", sid: null, filter: "all",
+      // drawer 是「設定整頁開著」（它原本是側邊抽屜，變數名沿用）。
       drawer: false, tab: "section", section: "provider", docId: "persona", menu: false, q: "", helpAll: false,
       dialog: null, newTitle: "", newModel: "", target: null, toast: "", folds: {}, open: {}, busy: false,
       // ── 對話 ──
@@ -212,6 +230,11 @@
       mem: { loaded: false, error: "", items: [], cut: false }, memAll: false, memNote: "",
       bind: { loaded: false, error: "", items: [] }, bindAdd: false, bindNote: "", bindErr: "", bindBusy: false,
       bf: { platform: "discord", account: "", tenant: "", channel: "", workspace: "default", profile: "gateway", users: "", roles: "" },
+      // ── ChatGPT 登入：GetChatGPTAccount 說的狀態。沒有權杖、授權碼或貼上的網址，那些不進任何狀態。
+      // gptFlow 是進行中的那一次登入；它的 url 是給操作者自己的瀏覽器的，只用 x-text 放進頁面，不放進任何連結。
+      gpt: { loaded: false, error: "", signedIn: false, label: "", scopes: [], plan: false, expires: null, errCode: "", errMsg: "", restart: false },
+      gptModels: { loaded: false, busy: false, list: [], error: "" },
+      gptFlow: null, gptBusy: false, gptNote: "", gptOut: null,
       S, DOCS, daemonAddr: location.host,
 
       // ═══════════ 啟動 ═══════════
@@ -231,6 +254,8 @@
         this.$watch("editSig", () => this.scheduleCheck());
         // 離開那一格、關掉抽屜或換搜尋，輸入框就收起來，打到一半的金鑰跟著丟掉。
         this.$watch("[drawer, tab, section, q].join('|')", () => this.credClose());
+        // ChatGPT 的卡片只有一份，放在設定的「模型提供者」最上面；沒有 agent 的畫面要用它時，把它搬過去。
+        this.$watch("[drawer, mode].join('|')", () => this.$nextTick(() => this.placeGpt()));
         if (this.paired) await this.start();
       },
       async start() {
@@ -249,15 +274,15 @@
           // 哪一個失敗都不該讓整頁起不來：憑證失效回到連線畫面，其餘告訴使用者。
           const guard = (p) => p.catch((e) => this.fail(e, true));
           if (this.repair) {
-            await Promise.all([guard(this.loadConfig()), guard(this.loadDocs())]);
-            this.drawer = window.innerWidth > 1100;
+            await Promise.all([guard(this.loadConfig()), guard(this.loadDocs()), guard(this.loadGpt())]);
           } else {
-            await Promise.all([guard(this.loadConfig()), guard(this.loadDocs()), guard(this.loadModels()), guard(this.loadSkills()), this.refresh()]);
+            await Promise.all([guard(this.loadConfig()), guard(this.loadDocs()), guard(this.loadGpt()), guard(this.loadModels()), guard(this.loadSkills()), this.refresh()]);
             if (!this.paired) return;
             const sid = new URLSearchParams(location.search).get("session");
             if (sid && this.sess(sid)) this.openSession(sid);
           }
           this.ready = true;
+          this.placeGpt();
         } finally { this._starting = false; }
       },
       tick() {
@@ -266,6 +291,7 @@
         // 打金鑰時不重畫那一塊；其餘時候順便看一眼金鑰檔有沒有被別處動過。
         // 儲存的設定讀不進來的時候不問：不知道檔名，這個呼叫只會被拒絕。
         if (!this.credForm && !this.docs.config.parseError) this.loadCreds().catch((e) => this.fail(e, true));
+        this.loadGpt().catch((e) => this.fail(e, true));
         // 技能只在看著它的時候一直問：agent 自己取得的技能會出現在這裡。其他時候在開頁面和每次動作之後問。
         if (!this.repair && this.view === "skills") this.loadSkills().catch((e) => this.fail(e, true));
         return this.repair ? this.loadState().catch((e) => this.fail(e, true)) : this.refresh();
@@ -290,9 +316,11 @@
       // 啟動時的問題不會跟著修改變；現在儲存的設定已經沒有它了，就是改好、等重啟。
       fixed(p) {
         const v = this.verdict;
+        // 缺的是 ChatGPT 登入：現在登入了、也允許用方案，就是改好、等重啟。
+        if (p.source === "startup" && /^chatgpt:/i.test(p.why)) return this.gpt.signedIn && this.gpt.plan;
         return p.source === "settings" && (v.state === "ok" || v.state === "bad") && !v.problems.some((q) => q.key === p.key);
       },
-      esc() { if (this.dialog) this.dialog = null; else if (this.credForm) this.credClose(); else if (this.menu) this.menu = false; else if (this.drawer) this.drawer = false; },
+      esc() { if (this.dialog) this.dialog = null; else if (this.credForm) this.credClose(); else if (this.menu) this.menu = false; else if (this.drawer && this.q) this.q = ""; else if (this.drawer) this.drawer = false; },
       // 通知裡常有對話標題、摘要這類別人寫的字，一律經過 vis()。
       say(t) { this.toast = vis(t); clearTimeout(this._t); this._t = setTimeout(() => (this.toast = ""), 4200); },
 
@@ -436,7 +464,7 @@
       },
       get detail() { return this.sess(this.sid); },
       openSession(id) { this.view = "session"; this.sid = id; this.refresh(); },
-      back() { this.view = "board"; this.sid = null; },
+      back() { this.view = "board"; this.sid = null; this.drawer = false; },
       schedulesOf(sid) { return this.schedules.filter((s) => s.sessionId === sid); },
 
       // ═══════════ 對話：做 ═══════════
@@ -526,7 +554,7 @@
       async checkSaved() {
         if (this.docs.config.parseError) { this.verdict = { state: "unreadable", problems: [] }; return; }
         const r = await API.call("ConfigService", "CheckConfig", { meta: API.meta(), edits: [] });
-        const problems = r.problems || [];
+        const problems = (r.problems || []).map(nice);
         this.verdict = { state: problems.length ? "bad" : "ok", problems };
       },
       def(key) { return byKey[key] ? clone(byKey[key].def) : undefined; },
@@ -546,7 +574,8 @@
         const o = this.lock[key]; if (!o) return "";
         return (o.source === "flag" ? "被旗標 " : "被環境變數 ") + o.name;
       },
-      pendingKey(key) { return !!byKey[key] && !(key in this.lock) && !eq(key in this.stored ? this.stored[key] : this.def(key), key in this.running ? this.running[key] : this.def(key)); },
+      // 兩邊都先補齊列表項的空白欄位再比：執行中的值是補過預設的，儲存的不一定。
+      pendingKey(key) { return !!byKey[key] && !(key in this.lock) && !eq(this.filled(key, clone(key in this.stored ? this.stored[key] : this.def(key))), this.filled(key, clone(this.runningVal(key)))); },
       setv(key, v) { if (this.locked(key)) return; if (eq(v, this.base(key))) delete this.edits[key]; else this.edits[key] = v; },
       revert(key) { this.setv(key, this.base(key)); },
       toDefault(key) { this.setv(key, this.def(key)); },
@@ -558,6 +587,11 @@
       blank(f) { const o = {}; f.item.fields.forEach((c) => (o[c.key] = clone(c.def))); return o; },
       addItem(f) { const l = clone(this.val(f.key)); l.push(this.blank(f)); this.setv(f.key, l); this.open[f.key + "[" + (l.length - 1) + "]"] = true; },
       delItem(f, i) { const l = clone(this.val(f.key)); l.splice(i, 1); this.setv(f.key, l); },
+      // 頭像字：名字的第一個字；還沒有名字就是「？」，不要拿「（還沒有名字）」的括號當頭像。
+      itemInitial(f, i) {
+        const v = this.itemGet(f.key, i, f.item.title), t = Array.isArray(v) ? v[0] : v;
+        return (Array.from(String(t || ""))[0] || "？").toUpperCase();
+      },
       itemTitle(f, i) {
         const v = this.itemGet(f.key, i, f.item.title);
         const t = Array.isArray(v) ? v.join("、") : v;
@@ -582,7 +616,7 @@
         try {
           const r = await API.call("ConfigService", "CheckConfig", { meta: API.meta(), edits: this.editsPayload() });
           if (sig !== this.editSig) return; // 這中間又改了，等下一次
-          this.check = { problems: r.problems || [], diff: r.diff || [], sig, busy: false };
+          this.check = { problems: (r.problems || []).map(nice), diff: r.diff || [], sig, busy: false };
         } catch (e) {
           if (e.code !== "invalid_argument") { this.check.busy = false; return this.fail(e, true); }
           // 值寫成了這個欄位吃不下的樣子（時間沒寫單位、數字欄位清空…）：daemon 不是用 problems 回，而是整個拒絕。
@@ -590,13 +624,13 @@
           if (sig !== this.editSig) return;
           const m = /^config: ([^\s:]+): (.*)$/s.exec(e.message || ""), key = m ? m[1] : this.editKeys[0];
           const why = m ? m[2] : e.message || "不能這樣寫";
-          const fix = /is not a duration/.test(why) ? "寫成數字加單位，例如 30s、5m、1h30m。"
-            : /cannot be written as/.test(why) ? "這一格要的不是這種值，填回正確的類型，或按「還原」。" : "";
-          this.check = { problems: [{ key, why, fix }], diff: [], sig, busy: false };
+          this.check = { problems: [nice({ key, why, fix: "" })], diff: [], sig, busy: false };
         }
       },
       get problems() { return this.check.problems; },
       get checked() { return !this.check.busy && this.check.sig === this.editSig; },
+      // 一則問題的整句。中文句子用「。」收尾，daemon 的英文原樣用「.」。
+      msg(p) { return (p.key ? p.key + " " : "") + p.why + (/[\u3000-\u303f\uff00-\uffef\u4e00-\u9fff]$/.test(p.why) ? "。" : "."); },
       probs(path) { return this.problems.filter((p) => p.key === path); },
       secEdits(id) { return this.editKeys.filter((k) => secOf[baseKey(k)] === id).length; },
       secErrs(id) { return this.problems.filter((p) => secOf[baseKey(p.key)] === id).length; },
@@ -670,6 +704,20 @@
         }
         return out;
       },
+      // 設定頁的卡片：一個設定區塊一張卡，欄位是卡裡的列。收起來的進階欄位、沒選到的後端區塊不畫出來。
+      // 「其他後端」的展開鈕不屬於任何一張卡，自己一項。
+      get setCards() {
+        const out = [];
+        this.rows.forEach((r) => {
+          if (r.kind === "sec" || r.kind === "blk") {
+            const t = r.kind === "sec" ? r.sec : r.blk;
+            out.push({ id: r.id, kind: "card", hide: r.hide, title: t.zh, code: "[" + t.table + "]", rows: [] });
+          } else if (r.kind === "fold" && r.strong) out.push({ id: r.id, kind: "fold", row: r });
+          else if (r.kind === "none") out.push({ id: r.id, kind: "none" });
+          else if (!r.hide && out.length) out[out.length - 1].rows.push(r);
+        });
+        return out.filter((c) => !c.hide);
+      },
       // 單一列的值
       ev(r) { return r.lk ? this.itemGet(r.lk, r.i, r.f.key) : this.val(r.path); },
       es(r, v) { if (r.lk) this.itemSet(r.lk, r.i, r.f.key, v); else this.setv(r.path, v); },
@@ -680,6 +728,7 @@
         const v = this.ev(r), f = r.f;
         if (f.unit === "bytes" && v > 0) return "＝ " + fmtBytes(v);
         if (f.unit === "ratio" && typeof v === "number") return "＝ " + Math.round(v * 100) + "%";
+        if (f.key === "context.window" && v === 0) return "0 代表自動，向模型供應端查";
         return "";
       },
       num(r, raw) { const f = r.f; if (raw === "" || raw === null) return this.es(r, ""); this.es(r, f.type === "int" ? parseInt(raw, 10) : parseFloat(raw)); },
@@ -714,7 +763,7 @@
         try {
           const r = await API.call("ConfigService", "WriteConfig", { meta: API.meta(), hash: this.docs.config.hash, edits: this.editsPayload() });
           this.dialog = null;
-          if (!r.written) { this.check = { problems: r.problems || [], diff: this.check.diff, sig: this.editSig, busy: false }; this.goProblem(); return; }
+          if (!r.written) { this.check = { problems: (r.problems || []).map(nice), diff: this.check.diff, sig: this.editSig, busy: false }; this.goProblem(); return; }
           this.edits = {};
           await this.loadConfig();
           this.say("已寫入 " + n + " 項" + this.afterSave("config"));
@@ -762,7 +811,7 @@
         const d = this.docs[id];
         if (id === "config") {
           const r = await API.call("ConfigService", "ReplaceConfigText", { meta: API.meta(), text, hash: d.hash });
-          if (!r.written) return { problems: r.problems || [] };
+          if (!r.written) return { problems: (r.problems || []).map(nice) };
           d.saved = d.draft = text; // loadConfig 再用 daemon 給的內容對一次
           await this.loadConfig();
         } else {
@@ -977,7 +1026,7 @@
       get manage() { return this.view === "skills" || this.view === "memory" || this.view === "channels"; },
       // 管理的三頁（技能、記憶、頻道）只在打開、切換和每次動作之後讀；只有技能在看著的時候還會一直問。
       openManage(v) {
-        v = v || this.mview; this.view = this.mview = v; this.sid = null; this.skillErr = ""; this.memNote = ""; this.bindNote = "";
+        v = v || this.mview; this.view = this.mview = v; this.sid = null; this.drawer = false; this.skillErr = ""; this.memNote = ""; this.bindNote = "";
         const load = v === "memory" ? this.loadMemory() : v === "channels" ? this.loadBindings() : this.loadSkills();
         load.catch((e) => this.fail(e, true));
       },
@@ -1284,17 +1333,170 @@
         await this.loadBindings().catch((e) => this.fail(e, true));
       },
 
-      top() { this.$nextTick(() => { const el = document.querySelector(".drawer .db"); if (el) el.scrollTop = 0; }); },
+      // ═══════════ ChatGPT 登入 ═══════════
+      // 登入的是操作者自己的帳號，權杖只在 daemon 的部署目錄裡：這裡的回應沒有權杖、授權碼，
+      // 也沒有發給這個部署的 client id。頁面只拿到狀態，和一個要在操作者自己的瀏覽器開的授權網址。
+      // 授權網址和貼回來的網址都不放進連結或標記：網址只用 x-text 顯示，只在確定來源是 auth.openai.com 時開啟；
+      // 貼回來的網址只在輸入框裡，送出時讀一次，不論成敗都清掉。
+      async loadGpt() {
+        try {
+          const r = await API.call("ChatGPTAuthService", "GetChatGPTAccount", {});
+          this.gpt = {
+            loaded: true, error: "", signedIn: !!r.signedIn, label: r.label || r.email || "", scopes: r.grantedScopes || [],
+            plan: !!r.planUsageGranted, expires: at(r.accessTokenExpiresAt), errCode: r.lastErrorCode || "", errMsg: r.lastErrorMessage || "",
+            restart: !!r.restartNeeded,
+          };
+          // 模型清單要問 ChatGPT，所以只在剛登入、或按再讀一次時問一次，不跟著每四秒的輪詢走。
+          if (!(this.gpt.signedIn && this.gpt.plan)) this.gptModels = { loaded: false, busy: false, list: [], error: "" };
+          else if (!this.gptModels.loaded && !this.gptModels.busy) await this.loadGptModels();
+        } catch (e) {
+          if (e instanceof API.Unauthorized || e.code === "unavailable") throw e;
+          this.gpt = Object.assign({}, this.gpt, { loaded: true, error: e.message || e.code });
+        }
+      },
+      async loadGptModels() {
+        this.gptModels = Object.assign({}, this.gptModels, { busy: true });
+        try {
+          const r = await API.call("ChatGPTAuthService", "ListChatGPTModels", {});
+          this.gptModels = { loaded: true, busy: false, error: "", list: (r.models || []).map((m) => ({ id: m.id, name: m.displayName || m.id })) };
+        } catch (e) {
+          if (e instanceof API.Unauthorized || e.code === "unavailable") { this.gptModels = Object.assign({}, this.gptModels, { busy: false }); throw e; }
+          this.gptModels = { loaded: true, busy: false, list: [], error: e.message || e.code };
+        }
+      },
+      // 目前設定的模型不在清單裡的話，也列出來，不要讓下拉選單悄悄換成別的值。
+      get gptModelChoices() {
+        const cur = this.val("provider.chatgpt.model"), list = this.gptModels.list;
+        return cur && !list.some((m) => m.id === cur) ? [{ id: cur, name: cur + "（不在清單裡）" }].concat(list) : list;
+      },
+      // 卡片只有一份：設定頁開著、或有 agent 的時候放在設定裡，沒有 agent 又沒開設定頁時放在修復畫面上。
+      get gptRepair() { return this.repair && this.agentProblems.some((p) => /^chatgpt:/i.test(p.why)); },
+      get gptInSettings() { return this.drawer && this.tab === "section" && this.section === "provider" && !this.q.trim(); },
+      placeGpt() {
+        const card = this.$refs.gptc, host = document.getElementById(this.drawer || !this.repair ? "gpt-in-settings" : "gpt-in-repair");
+        if (card && host && card.parentNode !== host) host.appendChild(card);
+      },
+      gptExpiry() {
+        const t = this.gpt.expires;
+        if (!t) return "沒有記錄";
+        return stamp(t) + (t > Date.now() ? "（" + until(t) + "）" : "（已過期）");
+      },
+      // 方案用量到上限：OpenAI 沒有公開查用量或重置時間的介面，所以只說去哪裡看，不猜時間。
+      get gptLimited() { return /usage_limit_exceeded/.test(this.gpt.errCode); },
+      // 登入網址的來源只認 https://auth.openai.com，其他一律不由頁面代開。
+      // 假的授權伺服器（開發與測試用，只認 127.0.0.1 的 http）也不會被開。
+      openAuthorizeUrl(url) {
+        let u;
+        try { u = new URL(url); } catch (_) { return "bad"; }
+        if (u.origin !== "https://auth.openai.com") return "foreign";
+        // 不用 noopener 特徵字串：它讓 window.open 即使開成了也回傳 null，頁面就永遠說被擋。
+        // 改成取得視窗後立刻切斷 opener，授權頁拿不到這個儀表板。
+        const w = window.open(u.href, "_blank");
+        if (!w) return "blocked";
+        w.opener = null;
+        return "opened";
+      },
+      gptPort() { try { return new URL(this.gptFlow.redirect).port; } catch (_) { return ""; } },
+      async gptStart() {
+        if (this.gptBusy) return;
+        this.gptBusy = true; this.gptNote = ""; this.gptOut = null; clearTimeout(this._gp);
+        try {
+          const r = await API.call("ChatGPTAuthService", "StartChatGPTSignIn", {});
+          const opened = this.openAuthorizeUrl(r.authorizationUrl || "");
+          this.gptFlow = { id: r.flowId, url: r.authorizationUrl || "", redirect: r.redirectUri || "", state: "pending", error: "", opened, expires: at(r.expiresAt) };
+          this.gptWatch(r.flowId);
+        } catch (e) {
+          if (e instanceof API.Unauthorized || e.code === "unavailable") this.fail(e);
+          else this.gptNote = "沒有開始登入：" + (e.message || e.code);
+        } finally { this.gptBusy = false; }
+      },
+      // 每 1.5 秒問一次這次登入有沒有完成（瀏覽器的轉址由 daemon 在本機收），直到成功、失敗或過期。
+      gptWatch(id) {
+        clearTimeout(this._gp);
+        const step = async () => {
+          const f = this.gptFlow;
+          if (!f || f.id !== id || f.state !== "pending") return;
+          if (f.expires && f.expires < Date.now()) { f.state = "failed"; f.url = ""; f.error = "這次登入已經過期，重新開始一次。"; return; }
+          try {
+            const r = await API.call("ChatGPTAuthService", "GetChatGPTSignIn", { flowId: id });
+            if (this.gptFlow !== f) return;
+            if (r.state === "CHAT_GPT_SIGN_IN_STATE_SUCCEEDED") return this.gptDone();
+            if (r.state === "CHAT_GPT_SIGN_IN_STATE_FAILED") { f.state = "failed"; f.url = ""; f.error = r.error || "登入沒有成功。"; return; }
+          } catch (e) {
+            if (e instanceof API.Unauthorized) return this.fail(e);
+            if (e.code === "not_found") { this.gptFlow = null; this.gptNote = "這次登入已經不在了（被另一次取代，或 daemon 重啟過）。重新開始一次。"; return; }
+            if (e.code !== "unavailable") { f.state = "failed"; f.url = ""; f.error = e.message || e.code; return; }
+          }
+          this._gp = setTimeout(step, 1500);
+        };
+        this._gp = setTimeout(step, 1000);
+      },
+      async gptDone() {
+        this.gptFlow = null; this.gptNote = "";
+        this.gptModels = { loaded: false, busy: false, list: [], error: "" };
+        await this.loadGpt().catch((e) => this.fail(e, true));
+        this.say("已登入 ChatGPT" + (this.gpt.restart ? "，重啟後才會用上" : ""));
+      },
+      gptCancel() { clearTimeout(this._gp); this.gptFlow = null; this.gptNote = ""; },
+      async gptCopy() {
+        try { await navigator.clipboard.writeText(this.gptFlow.url); this.say("已複製登入網址"); } catch (_) { this.say("複製不了，請自己選取上面的網址"); }
+      },
+      // 貼回來的網址：瀏覽器不在這台機器上時，它轉去 127.0.0.1 會載入失敗，網址列裡那一串就是要貼回來的。
+      async gptComplete(box) {
+        const f = this.gptFlow;
+        if (!f || this.gptBusy) return;
+        if (!box.value.trim()) { box.value = ""; this.gptNote = "先貼上瀏覽器網址列的網址。"; return; }
+        this.gptBusy = true; this.gptNote = "";
+        try {
+          await API.call("ChatGPTAuthService", "CompleteChatGPTSignIn", { flowId: f.id, redirectedAddress: box.value });
+          await this.gptDone();
+        } catch (e) {
+          if (e instanceof API.Unauthorized || e.code === "unavailable") this.fail(e);
+          else if (e.code === "invalid_argument") this.gptNote = this.gptPasteNote(e.message || "");
+          else if (/declined/.test(e.message || "")) { this.gptNote = "你在 ChatGPT 那邊選了不同意，這次登入結束了。要用的話重新開始，並在授權頁按同意。"; this.gptFlow = null; clearTimeout(this._gp); }
+          else if (e.code === "not_found") { this.gptFlow = null; this.gptNote = "這次登入已經不在了。重新開始一次。"; }
+          else this.gptNote = "登入沒有成功：" + (e.message || e.code);
+        } finally { box.value = ""; this.gptBusy = false; }
+      },
+      // daemon 對貼回的網址只回它自己的幾句固定的話（不含網址內容），這裡依字句分辨原因。
+      gptPasteNote(why) {
+        const again = "什麼都沒有送出，登入還在等；回到瀏覽器，複製網址列整段再貼一次。";
+        if (/does not belong/.test(why)) return "這個網址是別次登入的，對不上這次。" + again;
+        if (/no authorization code or no state/.test(why)) return "網址裡缺了 code 或 state，看起來沒複製完整。" + again;
+        if (/too long/.test(why)) return "貼上的內容太長，不像轉址網址。" + again;
+        return "這不是網址。" + again;
+      },
+      askGptOut() { this.dialog = "gptout"; },
+      async gptSignOut() {
+        this.dialog = null; this.gptNote = ""; this.gptOut = null;
+        try {
+          const r = await API.call("ChatGPTAuthService", "SignOutChatGPT", {});
+          this.gptOut = { revoked: !!r.revoked, detail: r.detail || "" };
+          this.gptModels = { loaded: false, busy: false, list: [], error: "" };
+          await this.loadGpt();
+          this.say("已登出 ChatGPT");
+        } catch (e) { this.fail(e); }
+      },
+
+      top() { this.$nextTick(() => { const el = document.querySelector(".setp .smain"); if (el) el.scrollTop = 0; }); },
       pick(id) { this.tab = "section"; this.section = id; this.menu = false; this.q = ""; this.top(); },
       pickDoc(id) { this.tab = "doc"; this.docId = id; this.menu = false; this.q = ""; this.top(); },
       pickTab(t) { this.tab = t; this.menu = false; this.q = ""; this.drawer = true; this.top(); if (t === "history") this.openHistory(this.hist.doc); },
       get curDoc() { return this.tab === "raw" ? "config" : this.docId; },
       get where() {
+        if (this.q.trim()) return { zh: "搜尋結果", code: "" };
         if (this.tab === "doc") return { zh: DOCS[this.docId].zh, code: DOCS[this.docId].name };
         if (this.tab === "raw") return { zh: "設定原文", code: "config" };
         if (this.tab === "history") return { zh: "版本紀錄", code: "" };
         const sec = this.sectionNow;
         return { zh: sec ? sec.zh : "", code: sec ? "[" + sec.table + "]" : "" };
+      },
+      // 標題底下那一行：這一頁是什麼。
+      get headDesc() {
+        if (this.q.trim()) return "";
+        if (this.tab === "doc" || this.tab === "raw") return DOCS[this.curDoc].lead;
+        if (this.tab === "history") return "每份文件最近 20 次儲存的版本。選一個，看它和現在儲存的差在哪；也可以還原成它，還原會存成新的一版。";
+        return this.sectionNow ? this.sectionNow.blurb : "";
       },
       get pendingDocs() {
         return ["config", "persona", "agents"].filter((id) => this.docs[id].pending)
@@ -1304,9 +1506,10 @@
         const parts = this.pendingDocs.map((d) => d.zh + (d.n ? "（" + d.n + " 項）" : ""));
         if (this.restartCreds.length) parts.push("金鑰（" + this.restartCreds.length + " 把）");
         if (this.skills.restart) parts.push("技能");
+        if (this.gpt.restart) parts.push("ChatGPT 登入");
         return parts.join("、");
       },
-      get hasPending() { return this.pendingDocs.length > 0 || this.restartCreds.length > 0 || this.skills.restart; },
+      get hasPending() { return this.pendingDocs.length > 0 || this.restartCreds.length > 0 || this.skills.restart || this.gpt.restart; },
       // 把 `x` 轉成 <code>。只用在設定架構裡寫死的說明，先把 < > & 轉掉。
       md(t) { return String(t || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])).replace(/`([^`]+)`/g, "<code>$1</code>"); },
     }));

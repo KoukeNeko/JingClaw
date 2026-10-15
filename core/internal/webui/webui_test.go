@@ -635,7 +635,7 @@ func TestAValueTheDaemonRefusesOutrightIsShownOnItsField(t *testing.T) {
 	app := page(t, "app.js")
 
 	check := method(t, app, "async runCheck() {")
-	for _, want := range []string{`e.code !== "invalid_argument"`, "this.check = { problems: [{ key, why, fix }]"} {
+	for _, want := range []string{`e.code !== "invalid_argument"`, `this.check = { problems: [nice({ key, why, fix: "" })]`} {
 		if !strings.Contains(check, want) {
 			t.Errorf("runCheck does not turn a refused value into a problem: missing %s", want)
 		}
@@ -650,6 +650,140 @@ func TestAKeySavedAfterOpeningTheBoxOnNoFileLeavesANewFileAlone(t *testing.T) {
 	for _, want := range []string{"body.expectAbsent = true", `c.fileState === "CREDENTIAL_FILE_STATE_ABSENT"`} {
 		if !strings.Contains(app, want) {
 			t.Errorf("app.js does not hold a save to the file that was not there: missing %s", want)
+		}
+	}
+}
+
+// The ChatGPT card handles two things that must not leak: the authorization
+// address, which is for the operator's own browser, and the address the browser
+// ended on, which carries a one-time code. Neither becomes markup or a link,
+// the page opens the first only when it is OpenAI's, the second lives in the
+// box it was pasted into until the call returns, and no reply carries a token.
+func TestTheChatGPTCardKeepsAddressesAndTokensOutOfThePage(t *testing.T) {
+	index, app := page(t, "index.html"), page(t, "app.js")
+
+	// Opened by the page only when the origin is exactly OpenAI's, and nowhere else.
+	open := method(t, app, "openAuthorizeUrl(url) {")
+	check, call := strings.Index(open, `u.origin !== "https://auth.openai.com"`), strings.Index(open, "window.open(")
+	if check < 0 || call < check || !strings.Contains(open[check:call], "return") {
+		t.Errorf("openAuthorizeUrl does not return before window.open unless the origin is https://auth.openai.com: %s", open)
+	}
+	// "noopener" in the features string makes window.open return null even when
+	// the tab opens, so the handle is cut off after the call instead.
+	if strings.Contains(open, `"noopener`) || !strings.Contains(open[call:], "w.opener = null") {
+		t.Error("the authorization page is opened with a handle back to the dashboard")
+	}
+	if got := strings.Count(app, "window.open("); got != 1 {
+		t.Errorf("app.js opens a window in %d places, and the one that checks the origin is the only one", got)
+	}
+	if strings.Contains(index, "window.open") || strings.Contains(index, "location.href") {
+		t.Error("index.html opens or navigates somewhere itself")
+	}
+
+	// Shown as text in a <code>, and in no attribute.
+	if got := strings.Count(index, `<code class="g-url" x-text="gptFlow.url"></code>`); got != 1 {
+		t.Errorf("index.html shows the authorization address as text in %d places, and one is meant", got)
+	}
+	if got := strings.Count(index, "gptFlow.url"); got != 1 {
+		t.Errorf("index.html mentions the authorization address %d times, and only the x-text is meant", got)
+	}
+
+	// The address carries this attempt's state and the deployment's host id, so it
+	// is only on the page while the sign-in waits: every way a sign-in ends without
+	// succeeding clears it (and a success drops the whole flow).
+	if got := strings.Count(app, `f.url = ""`); got != 3 {
+		t.Errorf("app.js clears the authorization address in %d of the 3 places a sign-in fails or expires", got)
+	}
+	if !strings.Contains(index, `<div x-show="gptFlow.state==='pending'">
+                    <p class="nm">在瀏覽器開啟這個網址，完成登入</p>`) {
+		t.Error("the authorization address is not shown only while the sign-in waits")
+	}
+
+	// The paste-back box: not bound to anything, read once, cleared in a finally.
+	box := regexp.MustCompile(`<input[^>]*placeholder="貼上瀏覽器網址列的網址"[^>]*>`).FindAllString(index, -1)
+	if len(box) != 1 {
+		t.Fatalf("the page has %d paste-back boxes, and one is meant", len(box))
+	}
+	for _, binding := range []string{"x-model", ":value", "x-bind:value", "@input", "x-on:input", "x-ref", `type="password"`} {
+		if strings.Contains(box[0], binding) {
+			t.Errorf("the paste-back box has %s, which would keep the address in the page's state or hide it from the person pasting it", binding)
+		}
+	}
+	if !strings.Contains(box[0], `autocomplete="off"`) {
+		t.Error("the paste-back box lets the browser keep what is pasted")
+	}
+	if got := strings.Count(app, "redirectedAddress: box.value"); got != 1 {
+		t.Errorf("app.js sends a pasted address from %d places, and one is meant", got)
+	}
+	rest := app
+	for _, allowed := range []string{"!box.value.trim()", `box.value = ""`, "redirectedAddress: box.value"} {
+		rest = strings.ReplaceAll(rest, allowed, "")
+	}
+	if strings.Contains(rest, "box.value") {
+		t.Error("app.js reads the paste-back box in a way that could keep what is pasted")
+	}
+	if !regexp.MustCompile(`finally \{ box\.value = ""`).MatchString(app) {
+		t.Error("app.js does not clear the paste-back box in a finally")
+	}
+
+	// Exactly the six calls the service offers, each from one place; nothing reads a token.
+	used := make(map[string]int)
+	for _, call := range regexp.MustCompile(`API\.call\("ChatGPTAuthService", "(\w+)"`).FindAllStringSubmatch(app, -1) {
+		used[call[1]]++
+	}
+	for _, name := range []string{"GetChatGPTAccount", "StartChatGPTSignIn", "GetChatGPTSignIn", "CompleteChatGPTSignIn", "SignOutChatGPT", "ListChatGPTModels"} {
+		if used[name] != 1 {
+			t.Errorf("app.js calls ChatGPTAuthService/%s in %d places, and one is meant", name, used[name])
+		}
+		delete(used, name)
+	}
+	for name := range used {
+		t.Errorf("app.js calls ChatGPTAuthService/%s, which the page was not built against", name)
+	}
+	// (accessTokenExpiresAt is a time, which is not a token.)
+	if leak := regexp.MustCompile(`\b(accessToken|refreshToken|idToken|access_token|refresh_token|id_token)\b`).FindString(app); leak != "" {
+		t.Errorf("app.js reads %s, and no reply of the sign-in service carries one", leak)
+	}
+
+	// Signing out is behind a dialog that says what it does; the models are asked
+	// for once, not with every poll (each asks ChatGPT).
+	if got := strings.Count(index, `@click="gptSignOut()"`); got != 1 {
+		t.Errorf("index.html signs out from %d places, and the dialog is the one", got)
+	}
+	if !strings.Contains(index, `@click="askGptOut()"`) {
+		t.Error("the sign-out button does not open the confirmation")
+	}
+	if !strings.Contains(index, "撤銷") || !strings.Contains(index, "清除這台機器上存的登入資料") {
+		t.Error("the sign-out confirmation does not say what it revokes and clears")
+	}
+	if got := strings.Count(method(t, app, "async loadGpt() {"), "this.loadGptModels()"); got != 1 {
+		t.Errorf("loadGpt asks for the model list in %d places", got)
+	}
+	if strings.Contains(method(t, app, "tick() {"), "loadGptModels") {
+		t.Error("the page's poll asks ChatGPT for the model list")
+	}
+
+	// Said, not guessed: where limits live, and no number of the page's own.
+	if !strings.Contains(index, "Settings → Usage") {
+		t.Error("the card does not point to ChatGPT Settings → Usage")
+	}
+	if strings.Contains(index+app, "resetsAt") || strings.Contains(index+app, "重置時間：") {
+		t.Error("the page shows a reset time, which OpenAI documents no way to know")
+	}
+}
+
+// The look of the settings page is defined in one place, at the top of the
+// stylesheet, so that a card, a toggle and a pill are the same everywhere.
+func TestTheSettingsPageTokensAreDefinedOnce(t *testing.T) {
+	css := page(t, "styles.css")
+
+	root, _, found := strings.Cut(css, "}")
+	if !found || !strings.HasPrefix(root, ":root{") {
+		t.Fatal("styles.css does not start with its :root tokens")
+	}
+	for _, token := range []string{"--r-card:", "--r-pill:", "--tog-w:", "--tog-h:", "--pill:"} {
+		if strings.Count(css, token) != 1 || !strings.Contains(root, token) {
+			t.Errorf("%s is not defined exactly once, in the first :root", token)
 		}
 	}
 }
@@ -1040,4 +1174,27 @@ func sameJSON(a, b any) bool {
 		return out
 	}
 	return reflect.DeepEqual(normal(a), normal(b))
+}
+
+// Small behaviours of the settings page that were wrong once, kept from coming
+// back. They read the source, as the guards above do; the browser flows cover
+// what they do.
+func TestTheSettingsPageKeepsItsSmallFixes(t *testing.T) {
+	app := page(t, "app.js")
+
+	// A saved list item lacks the defaults the running one has; both sides are
+	// filled before they are compared, or every edit marks them pending.
+	pending := method(t, app, "pendingKey(key) {")
+	if strings.Count(pending, "this.filled(") != 2 {
+		t.Errorf("pendingKey does not fill both the saved and the running value: %s", pending)
+	}
+	// Escape clears the search before it closes the page.
+	esc := method(t, app, "esc() {")
+	if q, drawer := strings.Index(esc, "this.q = \"\""), strings.LastIndex(esc, "this.drawer = false"); q < 0 || q > drawer {
+		t.Errorf("Escape closes the page before it clears the search: %s", esc)
+	}
+	// A sign-in done in repair mode settles the problem that asked for it.
+	if fixed := method(t, app, "fixed(p) {"); !strings.Contains(fixed, "this.gpt.signedIn") {
+		t.Errorf("a ChatGPT sign-in does not mark the startup problem fixed: %s", fixed)
+	}
 }
