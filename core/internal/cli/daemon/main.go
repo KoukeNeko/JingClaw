@@ -15,7 +15,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -38,6 +37,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/gemini"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/ollama"
 	"github.com/KoukeNeko/JingClaw/core/internal/provider/openaicompat"
+	"github.com/KoukeNeko/JingClaw/core/internal/restart"
 	"github.com/KoukeNeko/JingClaw/core/internal/runtime"
 	"github.com/KoukeNeko/JingClaw/core/internal/sandbox"
 	"github.com/KoukeNeko/JingClaw/core/internal/secret"
@@ -65,7 +65,7 @@ const (
 // Main runs the daemon as a process of its own, until it is interrupted or
 // terminated. Args are the arguments after the subcommand name.
 func Main(args []string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := restart.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return Run(ctx, args)
 }
@@ -86,6 +86,9 @@ func runContext(parent context.Context, args []string) error {
 	// Before anything is read, so that a credential file modified after this is
 	// one this process cannot have read.
 	begun := time.Now()
+
+	// Taken before anything that starts a program, so that none inherits it.
+	handed := restart.TakeAddr()
 
 	flags := flag.NewFlagSet("jingclaw daemon", flag.ContinueOnError)
 	var (
@@ -292,6 +295,8 @@ func runContext(parent context.Context, args []string) error {
 		problems:  problems,
 		agent:     built,
 		signin:    signin,
+		handed:    handed,
+		restart:   restart.Request,
 	})
 }
 

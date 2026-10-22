@@ -98,7 +98,7 @@ func IsEnvName(text string) bool { return envName.MatchString(text) }
 var keptNames = []string{
 	home.ConfigName, InstructionsFile, PersonaFile,
 	home.WorkspaceName, home.DataName, home.RunName, home.LogName, home.BinName, home.SkillsName,
-	"mcp-auth", "sandbox", chatgptauthFile,
+	"mcp-auth", "sandbox", chatgptauthFile, dashboardAuthFile, dashboardSessionsFile,
 }
 
 // chatgptauthFile is the file the ChatGPT sign-in is kept in, written out here
@@ -106,13 +106,20 @@ var keptNames = []string{
 // service must never be able to read, replace or delete it.
 const chatgptauthFile = "chatgpt-auth.json"
 
+// The dashboard's password hash and its browser sessions, written out here for
+// the same reason. The credential service must never be able to touch them.
+const (
+	dashboardAuthFile     = "dashboard-auth.json"
+	dashboardSessionsFile = "dashboard-sessions.json"
+)
+
 // credentialNameFix says what a name may be. The one text for the check at
 // start and for the service that is asked to write the file, so that the rule
 // is said the same wherever it refuses something.
 const credentialNameFix = "Give a plain file name for a file directly inside the deployment directory: " +
 	"up to 64 letters, digits, '.', '_' or '-', starting with a letter or digit and not ending in '.', " +
 	`such as "gemini.key". It cannot be a path, a name this deployment keeps for itself ` +
-	"(config.toml, AGENTS.md, PERSONA.md, workspace, data, run, log, bin, skills, mcp-auth, sandbox, chatgpt-auth.json), " +
+	"(config.toml, AGENTS.md, PERSONA.md, workspace, data, run, log, bin, skills, mcp-auth, sandbox, chatgpt-auth.json, dashboard-auth.json, dashboard-sessions.json), " +
 	"a backup name (*.bak.*), or the name of a file that was imported (*.imported)."
 
 // notShown stands for a value that is not quoted back. A problem is printed,

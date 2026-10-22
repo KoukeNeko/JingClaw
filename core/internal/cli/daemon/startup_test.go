@@ -930,7 +930,7 @@ func TestARepairDaemonListensOnLoopbackWhateverTheSettingsSay(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
 
 	for _, addr := range []string{"0.0.0.0:0", "[::]:0", "10.1.2.3:0", "not an address", ""} {
-		listener, err := listen(addr, true, logger)
+		listener, err := listen("", addr, true, logger)
 		if err != nil {
 			t.Errorf("%q: %v", addr, err)
 			continue
@@ -950,7 +950,7 @@ func TestARepairDaemonListensOnLoopbackWhateverTheSettingsSay(t *testing.T) {
 	port := probe.Addr().(*net.TCPAddr).Port
 	_ = probe.Close()
 
-	kept, err := listen(net.JoinHostPort("0.0.0.0", strconv.Itoa(port)), true, logger)
+	kept, err := listen("", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)), true, logger)
 	if err != nil {
 		t.Fatalf("the port named by the settings: %v", err)
 	}
@@ -959,7 +959,7 @@ func TestARepairDaemonListensOnLoopbackWhateverTheSettingsSay(t *testing.T) {
 	}
 
 	// And a port that is taken is not a reason to be unreachable.
-	moved, err := listen(net.JoinHostPort("0.0.0.0", strconv.Itoa(port)), true, logger)
+	moved, err := listen("", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)), true, logger)
 	if err != nil {
 		t.Fatalf("with the port taken: %v", err)
 	}
@@ -971,7 +971,7 @@ func TestARepairDaemonListensOnLoopbackWhateverTheSettingsSay(t *testing.T) {
 
 	// A daemon with an agent is not so forgiving: the settings were checked,
 	// and an address that cannot be used is a reason not to start.
-	if listener, err := listen("not an address", false, logger); err == nil {
+	if listener, err := listen("", "not an address", false, logger); err == nil {
 		_ = listener.Close()
 		t.Error("a daemon with an agent listened on an address that is not one")
 	}

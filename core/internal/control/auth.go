@@ -31,7 +31,21 @@ const (
 
 	// ScopeGateway reaches the ingress and nothing else.
 	ScopeGateway Scope = "gateway"
+
+	// ScopeSetup is what signing in with the initial password gives. That
+	// password is known to anybody who has read the documentation, so it may
+	// call one method, the one that changes it, and nothing else.
+	ScopeSetup Scope = "setup"
 )
+
+// methodsForScope narrows a scope to named methods instead of whole services.
+// A scope listed here is allowed those paths and no others; a scope in neither
+// table is allowed nothing.
+var methodsForScope = map[Scope]map[string]bool{
+	ScopeSetup: {
+		"/jingclaw.control.v1.BrowserService/SetDashboardPassword": true,
+	},
+}
 
 // servicesForScope lists the fully-qualified proto services a scope may call.
 //
@@ -112,7 +126,11 @@ func AuthMiddleware(tokens []Token, sessions Sessions, allowedPort string, next 
 			return
 		}
 
-		if !servicesForScope[scope][serviceOf(r.URL.Path)] {
+		allowed := servicesForScope[scope][serviceOf(r.URL.Path)]
+		if methods, narrowed := methodsForScope[scope]; narrowed {
+			allowed = methods[r.URL.Path]
+		}
+		if !allowed {
 			// The credential is genuine but does not cover this service.
 			// Forbidden rather than unauthorized: retrying with the same token
 			// will never help.

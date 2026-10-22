@@ -235,6 +235,16 @@
       gpt: { loaded: false, error: "", signedIn: false, label: "", scopes: [], plan: false, expires: null, errCode: "", errMsg: "", restart: false },
       gptModels: { loaded: false, busy: false, list: [], error: "" },
       gptFlow: null, gptBusy: false, gptNote: "", gptOut: null,
+      // ── 登入：沒有憑證時的第一個畫面。密碼不在任何狀態裡，只在輸入框裡，送出時讀一次（見 doLogin）。──
+      // initial：daemon 說還在用初始密碼（登入畫面要提示）；until：被擋住時，什麼時候可以再試。
+      // must：登入或配對之後還在初始密碼，整頁只有「先改密碼」那一個畫面（見 gate）。
+      login: { checked: false, initial: false, down: false, ended: false, remember: true, busy: false, msg: "", until: 0, wait: 0 },
+      must: false,
+      // ── 登入與安全：密碼的狀態，和它的表單。表單裡的密碼同樣只在輸入框裡。──
+      pw: { set: null, err: "", form: false, busy: false, msg: "", ok: "", cmsg: "" },
+      // ── 重啟：phase 是 idle / confirm / sending / wait / late / back；runs 是 daemon 回報被中斷的執行數。──
+      rs: { phase: "idle", runs: null, err: "", note: "", since: 0, secs: 0 },
+      startedAt: "",
       S, DOCS, daemonAddr: location.host,
 
       // ═══════════ 啟動 ═══════════
@@ -244,8 +254,12 @@
         if (p.get("drawer")) this.drawer = true;
         if (p.get("q")) { this.q = p.get("q"); this.drawer = true; }
 
+        const ended = API.takeEnded();
         try { await API.pairFromAddress(); } catch (e) { this.pairFailed = true; this.pairWhy = e instanceof API.Unauthorized ? "" : e.message; }
         this.paired = API.paired;
+        if (this.paired) await this.gate();
+        // 沒有憑證、也沒有可用的連結：登入畫面；問 daemon 還是不是初始密碼，決定要不要提示。
+        if (!this.paired && !this.must) { this.login.ended = this.login.ended || (ended && !this.pairFailed); await this.checkAuth(); }
         this.settled = true;
 
         // 把新的連結貼進已經開著的分頁，只會改網址的片段、頁面不會重載；有配對碼就重載。
@@ -254,6 +268,9 @@
         this.$watch("editSig", () => this.scheduleCheck());
         // 離開那一格、關掉抽屜或換搜尋，輸入框就收起來，打到一半的金鑰跟著丟掉。
         this.$watch("[drawer, tab, section, q].join('|')", () => this.credClose());
+        // 離開「登入與安全」、或關掉清除密碼的對話框，打到一半的密碼也跟著丟掉。
+        this.$watch("[drawer, tab].join('|')", () => this.pwClose());
+        this.$watch("dialog", () => { if (this.dialog !== "clearpw") document.querySelectorAll('[data-pw="clear"]').forEach((box) => { box.value = ""; }); });
         // ChatGPT 的卡片只有一份，放在設定的「模型提供者」最上面；沒有 agent 的畫面要用它時，把它搬過去。
         this.$watch("[drawer, mode].join('|')", () => this.$nextTick(() => this.placeGpt()));
         if (this.paired) await this.start();
@@ -300,12 +317,181 @@
         const r = await API.call("ConfigService", "GetAgentState", {});
         this.mode = r.mode === "repair" ? "repair" : "running";
         this.agentProblems = (r.problems || []).map((p) => ({ key: p.key || "", value: p.value || "", why: p.why || "", fix: p.fix || "", source: p.source || "" }));
+        this.startedAt = r.startedAt || "";
         this.online = true; this.lastOk = Date.now();
       },
       // 重啟對進行中的對話的影響：停掉 daemon 時還在跑的會被中斷（記成已中斷）；停在等你核准或回答的、和已經結束的都還在。
       get restartNote() {
         const n = this.counts.run;
         return !this.repair && n ? "現在有 " + n + " 段對話正在執行，重啟會中斷它們；等你處理的和已經結束的都還在。" : "";
+      },
+
+      // ═══════════ 登入 ═══════════
+      async checkAuth() {
+        this.login.down = false;
+        try { this.login.initial = (await API.authState()).initial; } catch (_) { this.login.down = true; }
+        this.login.checked = true;
+        this.$nextTick(() => { const box = document.querySelector('[data-pw="login"]'); if (box) box.focus(); });
+      },
+      // 已經有憑證（配對連結換到的，或之前存的）：還在初始密碼就不進 app，先改密碼。
+      // 問不到就照常進去，之後的呼叫會處理連不上。
+      async gate() {
+        let initial = false;
+        try { initial = (await API.authState()).initial; } catch (_) { /* 見上 */ }
+        if (!initial) return;
+        // 重設之後，瀏覽器手上的舊憑證已經失效：先確認它還有效，再要它改密碼，不然改完還是得重新登入。
+        try { await API.call("ConfigService", "GetAgentState", {}, 4000); } catch (e) {
+          if (e instanceof API.Unauthorized) { API.takeEnded(); this.paired = false; this.login.ended = true; return; }
+        }
+        this.holdForChange();
+      },
+      // 初始密碼換到的憑證只能改密碼：什麼都不載入，畫面只有改密碼的表單。
+      holdForChange() {
+        this.must = true; this.paired = false; this.pw.msg = "";
+        this.$nextTick(() => { const box = document.querySelector('form.mustf [data-pw="next"]'); if (box) box.focus(); });
+      },
+      // 密碼只活在 password 這個區域變數裡：讀自輸入框，送出，不論成功與否都在 finally 清掉。
+      async doLogin(field) {
+        if (this.login.busy || this.login.wait > 0) return;
+        let password = field.value;
+        if (!password) { this.login.msg = "請輸入密碼。"; return; }
+        this.login.busy = true; this.login.msg = "";
+        let scope = "";
+        try {
+          scope = await API.login(password, this.login.remember);
+        } catch (e) {
+          if (e.code === "wrong") this.login.msg = "密碼不對。";
+          else if (e.code === "throttled") this.cool(e.wait);
+          else if (e.code === "unavailable") this.login.msg = "連不上 daemon。確認它還在跑，再試一次。";
+          else this.login.msg = "登入沒有成功（" + vis(e.message) + "）。再試一次；還是不行，看 daemon 的紀錄。";
+        } finally { password = ""; field.value = ""; this.login.busy = false; }
+        if (scope === "setup") this.holdForChange();
+        else if (API.paired) { this.paired = true; await this.start(); }
+      },
+      // 被擋住：倒數到可以再試為止。以結束的時刻算，分頁在背景時計時器變慢也不會多等。
+      cool(secs) {
+        clearInterval(this._cool);
+        this.login.msg = ""; this.login.until = Date.now() + secs * 1000; this.login.wait = secs;
+        this._cool = setInterval(() => {
+          this.login.wait = Math.max(0, Math.ceil((this.login.until - Date.now()) / 1000));
+          if (!this.login.wait) { clearInterval(this._cool); this.login.msg = "可以再試一次了。"; }
+        }, 500);
+      },
+
+      // ═══════════ 重啟 ═══════════
+      // 按鈕只開確認；真正送出的只有 restartNow，而且要先過確認。
+      askRestart() {
+        if (!["sending", "wait", "late"].includes(this.rs.phase)) this.rs = { phase: "confirm", runs: null, err: "", note: "", since: 0, secs: 0 };
+        this.dialog = "restart";
+      },
+      closeRestart() {
+        if (this.rs.phase === "sending" || this.rs.phase === "wait") return;
+        this.dialog = null;
+        if (this.rs.phase === "confirm" || this.rs.phase === "back") this.rs.phase = "idle";
+      },
+      async restartNow() {
+        if (this.rs.phase !== "confirm") return;
+        this.rs.phase = "sending"; this.rs.err = "";
+        const before = this.startedAt;
+        try {
+          const r = await API.call("ConfigService", "RestartDaemon", { meta: API.meta() });
+          this.rs.runs = Number(r.runsInFlight) || 0;
+        } catch (e) {
+          if (e instanceof API.Unauthorized) { this.rs.phase = "confirm"; return this.fail(e); }
+          // 已經有一次在重啟：不是失敗，等它完成就好。
+          if (e.code === "failed_precondition") this.rs.note = "已經有一次重啟在進行，等它完成。";
+          else {
+            this.rs.phase = "confirm";
+            this.rs.err = e.code === "unavailable" ? "連不上 daemon，重啟沒有送出。daemon 沒在跑的話，到那台機器的終端機執行 jingclaw。"
+              : e.code === "unimplemented" ? "這個 daemon 不能自己重啟。到那台機器的終端機執行 jingclaw stop，再執行 jingclaw。"
+              : "重啟沒有送出：" + vis(e.message || e.code);
+            return;
+          }
+        }
+        this.rs.phase = "wait"; this.rs.since = Date.now(); this.rs.secs = 0;
+        this.waitBack(before);
+      },
+      // 問 daemon 回來了沒有：連得上，而且是新的程序（起始時間變了，或中間看過它連不上）。
+      // 憑證在重啟後仍然有效，所以不必重新登入；超過 60 秒只是改說明，仍繼續等。
+      async waitBack(before) {
+        let down = false;
+        for (;;) {
+          await new Promise((done) => setTimeout(done, 1000));
+          this.rs.secs = Math.round((Date.now() - this.rs.since) / 1000);
+          if (this.rs.secs >= 60 && this.rs.phase === "wait") this.rs.phase = "late";
+          try {
+            const r = await API.call("ConfigService", "GetAgentState", {}, 3000);
+            if (down || (r.startedAt || "") !== before) break;
+          } catch (e) {
+            if (e instanceof API.Unauthorized) return this.fail(e);
+            down = true;
+          }
+        }
+        this.rs.phase = "back"; this.runsBy = {}; this.mode = ""; this.ready = false;
+        await this.begin();
+        this.say(this.repair ? "daemon 回來了，仍在修復模式" : "daemon 回來了");
+        // 對話框還開著就讓人讀完這一句，再自己收起來。
+        setTimeout(() => { if (this.rs.phase === "back") { this.rs.phase = "idle"; if (this.dialog === "restart") this.dialog = null; } }, 4000);
+      },
+
+      // ═══════════ 登入與安全 ═══════════
+      async loadPw() {
+        try { this.pw.set = !(await API.authState()).initial; this.pw.err = ""; } catch (_) { this.pw.err = "讀不到密碼的狀態，連不上 daemon。"; }
+      },
+      pwClose() {
+        this.pw.form = false; this.pw.msg = "";
+        document.querySelectorAll("form.pwform").forEach((form) => form.reset());
+      },
+      pwWhy(e) {
+        if (e.code === "permission_denied") return "現在的密碼不對。";
+        if (e.code === "resource_exhausted") return "現在的密碼輸錯太多次了，稍等一下再試。";
+        if (e.code === "invalid_argument") return "新密碼要 10 到 256 個字。";
+        if (e.code === "failed_precondition") return "新密碼不能和初始密碼一樣。";
+        return "沒有成功：" + vis(e.message || e.code);
+      },
+      // 三個密碼框只在這裡讀一次；成功與否，都在 finally 清掉。
+      async setPassword(form) {
+        if (this.pw.busy) return;
+        const box = (name) => form.querySelector('[data-pw="' + name + '"]');
+        let current = box("current") ? box("current").value : "", next = box("next").value, again = box("again").value;
+        this.pw.busy = true; this.pw.msg = ""; this.pw.ok = "";
+        try {
+          const n = Array.from(next).length;
+          if (this.pw.set && !current) { this.pw.msg = "先輸入現在的密碼。"; return; }
+          if (n < 10 || n > 256) { this.pw.msg = "新密碼要 10 到 256 個字，現在是 " + n + " 個。"; return; }
+          if (next !== again) { this.pw.msg = "兩次輸入的新密碼不一樣。"; return; }
+          const changed = !!this.pw.set;
+          const done = await API.call("BrowserService", "SetDashboardPassword", { meta: API.meta(), newPassword: next, currentPassword: current });
+          if (this.must) {
+            // 用初始密碼登入的憑證換成正式的；其他瀏覽器都已被登出。
+            if (done.token) API.adopt(done.token, done.expiresAt, this.login.remember);
+            this.must = false; this.paired = true; this.pw.msg = "";
+            this.say("密碼已設定。其他瀏覽器都已登出。");
+            await this.start();
+            return;
+          }
+          this.pw.form = false;
+          this.pw.ok = changed ? "密碼已更改。其他瀏覽器都已登出，這一個還在。" : "密碼已設定。之後用它就能登入，不必再用連結。";
+          await this.loadPw();
+        } catch (e) {
+          if (e instanceof API.Unauthorized || e.code === "unavailable") this.fail(e);
+          else this.pw.msg = this.pwWhy(e);
+        } finally { current = next = again = ""; form.reset(); this.pw.busy = false; }
+      },
+      askClearPw() { this.pw.cmsg = ""; this.dialog = "clearpw"; },
+      async clearPassword(field) {
+        if (this.pw.busy) return;
+        let current = field.value;
+        this.pw.busy = true; this.pw.cmsg = "";
+        try {
+          if (!current) { this.pw.cmsg = "先輸入現在的密碼。"; return; }
+          await API.call("BrowserService", "ClearDashboardPassword", { meta: API.meta(), currentPassword: current });
+          // 所有瀏覽器都登出了，包括這一個：整頁重來，回到登入畫面。
+          this.dialog = null; this.pw.form = false; API.forget(); location.reload();
+        } catch (e) {
+          if (e instanceof API.Unauthorized || e.code === "unavailable") { this.dialog = null; this.fail(e); }
+          else this.pw.cmsg = this.pwWhy(e);
+        } finally { current = ""; field.value = ""; this.pw.busy = false; }
       },
       // 連不上的時候，畫面上的還是最後一次讀到的。
       get staleText() {
@@ -320,7 +506,7 @@
         if (p.source === "startup" && /^chatgpt:/i.test(p.why)) return this.gpt.signedIn && this.gpt.plan;
         return p.source === "settings" && (v.state === "ok" || v.state === "bad") && !v.problems.some((q) => q.key === p.key);
       },
-      esc() { if (this.dialog) this.dialog = null; else if (this.credForm) this.credClose(); else if (this.menu) this.menu = false; else if (this.drawer && this.q) this.q = ""; else if (this.drawer) this.drawer = false; },
+      esc() { if (this.dialog === "restart") this.closeRestart(); else if (this.dialog) this.dialog = null; else if (this.credForm) this.credClose(); else if (this.menu) this.menu = false; else if (this.drawer && this.q) this.q = ""; else if (this.drawer) this.drawer = false; },
       // 通知裡常有對話標題、摘要這類別人寫的字，一律經過 vis()。
       say(t) { this.toast = vis(t); clearTimeout(this._t); this._t = setTimeout(() => (this.toast = ""), 4200); },
 
@@ -1481,13 +1667,14 @@
       top() { this.$nextTick(() => { const el = document.querySelector(".setp .smain"); if (el) el.scrollTop = 0; }); },
       pick(id) { this.tab = "section"; this.section = id; this.menu = false; this.q = ""; this.top(); },
       pickDoc(id) { this.tab = "doc"; this.docId = id; this.menu = false; this.q = ""; this.top(); },
-      pickTab(t) { this.tab = t; this.menu = false; this.q = ""; this.drawer = true; this.top(); if (t === "history") this.openHistory(this.hist.doc); },
+      pickTab(t) { this.tab = t; this.menu = false; this.q = ""; this.drawer = true; this.top(); if (t === "history") this.openHistory(this.hist.doc); if (t === "security") this.loadPw(); },
       get curDoc() { return this.tab === "raw" ? "config" : this.docId; },
       get where() {
         if (this.q.trim()) return { zh: "搜尋結果", code: "" };
         if (this.tab === "doc") return { zh: DOCS[this.docId].zh, code: DOCS[this.docId].name };
         if (this.tab === "raw") return { zh: "設定原文", code: "config" };
         if (this.tab === "history") return { zh: "版本紀錄", code: "" };
+        if (this.tab === "security") return { zh: "登入與安全", code: "" };
         const sec = this.sectionNow;
         return { zh: sec ? sec.zh : "", code: sec ? "[" + sec.table + "]" : "" };
       },
@@ -1496,6 +1683,7 @@
         if (this.q.trim()) return "";
         if (this.tab === "doc" || this.tab === "raw") return DOCS[this.curDoc].lead;
         if (this.tab === "history") return "每份文件最近 20 次儲存的版本。選一個，看它和現在儲存的差在哪；也可以還原成它，還原會存成新的一版。";
+        if (this.tab === "security") return "誰能進這個儀表板。密碼讓你不必每次都用 jingclaw dashboard 的連結。";
         return this.sectionNow ? this.sectionNow.blurb : "";
       },
       get pendingDocs() {

@@ -20,6 +20,21 @@ service BrowserService {
   // The code is spent by the first browser to present it, so somebody who
   // sees the address after it was used has nothing.
   rpc CreatePairing(CreatePairingRequest) returns (CreatePairingResponse);
+
+  // SetDashboardPassword replaces the dashboard password. Until it has been
+  // changed once, the password is the initial one and no current password is
+  // asked for; after that the current one has to be given. The new one must
+  // differ from the initial one. Every other browser is signed out.
+  //
+  // The operator's own credential, a browser that is already in, and a setup
+  // session (what the initial password signs in as, and which can call nothing
+  // else) can ask; the password is never returned by anything. A setup session
+  // is answered with a control session of its own to continue with.
+  rpc SetDashboardPassword(SetDashboardPasswordRequest) returns (SetDashboardPasswordResponse);
+
+  // ClearDashboardPassword puts the password back to the initial one, and
+  // every browser is signed out.
+  rpc ClearDashboardPassword(ClearDashboardPasswordRequest) returns (ClearDashboardPasswordResponse);
 }
 
 message CreatePairingRequest {
@@ -30,3 +45,28 @@ message CreatePairingResponse {
   string code = 1;
   google.protobuf.Timestamp expires_at = 2;
 }
+
+message SetDashboardPasswordRequest {
+  RequestMeta meta = 1;
+
+  // Ten to 256 characters.
+  string new_password = 2;
+
+  // Required once the password has been changed; ignored while it is the
+  // initial one.
+  string current_password = 3;
+}
+
+message SetDashboardPasswordResponse {
+  // Set only when the caller was a setup session: a control session to
+  // continue with, as the login gives. Empty otherwise.
+  string token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message ClearDashboardPasswordRequest {
+  RequestMeta meta = 1;
+  string current_password = 2;
+}
+
+message ClearDashboardPasswordResponse {}

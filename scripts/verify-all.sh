@@ -26,7 +26,7 @@ for CHECK in verify-config.sh verify-api.sh verify-dashboard.sh verify-compactio
 	verify-attach.sh verify-gateway-restart.sh verify-clock.sh \
 	verify-console-owns-it.sh verify-skill-proposal.sh verify-seed-from-environment.sh \
 	verify-working-line.sh verify-credentials.sh verify-skills-web.sh \
-	verify-parity.sh verify-chatgpt.sh verify-one-process.sh; do
+	verify-parity.sh verify-chatgpt.sh verify-one-process.sh verify-restart.sh; do
 	printf '\n=== %s ===\n' "$CHECK"
 	if ! "./$CHECK"; then
 		FAILED=$((FAILED + 1))

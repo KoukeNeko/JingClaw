@@ -36,6 +36,12 @@ const (
 	// BrowserServiceCreatePairingProcedure is the fully-qualified name of the BrowserService's
 	// CreatePairing RPC.
 	BrowserServiceCreatePairingProcedure = "/jingclaw.control.v1.BrowserService/CreatePairing"
+	// BrowserServiceSetDashboardPasswordProcedure is the fully-qualified name of the BrowserService's
+	// SetDashboardPassword RPC.
+	BrowserServiceSetDashboardPasswordProcedure = "/jingclaw.control.v1.BrowserService/SetDashboardPassword"
+	// BrowserServiceClearDashboardPasswordProcedure is the fully-qualified name of the BrowserService's
+	// ClearDashboardPassword RPC.
+	BrowserServiceClearDashboardPasswordProcedure = "/jingclaw.control.v1.BrowserService/ClearDashboardPassword"
 )
 
 // BrowserServiceClient is a client for the jingclaw.control.v1.BrowserService service.
@@ -45,6 +51,19 @@ type BrowserServiceClient interface {
 	// The code is spent by the first browser to present it, so somebody who
 	// sees the address after it was used has nothing.
 	CreatePairing(context.Context, *connect.Request[v1.CreatePairingRequest]) (*connect.Response[v1.CreatePairingResponse], error)
+	// SetDashboardPassword replaces the dashboard password. Until it has been
+	// changed once, the password is the initial one and no current password is
+	// asked for; after that the current one has to be given. The new one must
+	// differ from the initial one. Every other browser is signed out.
+	//
+	// The operator's own credential, a browser that is already in, and a setup
+	// session (what the initial password signs in as, and which can call nothing
+	// else) can ask; the password is never returned by anything. A setup session
+	// is answered with a control session of its own to continue with.
+	SetDashboardPassword(context.Context, *connect.Request[v1.SetDashboardPasswordRequest]) (*connect.Response[v1.SetDashboardPasswordResponse], error)
+	// ClearDashboardPassword puts the password back to the initial one, and
+	// every browser is signed out.
+	ClearDashboardPassword(context.Context, *connect.Request[v1.ClearDashboardPasswordRequest]) (*connect.Response[v1.ClearDashboardPasswordResponse], error)
 }
 
 // NewBrowserServiceClient constructs a client for the jingclaw.control.v1.BrowserService service.
@@ -64,17 +83,41 @@ func NewBrowserServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(browserServiceMethods.ByName("CreatePairing")),
 			connect.WithClientOptions(opts...),
 		),
+		setDashboardPassword: connect.NewClient[v1.SetDashboardPasswordRequest, v1.SetDashboardPasswordResponse](
+			httpClient,
+			baseURL+BrowserServiceSetDashboardPasswordProcedure,
+			connect.WithSchema(browserServiceMethods.ByName("SetDashboardPassword")),
+			connect.WithClientOptions(opts...),
+		),
+		clearDashboardPassword: connect.NewClient[v1.ClearDashboardPasswordRequest, v1.ClearDashboardPasswordResponse](
+			httpClient,
+			baseURL+BrowserServiceClearDashboardPasswordProcedure,
+			connect.WithSchema(browserServiceMethods.ByName("ClearDashboardPassword")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // browserServiceClient implements BrowserServiceClient.
 type browserServiceClient struct {
-	createPairing *connect.Client[v1.CreatePairingRequest, v1.CreatePairingResponse]
+	createPairing          *connect.Client[v1.CreatePairingRequest, v1.CreatePairingResponse]
+	setDashboardPassword   *connect.Client[v1.SetDashboardPasswordRequest, v1.SetDashboardPasswordResponse]
+	clearDashboardPassword *connect.Client[v1.ClearDashboardPasswordRequest, v1.ClearDashboardPasswordResponse]
 }
 
 // CreatePairing calls jingclaw.control.v1.BrowserService.CreatePairing.
 func (c *browserServiceClient) CreatePairing(ctx context.Context, req *connect.Request[v1.CreatePairingRequest]) (*connect.Response[v1.CreatePairingResponse], error) {
 	return c.createPairing.CallUnary(ctx, req)
+}
+
+// SetDashboardPassword calls jingclaw.control.v1.BrowserService.SetDashboardPassword.
+func (c *browserServiceClient) SetDashboardPassword(ctx context.Context, req *connect.Request[v1.SetDashboardPasswordRequest]) (*connect.Response[v1.SetDashboardPasswordResponse], error) {
+	return c.setDashboardPassword.CallUnary(ctx, req)
+}
+
+// ClearDashboardPassword calls jingclaw.control.v1.BrowserService.ClearDashboardPassword.
+func (c *browserServiceClient) ClearDashboardPassword(ctx context.Context, req *connect.Request[v1.ClearDashboardPasswordRequest]) (*connect.Response[v1.ClearDashboardPasswordResponse], error) {
+	return c.clearDashboardPassword.CallUnary(ctx, req)
 }
 
 // BrowserServiceHandler is an implementation of the jingclaw.control.v1.BrowserService service.
@@ -84,6 +127,19 @@ type BrowserServiceHandler interface {
 	// The code is spent by the first browser to present it, so somebody who
 	// sees the address after it was used has nothing.
 	CreatePairing(context.Context, *connect.Request[v1.CreatePairingRequest]) (*connect.Response[v1.CreatePairingResponse], error)
+	// SetDashboardPassword replaces the dashboard password. Until it has been
+	// changed once, the password is the initial one and no current password is
+	// asked for; after that the current one has to be given. The new one must
+	// differ from the initial one. Every other browser is signed out.
+	//
+	// The operator's own credential, a browser that is already in, and a setup
+	// session (what the initial password signs in as, and which can call nothing
+	// else) can ask; the password is never returned by anything. A setup session
+	// is answered with a control session of its own to continue with.
+	SetDashboardPassword(context.Context, *connect.Request[v1.SetDashboardPasswordRequest]) (*connect.Response[v1.SetDashboardPasswordResponse], error)
+	// ClearDashboardPassword puts the password back to the initial one, and
+	// every browser is signed out.
+	ClearDashboardPassword(context.Context, *connect.Request[v1.ClearDashboardPasswordRequest]) (*connect.Response[v1.ClearDashboardPasswordResponse], error)
 }
 
 // NewBrowserServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -99,10 +155,26 @@ func NewBrowserServiceHandler(svc BrowserServiceHandler, opts ...connect.Handler
 		connect.WithSchema(browserServiceMethods.ByName("CreatePairing")),
 		connect.WithHandlerOptions(opts...),
 	)
+	browserServiceSetDashboardPasswordHandler := connect.NewUnaryHandler(
+		BrowserServiceSetDashboardPasswordProcedure,
+		svc.SetDashboardPassword,
+		connect.WithSchema(browserServiceMethods.ByName("SetDashboardPassword")),
+		connect.WithHandlerOptions(opts...),
+	)
+	browserServiceClearDashboardPasswordHandler := connect.NewUnaryHandler(
+		BrowserServiceClearDashboardPasswordProcedure,
+		svc.ClearDashboardPassword,
+		connect.WithSchema(browserServiceMethods.ByName("ClearDashboardPassword")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.BrowserService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case BrowserServiceCreatePairingProcedure:
 			browserServiceCreatePairingHandler.ServeHTTP(w, r)
+		case BrowserServiceSetDashboardPasswordProcedure:
+			browserServiceSetDashboardPasswordHandler.ServeHTTP(w, r)
+		case BrowserServiceClearDashboardPasswordProcedure:
+			browserServiceClearDashboardPasswordHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -114,4 +186,12 @@ type UnimplementedBrowserServiceHandler struct{}
 
 func (UnimplementedBrowserServiceHandler) CreatePairing(context.Context, *connect.Request[v1.CreatePairingRequest]) (*connect.Response[v1.CreatePairingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.BrowserService.CreatePairing is not implemented"))
+}
+
+func (UnimplementedBrowserServiceHandler) SetDashboardPassword(context.Context, *connect.Request[v1.SetDashboardPasswordRequest]) (*connect.Response[v1.SetDashboardPasswordResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.BrowserService.SetDashboardPassword is not implemented"))
+}
+
+func (UnimplementedBrowserServiceHandler) ClearDashboardPassword(context.Context, *connect.Request[v1.ClearDashboardPasswordRequest]) (*connect.Response[v1.ClearDashboardPasswordResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.BrowserService.ClearDashboardPassword is not implemented"))
 }

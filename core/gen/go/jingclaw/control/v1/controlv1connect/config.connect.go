@@ -59,6 +59,9 @@ const (
 	// ConfigServiceGetAgentStateProcedure is the fully-qualified name of the ConfigService's
 	// GetAgentState RPC.
 	ConfigServiceGetAgentStateProcedure = "/jingclaw.control.v1.ConfigService/GetAgentState"
+	// ConfigServiceRestartDaemonProcedure is the fully-qualified name of the ConfigService's
+	// RestartDaemon RPC.
+	ConfigServiceRestartDaemonProcedure = "/jingclaw.control.v1.ConfigService/RestartDaemon"
 )
 
 // ConfigServiceClient is a client for the jingclaw.control.v1.ConfigService service.
@@ -103,6 +106,12 @@ type ConfigServiceClient interface {
 	// GetAgentState says whether the daemon is running an agent, and if it is
 	// not, why. A page asks this before anything else.
 	GetAgentState(context.Context, *connect.Request[v1.GetAgentStateRequest]) (*connect.Response[v1.GetAgentStateResponse], error)
+	// RestartDaemon restarts the whole process, which is how a saved setting
+	// that waits for a restart takes effect. It answers first, then the process
+	// shuts down as it does for a stop and starts again from the same binary,
+	// with the same arguments and environment, on the same address when that is
+	// still free. Runs in flight are interrupted. Works with or without an agent.
+	RestartDaemon(context.Context, *connect.Request[v1.RestartDaemonRequest]) (*connect.Response[v1.RestartDaemonResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the jingclaw.control.v1.ConfigService service. By
@@ -170,6 +179,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("GetAgentState")),
 			connect.WithClientOptions(opts...),
 		),
+		restartDaemon: connect.NewClient[v1.RestartDaemonRequest, v1.RestartDaemonResponse](
+			httpClient,
+			baseURL+ConfigServiceRestartDaemonProcedure,
+			connect.WithSchema(configServiceMethods.ByName("RestartDaemon")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -184,6 +199,7 @@ type configServiceClient struct {
 	listDocumentVersions *connect.Client[v1.ListDocumentVersionsRequest, v1.ListDocumentVersionsResponse]
 	getDocumentVersion   *connect.Client[v1.GetDocumentVersionRequest, v1.GetDocumentVersionResponse]
 	getAgentState        *connect.Client[v1.GetAgentStateRequest, v1.GetAgentStateResponse]
+	restartDaemon        *connect.Client[v1.RestartDaemonRequest, v1.RestartDaemonResponse]
 }
 
 // GetConfig calls jingclaw.control.v1.ConfigService.GetConfig.
@@ -231,6 +247,11 @@ func (c *configServiceClient) GetAgentState(ctx context.Context, req *connect.Re
 	return c.getAgentState.CallUnary(ctx, req)
 }
 
+// RestartDaemon calls jingclaw.control.v1.ConfigService.RestartDaemon.
+func (c *configServiceClient) RestartDaemon(ctx context.Context, req *connect.Request[v1.RestartDaemonRequest]) (*connect.Response[v1.RestartDaemonResponse], error) {
+	return c.restartDaemon.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the jingclaw.control.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig is what is saved, what is running, and which settings the saved
@@ -273,6 +294,12 @@ type ConfigServiceHandler interface {
 	// GetAgentState says whether the daemon is running an agent, and if it is
 	// not, why. A page asks this before anything else.
 	GetAgentState(context.Context, *connect.Request[v1.GetAgentStateRequest]) (*connect.Response[v1.GetAgentStateResponse], error)
+	// RestartDaemon restarts the whole process, which is how a saved setting
+	// that waits for a restart takes effect. It answers first, then the process
+	// shuts down as it does for a stop and starts again from the same binary,
+	// with the same arguments and environment, on the same address when that is
+	// still free. Runs in flight are interrupted. Works with or without an agent.
+	RestartDaemon(context.Context, *connect.Request[v1.RestartDaemonRequest]) (*connect.Response[v1.RestartDaemonResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -336,6 +363,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("GetAgentState")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceRestartDaemonHandler := connect.NewUnaryHandler(
+		ConfigServiceRestartDaemonProcedure,
+		svc.RestartDaemon,
+		connect.WithSchema(configServiceMethods.ByName("RestartDaemon")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jingclaw.control.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -356,6 +389,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceGetDocumentVersionHandler.ServeHTTP(w, r)
 		case ConfigServiceGetAgentStateProcedure:
 			configServiceGetAgentStateHandler.ServeHTTP(w, r)
+		case ConfigServiceRestartDaemonProcedure:
+			configServiceRestartDaemonHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -399,4 +434,8 @@ func (UnimplementedConfigServiceHandler) GetDocumentVersion(context.Context, *co
 
 func (UnimplementedConfigServiceHandler) GetAgentState(context.Context, *connect.Request[v1.GetAgentStateRequest]) (*connect.Response[v1.GetAgentStateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConfigService.GetAgentState is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) RestartDaemon(context.Context, *connect.Request[v1.RestartDaemonRequest]) (*connect.Response[v1.RestartDaemonResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jingclaw.control.v1.ConfigService.RestartDaemon is not implemented"))
 }

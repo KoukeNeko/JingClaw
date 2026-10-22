@@ -11,17 +11,38 @@
 <script src="app.js"></script>
 <script defer src="vendor/alpine.min.js"></script>
 </head>
-<body x-data="app" x-init="init()" @keydown.escape.window="esc()" x-cloak>
+<body x-data="app" @keydown.escape.window="esc()" x-cloak>
 <div class="app" :class="{open: drawer, off: !online}">
 
-<!-- ═════════ 還沒連上：配對畫面 ═════════ -->
+<!-- ═════════ 還沒進去：登入，或（還在初始密碼時）先改密碼 ═════════ -->
 <section class="connect" x-show="settled && !paired" aria-labelledby="t-connect">
   <div class="cbox">
-    <h1 id="t-connect" x-text="pairFailed ? '這個連結用不了' : '還沒連上 daemon'"></h1>
-    <p>在跑 JingClaw 的那台機器上，開一個終端機執行：</p>
-    <pre><code>jingclaw dashboard</code></pre>
-    <p class="hint">連結只能用一次，一分鐘內有效。瀏覽器的連線會在 daemon 停止、或十二小時後結束，到時再執行一次就好。</p>
-    <p class="warn" x-show="pairFailed" x-text="pairWhy || '這個連結已經用過、已經過期，或不是這個 daemon 發的。'"></p>
+    <h1 id="t-connect" x-text="must ? '先改密碼才能繼續' : pairFailed ? '這個連結用不了' : '登入 JingClaw'"></h1>
+    <p class="warn" x-show="login.ended && !must" role="status">這個瀏覽器的登入失效了：超過十二小時（用初始密碼登入的只有十五分鐘）、密碼被更改或重設，或被登出。重新登入就好。</p>
+    <p class="warn" x-show="pairFailed && !must" x-text="pairWhy || '這個連結已經用過、已經過期，或不是這個 daemon 發的。'"></p>
+
+    <!-- 登入：密碼框不綁任何狀態，送出時讀一次，不論結果都清掉。 -->
+    <form class="loginf" x-show="!must" @submit.prevent="doLogin($event.target.querySelector('[data-pw=login]'))">
+      <label class="fl"><span>密碼</span><input class="in" data-pw="login" type="password" autocomplete="current-password" spellcheck="false" maxlength="256" :disabled="login.busy"></label>
+      <p class="hint" x-show="login.initial">第一次登入使用初始密碼：環境變數 JINGCLAW_DASHBOARD_PASSWORD 的值，沒設就是文件裡寫的固定值。登入後會要你立刻改掉。</p>
+      <label class="chk"><input type="checkbox" x-model="login.remember"><span>記住這個瀏覽器</span></label>
+      <p class="hint" x-text="login.remember ? '登入會留在這個瀏覽器，關掉再開也不必重新輸入，十二小時後結束。共用的電腦不要勾。' : '登入只留在這個分頁，關掉分頁就結束。'"></p>
+      <p class="warn" x-show="login.wait > 0" role="status">輸入錯太多次了。請等 <b x-text="login.wait"></b> 秒再試。</p>
+      <p class="warn" x-show="login.msg && !login.wait" role="alert" x-text="login.msg"></p>
+      <div class="loginacts"><button type="submit" class="btn primary" :disabled="login.busy || login.wait > 0">登入</button></div>
+    </form>
+    <p class="hint" x-show="!must">想用連結進來：在跑 JingClaw 的那台機器上開終端機，執行 <code>jingclaw dashboard</code>。</p>
+    <p class="warn" x-show="login.down && !must" role="alert">連不上 daemon，沒能確認密碼的狀態。<button type="button" class="lnk" @click="checkAuth()">再試一次</button></p>
+
+    <!-- 還在初始密碼：只有這一個表單，沒有略過。這時的憑證只能改密碼，所以這裡不載入任何別的東西。 -->
+    <form class="loginf pwform mustf" x-show="must" @submit.prevent="setPassword($event.target)">
+      <p>你現在用的是初始密碼，能連到這台機器的人都可能知道它。先設一個只有你知道的新密碼，才能繼續。</p>
+      <label class="fl"><span>新密碼</span><input class="in" data-pw="next" type="password" autocomplete="new-password" spellcheck="false" maxlength="256"></label>
+      <label class="fl"><span>再輸入一次新密碼</span><input class="in" data-pw="again" type="password" autocomplete="new-password" spellcheck="false" maxlength="256"></label>
+      <p class="hint">10 到 256 個字，而且不能和初始密碼一樣。設好之後，其他瀏覽器都會登出。</p>
+      <p class="warn" x-show="pw.msg" role="alert" x-text="pw.msg"></p>
+      <div class="loginacts"><button type="submit" class="btn primary" :disabled="pw.busy">設定新密碼並繼續</button></div>
+    </form>
   </div>
 </section>
 
@@ -46,14 +67,14 @@
 <template x-if="mode==='running' && hasPending">
   <div class="rst-bar" role="status">
     <span class="what">已儲存，尚未生效：<b x-text="pendingText"></b>。啟動時才會讀到它們。</span>
-    <span class="how">在終端機執行 <code>jingclaw stop</code>，再執行 <code>jingclaw</code>。重啟後這個瀏覽器的連線會失效，再執行 <code>jingclaw dashboard</code>。</span>
+    <span class="how"><button class="btn pill sm" :disabled="!online" @click="askRestart()">重啟 daemon</button>　重啟後這個瀏覽器不必重新登入。在終端機也可以：<code>jingclaw stop</code>，再 <code>jingclaw</code>。</span>
   </div>
 </template>
 
 <!-- ═════════ 左：看板 ═════════ -->
 <main class="board" x-show="mode==='running'">
 
-  <p class="msg off-note" role="status" x-show="!online">連不上 daemon。下面是 <span x-text="staleText"></span>的畫面，現在按什麼都送不出去。連上之後會自動更新；如果是 daemon 重啟了，這個瀏覽器的連線已經失效，要再執行 <code>jingclaw dashboard</code>。</p>
+  <p class="msg off-note" role="status" x-show="!online">連不上 daemon。下面是 <span x-text="staleText"></span>的畫面，現在按什麼都送不出去。連上之後會自動更新。daemon 重啟過也一樣：這個瀏覽器的登入還有效，不必重新登入。</p>
   <p class="msg off-note" role="alert" x-show="online && loadErr">讀不到對話：<span x-text="vis(loadErr)"></span>。看板上的是最後一次讀到的，可能已經過時，空的不代表沒事。</p>
 
   <template x-if="view==='board'">
@@ -594,7 +615,7 @@
 <!-- ═════════ 左：沒有 agent 的時候 ═════════ -->
 <main class="board" x-show="repair" aria-labelledby="t-repair">
   <div class="bh"><h1 id="t-repair">沒有 agent 在跑</h1></div>
-  <p class="msg off-note" role="status" x-show="!online">連不上 daemon。下面是 <span x-text="staleText"></span>的畫面。連上之後會自動更新；如果是 daemon 重啟了，這個瀏覽器的連線已經失效，要再執行 <code>jingclaw dashboard</code>。</p>
+  <p class="msg off-note" role="status" x-show="!online">連不上 daemon。下面是 <span x-text="staleText"></span>的畫面。連上之後會自動更新。daemon 重啟過也一樣：這個瀏覽器的登入還有效，不必重新登入。</p>
   <p class="calm">daemon 啟動時沒能建立 agent，所以只開著修正設定要用的功能。對話、核准和排程都停著。</p>
 
   <section class="need" aria-label="沒有 agent 的原因">
@@ -658,10 +679,11 @@
   <section class="rep" aria-labelledby="t-restart">
     <h3 class="h3s" id="t-restart">存好之後重啟</h3>
     <div class="cbox">
-      <p>daemon 只在啟動時讀設定，所以存好之後要重啟。在跑 JingClaw 的那台機器上，開一個終端機執行：</p>
+      <p>daemon 只在啟動時讀設定，所以存好之後要重啟。重啟後這個瀏覽器不必重新登入；問題還在的話，會再回到這個畫面。</p>
+      <div class="rep-acts"><button class="btn primary" :disabled="!online" @click="askRestart()">重啟 daemon</button></div>
+      <p class="hint">按鈕不能用的時候（例如連不上 daemon），在跑 JingClaw 的那台機器上開一個終端機執行：</p>
       <pre><code>jingclaw stop
 jingclaw</code></pre>
-      <p class="hint">重啟後這個瀏覽器的連線會失效，再執行 <code>jingclaw dashboard</code> 取得新的連結。</p>
     </div>
   </section>
 </main>
@@ -700,6 +722,10 @@ jingclaw</code></pre>
         </template>
       </div>
       <div class="mg">
+        <p class="mgt">存取</p>
+        <button class="mi" :class="{on: tab==='security' && !q.trim()}" @click="pickTab('security')"><span>登入與安全</span></button>
+      </div>
+      <div class="mg">
         <p class="mgt">進階</p>
         <button class="mi" :class="{on: tab==='raw' && !q.trim()}" @click="pickTab('raw')"><span>設定原文</span><code>config</code><b class="n pend" x-show="docs.config.pending">待重啟</b></button>
         <button class="mi" :class="{on: tab==='history' && !q.trim()}" @click="pickTab('history')"><span>版本紀錄</span></button>
@@ -712,6 +738,7 @@ jingclaw</code></pre>
       <div class="sht">
         <h2><span x-text="where.zh"></span><code x-text="where.code"></code></h2>
         <p class="sd" x-show="headDesc" x-text="headDesc"></p>
+        <p class="shrst"><button class="btn pill sm" :class="{amber: hasPending}" :disabled="!online" @click="askRestart()">重啟 daemon</button><span class="mute" x-text="hasPending ? '有已儲存、還沒生效的設定' : '設定存好之後要重啟才會生效'"></span></p>
       </div>
       <div class="act" x-show="tab==='section' || q.trim()">
         <p class="st">
@@ -818,8 +845,9 @@ jingclaw</code></pre>
             <div class="g-row" x-show="gpt.restart">
               <div class="g-t">
                 <p class="nm">重啟後才會用上</p>
-                <p class="sub">登入的狀態和 daemon 啟動時不同，而它只在啟動時讀。在終端機執行 <code>jingclaw stop</code>，再執行 <code>jingclaw</code>。重啟後這個瀏覽器的連線會失效，再執行 <code>jingclaw dashboard</code>。</p>
+                <p class="sub">登入的狀態和 daemon 啟動時不同，而它只在啟動時讀。重啟後這個瀏覽器不必重新登入。在終端機也可以：<code>jingclaw stop</code>，再 <code>jingclaw</code>。</p>
               </div>
+              <div class="g-c"><button class="btn pill" :disabled="!online" @click="askRestart()">重啟 daemon</button></div>
             </div>
 
             <!-- 進行中的登入 -->
@@ -1049,6 +1077,68 @@ jingclaw</code></pre>
     </div>
 
     <!-- 版本紀錄 -->
+    <!-- 登入與安全：密碼的狀態、設定、更改、清除。密碼框不綁任何狀態，送出時讀一次，不論結果都清掉。 -->
+    <div class="db" x-show="tab==='security' && !q.trim()">
+      <section class="gptc" aria-labelledby="t-pw">
+        <h3 class="ct" id="t-pw"><span>登入密碼</span></h3>
+        <div class="card">
+          <div class="g-row">
+            <div class="g-t">
+              <p class="nm" x-text="pw.err ? '讀不到密碼的狀態' : pw.set === null ? '讀取中…' : pw.set ? '已更改過密碼' : '還在用初始密碼'"></p>
+              <p class="sub" x-show="pw.err" x-text="pw.err"></p>
+              <p class="sub" x-show="!pw.err && pw.set === false">用初始密碼登入的人只能改密碼。現在就改成只有你知道的。</p>
+              <p class="sub" x-show="!pw.err && pw.set">登入畫面會問密碼，不必再用連結。</p>
+            </div>
+            <div class="g-c">
+              <button class="btn pill primary" x-show="pw.set === false && !pw.form" @click="pw.form = true; pw.ok = ''">設定密碼</button>
+              <button class="btn pill" x-show="pw.set && !pw.form" @click="pw.form = true; pw.ok = ''">更改密碼</button>
+              <button class="btn pill danger" x-show="pw.set" @click="askClearPw()">重設為初始密碼</button>
+            </div>
+          </div>
+
+          <div class="g-row" x-show="pw.form">
+            <form class="pwform g-t" @submit.prevent="setPassword($event.target)">
+              <label class="fl" x-show="pw.set"><span>現在的密碼</span><input class="in" data-pw="current" type="password" autocomplete="current-password" spellcheck="false" maxlength="256"></label>
+              <label class="fl"><span>新密碼</span><input class="in" data-pw="next" type="password" autocomplete="new-password" spellcheck="false" maxlength="256"></label>
+              <label class="fl"><span>再輸入一次新密碼</span><input class="in" data-pw="again" type="password" autocomplete="new-password" spellcheck="false" maxlength="256"></label>
+              <p class="sub">10 到 256 個字。</p>
+              <p class="msg" x-show="pw.msg" role="alert" x-text="pw.msg"></p>
+              <div class="acts"><button type="button" class="btn pill" @click="pwClose()">取消</button><button type="submit" class="btn pill primary" :disabled="pw.busy" x-text="pw.set ? '更改密碼' : '設定密碼'"></button></div>
+            </form>
+          </div>
+
+          <div class="g-row" x-show="pw.ok" role="status">
+            <div class="g-t"><p class="sub ok" x-text="pw.ok"></p></div>
+          </div>
+
+          <div class="g-row">
+            <div class="g-t">
+              <p class="nm">密碼保護什麼</p>
+              <p class="sub">這個儀表板能核准這台機器上 agent 要執行的指令，也能改它的設定。密碼決定誰能做這些事，請當成這台機器的密碼對待。</p>
+            </div>
+          </div>
+          <div class="g-row">
+            <div class="g-t">
+              <p class="nm">初始密碼是什麼</p>
+              <p class="sub">還沒改過密碼（或重設之後）的密碼是初始密碼：環境變數 <code>JINGCLAW_DASHBOARD_PASSWORD</code> 的值，沒設就是文件裡寫的固定值。用它登入只能改密碼，改完才進得去。改過一次之後，環境變數就不再有作用。在改掉之前，任何連得到這個本機連接埠的人都能用它搶先設密碼，所以共用的機器請先把環境變數設成只有你知道的值，並馬上改掉。</p>
+            </div>
+          </div>
+          <div class="g-row">
+            <div class="g-t">
+              <p class="nm">更改會登出其他瀏覽器，重設會登出全部</p>
+              <p class="sub">更改密碼之後，所有其他瀏覽器的登入都會失效，要重新登入；你現在用的這一個不受影響。重設為初始密碼會登出所有瀏覽器，包括這一個，下次登入要用初始密碼再改一次。</p>
+            </div>
+          </div>
+          <div class="g-row">
+            <div class="g-t">
+              <p class="nm">重啟 daemon 不會登出</p>
+              <p class="sub">登入在 daemon 重啟後仍然有效。密碼只存成雜湊，不會被讀回來；忘了密碼的話，停掉 daemon、刪掉部署目錄裡的 <code>dashboard-auth.json</code> 再啟動，就回到初始密碼。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
     <div class="db" x-show="tab==='history' && !q.trim()">
       <div class="chips">
         <template x-for="id in ['config', 'persona', 'agents']" :key="id">
@@ -1097,7 +1187,7 @@ jingclaw</code></pre>
   <p class="sub">只動下面這幾行，其餘的內容與註解原樣保留。</p>
   <div class="diff"><template x-for="(l,i) in diff" :key="i"><div class="ln" :class="l.c" x-text="l.t"></div></template></div>
   <p class="fine">daemon 只在啟動時讀設定，寫入後重啟才會生效。<span x-text="restartNote"></span></p>
-  <p class="fine">重啟的方式：在終端機執行 <code>jingclaw stop</code>，再執行 <code>jingclaw</code>。重啟後這個瀏覽器的連線會失效，再執行 <code>jingclaw dashboard</code>。</p>
+  <p class="fine">寫入之後，用設定頁上的「重啟 daemon」讓它生效；這個瀏覽器不必重新登入。在終端機也可以：<code>jingclaw stop</code>，再 <code>jingclaw</code>。</p>
   <div class="dacts"><button class="btn" @click="dialog=null">取消</button><button class="btn primary" :disabled="writing" @click="write()">寫入</button></div>
 </dialog>
 
@@ -1155,6 +1245,58 @@ jingclaw</code></pre>
   <p class="sub">會請 ChatGPT 撤銷這個登入，並清除這台機器上存的登入資料。撤銷有沒有成功，登出之後會告訴你。</p>
   <p class="fine">要再用 ChatGPT 提供模型，得重新登入。如果現在的模型後端是 ChatGPT 登入，登出之後送給模型的請求會失敗，直到再登入。</p>
   <div class="dacts"><button class="btn pill" @click="dialog=null">取消</button><button class="btn pill danger" @click="gptSignOut()">登出</button></div>
+</dialog>
+
+<dialog class="dlg" x-effect="dialog==='clearpw' ? ($el.open || $el.showModal()) : ($el.open && $el.close())" @cancel.prevent="dialog=null" @click.self="dialog=null" aria-labelledby="t-clearpw">
+  <form method="dialog" @submit.prevent="clearPassword($event.target.querySelector('[data-pw=clear]'))">
+    <h2 id="t-clearpw">重設為初始密碼</h2>
+    <p class="sub">重設之後，所有瀏覽器（包括這一個）都會登出。下次登入要用初始密碼，登入後會被要求立刻改成新的。</p>
+    <label class="fl"><span>現在的密碼</span><input class="in" data-pw="clear" type="password" autocomplete="current-password" spellcheck="false" maxlength="256"></label>
+    <p class="msg" x-show="pw.cmsg" role="alert" x-text="pw.cmsg"></p>
+    <div class="dacts"><button type="button" class="btn" @click="dialog=null">取消</button><button type="submit" class="btn danger" :disabled="pw.busy">重設為初始密碼</button></div>
+  </form>
+</dialog>
+
+<!-- 重啟：先說會發生什麼，確認才送出；送出之後等 daemon 回來，登入不會失效 -->
+<dialog class="dlg" x-effect="dialog==='restart' ? ($el.open || $el.showModal()) : ($el.open && $el.close())" @cancel.prevent="closeRestart()" @click.self="closeRestart()" aria-labelledby="t-restart-dlg">
+  <template x-if="rs.phase==='confirm' || rs.phase==='sending'">
+    <div>
+      <h2 id="t-restart-dlg">重啟 daemon</h2>
+      <p class="sub">daemon 會關掉再啟動，已儲存的設定在重啟後生效。這個瀏覽器的登入不受影響，頁面會等它回來。</p>
+      <p class="sub rs-runs" x-show="repair">現在沒有 agent 在跑，所以沒有對話會被中斷。</p>
+      <p class="sub rs-runs" x-show="!repair && counts.run > 0"><b x-text="counts.run"></b> 段對話正在執行，重啟會中斷它們，記成已中斷；等你處理的和已經結束的都還在。</p>
+      <p class="sub rs-runs" x-show="!repair && counts.run === 0">現在沒有進行中的對話，不會中斷任何執行。</p>
+      <p class="fine" x-show="unsaved">還有沒寫入或沒儲存的修改，重啟不會把它們存下來。</p>
+      <p class="msg" x-show="rs.err" role="alert" x-text="rs.err"></p>
+      <p class="fine">不用按鈕的話，也可以在跑 JingClaw 的那台機器上執行 <code>jingclaw stop</code>，再執行 <code>jingclaw</code>。</p>
+      <div class="dacts"><button class="btn" :disabled="rs.phase==='sending'" @click="closeRestart()">取消</button><button class="btn" :class="counts.run > 0 && !repair ? 'danger' : 'primary'" :disabled="rs.phase!=='confirm' || !online" @click="restartNow()">重啟</button></div>
+    </div>
+  </template>
+  <template x-if="rs.phase==='wait'">
+    <div role="status">
+      <h2 id="t-restart-dlg"><i class="lamp run" aria-hidden="true"></i> 重啟中</h2>
+      <p class="sub">daemon 正在重啟，這個頁面會等它回來，已經等了 <b x-text="rs.secs"></b> 秒。</p>
+      <p class="sub" x-show="rs.runs !== null" x-text="rs.runs ? '這次重啟中斷了 ' + rs.runs + ' 段進行中的執行。' : '重啟時沒有進行中的執行。'"></p>
+      <p class="sub" x-show="rs.note" x-text="rs.note"></p>
+    </div>
+  </template>
+  <template x-if="rs.phase==='late'">
+    <div role="alert">
+      <h2 id="t-restart-dlg">daemon 還沒回來</h2>
+      <p class="sub">已經等了 <b x-text="rs.secs"></b> 秒，daemon 還沒在這個位址回應。它可能沒能重新啟動。</p>
+      <p class="sub">在跑 JingClaw 的那台機器上開一個終端機，執行 <code>jingclaw stop</code>，再執行 <code>jingclaw</code>，看它印出的訊息。</p>
+      <p class="fine">這個頁面還會繼續等；daemon 回來就會自己接上，不必重新登入。</p>
+      <div class="dacts"><button class="btn" @click="closeRestart()">關閉</button></div>
+    </div>
+  </template>
+  <template x-if="rs.phase==='back'">
+    <div role="status">
+      <h2 id="t-restart-dlg">daemon 回來了</h2>
+      <p class="sub" x-text="repair ? '它又回到修復模式：原因在畫面上，改好之後可以再重啟一次。' : '已儲存的設定現在生效了。'"></p>
+      <p class="sub" x-show="rs.runs" x-text="'這次重啟中斷了 ' + rs.runs + ' 段進行中的執行。'"></p>
+      <div class="dacts"><button class="btn primary" @click="closeRestart()">關閉</button></div>
+    </div>
+  </template>
 </dialog>
 
 <div class="toast" role="status" aria-live="polite" x-show="toast" x-text="toast"></div>

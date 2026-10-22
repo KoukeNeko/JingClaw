@@ -118,6 +118,211 @@ func (x *CreatePairingResponse) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type SetDashboardPasswordRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Meta  *RequestMeta           `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
+	// Ten to 256 characters.
+	NewPassword string `protobuf:"bytes,2,opt,name=new_password,json=newPassword,proto3" json:"new_password,omitempty"`
+	// Required once the password has been changed; ignored while it is the
+	// initial one.
+	CurrentPassword string `protobuf:"bytes,3,opt,name=current_password,json=currentPassword,proto3" json:"current_password,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *SetDashboardPasswordRequest) Reset() {
+	*x = SetDashboardPasswordRequest{}
+	mi := &file_jingclaw_control_v1_browser_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetDashboardPasswordRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetDashboardPasswordRequest) ProtoMessage() {}
+
+func (x *SetDashboardPasswordRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_browser_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetDashboardPasswordRequest.ProtoReflect.Descriptor instead.
+func (*SetDashboardPasswordRequest) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_browser_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SetDashboardPasswordRequest) GetMeta() *RequestMeta {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
+func (x *SetDashboardPasswordRequest) GetNewPassword() string {
+	if x != nil {
+		return x.NewPassword
+	}
+	return ""
+}
+
+func (x *SetDashboardPasswordRequest) GetCurrentPassword() string {
+	if x != nil {
+		return x.CurrentPassword
+	}
+	return ""
+}
+
+type SetDashboardPasswordResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Set only when the caller was a setup session: a control session to
+	// continue with, as the login gives. Empty otherwise.
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetDashboardPasswordResponse) Reset() {
+	*x = SetDashboardPasswordResponse{}
+	mi := &file_jingclaw_control_v1_browser_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetDashboardPasswordResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetDashboardPasswordResponse) ProtoMessage() {}
+
+func (x *SetDashboardPasswordResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_browser_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetDashboardPasswordResponse.ProtoReflect.Descriptor instead.
+func (*SetDashboardPasswordResponse) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_browser_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SetDashboardPasswordResponse) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *SetDashboardPasswordResponse) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+type ClearDashboardPasswordRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Meta            *RequestMeta           `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
+	CurrentPassword string                 `protobuf:"bytes,2,opt,name=current_password,json=currentPassword,proto3" json:"current_password,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ClearDashboardPasswordRequest) Reset() {
+	*x = ClearDashboardPasswordRequest{}
+	mi := &file_jingclaw_control_v1_browser_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClearDashboardPasswordRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClearDashboardPasswordRequest) ProtoMessage() {}
+
+func (x *ClearDashboardPasswordRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_browser_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClearDashboardPasswordRequest.ProtoReflect.Descriptor instead.
+func (*ClearDashboardPasswordRequest) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_browser_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ClearDashboardPasswordRequest) GetMeta() *RequestMeta {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
+func (x *ClearDashboardPasswordRequest) GetCurrentPassword() string {
+	if x != nil {
+		return x.CurrentPassword
+	}
+	return ""
+}
+
+type ClearDashboardPasswordResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClearDashboardPasswordResponse) Reset() {
+	*x = ClearDashboardPasswordResponse{}
+	mi := &file_jingclaw_control_v1_browser_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClearDashboardPasswordResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClearDashboardPasswordResponse) ProtoMessage() {}
+
+func (x *ClearDashboardPasswordResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_browser_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClearDashboardPasswordResponse.ProtoReflect.Descriptor instead.
+func (*ClearDashboardPasswordResponse) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_browser_proto_rawDescGZIP(), []int{5}
+}
+
 var File_jingclaw_control_v1_browser_proto protoreflect.FileDescriptor
 
 const file_jingclaw_control_v1_browser_proto_rawDesc = "" +
@@ -128,9 +333,23 @@ const file_jingclaw_control_v1_browser_proto_rawDesc = "" +
 	"\x15CreatePairingResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x129\n" +
 	"\n" +
-	"expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt2x\n" +
+	"expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xa1\x01\n" +
+	"\x1bSetDashboardPasswordRequest\x124\n" +
+	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x12!\n" +
+	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\x12)\n" +
+	"\x10current_password\x18\x03 \x01(\tR\x0fcurrentPassword\"o\n" +
+	"\x1cSetDashboardPasswordResponse\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x129\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\x80\x01\n" +
+	"\x1dClearDashboardPasswordRequest\x124\n" +
+	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\x12)\n" +
+	"\x10current_password\x18\x02 \x01(\tR\x0fcurrentPassword\" \n" +
+	"\x1eClearDashboardPasswordResponse2\xf9\x02\n" +
 	"\x0eBrowserService\x12f\n" +
-	"\rCreatePairing\x12).jingclaw.control.v1.CreatePairingRequest\x1a*.jingclaw.control.v1.CreatePairingResponseB\xde\x01\n" +
+	"\rCreatePairing\x12).jingclaw.control.v1.CreatePairingRequest\x1a*.jingclaw.control.v1.CreatePairingResponse\x12{\n" +
+	"\x14SetDashboardPassword\x120.jingclaw.control.v1.SetDashboardPasswordRequest\x1a1.jingclaw.control.v1.SetDashboardPasswordResponse\x12\x81\x01\n" +
+	"\x16ClearDashboardPassword\x122.jingclaw.control.v1.ClearDashboardPasswordRequest\x1a3.jingclaw.control.v1.ClearDashboardPasswordResponseB\xde\x01\n" +
 	"\x17com.jingclaw.control.v1B\fBrowserProtoP\x01ZGgithub.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1;controlv1\xa2\x02\x03JCX\xaa\x02\x13Jingclaw.Control.V1\xca\x02\x13Jingclaw\\Control\\V1\xe2\x02\x1fJingclaw\\Control\\V1\\GPBMetadata\xea\x02\x15Jingclaw::Control::V1b\x06proto3"
 
 var (
@@ -145,23 +364,34 @@ func file_jingclaw_control_v1_browser_proto_rawDescGZIP() []byte {
 	return file_jingclaw_control_v1_browser_proto_rawDescData
 }
 
-var file_jingclaw_control_v1_browser_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_jingclaw_control_v1_browser_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_jingclaw_control_v1_browser_proto_goTypes = []any{
-	(*CreatePairingRequest)(nil),  // 0: jingclaw.control.v1.CreatePairingRequest
-	(*CreatePairingResponse)(nil), // 1: jingclaw.control.v1.CreatePairingResponse
-	(*RequestMeta)(nil),           // 2: jingclaw.control.v1.RequestMeta
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
+	(*CreatePairingRequest)(nil),           // 0: jingclaw.control.v1.CreatePairingRequest
+	(*CreatePairingResponse)(nil),          // 1: jingclaw.control.v1.CreatePairingResponse
+	(*SetDashboardPasswordRequest)(nil),    // 2: jingclaw.control.v1.SetDashboardPasswordRequest
+	(*SetDashboardPasswordResponse)(nil),   // 3: jingclaw.control.v1.SetDashboardPasswordResponse
+	(*ClearDashboardPasswordRequest)(nil),  // 4: jingclaw.control.v1.ClearDashboardPasswordRequest
+	(*ClearDashboardPasswordResponse)(nil), // 5: jingclaw.control.v1.ClearDashboardPasswordResponse
+	(*RequestMeta)(nil),                    // 6: jingclaw.control.v1.RequestMeta
+	(*timestamppb.Timestamp)(nil),          // 7: google.protobuf.Timestamp
 }
 var file_jingclaw_control_v1_browser_proto_depIdxs = []int32{
-	2, // 0: jingclaw.control.v1.CreatePairingRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
-	3, // 1: jingclaw.control.v1.CreatePairingResponse.expires_at:type_name -> google.protobuf.Timestamp
-	0, // 2: jingclaw.control.v1.BrowserService.CreatePairing:input_type -> jingclaw.control.v1.CreatePairingRequest
-	1, // 3: jingclaw.control.v1.BrowserService.CreatePairing:output_type -> jingclaw.control.v1.CreatePairingResponse
-	3, // [3:4] is the sub-list for method output_type
-	2, // [2:3] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	6, // 0: jingclaw.control.v1.CreatePairingRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	7, // 1: jingclaw.control.v1.CreatePairingResponse.expires_at:type_name -> google.protobuf.Timestamp
+	6, // 2: jingclaw.control.v1.SetDashboardPasswordRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	7, // 3: jingclaw.control.v1.SetDashboardPasswordResponse.expires_at:type_name -> google.protobuf.Timestamp
+	6, // 4: jingclaw.control.v1.ClearDashboardPasswordRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	0, // 5: jingclaw.control.v1.BrowserService.CreatePairing:input_type -> jingclaw.control.v1.CreatePairingRequest
+	2, // 6: jingclaw.control.v1.BrowserService.SetDashboardPassword:input_type -> jingclaw.control.v1.SetDashboardPasswordRequest
+	4, // 7: jingclaw.control.v1.BrowserService.ClearDashboardPassword:input_type -> jingclaw.control.v1.ClearDashboardPasswordRequest
+	1, // 8: jingclaw.control.v1.BrowserService.CreatePairing:output_type -> jingclaw.control.v1.CreatePairingResponse
+	3, // 9: jingclaw.control.v1.BrowserService.SetDashboardPassword:output_type -> jingclaw.control.v1.SetDashboardPasswordResponse
+	5, // 10: jingclaw.control.v1.BrowserService.ClearDashboardPassword:output_type -> jingclaw.control.v1.ClearDashboardPasswordResponse
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_browser_proto_init() }
@@ -176,7 +406,7 @@ func file_jingclaw_control_v1_browser_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jingclaw_control_v1_browser_proto_rawDesc), len(file_jingclaw_control_v1_browser_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

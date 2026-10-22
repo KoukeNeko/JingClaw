@@ -284,6 +284,7 @@ background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 .addrow .btn,.act .btn{white-space:nowrap}
 .btn.pill{border-radius:var(--r-pill);padding:8px 20px}
 .btn.pill.sm{padding:5px 15px}
+.btn.pill.danger{background:var(--coral);border-color:var(--coral);color:#2A0E08}
 .btn.primary:disabled{background:var(--pane2);border-color:var(--pane2);color:var(--tx3);opacity:1}
 
 /* ChatGPT 帳號卡 */
@@ -421,6 +422,17 @@ background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 .cbox pre{background:#07100E;border:1px solid var(--line);border-radius:8px;padding:12px 16px;font:15px var(--mono);color:var(--tx);margin:12px 0}
 .cbox .hint{font-size:14px;color:var(--tx3)}
 .cbox .warn{color:var(--amber)}
+.loginf{margin:14px 0 4px}
+.loginf .warn{margin:8px 0 0;font-size:14px}
+.loginf .hint{margin:8px 0 0}
+.loginacts{margin-top:14px}
+.chk{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;color:var(--tx2)}
+.chk input{width:16px;height:16px;accent-color:var(--teal)}
+.shrst{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:13px}
+.pwform{max-width:420px}
+.pwform .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.g-t .sub.ok{color:var(--teal)}
+.rs-runs b{color:var(--amber)}
 
 /* ── 金鑰：設定欄位底下的狀態與動作 ── */
 .cred{padding:12px var(--row-x) 14px;border-top:1px solid var(--line2);background:var(--field)}

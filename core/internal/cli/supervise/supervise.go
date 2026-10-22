@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -34,6 +33,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/gateway"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
 	"github.com/KoukeNeko/JingClaw/core/internal/home"
+	"github.com/KoukeNeko/JingClaw/core/internal/restart"
 )
 
 // readyTimeout is how long a daemon gets to publish itself before starting it
@@ -102,6 +102,9 @@ func Run(ctx context.Context) error {
 }
 
 func run(ctx context.Context, p parts) error {
+	// A restart asked for by the dashboard ends the run the way a terminate
+	// does, in the same order; main starts the process again afterwards.
+	//
 	// The hangup as well as the interrupt and the terminate. A terminal that
 	// goes away — a window closed, an ssh session dropped — sends this, and
 	// Go's own answer to it is to die without running anything deferred: the
@@ -109,7 +112,7 @@ func run(ctx context.Context, p parts) error {
 	//
 	// An ssh session with no terminal at all sends no signal, and there the
 	// console's own read returns EOF and leaves the same way.
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, hangup)
+	ctx, stop := restart.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, hangup)
 	defer stop()
 
 	forgetAFileNamingThisProcess()

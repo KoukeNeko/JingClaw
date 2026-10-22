@@ -18,6 +18,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/config"
 	"github.com/KoukeNeko/JingClaw/core/internal/control"
 	"github.com/KoukeNeko/JingClaw/core/internal/discovery"
+	"github.com/KoukeNeko/JingClaw/core/internal/home"
 	"github.com/KoukeNeko/JingClaw/core/internal/id"
 	chatgptprovider "github.com/KoukeNeko/JingClaw/core/internal/provider/chatgpt"
 	"github.com/KoukeNeko/JingClaw/core/internal/storage/sqlite"
@@ -67,6 +68,14 @@ type serving struct {
 	// problems are why there is no agent, and agent is nil exactly then.
 	problems []control.AgentProblem
 	agent    *agent
+
+	// handed is the address the process this one replaced was serving on,
+	// tried before the configured one. Empty when not started by a restart.
+	handed string
+
+	// restart asks for the process to be restarted, remembering the address
+	// to come back on. Nil where a restart is not offered.
+	restart func(addr string) bool
 }
 
 // services are the RPC services this daemon answers for.
@@ -180,9 +189,15 @@ func serve(rootCtx context.Context, s serving) error {
 
 	// What lets a browser in. It is given a credential of its own and never
 	// the one above, which programs on this machine read from a file.
-	browsers := control.NewBrowsers(time.Now)
+	// Kept in the deployment directory, so that a restart signs nobody out.
+	var browsers *control.Browsers
+	if dir, found := home.Resolve(); found {
+		browsers = control.OpenBrowsers(time.Now, dir.Root, logger)
+	} else {
+		browsers = control.NewBrowsers(time.Now)
+	}
 
-	listener, err := listen(s.cfg.Server.Addr, repair, logger)
+	listener, err := listen(s.handed, s.cfg.Server.Addr, repair, logger)
 	if err != nil {
 		return err
 	}
@@ -196,6 +211,19 @@ func serve(rootCtx context.Context, s serving) error {
 	baseURL := "http://" + net.JoinHostPort("127.0.0.1", port)
 
 	state := control.AgentState{Repair: repair, Problems: s.problems, StartedAt: time.Now()}
+	if s.restart != nil {
+		bound := listener.Addr().String()
+		state.Restart = func() (int, error) {
+			inFlight := 0
+			if !repair {
+				inFlight = a.rt.ActiveRuns()
+			}
+			if !s.restart(bound) {
+				return 0, control.ErrRestartInProgress
+			}
+			return inFlight, nil
+		}
+	}
 
 	// Everything that does anything sits behind the credential check. A
 	// browser's credential is checked the same way, against the same list of
@@ -205,11 +233,13 @@ func serve(rootCtx context.Context, s serving) error {
 		root.Handle(one.path, control.AuthMiddleware(tokens, browsers, port, one.handler))
 	}
 
-	// The page, and the one place a browser gets in. Neither takes a
-	// credential: the page holds no secrets and can do nothing until it has
-	// one, and a pairing code is the credential. The host check still stands
+	// The page, and the places a browser gets in. None takes a credential: the
+	// page holds no secrets and can do nothing until it has one, and a
+	// pairing code or the password is the credential. The host check still stands
 	// in front of both, which is what keeps a web page from elsewhere out.
 	root.Handle("/ui/pair", control.RequireLoopbackHost(port, control.PairHandler(browsers)))
+	root.Handle("/ui/auth", control.RequireLoopbackHost(port, control.AuthHandler(browsers)))
+	root.Handle("/ui/login", control.RequireLoopbackHost(port, control.LoginHandler(browsers)))
 	root.Handle("/ui/", control.RequireLoopbackHost(port, http.StripPrefix("/ui/", webui.Handler())))
 
 	// h2c so a gRPC client can reach the same endpoint as Connect and
@@ -294,7 +324,15 @@ func serve(rootCtx context.Context, s serving) error {
 	return nil
 }
 
+// handedPatience is how long the address from before a restart is waited for.
+var handedPatience = 3 * time.Second
+
 // listen opens the address the daemon serves on.
+//
+// After a restart the address the old process had comes first, so that a
+// dashboard reached through a forwarded port is still there; it is given a
+// moment, because on Windows the old process is still leaving. If it will not
+// do, the configured one is used as it would have been.
 //
 // A daemon with no agent is on loopback whatever the settings say. They may be
 // the reason there is no agent, and one of the mistakes they can hold is an
@@ -302,7 +340,23 @@ func serve(rootCtx context.Context, s serving) error {
 // whatever was told where to find the daemon still can; when the port will not
 // do, a free one is better than a daemon nobody can reach to correct the line
 // that named it.
-func listen(addr string, repair bool, logger *slog.Logger) (net.Listener, error) {
+func listen(handed, addr string, repair bool, logger *slog.Logger) (net.Listener, error) {
+	if handed != "" {
+		var err error
+		for deadline := time.Now().Add(handedPatience); ; {
+			var listener net.Listener
+			if listener, err = net.Listen("tcp", handed); err == nil {
+				return listener, nil
+			}
+			if !time.Now().Before(deadline) {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		logger.Warn("the address from before the restart is not free, so the configured one is used",
+			"address", handed, "error", err)
+	}
+
 	if !repair {
 		listener, err := net.Listen("tcp", addr)
 		if err != nil {

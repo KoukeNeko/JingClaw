@@ -19,6 +19,7 @@ import (
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/gateway"
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/service"
 	"github.com/KoukeNeko/JingClaw/core/internal/cli/supervise"
+	"github.com/KoukeNeko/JingClaw/core/internal/restart"
 )
 
 // version is stamped in at build time with -ldflags "-X main.version=<tag>",
@@ -35,6 +36,16 @@ func main() {
 	if err := root().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
+	}
+
+	// Everything has shut down in order. If that was a restart, this is the
+	// moment to run again: on Unix the call does not return.
+	if restart.Wanted() {
+		fmt.Fprintln(os.Stderr, "jingclaw: restarting")
+		if err := restart.Exec(); err != nil {
+			fmt.Fprintln(os.Stderr, "error: could not restart:", err)
+			os.Exit(1)
+		}
 	}
 }
 

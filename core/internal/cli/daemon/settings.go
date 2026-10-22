@@ -457,8 +457,7 @@ func settingsProblems(err error) []control.AgentProblem {
 // a program that is not installed.
 //
 // The message is what the daemon used to print before it exited, and it already
-// says what to do about the cause; the fix added here is only how to try again,
-// because there is no restart to ask for.
+// says what to do about the cause; the fix added here is only how to try again.
 func startupProblem(err error) control.AgentProblem {
 	// The one backend with no key is put right by signing in, not by editing.
 	if errors.Is(err, chatgptauth.ErrNotSignedIn) || errors.Is(err, chatgptauth.ErrPlanUsageNotGranted) {

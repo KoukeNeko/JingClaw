@@ -43,6 +43,9 @@
 #   no credential is in anything the daemon says
 set -eu
 
+# The initial password is the built-in one unless this is set.
+unset JINGCLAW_DASHBOARD_PASSWORD
+
 cd "$(dirname "$0")/../core"
 
 WORK=$(mktemp -d)
@@ -136,7 +139,9 @@ printf 'ok   the link holds a one-time code and no credential\n'
 # 2. Without a browser to open, the command still says where to go.
 jingclaw dashboard 2>"$WORK/said" >/dev/null || fail "the dashboard command failed with no browser"
 grep -q '/ui/#pair=' "$WORK/said" || fail "it did not say where to go: $(cat "$WORK/said")"
-printf 'ok   with no browser it says where to go\n'
+grep -q 'still the initial one' "$WORK/said" || fail "it did not say the password is still the initial one: $(cat "$WORK/said")"
+grep -qF 'jingclaw-initial' "$WORK/said" && fail "it printed the initial password"
+printf 'ok   with no browser it says where to go, and that the password is still initial (without saying what it is)\n'
 
 # 3. The page is served, with a policy, and only to a name that is this machine.
 HEADERS=$(curl -s -D - -o "$WORK/page" "$BASE/ui/")
@@ -198,8 +203,9 @@ printf 'ok   the board shows what others wrote through vis with the arguments in
 
 # A key typed into the page has one place to be: the password box, read once
 # when it is sent and cleared whether the call worked or not.
-[ "$(grep -o 'type="password"' "$WORK/served-index.html" | wc -l | tr -d ' ')" = 1 ] || fail "the page has more or fewer than one password box"
-BOX=$(grep -o '<input[^>]*type="password"[^>]*>' "$WORK/served-index.html")
+# (The dashboard's own password boxes carry data-pw and are checked below.)
+BOX=$(grep -o '<input[^>]*type="password"[^>]*>' "$WORK/served-index.html" | grep -v 'data-pw=' || true)
+[ "$(printf '%s\n' "$BOX" | grep -c 'type="password"')" = 1 ] || fail "the page has more or fewer than one key box"
 case "$BOX" in *'autocomplete="off"'*) ;; *) fail "the password box lets the browser fill or keep it: $BOX" ;; esac
 case "$BOX" in *x-model*|*:value*|*@input*|*x-ref*) fail "the password box is bound to the page's state: $BOX" ;; esac
 [ "$(grep -o 'API.call("CredentialService", "PutCredential"' "$WORK/served-app.js" | wc -l | tr -d ' ')" = 1 ] || fail "a key is saved from more than the one place that clears the box"
@@ -209,6 +215,61 @@ for SINK in localStorage sessionStorage console. document.cookie; do
 	if grep -qF -- "$SINK" "$WORK/served-app.js"; then fail "app.js contains $SINK"; fi
 done
 printf 'ok   the page has one password box, bound to nothing, cleared after every save, and nothing in it stores or logs\n'
+
+# The dashboard's own password (login, "Dashboard access", the clear dialog) and
+# the restart: what the served page and its two open routes must keep, without a
+# browser. The password is read once into a local by the method that sends it,
+# cleared in a finally, and in no state, storage, address or log; the restart is
+# sent from one place, behind a dialog; and nothing says a restart signs the
+# browser out, because a session survives one.
+curl -s "$BASE/ui/api.js" > "$WORK/served-api.js"
+[ -s "$WORK/served-api.js" ] || fail "api.js is not served"
+[ "$(grep -o '<input[^>]*data-pw="[a-z]*"[^>]*>' "$WORK/served-index.html" | wc -l | tr -d ' ')" = 7 ] || fail "the page has more or fewer than the seven dashboard password boxes (the blocking change-the-password screen has two of its own)"
+for BOX in $(grep -o '<input[^>]*data-pw="[a-z]*"[^>]*>' "$WORK/served-index.html" | tr ' ' '~'); do
+	case "$BOX" in *'type="password"'*) ;; *) fail "a dashboard password box is not type=password: $BOX" ;; esac
+	case "$BOX" in *'autocomplete="current-password"'*|*'autocomplete="new-password"'*) ;; *) fail "a dashboard password box has no autocomplete=current-password or new-password: $BOX" ;; esac
+	case "$BOX" in *x-model*|*:value*|*@input*|*x-ref*|*value=*) fail "a dashboard password box is bound to the page's state: $BOX" ;; esac
+done
+for CLEAR in 'finally { password = ""; field.value = ""' 'finally { current = next = again = ""; form.reset()' 'finally { current = ""; field.value = ""'; do
+	grep -qF -- "$CLEAR" "$WORK/served-app.js" || fail "a dashboard password box is not cleared in a finally: $CLEAR"
+done
+for CALL in 'API.call("BrowserService", "SetDashboardPassword"' 'API.call("BrowserService", "ClearDashboardPassword"' 'API.call("ConfigService", "RestartDaemon"'; do
+	[ "$(grep -oF -- "$CALL" "$WORK/served-app.js" | wc -l | tr -d ' ')" = 1 ] || fail "the page does not make $CALL from exactly one place"
+done
+[ "$(grep -oF '@click="restartNow()"' "$WORK/served-index.html" | wc -l | tr -d ' ')" = 1 ] || fail "the restart is sent from more than the dialog's one button"
+[ "$(grep -oF '@click="askRestart()"' "$WORK/served-index.html" | wc -l | tr -d ' ')" -ge 4 ] || fail "the restart is not offered in the banner, the settings, the repair screen and the ChatGPT card"
+for ROUTE in /ui/pair /ui/auth /ui/login; do
+	[ "$(grep -oF "fetch(\"$ROUTE\"" "$WORK/served-api.js" | wc -l | tr -d ' ')" = 1 ] || fail "api.js does not reach $ROUTE from exactly one place"
+done
+grep -qF 'remember ? "local" : "session"' "$WORK/served-api.js" || fail "the login does not choose where the session is kept by the remember choice"
+grep -qF 'res.headers.get("Retry-After")' "$WORK/served-api.js" || fail "the login does not read how long a throttled attempt must wait"
+grep -qF 'x-init="init()"' "$WORK/served-index.html" && fail "the page starts itself twice"
+for WRONG in 連線會失效 連線已經失效 沒有重啟按鈕 沒有重啟的按鈕; do
+	grep -qF -- "$WRONG" "$WORK/served-index.html" "$WORK/served-app.js" "$WORK/served-schema.js" "$WORK/served-api.js" && fail "the page still says: $WRONG"
+done
+# The two routes a browser without a session may use: what the login screen asks.
+# A fresh deployment has the initial password, so a login with it is a SETUP
+# session: it can change the password and call nothing else.
+[ "$(curl -s "$BASE/ui/auth")" = '{"initial":true,"passwordSet":true}' ] || fail "a fresh daemon does not say its password is the initial one: $(curl -s "$BASE/ui/auth")"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"password":"anything at all"}' "$BASE/ui/login")" = 401 ] || fail "a wrong password is not refused"
+SETUP_REPLY=$(curl -s -X POST -H 'content-type: application/json' -d '{"password":"jingclaw-initial"}' "$BASE/ui/login")
+SETUP=$(printf '%s' "$SETUP_REPLY" | field 'd["token"]')
+[ "$(printf '%s' "$SETUP_REPLY" | field 'd["scope"]')" = setup ] || fail "the initial password did not give a setup session: $SETUP_REPLY"
+[ "$(status ConfigService/GetConfig "$SETUP" '{}')" = 403 ] || fail "a setup session can call ConfigService"
+[ "$(status SessionService/ListSessions "$SETUP" '{}')" = 403 ] || fail "a setup session can call SessionService"
+[ "$(status BrowserService/CreatePairing "$SETUP" '{}')" = 403 ] || fail "a setup session can make a pairing"
+[ "$(status BrowserService/ClearDashboardPassword "$SETUP" '{}')" = 403 ] || fail "a setup session can reset the password"
+[ "$(status BrowserService/SetDashboardPassword "$SETUP" '{"newPassword":"jingclaw-initial"}')" = 400 ] || fail "the initial password was accepted as the new password"
+NEWPW="dashboard-check-Zx3Cv7Bn"
+CHANGE=$(call BrowserService/SetDashboardPassword "$SETUP" "{\"newPassword\":\"$NEWPW\"}")
+CONTROL=$(printf '%s' "$CHANGE" | field 'd["token"]')
+[ "$(status ConfigService/GetConfig "$CONTROL" '{}')" = 200 ] || fail "the session a change from a setup session is answered with cannot call ConfigService: $CHANGE"
+[ "$(status ConfigService/GetConfig "$SETUP" '{}')" = 401 ] || fail "the setup session is still alive after the change"
+[ "$(curl -s "$BASE/ui/auth")" = '{"initial":false,"passwordSet":true}' ] || fail "the page is not told the password was changed"
+printf '%s\n' "$NEWPW" | jingclaw dashboard password --clear 2>/dev/null || fail "the password could not be reset from the command line"
+[ "$(status ConfigService/GetConfig "$CONTROL" '{}')" = 401 ] || fail "a reset left a session in"
+[ "$(curl -s "$BASE/ui/auth")" = '{"initial":true,"passwordSet":true}' ] || fail "a reset did not go back to the initial password"
+printf 'ok   the dashboard password boxes are bound to nothing and cleared in a finally, the restart is sent from one place behind a dialog, and the two open routes answer the login screen, and the initial password gives a setup session that can only change the password\n'
 
 # The settings are a page of their own (a section list and cards), and the
 # ChatGPT card shows the two addresses it handles as text only: the one to open
@@ -532,12 +593,17 @@ $(call ConfigService/GetInstructionFile "$LOCAL" '{"file":"INSTRUCTION_FILE_PERS
 }
 nothing_leaks "$LOCAL" "$GATEWAY" "$CODE" "$SESSION"
 
-# 12. A browser's access ends when the daemon stops. Nothing of it is kept.
+# 12. A browser's access survives a restart, and is kept as a hash: the token
+#     is not on disk, and a pairing code, which is memory only, is not either.
+[ "$(mode "$JINGCLAW_HOME/dashboard-sessions.json")" = 600 ] ||
+	fail "the sessions file is not mode 600"
+grep -qF -- "$SESSION" "$JINGCLAW_HOME/dashboard-sessions.json" && fail "a session token is on disk"
 kill "$DAEMON"; wait "$DAEMON" 2>/dev/null || true
 rm -f "$WORK/run/daemon.json"
 start
-[ "$(status SessionService/ListSessions "$SESSION" '{}')" = 401 ] || fail "a session outlived the daemon"
-printf 'ok   a session does not outlive the daemon\n'
+[ "$(status SessionService/ListSessions "$SESSION" '{}')" = 200 ] || fail "a session did not survive a restart"
+[ "$(status SessionService/ListSessions "not-a-session" '{}')" = 401 ] || fail "a made-up session was accepted after a restart"
+printf 'ok   a session survives a restart, kept as a hash and never as the token\n'
 
 # 13. The restart is what puts a saved change into effect, and the variables
 #     that arrive again with it do not undo what was saved.

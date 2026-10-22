@@ -71,9 +71,9 @@ type AgentProblem struct {
 
 // AgentState is what the daemon says about whether it is running an agent.
 //
-// Fixed at start. Settings are read once, and there is no restart to ask for,
-// so a daemon that came up without an agent stays that way until it is stopped
-// and started again; what an operator saves in between does not change it.
+// Fixed at start. Settings are read once, so a daemon that came up without an
+// agent stays that way until it is restarted (RestartDaemon, or stopped and
+// started again); what an operator saves in between does not change it.
 type AgentState struct {
 	// Repair is true for a daemon that could not build an agent and is serving
 	// only what is needed to fix the settings.
@@ -81,7 +81,15 @@ type AgentState struct {
 	Problems []AgentProblem
 
 	StartedAt time.Time
+
+	// Restart asks the process to restart and says how many runs that
+	// interrupts. Nil where a restart is not possible, which answers as an
+	// RPC that is not implemented.
+	Restart func() (inFlight int, err error)
 }
+
+// ErrRestartInProgress is what Restart returns for a second request.
+var ErrRestartInProgress = errors.New("a restart is already in progress")
 
 // ConfigServer lets a person read and change the settings.
 //
@@ -430,6 +438,23 @@ func (s *ConfigServer) GetAgentState(
 		resp.StartedAt = timestamppb.New(s.state.StartedAt)
 	}
 	return connect.NewResponse(resp), nil
+}
+
+func (s *ConfigServer) RestartDaemon(
+	_ context.Context,
+	_ *connect.Request[controlv1.RestartDaemonRequest],
+) (*connect.Response[controlv1.RestartDaemonResponse], error) {
+	if s.state.Restart == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("this daemon cannot restart itself"))
+	}
+	inFlight, err := s.state.Restart()
+	if errors.Is(err, ErrRestartInProgress) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&controlv1.RestartDaemonResponse{RunsInFlight: int32(inFlight)}), nil
 }
 
 // ── helpers ────────────────────────────────────────────────────────────

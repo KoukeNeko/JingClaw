@@ -1582,6 +1582,95 @@ func (x *GetAgentStateResponse) GetStartedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type RestartDaemonRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Meta          *RequestMeta           `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartDaemonRequest) Reset() {
+	*x = RestartDaemonRequest{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartDaemonRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartDaemonRequest) ProtoMessage() {}
+
+func (x *RestartDaemonRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartDaemonRequest.ProtoReflect.Descriptor instead.
+func (*RestartDaemonRequest) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *RestartDaemonRequest) GetMeta() *RequestMeta {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
+type RestartDaemonResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many runs the restart interrupts.
+	RunsInFlight  int32 `protobuf:"varint,1,opt,name=runs_in_flight,json=runsInFlight,proto3" json:"runs_in_flight,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartDaemonResponse) Reset() {
+	*x = RestartDaemonResponse{}
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartDaemonResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartDaemonResponse) ProtoMessage() {}
+
+func (x *RestartDaemonResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jingclaw_control_v1_config_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartDaemonResponse.ProtoReflect.Descriptor instead.
+func (*RestartDaemonResponse) Descriptor() ([]byte, []int) {
+	return file_jingclaw_control_v1_config_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *RestartDaemonResponse) GetRunsInFlight() int32 {
+	if x != nil {
+		return x.RunsInFlight
+	}
+	return 0
+}
+
 var File_jingclaw_control_v1_config_proto protoreflect.FileDescriptor
 
 const file_jingclaw_control_v1_config_proto_rawDesc = "" +
@@ -1684,7 +1773,11 @@ const file_jingclaw_control_v1_config_proto_rawDesc = "" +
 	"\x04mode\x18\x01 \x01(\tR\x04mode\x12>\n" +
 	"\bproblems\x18\x02 \x03(\v2\".jingclaw.control.v1.ConfigProblemR\bproblems\x129\n" +
 	"\n" +
-	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt*n\n" +
+	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"L\n" +
+	"\x14RestartDaemonRequest\x124\n" +
+	"\x04meta\x18\x01 \x01(\v2 .jingclaw.control.v1.RequestMetaR\x04meta\"=\n" +
+	"\x15RestartDaemonResponse\x12$\n" +
+	"\x0eruns_in_flight\x18\x01 \x01(\x05R\frunsInFlight*n\n" +
 	"\x0fInstructionFile\x12 \n" +
 	"\x1cINSTRUCTION_FILE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18INSTRUCTION_FILE_PERSONA\x10\x01\x12\x1b\n" +
@@ -1693,7 +1786,7 @@ const file_jingclaw_control_v1_config_proto_rawDesc = "" +
 	"\x1dSETTINGS_DOCUMENT_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18SETTINGS_DOCUMENT_CONFIG\x10\x01\x12\x1c\n" +
 	"\x18SETTINGS_DOCUMENT_AGENTS\x10\x02\x12\x1d\n" +
-	"\x19SETTINGS_DOCUMENT_PERSONA\x10\x032\xed\a\n" +
+	"\x19SETTINGS_DOCUMENT_PERSONA\x10\x032\xd5\b\n" +
 	"\rConfigService\x12Z\n" +
 	"\tGetConfig\x12%.jingclaw.control.v1.GetConfigRequest\x1a&.jingclaw.control.v1.GetConfigResponse\x12`\n" +
 	"\vCheckConfig\x12'.jingclaw.control.v1.CheckConfigRequest\x1a(.jingclaw.control.v1.CheckConfigResponse\x12`\n" +
@@ -1703,7 +1796,8 @@ const file_jingclaw_control_v1_config_proto_rawDesc = "" +
 	"\x12PutInstructionFile\x12..jingclaw.control.v1.PutInstructionFileRequest\x1a/.jingclaw.control.v1.PutInstructionFileResponse\x12{\n" +
 	"\x14ListDocumentVersions\x120.jingclaw.control.v1.ListDocumentVersionsRequest\x1a1.jingclaw.control.v1.ListDocumentVersionsResponse\x12u\n" +
 	"\x12GetDocumentVersion\x12..jingclaw.control.v1.GetDocumentVersionRequest\x1a/.jingclaw.control.v1.GetDocumentVersionResponse\x12f\n" +
-	"\rGetAgentState\x12).jingclaw.control.v1.GetAgentStateRequest\x1a*.jingclaw.control.v1.GetAgentStateResponseB\xdd\x01\n" +
+	"\rGetAgentState\x12).jingclaw.control.v1.GetAgentStateRequest\x1a*.jingclaw.control.v1.GetAgentStateResponse\x12f\n" +
+	"\rRestartDaemon\x12).jingclaw.control.v1.RestartDaemonRequest\x1a*.jingclaw.control.v1.RestartDaemonResponseB\xdd\x01\n" +
 	"\x17com.jingclaw.control.v1B\vConfigProtoP\x01ZGgithub.com/KoukeNeko/JingClaw/core/gen/go/jingclaw/control/v1;controlv1\xa2\x02\x03JCX\xaa\x02\x13Jingclaw.Control.V1\xca\x02\x13Jingclaw\\Control\\V1\xe2\x02\x1fJingclaw\\Control\\V1\\GPBMetadata\xea\x02\x15Jingclaw::Control::V1b\x06proto3"
 
 var (
@@ -1719,7 +1813,7 @@ func file_jingclaw_control_v1_config_proto_rawDescGZIP() []byte {
 }
 
 var file_jingclaw_control_v1_config_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_jingclaw_control_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_jingclaw_control_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_jingclaw_control_v1_config_proto_goTypes = []any{
 	(InstructionFile)(0),                 // 0: jingclaw.control.v1.InstructionFile
 	(SettingsDocument)(0),                // 1: jingclaw.control.v1.SettingsDocument
@@ -1746,58 +1840,63 @@ var file_jingclaw_control_v1_config_proto_goTypes = []any{
 	(*GetDocumentVersionResponse)(nil),   // 22: jingclaw.control.v1.GetDocumentVersionResponse
 	(*GetAgentStateRequest)(nil),         // 23: jingclaw.control.v1.GetAgentStateRequest
 	(*GetAgentStateResponse)(nil),        // 24: jingclaw.control.v1.GetAgentStateResponse
-	(*structpb.Struct)(nil),              // 25: google.protobuf.Struct
-	(*structpb.Value)(nil),               // 26: google.protobuf.Value
-	(*RequestMeta)(nil),                  // 27: jingclaw.control.v1.RequestMeta
-	(*timestamppb.Timestamp)(nil),        // 28: google.protobuf.Timestamp
+	(*RestartDaemonRequest)(nil),         // 25: jingclaw.control.v1.RestartDaemonRequest
+	(*RestartDaemonResponse)(nil),        // 26: jingclaw.control.v1.RestartDaemonResponse
+	(*structpb.Struct)(nil),              // 27: google.protobuf.Struct
+	(*structpb.Value)(nil),               // 28: google.protobuf.Value
+	(*RequestMeta)(nil),                  // 29: jingclaw.control.v1.RequestMeta
+	(*timestamppb.Timestamp)(nil),        // 30: google.protobuf.Timestamp
 }
 var file_jingclaw_control_v1_config_proto_depIdxs = []int32{
-	25, // 0: jingclaw.control.v1.GetConfigResponse.file:type_name -> google.protobuf.Struct
-	25, // 1: jingclaw.control.v1.GetConfigResponse.running:type_name -> google.protobuf.Struct
+	27, // 0: jingclaw.control.v1.GetConfigResponse.file:type_name -> google.protobuf.Struct
+	27, // 1: jingclaw.control.v1.GetConfigResponse.running:type_name -> google.protobuf.Struct
 	4,  // 2: jingclaw.control.v1.GetConfigResponse.overrides:type_name -> jingclaw.control.v1.ConfigOverride
-	26, // 3: jingclaw.control.v1.ConfigEdit.value:type_name -> google.protobuf.Value
-	27, // 4: jingclaw.control.v1.CheckConfigRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	28, // 3: jingclaw.control.v1.ConfigEdit.value:type_name -> google.protobuf.Value
+	29, // 4: jingclaw.control.v1.CheckConfigRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
 	5,  // 5: jingclaw.control.v1.CheckConfigRequest.edits:type_name -> jingclaw.control.v1.ConfigEdit
 	6,  // 6: jingclaw.control.v1.CheckConfigResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
 	7,  // 7: jingclaw.control.v1.CheckConfigResponse.diff:type_name -> jingclaw.control.v1.ConfigDiffLine
-	27, // 8: jingclaw.control.v1.WriteConfigRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	29, // 8: jingclaw.control.v1.WriteConfigRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
 	5,  // 9: jingclaw.control.v1.WriteConfigRequest.edits:type_name -> jingclaw.control.v1.ConfigEdit
 	6,  // 10: jingclaw.control.v1.WriteConfigResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
-	27, // 11: jingclaw.control.v1.ReplaceConfigTextRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	29, // 11: jingclaw.control.v1.ReplaceConfigTextRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
 	6,  // 12: jingclaw.control.v1.ReplaceConfigTextResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
 	0,  // 13: jingclaw.control.v1.GetInstructionFileRequest.file:type_name -> jingclaw.control.v1.InstructionFile
-	27, // 14: jingclaw.control.v1.PutInstructionFileRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	29, // 14: jingclaw.control.v1.PutInstructionFileRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
 	0,  // 15: jingclaw.control.v1.PutInstructionFileRequest.file:type_name -> jingclaw.control.v1.InstructionFile
-	28, // 16: jingclaw.control.v1.DocumentVersion.saved_at:type_name -> google.protobuf.Timestamp
+	30, // 16: jingclaw.control.v1.DocumentVersion.saved_at:type_name -> google.protobuf.Timestamp
 	1,  // 17: jingclaw.control.v1.ListDocumentVersionsRequest.document:type_name -> jingclaw.control.v1.SettingsDocument
 	18, // 18: jingclaw.control.v1.ListDocumentVersionsResponse.versions:type_name -> jingclaw.control.v1.DocumentVersion
 	1,  // 19: jingclaw.control.v1.GetDocumentVersionRequest.document:type_name -> jingclaw.control.v1.SettingsDocument
 	18, // 20: jingclaw.control.v1.GetDocumentVersionResponse.info:type_name -> jingclaw.control.v1.DocumentVersion
 	6,  // 21: jingclaw.control.v1.GetAgentStateResponse.problems:type_name -> jingclaw.control.v1.ConfigProblem
-	28, // 22: jingclaw.control.v1.GetAgentStateResponse.started_at:type_name -> google.protobuf.Timestamp
-	2,  // 23: jingclaw.control.v1.ConfigService.GetConfig:input_type -> jingclaw.control.v1.GetConfigRequest
-	8,  // 24: jingclaw.control.v1.ConfigService.CheckConfig:input_type -> jingclaw.control.v1.CheckConfigRequest
-	10, // 25: jingclaw.control.v1.ConfigService.WriteConfig:input_type -> jingclaw.control.v1.WriteConfigRequest
-	12, // 26: jingclaw.control.v1.ConfigService.ReplaceConfigText:input_type -> jingclaw.control.v1.ReplaceConfigTextRequest
-	14, // 27: jingclaw.control.v1.ConfigService.GetInstructionFile:input_type -> jingclaw.control.v1.GetInstructionFileRequest
-	16, // 28: jingclaw.control.v1.ConfigService.PutInstructionFile:input_type -> jingclaw.control.v1.PutInstructionFileRequest
-	19, // 29: jingclaw.control.v1.ConfigService.ListDocumentVersions:input_type -> jingclaw.control.v1.ListDocumentVersionsRequest
-	21, // 30: jingclaw.control.v1.ConfigService.GetDocumentVersion:input_type -> jingclaw.control.v1.GetDocumentVersionRequest
-	23, // 31: jingclaw.control.v1.ConfigService.GetAgentState:input_type -> jingclaw.control.v1.GetAgentStateRequest
-	3,  // 32: jingclaw.control.v1.ConfigService.GetConfig:output_type -> jingclaw.control.v1.GetConfigResponse
-	9,  // 33: jingclaw.control.v1.ConfigService.CheckConfig:output_type -> jingclaw.control.v1.CheckConfigResponse
-	11, // 34: jingclaw.control.v1.ConfigService.WriteConfig:output_type -> jingclaw.control.v1.WriteConfigResponse
-	13, // 35: jingclaw.control.v1.ConfigService.ReplaceConfigText:output_type -> jingclaw.control.v1.ReplaceConfigTextResponse
-	15, // 36: jingclaw.control.v1.ConfigService.GetInstructionFile:output_type -> jingclaw.control.v1.GetInstructionFileResponse
-	17, // 37: jingclaw.control.v1.ConfigService.PutInstructionFile:output_type -> jingclaw.control.v1.PutInstructionFileResponse
-	20, // 38: jingclaw.control.v1.ConfigService.ListDocumentVersions:output_type -> jingclaw.control.v1.ListDocumentVersionsResponse
-	22, // 39: jingclaw.control.v1.ConfigService.GetDocumentVersion:output_type -> jingclaw.control.v1.GetDocumentVersionResponse
-	24, // 40: jingclaw.control.v1.ConfigService.GetAgentState:output_type -> jingclaw.control.v1.GetAgentStateResponse
-	32, // [32:41] is the sub-list for method output_type
-	23, // [23:32] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	30, // 22: jingclaw.control.v1.GetAgentStateResponse.started_at:type_name -> google.protobuf.Timestamp
+	29, // 23: jingclaw.control.v1.RestartDaemonRequest.meta:type_name -> jingclaw.control.v1.RequestMeta
+	2,  // 24: jingclaw.control.v1.ConfigService.GetConfig:input_type -> jingclaw.control.v1.GetConfigRequest
+	8,  // 25: jingclaw.control.v1.ConfigService.CheckConfig:input_type -> jingclaw.control.v1.CheckConfigRequest
+	10, // 26: jingclaw.control.v1.ConfigService.WriteConfig:input_type -> jingclaw.control.v1.WriteConfigRequest
+	12, // 27: jingclaw.control.v1.ConfigService.ReplaceConfigText:input_type -> jingclaw.control.v1.ReplaceConfigTextRequest
+	14, // 28: jingclaw.control.v1.ConfigService.GetInstructionFile:input_type -> jingclaw.control.v1.GetInstructionFileRequest
+	16, // 29: jingclaw.control.v1.ConfigService.PutInstructionFile:input_type -> jingclaw.control.v1.PutInstructionFileRequest
+	19, // 30: jingclaw.control.v1.ConfigService.ListDocumentVersions:input_type -> jingclaw.control.v1.ListDocumentVersionsRequest
+	21, // 31: jingclaw.control.v1.ConfigService.GetDocumentVersion:input_type -> jingclaw.control.v1.GetDocumentVersionRequest
+	23, // 32: jingclaw.control.v1.ConfigService.GetAgentState:input_type -> jingclaw.control.v1.GetAgentStateRequest
+	25, // 33: jingclaw.control.v1.ConfigService.RestartDaemon:input_type -> jingclaw.control.v1.RestartDaemonRequest
+	3,  // 34: jingclaw.control.v1.ConfigService.GetConfig:output_type -> jingclaw.control.v1.GetConfigResponse
+	9,  // 35: jingclaw.control.v1.ConfigService.CheckConfig:output_type -> jingclaw.control.v1.CheckConfigResponse
+	11, // 36: jingclaw.control.v1.ConfigService.WriteConfig:output_type -> jingclaw.control.v1.WriteConfigResponse
+	13, // 37: jingclaw.control.v1.ConfigService.ReplaceConfigText:output_type -> jingclaw.control.v1.ReplaceConfigTextResponse
+	15, // 38: jingclaw.control.v1.ConfigService.GetInstructionFile:output_type -> jingclaw.control.v1.GetInstructionFileResponse
+	17, // 39: jingclaw.control.v1.ConfigService.PutInstructionFile:output_type -> jingclaw.control.v1.PutInstructionFileResponse
+	20, // 40: jingclaw.control.v1.ConfigService.ListDocumentVersions:output_type -> jingclaw.control.v1.ListDocumentVersionsResponse
+	22, // 41: jingclaw.control.v1.ConfigService.GetDocumentVersion:output_type -> jingclaw.control.v1.GetDocumentVersionResponse
+	24, // 42: jingclaw.control.v1.ConfigService.GetAgentState:output_type -> jingclaw.control.v1.GetAgentStateResponse
+	26, // 43: jingclaw.control.v1.ConfigService.RestartDaemon:output_type -> jingclaw.control.v1.RestartDaemonResponse
+	34, // [34:44] is the sub-list for method output_type
+	24, // [24:34] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_jingclaw_control_v1_config_proto_init() }
@@ -1812,7 +1911,7 @@ func file_jingclaw_control_v1_config_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jingclaw_control_v1_config_proto_rawDesc), len(file_jingclaw_control_v1_config_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   23,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

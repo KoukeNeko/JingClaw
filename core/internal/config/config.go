@@ -1703,6 +1703,17 @@ func (c Config) LogLevel() slog.Level {
 	return logLevels[strings.ToLower(c.Server.LogLevel)]
 }
 
+// LoopbackAddress is whether addr is written as host:port with a loopback host
+// and a port that can be listened on, which is what server.addr must be.
+func LoopbackAddress(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	number, err := strconv.Atoi(port)
+	return err == nil && number > 0 && number < 65536 && isLoopback(host)
+}
+
 func isLoopback(host string) bool {
 	switch host {
 	case "localhost", "127.0.0.1", "::1":

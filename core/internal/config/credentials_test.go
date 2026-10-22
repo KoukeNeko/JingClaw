@@ -110,7 +110,7 @@ func TestAFileNameTheDeploymentKeepsForItselfIsRefusedWhateverItsCase(t *testing
 	for _, name := range []string{
 		"config.toml", "Config.TOML", "AGENTS.md", "agents.md", "PERSONA.md", "persona.MD",
 		"workspace", "WORKSPACE", "data", "run", "log", "bin", "skills", "Skills",
-		"mcp-auth", "sandbox", "Sandbox", "chatgpt-auth.json", "ChatGPT-Auth.JSON",
+		"mcp-auth", "sandbox", "Sandbox", "chatgpt-auth.json", "ChatGPT-Auth.JSON", "dashboard-auth.json", "Dashboard-Sessions.json",
 		"config.toml.bak.1", "x.BAK.2", "gemini.bak.key",
 		// What a settings file is renamed to once it has been imported. It is the
 		// only copy of what it held, and a credential saved or deleted there would

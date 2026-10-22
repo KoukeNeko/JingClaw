@@ -969,6 +969,13 @@ func (r *Runtime) Wait(ctx context.Context, id domain.RunID) error {
 	}
 }
 
+// ActiveRuns is how many runs this process is driving right now.
+func (r *Runtime) ActiveRuns() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.active)
+}
+
 // Shutdown stops accepting work, interrupts everything still running, and
 // waits for every run goroutine to return.
 func (r *Runtime) Shutdown(ctx context.Context) error {

@@ -70,6 +70,13 @@ service ConfigService {
   // GetAgentState says whether the daemon is running an agent, and if it is
   // not, why. A page asks this before anything else.
   rpc GetAgentState(GetAgentStateRequest) returns (GetAgentStateResponse);
+
+  // RestartDaemon restarts the whole process, which is how a saved setting
+  // that waits for a restart takes effect. It answers first, then the process
+  // shuts down as it does for a stop and starts again from the same binary,
+  // with the same arguments and environment, on the same address when that is
+  // still free. Runs in flight are interrupted. Works with or without an agent.
+  rpc RestartDaemon(RestartDaemonRequest) returns (RestartDaemonResponse);
 }
 
 message GetConfigRequest {}
@@ -307,4 +314,13 @@ message GetAgentStateResponse {
   // Why there is no agent. Empty when one is running.
   repeated ConfigProblem problems = 2;
   google.protobuf.Timestamp started_at = 3;
+}
+
+message RestartDaemonRequest {
+  RequestMeta meta = 1;
+}
+
+message RestartDaemonResponse {
+  // How many runs the restart interrupts.
+  int32 runs_in_flight = 1;
 }

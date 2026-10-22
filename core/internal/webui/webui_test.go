@@ -211,7 +211,14 @@ func TestThePageDoesNotSpeakOfTheSettingsAsAFileOrAsLive(t *testing.T) {
 func TestAKeyTypedIntoThePageHasNowhereToLive(t *testing.T) {
 	index, app, api := page(t, "index.html"), page(t, "app.js"), page(t, "api.js")
 
-	boxes := regexp.MustCompile(`<input[^>]*type="password"[^>]*>`).FindAllString(index, -1)
+	// The dashboard's own password boxes carry data-pw and have a test of their
+	// own (TestTheDashboardPasswordHasNowhereToLive); this one is the key's.
+	var boxes []string
+	for _, box := range regexp.MustCompile(`<input[^>]*type="password"[^>]*>`).FindAllString(index, -1) {
+		if !strings.Contains(box, "data-pw=") {
+			boxes = append(boxes, box)
+		}
+	}
 	if len(boxes) != 1 {
 		t.Fatalf("the page has %d password boxes, and the key has one", len(boxes))
 	}
@@ -772,6 +779,263 @@ func TestTheChatGPTCardKeepsAddressesAndTokensOutOfThePage(t *testing.T) {
 	}
 }
 
+// The dashboard's password is typed into a box in the login form, in the
+// "Dashboard access" section or in the dialog that clears it. Each is read once
+// by the method that sends it, into a local variable, and emptied in a finally.
+// It is in no state the page keeps, no storage, no address and no log.
+func TestTheDashboardPasswordHasNowhereToLive(t *testing.T) {
+	index, app, api := page(t, "index.html"), page(t, "app.js"), page(t, "api.js")
+
+	boxes := regexp.MustCompile(`<input[^>]*data-pw="(\w+)"[^>]*>`).FindAllStringSubmatch(index, -1)
+	want := map[string]string{
+		"login": "current-password", "current": "current-password", "next": "new-password",
+		"again": "new-password", "clear": "current-password",
+	}
+	// next and again are in two forms: the one in the security section, and the
+	// blocking one that is all the page shows while the password is the initial one.
+	const boxCount = 7
+	if len(boxes) != boxCount {
+		t.Fatalf("the page has %d dashboard password boxes, and %d are meant", len(boxes), boxCount)
+	}
+	for _, box := range boxes {
+		kind := want[box[1]]
+		if kind == "" {
+			t.Errorf("an unexpected password box %q", box[1])
+			continue
+		}
+		if !strings.Contains(box[0], `type="password"`) || !strings.Contains(box[0], `autocomplete="`+kind+`"`) {
+			t.Errorf("the %q box is not a password box with autocomplete=%s: %s", box[1], kind, box[0])
+		}
+		for _, binding := range []string{"x-model", ":value", "x-bind:value", "@input", "x-on:input", "x-ref", "value="} {
+			if strings.Contains(box[0], binding) {
+				t.Errorf("the %q box has %s, which would keep what is typed in the page's state", box[1], binding)
+			}
+		}
+	}
+	// No other box takes a password, and the login's remember choice is a checkbox.
+	if got := strings.Count(index, `type="password"`); got != boxCount+1 {
+		t.Errorf("the page has %d password boxes, and %d are meant (the key's, and these)", got, boxCount+1)
+	}
+
+	// Each sender reads its boxes into locals and empties them in a finally.
+	for name, clears := range map[string][]string{
+		"async doLogin(field) {":       {`finally { password = ""; field.value = ""`},
+		"async setPassword(form) {":    {`finally { current = next = again = ""; form.reset()`},
+		"async clearPassword(field) {": {`finally { current = ""; field.value = ""`},
+	} {
+		body := method(t, app, name)
+		for _, clear := range clears {
+			if !strings.Contains(body, clear) {
+				t.Errorf("%s does not clear what was typed in a finally (%s)", name, clear)
+			}
+		}
+		// A local, never a property: nothing here assigns a typed value to the state.
+		if kept := regexp.MustCompile(`this\.[\w.]+\s*=\s*(password|current|next|again|field\.value)\b`).FindString(body); kept != "" {
+			t.Errorf("%s keeps a password in the state: %s", name, kept)
+		}
+	}
+	// The state objects the page keeps have no field for a password.
+	for _, field := range []string{"login: {", "pw: {"} {
+		start := strings.Index(app, "      "+field)
+		if start < 0 {
+			t.Fatalf("app.js has no %s state", field)
+		}
+		line, _, _ := strings.Cut(app[start:], "\n")
+		if regexp.MustCompile(`(?i)pass(word)?\s*:|secret|current\s*:|next\s*:`).MatchString(line) {
+			t.Errorf("the state %s has a field for a password: %s", field, line)
+		}
+	}
+
+	// The blocking screen reuses setPassword (so it clears its boxes the same
+	// way) and has no box for a current password: the initial one is never typed.
+	mustForm := regexp.MustCompile(`(?s)<form[^>]*mustf[^>]*>.*?</form>`).FindString(index)
+	if mustForm == "" || !strings.Contains(mustForm, `@submit.prevent="setPassword($event.target)"`) ||
+		strings.Contains(mustForm, `data-pw="current"`) || strings.Count(mustForm, `type="password"`) != 2 {
+		t.Errorf("the change-the-password screen is not a two-box form sent by setPassword: %s", mustForm)
+	}
+	// While the password is the initial one nothing is loaded: no start() until
+	// the change is done, and the session in that state is not stored.
+	for _, want := range []string{`holdForChange() {`, `if (scope === "setup") this.holdForChange();`, `if (this.must) {`} {
+		if !strings.Contains(app, want) {
+			t.Errorf("app.js lacks %q", want)
+		}
+	}
+	if hold := method(t, app, "holdForChange() {"); strings.Contains(hold, "start(") || !strings.Contains(hold, "this.paired = false") {
+		t.Errorf("holdForChange starts the app or leaves the page paired: %s", hold)
+	}
+	if !strings.Contains(apiMethod(t, api, "async login(password, remember) {"), `if (granted.scope === "setup") return "setup";`) {
+		t.Error("a setup session is stored; it is meant to be held in memory only")
+	}
+	// The initial password is never on the page: the hint names the variable and
+	// the documentation, and there is no value for it anywhere in the assets.
+	if !strings.Contains(index, "第一次登入使用初始密碼：環境變數 JINGCLAW_DASHBOARD_PASSWORD 的值，沒設就是文件裡寫的固定值") {
+		t.Error("the login screen does not give the hint about the initial password")
+	}
+	for _, name := range []string{"index.html", "app.js", "api.js", "schema.js"} {
+		if strings.Contains(page(t, name), "jingclaw-initial") {
+			t.Errorf("%s holds the initial password", name)
+		}
+	}
+	// Reset, not clear: the label and the dialog say what it does.
+	if strings.Contains(index, "清除密碼") || strings.Contains(index, "清除登入密碼") || strings.Count(index, "重設為初始密碼") < 3 {
+		t.Error("the security section still talks about clearing the password, or does not say reset to the initial one")
+	}
+
+	// It is sent from exactly three places: the login route, and the two calls.
+	if got := strings.Count(api, `fetch("/ui/login"`); got != 1 {
+		t.Errorf("api.js posts a password to /ui/login in %d places, and one is meant", got)
+	}
+	login := apiMethod(t, api, "async login(password, remember) {")
+	if strings.Count(login, "password") != 2 || !strings.Contains(login, "JSON.stringify({ password })") {
+		t.Errorf("login uses the password somewhere other than its parameter and the request body: %s", login)
+	}
+	for call, n := range map[string]int{
+		`API.call("BrowserService", "SetDashboardPassword"`:   1,
+		`API.call("BrowserService", "ClearDashboardPassword"`: 1,
+	} {
+		if got := strings.Count(app, call); got != n {
+			t.Errorf("app.js has %d of %s, and %d is meant", got, call, n)
+		}
+	}
+	// Used only by methods that clear their boxes.
+	for _, name := range []string{"SetDashboardPassword", "ClearDashboardPassword"} {
+		if strings.Contains(index, name) || strings.Contains(api, name) {
+			t.Errorf("%s is called from somewhere that does not clear the boxes", name)
+		}
+	}
+
+	// Nothing the page keeps outlives it or reaches a log, except the session
+	// token, which api.js keeps in the storage the person chose.
+	for name, text := range map[string]string{"app.js": app, "index.html": index} {
+		for _, sink := range []string{"localStorage", "sessionStorage", "console.", "document.cookie", "location.hash =", "history.pushState", "location.search ="} {
+			if strings.Contains(text, sink) {
+				t.Errorf("%s uses %s", name, sink)
+			}
+		}
+	}
+	if strings.Contains(api, "console.") || strings.Contains(api, "password:") {
+		t.Error("api.js logs, or keeps a password in an object")
+	}
+	// The remember choice is where the token goes: local when on, session when off.
+	if !strings.Contains(api, `remember ? "local" : "session"`) {
+		t.Error("login does not choose the storage by the remember choice")
+	}
+	if !strings.Contains(index, `x-model="login.remember"`) || !strings.Contains(app, "remember: true") {
+		t.Error("the remember choice is not a checkbox that starts on")
+	}
+	// A throttled login shows the wait the daemon gave and disables the button.
+	if !strings.Contains(api, `res.headers.get("Retry-After")`) || !strings.Contains(index, `:disabled="login.busy || login.wait > 0"`) {
+		t.Error("a throttled login does not read Retry-After and disable the button")
+	}
+	// A token the daemon rejects is dropped before the page reloads, so the
+	// reload lands on the login screen and cannot loop.
+	if !regexp.MustCompile(`(?s)status === 401\) \{\s*api\.forget\(\);`).MatchString(api) {
+		t.Error("api.js does not forget a rejected session before the page reloads")
+	}
+	// Nothing says there is no restart button, or that a restart signs the browser out.
+	for _, name := range []string{"index.html", "app.js", "schema.js", "api.js"} {
+		text := page(t, name)
+		for _, phrase := range []string{"連線會失效", "連線已經失效", "沒有重啟的按鈕", "沒有重啟按鈕", "重啟後這個瀏覽器的連線"} {
+			if strings.Contains(text, phrase) {
+				t.Errorf("%s still says %q, which a restart no longer does", name, phrase)
+			}
+		}
+	}
+}
+
+// The restart is asked for in one place, after a dialog that says what it
+// does, and every other button only opens that dialog.
+func TestTheRestartIsConfirmedBeforeItIsSent(t *testing.T) {
+	index, app := page(t, "index.html"), page(t, "app.js")
+
+	if got := strings.Count(app, `API.call("ConfigService", "RestartDaemon"`); got != 1 {
+		t.Fatalf("app.js restarts the daemon from %d places, and one is meant", got)
+	}
+	send := method(t, app, "async restartNow() {")
+	if !strings.Contains(send, `API.call("ConfigService", "RestartDaemon"`) {
+		t.Error("RestartDaemon is not called from restartNow")
+	}
+	// It refuses to run unless the dialog is open at its confirm step, and takes
+	// the step away before it awaits, so a second press does not send another.
+	guard, step, call := strings.Index(send, `this.rs.phase !== "confirm"`), strings.Index(send, `this.rs.phase = "sending"`), strings.Index(send, "await API.call(")
+	if guard < 0 || step < guard || call < step {
+		t.Errorf("restartNow does not check the confirm step and leave it before the call: %s", send)
+	}
+	if got := strings.Count(index, `@click="restartNow()"`); got != 1 {
+		t.Errorf("index.html sends the restart from %d places, and the dialog's button is the one", got)
+	}
+	if got := strings.Count(index, `@click="askRestart()"`); got < 4 {
+		t.Errorf("index.html opens the restart dialog from %d places, and the banner, the header, the repair screen and the ChatGPT card are meant", got)
+	}
+	// The dialog says what happens before it asks: settings take effect, runs are
+	// interrupted (with the count), the login stays.
+	for _, text := range []string{"已儲存的設定在重啟後生效", "會中斷它們", `x-text="counts.run"`, "登入不受影響"} {
+		if !strings.Contains(index, text) {
+			t.Errorf("the restart dialog does not say %q", text)
+		}
+	}
+	// It waits for the daemon with a bounded probe, not for ever on one request,
+	// and says what to do by hand once a minute has passed.
+	wait := method(t, app, "async waitBack(before) {")
+	if !strings.Contains(wait, `"GetAgentState", {}, 3000`) || !strings.Contains(wait, "this.rs.secs >= 60") {
+		t.Errorf("waitBack does not probe with a timeout and give up waiting quietly after 60 seconds: %s", wait)
+	}
+	if !strings.Contains(index, "jingclaw stop</code>，再執行 <code>jingclaw</code>，看它印出的訊息") {
+		t.Error("the restart dialog gives no command-line fallback when the daemon does not return")
+	}
+	// A restart already under way is waited for, not reported as a failure.
+	if !strings.Contains(send, `"failed_precondition"`) {
+		t.Error("restartNow does not treat a restart in progress as one to wait for")
+	}
+	// The dialog cannot be dismissed while the request or the wait is under way.
+	if closing := method(t, app, "closeRestart() {"); !strings.Contains(closing, `"sending"`) || !strings.Contains(closing, `"wait"`) {
+		t.Errorf("closeRestart can close the dialog during the restart: %s", closing)
+	}
+}
+
+// The page asks only for the pages the daemon serves without a credential.
+func TestThePageReachesOnlyTheRoutesItIsMeantTo(t *testing.T) {
+	api := page(t, "api.js")
+
+	found := map[string]int{}
+	for _, m := range regexp.MustCompile(`fetch\("(/[^"]*)"`).FindAllStringSubmatch(api, -1) {
+		found[m[1]]++
+	}
+	for _, route := range []string{"/ui/pair", "/ui/auth", "/ui/login"} {
+		if found[route] != 1 {
+			t.Errorf("api.js fetches %s in %d places, and one is meant", route, found[route])
+		}
+		delete(found, route)
+	}
+	delete(found, "")
+	if len(found) != 0 {
+		t.Errorf("api.js fetches routes the page was not built against: %v", found)
+	}
+	if !strings.Contains(api, `fetch(PREFIX + service + "/" + method`) {
+		t.Error("api.js no longer makes its calls through the one function that handles a 401")
+	}
+	// Per service: what the page may call on the services the password and the
+	// restart added to.
+	app := page(t, "app.js")
+	for service, allowed := range map[string][]string{
+		"BrowserService": {"SetDashboardPassword", "ClearDashboardPassword"},
+	} {
+		got := map[string]int{}
+		for _, call := range regexp.MustCompile(`API\.call\("`+service+`", "(\w+)"`).FindAllStringSubmatch(app, -1) {
+			got[call[1]]++
+		}
+		for _, name := range allowed {
+			if got[name] != 1 {
+				t.Errorf("app.js calls %s/%s in %d places, and one is meant", service, name, got[name])
+			}
+			delete(got, name)
+		}
+		for name := range got {
+			t.Errorf("app.js calls %s/%s, which the page was not built against (the page never makes a pairing)", service, name)
+		}
+	}
+}
+
 // The look of the settings page is defined in one place, at the top of the
 // stylesheet, so that a card, a toggle and a pill are the same everywhere.
 func TestTheSettingsPageTokensAreDefinedOnce(t *testing.T) {
@@ -805,6 +1069,22 @@ func method(t *testing.T, script, name string) string {
 	end := strings.Index(rest, "\n      },")
 	if end < 0 {
 		t.Fatalf("app.js has no end for %s", name)
+	}
+	return rest[:end]
+}
+
+// apiMethod is one of api.js's methods, which sit one level up from app.js's.
+func apiMethod(t *testing.T, script, name string) string {
+	t.Helper()
+
+	start := strings.Index(script, "\n    "+name)
+	if start < 0 {
+		t.Fatalf("api.js has no %s, and this test reads it", name)
+	}
+	rest := script[start+1:]
+	end := strings.Index(rest, "\n    },")
+	if end < 0 {
+		t.Fatalf("api.js has no end for %s", name)
 	}
 	return rest[:end]
 }
