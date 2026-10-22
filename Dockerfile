@@ -7,7 +7,7 @@
 # though the operator had chosen them, and from then on could not be told
 # apart from what they did choose.
 
-FROM golang:1.26-bookworm AS build
+FROM golang:1.27-bookworm AS build
 
 WORKDIR /src
 

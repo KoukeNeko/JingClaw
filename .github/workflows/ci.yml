@@ -11,7 +11,7 @@ permissions:
 
 env:
   BUF_VERSION: 1.72.0
-  GO_VERSION: "1.26"
+  GO_VERSION: "1.27"
 
 jobs:
   # The protobuf files are the contract shared by the Go core and, later, the
