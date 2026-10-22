@@ -1,6 +1,6 @@
 # Where JingClaw is
 
-Updated 2026-10-14.
+Updated 2026-10-23.
 
 ## Done
 
@@ -794,8 +794,9 @@ write, and the settings file's backups are gone. That the instruction files are 
 entry on identity has it, was already wrong: they were read when the daemon
 started. All three documents are read once, then, and a saved change shows as
 saved and not running yet — the hash of the saved text against the hash of the
-text the process started from — until `jingclaw stop` and `jingclaw`. A restart
-also ends the browser's access to the dashboard.
+text the process started from — until a restart (`jingclaw stop` and `jingclaw`,
+or later the page's own button). At the time a restart also ended the browser's
+access; it no longer does (see "Restart and a dashboard password").
 
 `JINGCLAW_CONFIG`, `JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` keep their meaning
 and their rule, with a row where there was a file: whole documents, an optional
@@ -841,8 +842,8 @@ removed behaviour used to hold — a daemon with no key exits, a sandbox it cann
 provide exits — are now that the daemon is in repair mode and answers 404 for
 the session service.
 
-What is deliberately not here: a restart from the page (there is no restart
-protocol; a person runs `jingclaw stop` and `jingclaw`); reloading settings
+What is deliberately not here: (a restart from the page was added later: see
+"Restart and a dashboard password", 2026-10-15); reloading settings
 without one; hiding `mcp.servers` headers and environment values in the text
 the dashboard shows, which is whole, and in the twenty versions kept; and
 reaching the dashboard from inside a container, where the daemon is on loopback,
@@ -898,6 +899,89 @@ taking a context and returning when it ends).
   container and checks exit 0, the "stopped" line and no leftover file.
   `verify-one-process.sh` is new; `verify-console-owns-it.sh` now asserts one
   process in place of the supervisor/daemon/watchdog tree.
+
+**The dashboard password starts as an initial one (2026-10-23; supersedes
+"Password login" under 2026-10-15 where they differ).** With no
+`dashboard-auth.json` the password is the initial one: `JINGCLAW_DASHBOARD_PASSWORD`
+if it is valid (10 to 256 characters; if set and invalid, one WARN without the
+value and the fixed default), otherwise `jingclaw-initial`. The page makes the
+operator change it at first login.
+
+- **State.** No file is the initial state; a change stores the salted hash and
+  ends it, after which the environment variable is ignored. `GET /ui/auth` is
+  `{"initial": bool, "passwordSet": true}`. `ClearDashboardPassword` (CLI
+  `--clear`, page label "reset to the initial password") deletes the file,
+  returns to initial and revokes every session, the caller's too. The new
+  password must differ from the initial one (failed precondition) and be 10 to
+  256 characters; no current password is asked for while the state is initial.
+- **Setup session.** A login with the initial password returns scope `setup`:
+  memory only, 15 minutes, at most 16, never persisted. `AuthMiddleware` allows
+  that scope `BrowserService/SetDashboardPassword` and nothing else (method-level,
+  default deny; a test walks every method of every service). That call, from a
+  setup session, returns a fresh control session (`token`, `expires_at` added to
+  `SetDashboardPasswordResponse`), and every other session, setup ones included, is
+  revoked. Wrong guesses share the existing throttle. A link from
+  `jingclaw dashboard` still gives a full control session; the page forces the
+  change anyway while the state is initial.
+- **Page.** The login screen is always the password form, with a hint about the
+  initial password (neither value printed). After a login or a pairing in the
+  initial state the page shows only a "change the password to continue" form, which
+  needs only `SetDashboardPassword`, and loads nothing else. A stored session that a
+  reset revoked lands on the login screen. `jingclaw dashboard` and `--print` say on
+  stderr that the password is still initial.
+- **Log.** `dashboard password: initial (change it at first login)` at start (with
+  `from environment` or `built-in default`), `dashboard password changed`,
+  `dashboard password reset to the initial one`. Never a value.
+- **Residual risk, not removed.** Until it is changed, anyone who can reach the
+  loopback port (another local user, a tunnel) can use the initial password to set
+  the password first and take over the dashboard. On a shared machine set
+  `JINGCLAW_DASHBOARD_PASSWORD` to a secret value and change it at once. A password
+  file that cannot be read (wrong mode, not a record) also puts the daemon back in
+  the initial state, with a warning.
+- **Verified** with unit tests, `scripts/verify-restart.sh`,
+  `scripts/verify-dashboard.sh` and a real browser (Chrome, headless): the forced
+  change screen after a login and after a pairing, mismatch, too short, equal to
+  the initial, the environment variable, reset, throttling, 700 and 390 px.
+
+**Restart and a dashboard password (2026-10-15).** The page can restart the
+daemon, and a browser can sign in with a password instead of a `#pair=` link.
+
+- **`ConfigService.RestartDaemon`** (control scope; mounted with and without an
+  agent, through the one service list). It answers with how many runs are in
+  flight, then, after a quarter of a second, ends the process the way SIGTERM
+  does (gateway, then daemon, discovery file removed) and `main` runs the same
+  binary again with the same arguments and environment. Unix: `syscall.Exec`, so
+  the pid, the terminal and a supervisor's hold on it stay. Windows: the new
+  process is started and the old one exits, so the pid changes and a console it
+  was started from is shared for a moment; not exercised here. The old address
+  goes in `JINGCLAW_RESTART_ADDR`, which the daemon tries first (loopback only,
+  validated like `server.addr`, removed from the environment at start, so
+  programs it starts do not inherit it) and gives up on, for the configured
+  address, after three seconds. A second request while one is under way is refused
+  (failed precondition). Runs in flight are interrupted, as for any shutdown.
+  Works for `jingclaw`, `jingclaw daemon`, and repair mode. Not tried with a
+  console on a terminal beyond `verify-console-owns-it.sh` still passing.
+- **Password login.** `GET /ui/auth` returns `{"passwordSet": bool}` and
+  `POST /ui/login {"password"}` returns what `/ui/pair` does, both behind the
+  loopback host check. Origin, when sent, must match Host; the body must be
+  JSON and is bounded; a wrong password and no password are the same 401, with
+  the same work done. Failures are counted for everybody together (five, then 1s
+  doubling to 60s, answered 429 with `Retry-After`, reset by a success or ten
+  quiet minutes). `BrowserService.SetDashboardPassword` and
+  `ClearDashboardPassword` (control scope; the current password is required when
+  one is set, and counts against the same throttle) and `jingclaw dashboard
+  password [--clear]`. Ten to 256 characters. PBKDF2-HMAC-SHA256, 600,000
+  iterations, from the standard library (`crypto/pbkdf2`, Go 1.24), salt and
+  parameters in `dashboard-auth.json`, mode 600; no new dependency. A change or a
+  clear signs out every other session.
+- **Sessions survive a restart.** Their hashes and expiry are in
+  `dashboard-sessions.json`, mode 600, loaded at start with the expired ones
+  dropped; sixteen at most, the oldest giving way. Pairing codes are still memory
+  only. Both file names are reserved in the credential-file rule.
+- **Not done:** the page's login form, password settings and restart button (the
+  API is there); a container still cannot reach the dashboard, though its process
+  can now restart itself in place; the Windows restart is untested.
+  `scripts/verify-restart.sh` is new.
 
 **Sign in with ChatGPT and a settings page of cards (2026-10-15).** The model
 can be served from a signed-in ChatGPT plan instead of a key, and the settings

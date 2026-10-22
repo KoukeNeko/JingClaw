@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/KoukeNeko/JingClaw/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/KoukeNeko/JingClaw/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI"></a>
   <a href="https://github.com/KoukeNeko/JingClaw/pkgs/container/jingclaw"><img alt="Container image" src="https://img.shields.io/badge/GHCR-amd64_%C2%B7_arm64-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
-  <img alt="Go 1.26" src="https://img.shields.io/badge/GO-1.26+-00ADD8?style=for-the-badge&logo=go&logoColor=white">
+  <img alt="Go 1.27" src="https://img.shields.io/badge/GO-1.27.3+-00ADD8?style=for-the-badge&logo=go&logoColor=white">
   <img alt="Preview" src="https://img.shields.io/badge/STATUS-PREVIEW-E8A33D?style=for-the-badge">
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/LICENSE-MIT-4CAF50?style=for-the-badge&logo=github"></a>
 </p>
@@ -45,7 +45,7 @@ gateway，並給你一個 console 看著它們。在另一個終端機再跑一�
 第一次執行還沒有模型、也還沒有聊天帳號。它會先用一個離線的替身代替模型，並說明在
 有 bot token 之前聊天是關著的。設定不是讓你編輯的檔案：它們存在 daemon 的資料庫裡，
 要改就到儀表板。執行 `jingclaw dashboard`，在那裡選好 provider、填入金鑰（或用 ChatGPT 登入）和 bot
-token，重啟一次（`jingclaw stop`，再 `jingclaw`），就可以在 Discord 跟它說話。
+token，重啟一次（儀表板有重啟鍵；用 `jingclaw stop` 再 `jingclaw` 也行），就可以在 Discord 跟它說話。
 
 ```bash
 jingclaw status      # 有沒有在跑，跑在哪
@@ -121,6 +121,6 @@ Windows 上也通過了。
 
 ## 需求
 
-建置需要 Go 1.26+。一個 provider——Gemini、Ollama、Anthropic、ChatGPT 帳號（還沒對實際服務驗證過，見上），或任何說
+建置需要 Go 1.27.3+。一個 provider——Gemini、Ollama、Anthropic、ChatGPT 帳號（還沒對實際服務驗證過，見上），或任何說
 OpenAI 那套格式的服務——想要聊天那一半的話還需要一個 Discord bot token。
 macOS、Linux 和 Windows，但要注意上面狀態那節寫的但書。

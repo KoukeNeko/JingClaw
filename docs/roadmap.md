@@ -50,8 +50,9 @@ the settings and the credentials and nothing that runs an agent, and says why;
 nor the console. A database that will not open is still fatal, because without
 it there is nowhere to correct anything.
 
-Not done, and said so: restarting from the page (it is `jingclaw stop`, then
-`jingclaw`, from a terminal, and a restart signs the browser out); reloading
+Not done, and said so: (restarting from the page and a password sign-in are
+done: see STATUS, 2026-10-15; the password now starts as an initial one that the
+page makes you change, STATUS 2026-10-23); reloading
 settings without a restart; hiding the headers and environment values typed
 into `mcp.servers` in the text the page shows; and reaching the dashboard from
 inside a container, where it is on the container's own loopback address.
@@ -72,7 +73,7 @@ Created on first run. Credentials go in beside them, mode 600.
 The settings are not files. The configuration, `AGENTS` and `PERSONA` are three
 documents in the database, each kept as the text it was given and edited in the
 dashboard; the daemon reads them once, when it starts, and the page marks a
-saved change as not running yet until `jingclaw stop` and `jingclaw`. A
+saved change as not running yet until a restart (the page's button, or `jingclaw stop` and `jingclaw`). A
 deployment that comes from older versions has them as `config.toml`,
 `AGENTS.md` and `PERSONA.md` in this directory: the first start imports each one
 and renames it `<name>.imported`, and never deletes it.

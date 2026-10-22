@@ -59,9 +59,49 @@ changing the saved text would do nothing.
 Settings are read when the daemon starts and not again: `config`, `persona`
 and `agents` alike. A change saved while it runs is saved and not running yet,
 and the page says so for each document whose saved text differs from the text
-the running process started with. It takes effect after `jingclaw stop`, then
-`jingclaw`. A restart also ends the browser's access to the dashboard, which
-the daemon holds and which ends with it; `jingclaw dashboard` gives a new link.
+the running process started with. It takes effect after a restart: the
+dashboard has a restart button, and `jingclaw stop` then `jingclaw` still works.
+A restart shuts the process down as a stop does and starts the same binary again
+with the same arguments and environment, on the same address when it is free;
+runs in flight are interrupted, and the page says how many. A browser stays
+signed in across it: its session is kept (as a hash, never the token) in
+`dashboard-sessions.json` in the deployment directory, mode 600.
+
+### The dashboard password
+
+A password can stand in for the `#pair=` link. There is always one. With no
+`dashboard-auth.json` it is the **initial password**: `JINGCLAW_DASHBOARD_PASSWORD`
+when that is set to ten to 256 characters, otherwise the fixed `jingclaw-initial`.
+A set value that is not valid is ignored with one warning in the log (the value
+is not in it) and the fixed one is used. The start logs `dashboard password:
+initial (change it at first login)` and whether it came from the environment or
+the built-in default, never the value.
+
+A login with the initial password is a *setup session*: 15 minutes, memory only,
+never written to disk, and allowed one call, `BrowserService.SetDashboardPassword`
+(a method-level allow-list; every other service and method answers 403). The
+reply to that call carries a fresh control session, so the page goes on without
+another login, and every other session is signed out. The page forces the change
+at first login; it also does so for a browser let in by the `#pair=` link while
+the password is still initial.
+
+Set it from the page or with `jingclaw dashboard password` (the new password on
+standard input, no echo on a terminal), ten to 256 characters and not the initial
+one; the command authenticates as the operator, so it needs no initial password.
+Only a salted PBKDF2-HMAC-SHA256 hash is kept, with its parameters, in
+`dashboard-auth.json` (mode 600); never in the database, a log or a reply. From
+then on `JINGCLAW_DASHBOARD_PASSWORD` is not looked at: it is a starting value and
+never an override. `jingclaw dashboard password --clear` (the page: "reset to the
+initial password") deletes the file, returns to the initial state and signs out
+every browser. Wrong guesses, at the initial password too, are throttled for
+everybody together (five, then a growing wait up to a minute). `GET /ui/auth`
+answers `{"initial": bool, "passwordSet": true}` and never a password.
+
+Residual risk: until the password is changed, anyone who can reach the loopback
+port (another local user, a tunnel) can use the initial password to set the
+password first and so take over the dashboard. On a shared machine set
+`JINGCLAW_DASHBOARD_PASSWORD` to a secret value before the first start, and change
+it at once.
 
 ### Saving, and versions
 
@@ -153,7 +193,8 @@ and the pairing of a browser), on loopback whatever `server.addr` says, with no
 agent, no gateway and no tools, so nothing in it can act. It says why where it
 starts, in `jingclaw dashboard` before it prints the link and on the first
 screen of the page, and `jingclaw status` shows the mode. Fix it there, then
-`jingclaw stop` and `jingclaw`: there is no restart from the page. A database
+the page's restart button (`RestartDaemon`), which works in repair mode too, or
+`jingclaw stop` and `jingclaw`. A database
 that will not open, or a `JINGCLAW_CONFIG` that cannot be used, still ends the
 start.
 

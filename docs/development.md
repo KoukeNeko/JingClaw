@@ -4,7 +4,7 @@ Building it, and the checks that decide whether a change is finished.
 
 ## Build
 
-Requires Go 1.26+ and [buf](https://buf.build) 1.72+ (only for changing the
+Requires Go 1.27.3+ and [buf](https://buf.build) 1.72+ (only for changing the
 proto files).
 
 ```bash

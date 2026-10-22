@@ -135,9 +135,30 @@ state of its own, and decides nothing the terminal could not.
 
 The link `jingclaw dashboard` prints works once, for a minute. A browser is not
 given the credential the command line uses; it trades the link for one of its
-own, kept only in that tab, which ends when the daemon stops or after twelve
-hours. Run the command again to let another browser in, or the same one after a
-restart. It cannot be reached from inside a container yet: the daemon listens
+own, kept only in that tab, which lasts twelve hours and survives a restart.
+Run the command again to let another browser in.
+
+A browser can also sign in with the dashboard password, with no link. Until you
+have changed it the password is the **initial password**: the value of
+`JINGCLAW_DASHBOARD_PASSWORD` when that is set (ten to 256 characters), otherwise
+the fixed value `jingclaw-initial`. The login page says so and does not print
+either. Signing in with it only lets you change the password: the page shows one
+screen, "change the password to continue", and nothing else until it is done (a
+link from `jingclaw dashboard` gets the same screen while the password is still
+the initial one). The new password must be ten to 256 characters and not the
+initial one. Changing it signs every other browser out, and from then on the
+environment variable is ignored. `jingclaw dashboard password` changes it from
+the command line with no need to know the initial one, and `--clear` (on the
+page, "reset to the initial password") puts it back to the initial password and
+signs out every browser, this one included.
+
+**Until you change it, anyone who can reach the daemon's loopback port, such as
+another user on the machine or a tunnel to it, can sign in with the initial
+password and set the password first, and so take over the dashboard.** On a
+shared machine set `JINGCLAW_DASHBOARD_PASSWORD` to a secret value before the
+first start, and change it at once. Signing in with the initial password gives a
+setup session that lasts 15 minutes, is kept in memory only, and can call
+nothing except the password change. It cannot be reached from inside a container yet: the daemon listens
 on loopback there and nothing publishes that, so a container's settings come in
 through `JINGCLAW_CONFIG`, `JINGCLAW_PERSONA` and `JINGCLAW_AGENTS` on its first
 start, and [`container.md`](container.md) says how.
@@ -200,7 +221,7 @@ To sign in:
 3. The browser is sent back to `127.0.0.1:<port>` and the card reports that you
    are signed in. Pick the model from the list the account can use, set the
    provider to ChatGPT (the card has a button for it), write, and restart:
-   `jingclaw stop`, then `jingclaw`. The sign-in is read when the daemon starts,
+   restart (the page's button, or `jingclaw stop`, then `jingclaw`). The sign-in is read when the daemon starts,
    like the settings.
 
 **A browser on another machine** (a container host, an LXC, a server you reach
@@ -251,10 +272,11 @@ What to know before relying on it:
 
 The daemon reads all three documents once, when it starts. A saved change shows
 as saved and not running yet, across the top of the page and next to the
-document, until the daemon is restarted: `jingclaw stop`, then `jingclaw`. The
-page compares what is saved with what the running process started from, so the
-mark is there for as long as it is true. A restart ends the browser's access to
-the dashboard as well; run `jingclaw dashboard` again.
+document, until the daemon is restarted: the page's restart button, or
+`jingclaw stop` then `jingclaw`. The page compares what is saved with what the
+running process started from, so the mark is there for as long as it is true. A
+restart interrupts runs in flight (the page says how many), brings the daemon
+back on the same address, and keeps a browser signed in.
 
 ### Versions
 
@@ -278,8 +300,8 @@ key it is about. Conversations, approvals and schedules are not there; nothing
 is running to serve them. The terminal says so too: `jingclaw` prints `agent not
 running`, `jingclaw status` shows the mode, and `jingclaw dashboard` lists the
 problems before it prints the link. A setting that a variable or a flag decides
-is fixed there, not on the page. Fix it, then `jingclaw stop` and `jingclaw`:
-there is no restart from the page.
+is fixed there, not on the page. Fix it, then restart: the page has a restart
+button, and `jingclaw stop` then `jingclaw` still works.
 
 ### Keys
 

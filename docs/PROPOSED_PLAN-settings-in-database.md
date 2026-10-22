@@ -9,7 +9,9 @@ not done* in the SkillService section. The independent review and the
 real-browser pass that end phase 4 are not claimed here. What is true of the
 system now is in [`STATUS.md`](STATUS.md#done), [`container.md`](container.md)
 and [`roadmap.md`](roadmap.md); where this plan and the code differ, the code is
-right.
+right. The dashboard password is now an initial value that the page makes you
+change at first login, and "clear" is "reset to the initial password" (STATUS,
+2026-10-23).
 
 ## What changes, in one paragraph
 
@@ -31,7 +33,7 @@ directories, not settings) but become manageable from the dashboard.
 | 4 | The three seed variables `JINGCLAW_CONFIG`, `JINGCLAW_PERSONA`, `JINGCLAW_AGENTS` keep their meaning (whole document, optional `base64:` prefix, all-or-nothing, **never overwrite an existing row**) but the target is the database row. |
 | 5 | First start after upgrade imports an existing `config.toml`, `AGENTS.md`, `PERSONA.md` from the deployment directory, then renames each imported file to `<name>.imported` (never deletes). See *Ensure*. |
 | 6 | Settings are still read once at start. The dashboard shows "saved, not running yet" for all three documents by comparing the stored hash with the hash the running process started with. The claim "instruction files are re-read on every run" is **wrong today** and is corrected everywhere. |
-| 7 | **Repair mode**: if the settings cannot be used (unparsable, fail `Validate`) or the agent cannot be built, the daemon does not exit. It serves the dashboard with only the services needed to fix the problem, reports why, and runs no agent. There is no restart RPC; the operator runs `jingclaw stop` then `jingclaw`. |
+| 7 | **Repair mode**: if the settings cannot be used (unparsable, fail `Validate`) or the agent cannot be built, the daemon does not exit. It serves the dashboard with only the services needed to fix the problem, reports why, and runs no agent. Originally there was no restart RPC (the operator ran `jingclaw stop` then `jingclaw`, which still works); `ConfigService.RestartDaemon` was added later (STATUS, 2026-10-15). |
 | 8 | The gateway process stops reading a file. It asks the daemon for its slice of settings (`GatewayIngressService.GetGatewaySettings`, gateway-scoped). It still never reaches `ConfigService`. |
 | 9 | Client CLI commands stop calling `config.Load`: they need only the runtime dir (`config.Candidate(nil)` = defaults + env). `jingclaw mcp list/login/logout` read the MCP servers from the running daemon (`GetConfig.text`). |
 | 10 | Skills (`~/.jingclaw/skills/`) and credential files (`gemini.key`, `discord.token`, …) remain files. The dashboard manages both. Credentials are **write-only**: nothing ever returns a value, length, hash or prefix. |

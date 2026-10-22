@@ -20,7 +20,10 @@ That message is the setup instructions. (Once a room is bound in the settings
 and the token is still missing, it adds "put that right, then restart:
 jingclaw stop, then jingclaw".) The container stays up: the daemon is
 running and only the chat connection is off. In a container, "restart" is
-restarting the container. At the defaults the provider is an offline stand-in
+restarting the container; the process can also restart itself in place (the
+dashboard's `RestartDaemon` keeps the pid, so tini and the container keep
+running), but the dashboard is still not reachable from a container, so that is
+an API call there. At the defaults the provider is an offline stand-in
 that echoes, so this proves the container and does nothing else.
 
 ## What lives where
@@ -492,7 +495,10 @@ prints a link, and only something inside the container could open it: a port
 published with `-p` does not reach a loopback address, the port is a free one
 chosen at each start (`server.addr` defaults to port 0), and `server.addr` is
 refused unless it is on loopback. There is no supported way to reach it from the
-host yet.
+host yet. The dashboard password can be given to a container as
+`JINGCLAW_DASHBOARD_PASSWORD` (its initial value, ten to 256 characters; without
+it the fixed one is used, see [`configuration.md`](configuration.md#the-dashboard-password)),
+but that does not make the dashboard reachable from outside.
 
 So the dashboard's work is done another way in a container:
 

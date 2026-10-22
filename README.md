@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/KoukeNeko/JingClaw/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/KoukeNeko/JingClaw/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI"></a>
   <a href="https://github.com/KoukeNeko/JingClaw/pkgs/container/jingclaw"><img alt="Container image" src="https://img.shields.io/badge/GHCR-amd64_%C2%B7_arm64-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
-  <img alt="Go 1.26" src="https://img.shields.io/badge/GO-1.26+-00ADD8?style=for-the-badge&logo=go&logoColor=white">
+  <img alt="Go 1.27" src="https://img.shields.io/badge/GO-1.27.3+-00ADD8?style=for-the-badge&logo=go&logoColor=white">
   <img alt="Preview" src="https://img.shields.io/badge/STATUS-PREVIEW-E8A33D?style=for-the-badge">
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/LICENSE-MIT-4CAF50?style=for-the-badge&logo=github"></a>
 </p>
@@ -45,8 +45,8 @@ The first run has no model and no chat account yet. It starts with an offline
 stand-in where the model goes, and says that chat is off until there is a bot
 token. The settings are not a file you edit: they live in the daemon's database,
 and the dashboard is where you change them. Run `jingclaw dashboard`, choose a
-provider and give it a key (or sign in with ChatGPT) and a bot token there, restart it (`jingclaw stop`,
-then `jingclaw`), and talk to it in Discord.
+provider and give it a key (or sign in with ChatGPT) and a bot token there, restart it (the dashboard has a
+restart button; `jingclaw stop`, then `jingclaw`, also works), and talk to it in Discord.
 
 ```bash
 jingclaw status      # running, and where
@@ -134,6 +134,6 @@ milestones.
 
 ## Requirements
 
-Go 1.26+ to build. A provider — Gemini, Ollama, Anthropic, a ChatGPT account (unverified against
+Go 1.27.3+ to build. A provider — Gemini, Ollama, Anthropic, a ChatGPT account (unverified against
 the live service, see above), or anything that speaks the OpenAI shape — and a Discord bot token if you want the chat half.
 macOS, Linux and Windows — with the caveats in the status above.
